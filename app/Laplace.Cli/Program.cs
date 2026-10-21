@@ -12,6 +12,7 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         ILoggerFactory? logging = null;
+        int exitCode = 1;
         try
         {
             logging = CliRuntime.LoggerFactory;
@@ -19,18 +20,17 @@ internal static class Program
                 new Dictionary<string, object> { ["OperationId"] = Guid.NewGuid().ToString("N"),
                     ["Command"] = args.FirstOrDefault() ?? "help" });
             Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(logging, parameterLoggingEnabled: false);
-            var exitCode = await RunAsync(args);
+            exitCode = await RunAsync(args);
             if (exitCode != 0) CliRuntime.LoggerFactory.CreateLogger("cli")
                 .LogWarning("CLI command ended with exit code {ExitCode}.", exitCode);
-            return exitCode;
         }
         catch (Exception ex)
         {
-            logging?.CreateLogger("cli").LogCritical(ex, "CLI terminated unexpectedly.");
-            Console.Error.WriteLine($"laplace-mono: {ex}");
-            return 1;
+            LaplaceLogging.ReportProcessFailure("laplace-mono", ex,
+                failure => logging?.CreateLogger("cli").LogCritical(failure, "CLI terminated unexpectedly."));
+            exitCode = 1;
         }
-        finally { logging?.Dispose(); }
+        return LaplaceLogging.CompleteProcess(logging, "laplace-mono", exitCode);
     }
 
     private static async Task<int> RunAsync(string[] args)

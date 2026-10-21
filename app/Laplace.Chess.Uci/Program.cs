@@ -16,18 +16,19 @@ return await RunAsync(args);
 static async Task<int> RunAsync(string[] args)
 {
     ILoggerFactory? loggerFactory = null;
+    int exitCode = 1;
     try
     {
         loggerFactory = LaplaceLogging.FileOnly("uci");
-        return await RunCommandAsync(args, loggerFactory);
+        exitCode = await RunCommandAsync(args, loggerFactory);
     }
     catch (Exception ex)
     {
-        loggerFactory?.CreateLogger("session").LogCritical(ex, "UCI process terminated unexpectedly.");
-        Console.Error.WriteLine($"laplace-uci: {ex}");
-        return 1;
+        LaplaceLogging.ReportProcessFailure("laplace-uci", ex,
+            failure => loggerFactory?.CreateLogger("session").LogCritical(failure, "UCI process terminated unexpectedly."));
+        exitCode = 1;
     }
-    finally { loggerFactory?.Dispose(); }
+    return LaplaceLogging.CompleteProcess(loggerFactory, "laplace-uci", exitCode);
 }
 
 static async Task<int> RunCommandAsync(string[] args, ILoggerFactory loggerFactory)

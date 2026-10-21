@@ -119,7 +119,7 @@ public sealed class GlomeProjectionThemeGateTests
         var glomeCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var buttons = Read("web", "src", "ui", "primitives", "Button", "Button.module.css");
 
-        Assert.Contains("<details className={styles.navDisclosure} open>", explore, StringComparison.Ordinal);
+        Assert.Matches(@"<details\b[^>]*\bclassName=\{styles\.navDisclosure\}[^>]*\bopen>", explore);
         Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
         Assert.Contains("<div className={styles.graphBody}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);

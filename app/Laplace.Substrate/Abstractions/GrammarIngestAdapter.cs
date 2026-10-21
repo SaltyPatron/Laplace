@@ -173,10 +173,10 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
         }
 
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
-        if (recipe == IntPtr.Zero) yield break;
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"Grammar '{_modalityId}' is unavailable for '{_filePath}'.");
 
         IntPtr iter = StructuredGrammarIngest.CreateRowIterForPipeline(recipe);
-        if (iter == IntPtr.Zero) yield break;
 
         int rowIndex = 0;
         long rowsTotal = 0;
@@ -197,12 +197,24 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
                 if (_acceptRow is null)
                 {
 
-                    foreach (var (lineUtf8, ast) in StructuredGrammarIngest.FeedAndParseForPipeline(iter, buf, read))
+                    var records = StructuredGrammarIngest.FeedAndParseForPipeline(iter, buf, read);
+                    int transferred = 0;
+                    try
                     {
-                        rowsTotal++;
-                        if (ast == IntPtr.Zero) continue;
-                        yield return new GrammarIngestRecord(
-                            lineUtf8, GrammarAst.Adopt(ast), rowIndex++, rowsTotal);
+                        while (transferred < records.Count)
+                        {
+                            var (lineUtf8, handle) = records[transferred];
+                            var ast = GrammarAst.Adopt(handle);
+                            transferred++;
+                            rowsTotal++;
+                            yield return new GrammarIngestRecord(lineUtf8, ast, rowIndex++, rowsTotal);
+                        }
+                    }
+                    finally
+                    {
+                        // A stopped consumer never takes ownership of the rest of this native batch.
+                        for (int index = transferred; index < records.Count; index++)
+                            NativeInterop.AstFree(records[index].Ast);
                     }
                 }
                 else
@@ -213,9 +225,7 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
                         rowsTotal++;
                         if (!_acceptRow(lineUtf8))
                             continue;
-                        if (!StructuredGrammarIngest.TryParseRowForPipeline(iter, lineUtf8, out IntPtr ast)
-                            || ast == IntPtr.Zero)
-                            continue;
+                        IntPtr ast = StructuredGrammarIngest.ParseRowForPipeline(iter, lineUtf8);
                         yield return new GrammarIngestRecord(
                             lineUtf8, GrammarAst.Adopt(ast), rowIndex++, rowsTotal);
                     }
@@ -233,7 +243,8 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
-        if (recipe == IntPtr.Zero) yield break;
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"Grammar '{_modalityId}' is unavailable for '{_filePath}'.");
 
         int rowIndex = 0;
         long rowsTotal = 0;
@@ -248,15 +259,7 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
             if (_acceptRow is not null && !_acceptRow(lineUtf8))
                 continue;
 
-            GrammarAst ast;
-            try
-            {
-                ast = GrammarDecomposer.Parse(lineUtf8, recipe);
-            }
-            catch (InvalidOperationException)
-            {
-                continue;
-            }
+            GrammarAst ast = GrammarDecomposer.Parse(lineUtf8, recipe);
 
             yield return new GrammarIngestRecord(lineUtf8, ast, rowIndex++, rowsTotal);
         }
@@ -275,14 +278,17 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
     private readonly GrammarRecordFraming _recordFraming;
     private readonly int _workerCount;
     private readonly CancellationToken _ct;
+    private readonly Action _initializeWorker;
 
-    public ParallelGrammarFileRecordStream(
-        string filePath,
-        string modalityId,
-        Func<ReadOnlySpan<byte>, bool>? acceptRow,
-        GrammarRecordFraming recordFraming,
-        int workerCount,
-        CancellationToken ct)
+    public ParallelGrammarFileRecordStream(string filePath, string modalityId,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow, GrammarRecordFraming recordFraming,
+        int workerCount, CancellationToken ct)
+        : this(filePath, modalityId, acceptRow, recordFraming, workerCount, ct,
+            CpuTopology.RequirePerformanceCorePin) { }
+
+    internal ParallelGrammarFileRecordStream(string filePath, string modalityId,
+        Func<ReadOnlySpan<byte>, bool>? acceptRow, GrammarRecordFraming recordFraming,
+        int workerCount, CancellationToken ct, Action initializeWorker)
     {
         _filePath = filePath;
         _modalityId = modalityId;
@@ -290,196 +296,152 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
         _recordFraming = recordFraming;
         _workerCount = Math.Max(1, workerCount);
         _ct = ct;
+        _initializeWorker = initializeWorker;
     }
 
     public async IAsyncEnumerable<GrammarIngestRecord> RecordsAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_ct, ct);
-        var runCt = linked.Token;
-
-        if (_recordFraming == GrammarRecordFraming.Line)
-        {
-            await foreach (var record in ParallelLineFramedAsync(runCt))
-                yield return record;
-            yield break;
-        }
-
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(_ct, ct);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(caller.Token);
+        var runCt = stop.Token;
+        caller.Token.ThrowIfCancellationRequested();
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
-        if (recipe == IntPtr.Zero) yield break;
-
-        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount)
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"Grammar '{_modalityId}' is unavailable for '{_filePath}'.");
+        var raw = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount)
         {
-            SingleWriter = true,
-            SingleReader = false,
-            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = true, SingleReader = false, FullMode = BoundedChannelFullMode.Wait,
         });
         var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount)
         {
-            SingleWriter = false,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = false, SingleReader = true, FullMode = BoundedChannelFullMode.Wait,
         });
-
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
+        void Failed(Exception error)
+        {
+            if (error is OperationCanceledException)
+            {
+                if (runCt.IsCancellationRequested) return;
+                error = new InvalidOperationException("Grammar pipeline cancelled without caller cancellation.", error);
+            }
+            if (Interlocked.CompareExchange(ref failure,
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error), null) is null)
+            {
+                parsed.Writer.TryComplete(error);
+                stop.Cancel();
+            }
+            else if (error is not ChannelClosedException
+                && !ReferenceEquals(error, Volatile.Read(ref failure)?.SourceException))
+                System.Diagnostics.Trace.TraceWarning("Additional grammar worker failure for {0}: {1}", _filePath, error);
+        }
+        var completions = Enumerable.Range(0, _workerCount).Select(_ =>
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var startedWorkers = new Thread?[_workerCount];
+        int remaining = _workerCount;
+        long sequence = 0;
+        void Finished(TaskCompletionSource<bool> completion)
+        {
+            if (Interlocked.Decrement(ref remaining) == 0)
+                parsed.Writer.TryComplete(Volatile.Read(ref failure)?.SourceException);
+            completion.TrySetResult(true);
+        }
         var feeder = Task.Run(async () =>
         {
             try
             {
-                await foreach (byte[] line in StructuredGrammarIngest.RawRecordsAsync(
-                                   _filePath, _modalityId, _acceptRow, runCt))
-                    await rawLines.Writer.WriteAsync(line, runCt);
+                var input = _recordFraming == GrammarRecordFraming.Line
+                    ? LinesAsync(runCt)
+                    : StructuredGrammarIngest.RawRecordsAsync(_filePath, _modalityId, _acceptRow, runCt);
+                await foreach (var bytes in input.ConfigureAwait(false))
+                    await raw.Writer.WriteAsync(bytes, runCt).ConfigureAwait(false);
             }
-            finally { rawLines.Writer.TryComplete(); }
-        }, runCt);
-
-        int workers = _workerCount;
-        var workerDone = new CountdownEvent(workers);
-        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
-        long rowSeq = 0;
-
-        for (int w = 0; w < workers; w++)
-        {
-            int wId = w;
-            new Thread(() =>
-            {
-                CpuTopology.RequirePerformanceCorePin();
-                IntPtr iter = StructuredGrammarIngest.CreateRowIterForPipeline(recipe);
-                try
-                {
-                    var reader = rawLines.Reader;
-                    while (true)
-                    {
-                        if (runCt.IsCancellationRequested) break;
-                        if (reader.TryRead(out byte[]? lineUtf8))
-                        {
-                            if (lineUtf8 is null) continue;
-                            if (!StructuredGrammarIngest.TryParseRowForPipeline(iter, lineUtf8, out IntPtr astPtr)
-                                || astPtr == IntPtr.Zero)
-                                continue;
-                            long seq = Interlocked.Increment(ref rowSeq);
-                            var record = new GrammarIngestRecord(
-                                lineUtf8, GrammarAst.Adopt(astPtr), (int)seq, seq);
-                            if (!parsed.Writer.TryWrite(record))
-                                parsed.Writer.WriteAsync(record, runCt).AsTask().GetAwaiter().GetResult();
-                            continue;
-                        }
-                        if (!reader.WaitToReadAsync(runCt).AsTask().GetAwaiter().GetResult())
-                            break;
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception ex)
-                {
-                    errors.Enqueue(ex);
-                    linked.Cancel();
-                }
-                finally
-                {
-                    if (iter != IntPtr.Zero)
-                        NativeInterop.GrammarRowIterFree(iter);
-                    if (workerDone.Signal())
-                        parsed.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
-                }
-            })
-            { IsBackground = true, Name = $"grammar-parse-pcore-{wId}" }.Start();
-        }
+            catch (Exception error) { Failed(error); }
+            finally { raw.Writer.TryComplete(); }
+        }, CancellationToken.None);
 
         try
         {
-            await foreach (var record in parsed.Reader.ReadAllAsync(runCt))
+            for (int index = 0; index < _workerCount; index++)
+            {
+                var completion = completions[index];
+                try
+                {
+                    var worker = new Thread(() =>
+                    {
+                        IntPtr iterator = IntPtr.Zero;
+                        try
+                        {
+                            runCt.ThrowIfCancellationRequested();
+                            _initializeWorker();
+                            if (_recordFraming != GrammarRecordFraming.Line)
+                                iterator = StructuredGrammarIngest.CreateRowIterForPipeline(recipe);
+                            while (raw.Reader.WaitToReadAsync(runCt).AsTask().GetAwaiter().GetResult())
+                            while (raw.Reader.TryRead(out var bytes))
+                            {
+                                runCt.ThrowIfCancellationRequested();
+                                GrammarAst ast;
+                                if (_recordFraming == GrammarRecordFraming.Line)
+                                    ast = GrammarDecomposer.Parse(bytes, recipe);
+                                else
+                                {
+                                    var handle = StructuredGrammarIngest.ParseRowForPipeline(iterator, bytes);
+                                    ast = GrammarAst.Adopt(handle);
+                                }
+                                long row = Interlocked.Increment(ref sequence);
+                                try
+                                {
+                                    parsed.Writer.WriteAsync(new GrammarIngestRecord(bytes, ast,
+                                        checked((int)row - (_recordFraming == GrammarRecordFraming.Line ? 1 : 0)), row),
+                                        runCt).AsTask().GetAwaiter().GetResult();
+                                }
+                                catch { ast.Dispose(); throw; }
+                            }
+                        }
+                        catch (Exception error) { Failed(error); }
+                        finally
+                        {
+                            try { if (iterator != IntPtr.Zero) NativeInterop.GrammarRowIterFree(iterator); }
+                            catch (Exception error) { Failed(error); }
+                            Finished(completion);
+                        }
+                    }) { IsBackground = true, Name = $"grammar-parse-pcore-{index}" };
+                    worker.Start();
+                    startedWorkers[index] = worker;
+                }
+                catch (Exception error) { Failed(error); Finished(completion); }
+            }
+            await foreach (var record in parsed.Reader.ReadAllAsync(caller.Token).ConfigureAwait(false))
+            {
+                if (Volatile.Read(ref failure) is { } rejected)
+                {
+                    record.Ast.Dispose();
+                    rejected.Throw();
+                }
                 yield return record;
+            }
+            caller.Token.ThrowIfCancellationRequested();
         }
         finally
         {
-            try { await feeder; } catch { }
+            stop.Cancel();
+            await feeder.ConfigureAwait(false);
+            await Task.WhenAll(completions.Select(item => item.Task)).ConfigureAwait(false);
+            foreach (var worker in startedWorkers)
+                if (worker is not null && !worker.Join(TimeSpan.FromSeconds(5)))
+                    Failed(new TimeoutException($"Grammar worker '{worker.Name}' did not exit after completing cleanup."));
+            while (parsed.Reader.TryRead(out var abandoned)) abandoned.Ast.Dispose();
+            Volatile.Read(ref failure)?.Throw();
         }
     }
 
-    private async IAsyncEnumerable<GrammarIngestRecord> ParallelLineFramedAsync(
-        [EnumeratorCancellation] CancellationToken ct)
+    private async IAsyncEnumerable<byte[]> LinesAsync([EnumeratorCancellation] CancellationToken ct)
     {
-        IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
-        if (recipe == IntPtr.Zero) yield break;
-
-        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount)
+        await foreach (var memory in StreamingUtf8LineReader.ReadLinesAsync(_filePath, ct).ConfigureAwait(false))
         {
-            SingleWriter = true,
-            SingleReader = false,
-            FullMode = BoundedChannelFullMode.Wait,
-        });
-        var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount)
-        {
-            SingleWriter = false,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.Wait,
-        });
-
-        var feeder = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (ReadOnlyMemory<byte> lineMem in StreamingUtf8LineReader.ReadLinesAsync(_filePath, ct))
-                {
-                    if (lineMem.Length == 0) continue;
-                    byte[] lineUtf8 = lineMem.Span.ToArray();
-                    if (_acceptRow is not null && !_acceptRow(lineUtf8)) continue;
-                    await rawLines.Writer.WriteAsync(lineUtf8, ct);
-                }
-            }
-            finally { rawLines.Writer.TryComplete(); }
-        }, ct);
-
-        int workers = _workerCount;
-        var workerDone = new CountdownEvent(workers);
-        long rowIndex = 0;
-        long rowsTotal = 0;
-
-        for (int w = 0; w < workers; w++)
-        {
-            new Thread(() =>
-            {
-                CpuTopology.RequirePerformanceCorePin();
-                try
-                {
-                    var reader = rawLines.Reader;
-                    while (true)
-                    {
-                        if (ct.IsCancellationRequested) break;
-                        if (reader.TryRead(out byte[]? lineUtf8))
-                        {
-                            if (lineUtf8 is null) continue;
-                            GrammarAst ast;
-                            try { ast = GrammarDecomposer.Parse(lineUtf8, recipe); }
-                            catch (InvalidOperationException) { continue; }
-                            long total = Interlocked.Increment(ref rowsTotal);
-                            int idx = (int)Interlocked.Increment(ref rowIndex) - 1;
-                            var record = new GrammarIngestRecord(lineUtf8, ast, idx, total);
-                            if (!parsed.Writer.TryWrite(record))
-                                parsed.Writer.WriteAsync(record, ct).AsTask().GetAwaiter().GetResult();
-                            continue;
-                        }
-                        if (!reader.WaitToReadAsync(ct).AsTask().GetAwaiter().GetResult())
-                            break;
-                    }
-                }
-                catch (OperationCanceledException) { }
-                finally
-                {
-                    if (workerDone.Signal())
-                        parsed.Writer.TryComplete();
-                }
-            })
-            { IsBackground = true }.Start();
-        }
-
-        try
-        {
-            await foreach (var record in parsed.Reader.ReadAllAsync(ct))
-                yield return record;
-        }
-        finally
-        {
-            try { await feeder; } catch { }
+            if (memory.Length == 0) continue;
+            var bytes = memory.Span.ToArray();
+            if (_acceptRow is null || _acceptRow(bytes)) yield return bytes;
         }
     }
 }

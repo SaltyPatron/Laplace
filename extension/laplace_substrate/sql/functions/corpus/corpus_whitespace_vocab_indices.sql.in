@@ -57,7 +57,7 @@
 --
 -- The fix is the idiom the sibling probes already prove:
 --   * bind the type_id ONCE into a plpgsql variable, so the LIST parent prunes at
---     plan time to the single HAS_CHARACTER_PROPERTY partition;
+--     plan time to the UCD gc predicate partition;
 --   * probe with `subject_id = ANY(p_vocab)`, which becomes the index condition
 --     itself and prunes the HASH sublevel per element -- one descent per id;
 --   * GROUP BY subject_id once, then LEFT JOIN the result back to the ordinals.
@@ -82,7 +82,7 @@ BEGIN ATOMIC
                    laplace.property_value_id('General_Category', 'Control')
                ])) AS is_sep
         FROM laplace.attestations a
-        WHERE a.type_id = laplace.relation_type_id('HAS_CHARACTER_PROPERTY')
+        WHERE a.type_id = laplace.relation_type_id('gc')
           AND a.subject_id = ANY (p_vocab)
         GROUP BY a.subject_id
     ), missing AS MATERIALIZED (

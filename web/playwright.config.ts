@@ -11,6 +11,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'retain-on-failure',
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
   },
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },

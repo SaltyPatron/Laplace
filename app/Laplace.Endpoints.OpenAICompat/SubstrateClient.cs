@@ -13,9 +13,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
 
-    public SubstrateClient()
+    public SubstrateClient() : this(null) { }
+
+    internal SubstrateClient(string? baseConnectionString)
     {
-        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString);
         // Read-only is enforced by the server session. Each command sets its own
         // timeout; a datasource-wide statement_timeout would override it.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
@@ -26,7 +28,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             dsb.ConnectionStringBuilder.Options = string.IsNullOrWhiteSpace(options)
                 ? "-c default_transaction_read_only=on"
                 : options + " -c default_transaction_read_only=on";
-        });
+        }, baseConnectionString);
     }
 
     internal NpgsqlDataSource DataSource => _dataSource;
@@ -375,6 +377,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Exact multi-source health count exceeded its query budget; the count is unavailable.");
             return null;
         }
     }
@@ -488,6 +492,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             }
             catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
             {
+                Serilog.Log.ForContext<SubstrateClient>().Warning(pg,
+                    "Readiness failed during the PostgreSQL perfcache probe.");
                 postgresPerfcacheReady = false;
                 detail = pg.MessageText;
             }
@@ -504,6 +510,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 }
                 catch (Exception ex)
                 {
+                    Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                        "Readiness failed while loading the process T0 perfcache.");
                     processPerfcacheReady = false;
                     detail = string.IsNullOrEmpty(detail)
                         ? ex.Message
@@ -526,6 +534,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Readiness failed while reading substrate inventory.");
             return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}", chessPerfcache);
         }
     }

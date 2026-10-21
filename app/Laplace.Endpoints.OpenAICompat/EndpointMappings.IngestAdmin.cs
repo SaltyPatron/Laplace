@@ -31,6 +31,7 @@ internal static class IngestAdminEndpoints
                 .Select(receipt => (JsonNode)new JsonObject
                 {
                     ["pid"] = receipt.ProcessId,
+                    ["process_run_id"] = receipt.ProcessRunId,
                     ["source"] = receipt.Source,
                     ["path"] = receipt.Path,
                     ["cli"] = receipt.CliPath,
@@ -43,6 +44,17 @@ internal static class IngestAdminEndpoints
             {
                 ["object"] = "list",
                 ["data"] = new JsonArray(rows),
+                ["completed"] = new JsonArray(IngestProcessRunner.CompletedProcesses().Select(receipt => (JsonNode)new JsonObject
+                {
+                    ["pid"] = receipt.Start.ProcessId,
+                    ["process_run_id"] = receipt.Start.ProcessRunId,
+                    ["source"] = receipt.Start.Source,
+                    ["started_at"] = receipt.Start.StartedAt,
+                    ["ended_at"] = receipt.EndedAt,
+                    ["status"] = receipt.Status,
+                    ["exit_code"] = receipt.ExitCode,
+                    ["output_incomplete"] = receipt.OutputIncomplete,
+                }).ToArray()),
             });
         }).WithTags("admin");
 
@@ -58,6 +70,7 @@ internal static class IngestAdminEndpoints
                 {
                     ["object"] = "ingest.process",
                     ["pid"] = receipt.ProcessId,
+                    ["process_run_id"] = receipt.ProcessRunId,
                     ["source"] = receipt.Source,
                     ["path"] = receipt.Path,
                     ["cli"] = receipt.CliPath,
@@ -78,7 +91,8 @@ internal static class IngestAdminEndpoints
             }
             catch (Exception ex)
             {
-                return EndpointJson.BadRequest("ingest_start_failed", ex.Message);
+                app.Logger.LogError(ex, "Ingest child start failed for source={Source}", request.Source);
+                return Results.Problem("The ingest process could not start. See the correlated server log.", statusCode: 503);
             }
         }).WithTags("admin");
 
@@ -107,7 +121,8 @@ internal static class IngestAdminEndpoints
             }
             catch (Exception ex)
             {
-                return EndpointJson.BadRequest("ingest_stop_failed", ex.Message);
+                app.Logger.LogError(ex, "Ingest child stop failed for process={ChildProcessId}", request.Pid);
+                return Results.Problem("The ingest process could not be stopped. See the correlated server log.", statusCode: 503);
             }
         }).WithTags("admin");
     }

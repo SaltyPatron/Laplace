@@ -92,7 +92,7 @@ public sealed class IsoRetirementTests
         Assert.Equal(386, rows.Count);
 
         // Every row is kept: it either states non-existence or names at least one successor.
-        Assert.Empty(rows.Where(r => !r.Keep));
+        Assert.DoesNotContain(rows, r => !r.Keep);
 
         int refutes = rows.Count(r => r.Reason == "N");
         int edges = rows.Sum(r => r.Succ.Length);

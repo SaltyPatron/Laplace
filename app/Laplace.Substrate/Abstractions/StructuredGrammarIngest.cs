@@ -102,9 +102,9 @@ public static class StructuredGrammarIngest
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
-        if (recipe == IntPtr.Zero) yield break;
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"Grammar '{modalityId}' is unavailable for '{filePath}'.");
         IntPtr iter = CreateRowIterForPipeline(recipe);
-        if (iter == IntPtr.Zero) yield break;
 
         try
         {
@@ -165,8 +165,8 @@ public static class StructuredGrammarIngest
 
     internal static unsafe IntPtr CreateRowIterForPipeline(IntPtr recipe) => CreateRowIter(recipe);
 
-    internal static unsafe bool TryParseRowForPipeline(IntPtr iter, byte[] lineUtf8, out IntPtr ast)
-        => TryParseRow(iter, lineUtf8, out ast);
+    internal static unsafe IntPtr ParseRowForPipeline(IntPtr iter, byte[] lineUtf8)
+        => ParseRow(iter, lineUtf8);
 
     internal static List<byte[]> FeedRawLinesForPipeline(IntPtr iter, byte[] buf, int read)
     {
@@ -184,19 +184,27 @@ public static class StructuredGrammarIngest
         {
             byte* chunk = read > 0 ? p : null;
             nuint chunkLen = (nuint)Math.Max(read, 0);
-            if (NativeInterop.GrammarRowIterFeedParsed(iter, chunk, chunkLen, &nativeRows, &rowCount) != 0)
-                return result;
-
-            for (nuint ri = 0; ri < rowCount; ri++)
+            int status = NativeInterop.GrammarRowIterFeedParsed(iter, chunk, chunkLen, &nativeRows, &rowCount);
+            try
             {
-                var row = nativeRows[ri];
-                int rowLen = (int)row.RowLen.ToUInt64();
-                var lineUtf8 = new ReadOnlySpan<byte>(row.RowUtf8.ToPointer(), rowLen).ToArray();
-                result.Add((lineUtf8, row.Ast));
-                nativeRows[ri].Ast = IntPtr.Zero;
+                if (status != 0)
+                    throw new InvalidOperationException($"Native grammar record feed failed with status {status}.");
+                for (nuint ri = 0; ri < rowCount; ri++)
+                {
+                    var row = nativeRows[ri];
+                    if (row.Ast == IntPtr.Zero)
+                        throw new InvalidOperationException("Native grammar record feed returned a null AST.");
+                    int rowLen = checked((int)row.RowLen.ToUInt64());
+                    var lineUtf8 = new ReadOnlySpan<byte>(row.RowUtf8.ToPointer(), rowLen).ToArray();
+                    result.Add((lineUtf8, row.Ast));
+                }
+                // Ownership transfers only after all managed record buffers exist.
+                for (nuint ri = 0; ri < rowCount; ri++) nativeRows[ri].Ast = IntPtr.Zero;
             }
-            if (nativeRows != null)
-                NativeInterop.GrammarRowIterFreeRows(nativeRows, rowCount);
+            finally
+            {
+                if (nativeRows != null) NativeInterop.GrammarRowIterFreeRows(nativeRows, rowCount);
+            }
         }
         return result;
     }
@@ -245,19 +253,21 @@ public static class StructuredGrammarIngest
     private static unsafe IntPtr CreateRowIter(IntPtr recipe)
     {
         IntPtr iter = IntPtr.Zero;
-        return NativeInterop.GrammarRowIterNew(recipe, &iter) == 0 ? iter : IntPtr.Zero;
+        int status = NativeInterop.GrammarRowIterNew(recipe, &iter);
+        if (status != 0 || iter == IntPtr.Zero)
+            throw new InvalidOperationException($"Native grammar record iterator creation failed with status {status}.");
+        return iter;
     }
 
-    private static unsafe bool TryParseRow(IntPtr iter, byte[] lineUtf8, out IntPtr ast)
+    private static unsafe IntPtr ParseRow(IntPtr iter, byte[] lineUtf8)
     {
-        ast = IntPtr.Zero;
         fixed (byte* p = lineUtf8)
         {
             IntPtr outAst = IntPtr.Zero;
-            if (NativeInterop.GrammarRowIterParseRow(iter, p, (nuint)lineUtf8.Length, &outAst) != 0)
-                return false;
-            ast = outAst;
-            return ast != IntPtr.Zero;
+            int status = NativeInterop.GrammarRowIterParseRow(iter, p, (nuint)lineUtf8.Length, &outAst);
+            if (status != 0 || outAst == IntPtr.Zero)
+                throw new InvalidOperationException($"Native grammar record parse failed with status {status}.");
+            return outAst;
         }
     }
 
@@ -268,18 +278,23 @@ public static class StructuredGrammarIngest
         nuint rowCount = 0;
         fixed (byte* p = buf)
         {
-            if (NativeInterop.GrammarRowIterFeedLines(iter, p, (nuint)read, &nativeRows, &rowCount) != 0)
-                return rows;
-
-            for (nuint ri = 0; ri < rowCount; ri++)
+            int status = NativeInterop.GrammarRowIterFeedLines(iter, p, (nuint)read, &nativeRows, &rowCount);
+            try
             {
-                var row = nativeRows[ri];
-                int rowLen = (int)row.RowLen.ToUInt64();
-                rows.Add(new RawRow(
-                    new ReadOnlySpan<byte>(row.RowUtf8.ToPointer(), rowLen).ToArray()));
+                if (status != 0)
+                    throw new InvalidOperationException($"Native grammar record framing failed with status {status}.");
+                for (nuint ri = 0; ri < rowCount; ri++)
+                {
+                    var row = nativeRows[ri];
+                    int rowLen = checked((int)row.RowLen.ToUInt64());
+                    rows.Add(new RawRow(
+                        new ReadOnlySpan<byte>(row.RowUtf8.ToPointer(), rowLen).ToArray()));
+                }
             }
-            if (nativeRows != null)
-                NativeInterop.GrammarRowIterFreeLines(nativeRows, rowCount);
+            finally
+            {
+                if (nativeRows != null) NativeInterop.GrammarRowIterFreeLines(nativeRows, rowCount);
+            }
         }
         return rows;
     }
@@ -298,7 +313,8 @@ public static class StructuredGrammarIngest
         CancellationToken ct = default)
     {
         IntPtr recipe = GrammarDecomposer.LookupById(modalityId);
-        if (recipe == IntPtr.Zero) return null;
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"Grammar '{modalityId}' is unavailable for '{filePath}'.");
 
         // This path parses one document as one grammar AST, so it holds the whole record;
         // multi-record files stream through IngestFileAsync's row iterator instead.

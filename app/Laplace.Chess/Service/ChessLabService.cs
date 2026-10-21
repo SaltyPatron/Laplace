@@ -29,7 +29,7 @@ public sealed partial class ChessLabService
         ILogger? log = null)
     {
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
-        _log = log ?? NullLogger.Instance;
+        _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessLabService).FullName!);
         _labDir = Path.GetFullPath(ChessLabPaths.LabDir);
     }
 

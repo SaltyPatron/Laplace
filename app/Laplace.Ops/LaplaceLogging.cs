@@ -25,6 +25,7 @@ namespace Laplace.Ops;
 public static class LaplaceLogging
 {
     private static readonly object TraceGate = new();
+    public static PersistentLogHealth PersistentHealth { get; } = new();
     /// <summary>Failure diagnostics from static adapters use the process-owned logger.</summary>
     public static void LogWarning(Type source, Exception exception, string message, params object?[] values)
         => Log.ForContext("SourceContext", source.FullName).Warning(exception, message, values);
@@ -32,6 +33,56 @@ public static class LaplaceLogging
     public static ILoggerProvider SharedProvider() => new SerilogLoggerProvider(Log.Logger, dispose: false);
     public static Microsoft.Extensions.Logging.ILogger CreateLogger(string category)
         => new SerilogLoggerFactory(Log.Logger, dispose: false).CreateLogger(category);
+
+    /// <summary>Retain the original process failure even if reporting it fails too.</summary>
+    public static void ReportProcessFailure(string component, Exception failure,
+        Action<Exception>? reportPersistent = null, PersistentLogHealth? health = null)
+    {
+        var persistent = health ?? PersistentHealth;
+        try { reportPersistent?.Invoke(failure); }
+        catch (Exception loggingFailure)
+        {
+            persistent.Failed();
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=fatal-report: {loggingFailure}", persistent);
+        }
+        Emergency($"{component}: pid={Environment.ProcessId} {failure}", persistent);
+    }
+
+    /// <summary>Observe flush/disposal and sink health before declaring process success.</summary>
+    public static int CompleteProcess(IDisposable? logging, string component, int operationExitCode,
+        PersistentLogHealth? health = null)
+    {
+        Action? closeLogging = logging is null ? null : logging.Dispose;
+        return CompleteProcess(closeLogging, component, operationExitCode, health);
+    }
+
+    public static int CompleteProcess(Action? closeLogging, string component, int operationExitCode,
+        PersistentLogHealth? health = null)
+    {
+        var persistent = health ?? PersistentHealth;
+        try { closeLogging?.Invoke(); }
+        catch (Exception failure)
+        {
+            persistent.Failed();
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=shutdown: {failure}", persistent);
+        }
+        var snapshot = persistent.Snapshot();
+        if (snapshot.Ready) return operationExitCode;
+        Emergency($"LOGGING_UNAVAILABLE component={component} pid={Environment.ProcessId} initialized={snapshot.Initialized} "
+            + $"failures={snapshot.FailureCount} operation_exit={operationExitCode}", persistent);
+        return operationExitCode == 0 ? 1 : operationExitCode;
+    }
+
+    private static void Emergency(string message, PersistentLogHealth health)
+    {
+        try { Console.Error.WriteLine(message); }
+        catch (Exception)
+        {
+            // Never recurse through a failed diagnostic channel. The final process
+            // result still reports failure when stderr itself cannot accept output.
+            health.Failed();
+        }
+    }
 
     public static ILoggerFactory ConsoleAndFile(string role, LogEventLevel min = LogEventLevel.Information)
         => Factory(role, console: true, min);
@@ -71,10 +122,21 @@ public static class LaplaceLogging
     /// </summary>
     public static LoggerConfiguration ApplyLaplaceSinks(
         this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true,
-        LogEventLevel consoleMinLevel = LogEventLevel.Verbose)
+        LogEventLevel consoleMinLevel = LogEventLevel.Verbose, PersistentLogHealth? health = null)
     {
+        var persistent = health ?? PersistentHealth;
         // Serilog sink failures must reach stderr, never recursively enter a failed sink.
-        SelfLog.Enable(TextWriter.Synchronized(Console.Error));
+        var errorOutput = TextWriter.Synchronized(Console.Error);
+        SelfLog.Enable(message =>
+        {
+            persistent.Failed();
+            try { errorOutput.WriteLine(message); }
+            catch (Exception error) when (error is IOException or ObjectDisposedException)
+            {
+                // The failed diagnostic output is already counted. Writing it
+                // back through Serilog would recurse into the same failed sink.
+            }
+        });
         lock (TraceGate)
             if (Trace.Listeners["LaplaceStructured"] is null) Trace.Listeners.Add(new StructuredTraceListener());
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
@@ -83,6 +145,9 @@ public static class LaplaceLogging
         // File sinks otherwise report an inaccessible path only to SelfLog and can
         // leave the process running with a disabled persistent sink.
         using (File.Open(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
+        var jsonPath = Path.Combine(LaplaceInstall.OpsLogDirectory,
+            $"laplace-{role}-{DateTime.Now:yyyyMMdd}.jsonl");
+        using (File.Open(jsonPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
 
         config = config.Enrich.FromLogContext()
             .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Warning)
@@ -115,6 +180,7 @@ public static class LaplaceLogging
                     outputTemplate: tmpl);
         }
 
+        persistent.Initialized();
         return config;
     }
 
@@ -157,14 +223,17 @@ public static class LaplaceLogging
         public override void Write(string? message) => Log.Information("{TraceMessage}", message);
         public override void WriteLine(string? message) => Write(message);
         public override void TraceEvent(TraceEventCache? cache, string source, TraceEventType type, int id, string? message)
+            => WriteEvent(source, type, id, message, null);
+        private static void WriteEvent(string source, TraceEventType type, int id, string? message, Exception? failure)
             => Log.ForContext("SourceContext", source).ForContext("EventId", id).Write(
                 type is TraceEventType.Critical ? LogEventLevel.Fatal : type is TraceEventType.Error
                     ? LogEventLevel.Error : type is TraceEventType.Warning ? LogEventLevel.Warning : LogEventLevel.Information,
-                "{TraceMessage}", message);
+                failure, "{TraceMessage}", message);
         public override void TraceEvent(TraceEventCache? cache, string source, TraceEventType type, int id,
             string? format, params object?[]? args)
-            => TraceEvent(cache, source, type, id, args is null ? format
-                : string.Format(System.Globalization.CultureInfo.InvariantCulture, format ?? "", args));
+            => WriteEvent(source, type, id, args is null ? format
+                : string.Format(System.Globalization.CultureInfo.InvariantCulture, format ?? "", args),
+                args?.OfType<Exception>().FirstOrDefault());
     }
 
     public static string CorrelationId(string? value) => !string.IsNullOrWhiteSpace(value)

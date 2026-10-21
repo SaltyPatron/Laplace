@@ -59,7 +59,7 @@ public sealed class LichessConnectivityService : ILichessConnection
         Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null, bool ownsHost = false, bool drainGames = false)
     {
         _getHost = getHost;
-        _log = log ?? NullLogger.Instance;
+        _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(LichessConnectivityService).FullName!);
         _ownsHost = ownsHost;
         _drainGames = drainGames;
     }

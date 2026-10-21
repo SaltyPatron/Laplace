@@ -84,9 +84,8 @@ public sealed class OpenSubtitlesDecomposerTests
 
             var entities = new Dictionary<Hash128, EntityRow>();
             var trajectories = new Dictionary<Hash128, double[]>();
-            int translationEdges = 0, languageEdges = 0, intentStages = 0;
-            var langObjects = new HashSet<Hash128>();
-            var languageSubjects = new HashSet<Hash128>();
+            int intentStages = 0;
+            var claims = new List<AttestationRow>();
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
             Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
@@ -99,31 +98,14 @@ public sealed class OpenSubtitlesDecomposerTests
                 foreach (var e in StagedChangeRows.Entities(change)) entities[e.Id] = e;
                 foreach (var form in StagedChangeRows.Forms(change))
                     if (form.TrajectoryXyzm is { } xyzm) trajectories[form.EntityId] = xyzm;
-                foreach (var a in change.Attestations)
-                {
-                    if (a.TypeId == translationType)
-                    {
-                        translationEdges++;
-                    }
-                    else if (a.TypeId == languageType)
-                    {
-                        languageEdges++;
-                        languageSubjects.Add(a.SubjectId);
-                        if (a.ObjectId is { } o) langObjects.Add(o);
-                    }
-                    Assert.Equal(languageType, a.TypeId);
-                }
+                claims.AddRange(StagedChangeRows.Attestations(change));
             }
 
-            Assert.Equal(0, translationEdges);
-            Assert.Equal(2, languageEdges);
+            Assert.DoesNotContain(claims, a => a.TypeId == translationType || a.TypeId == languageType);
             Assert.True(intentStages > 0, "content witness batches should populate IntentStages");
 
             Hash128 enId = LanguageReference.Resolve("en");
             Hash128 esId = LanguageReference.Resolve("es");
-            Assert.Contains(enId, langObjects);
-            Assert.Contains(esId, langObjects);
-
             Assert.Contains(enId, entities.Keys);
             Assert.Contains(esId, entities.Keys);
 
@@ -136,47 +118,31 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.NotNull(whatId);
             Assert.NotNull(comoId);
 
-            // A sequence is the ordered composition of its sentences; no source schema
-            // id enters the Merkle preimage, so any source admitting the same sequence
-            // reaches the same entity.
+            // Each alignment is the ordered pair of [language, sentence] utterances.
+            // The zip name, line numbers and 512-record execution batch are packaging.
             Hash128 sequenceSchema =
                 Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
-            Hash128 leftSequence = Hash128.Merkle(
-                EntityTier.Document, [helloId!.Value, whatId!.Value]);
-            Hash128 rightSequence = Hash128.Merkle(
-                EntityTier.Document, [holaId!.Value, comoId!.Value]);
-            Hash128 oldNamespacedLeftSequence = Hash128.Merkle(
-                EntityTier.Document, [sequenceSchema, helloId.Value, whatId.Value]);
-
             Assert.DoesNotContain(sequenceSchema, entities.Keys);
-            Assert.DoesNotContain(oldNamespacedLeftSequence, entities.Keys);
-            Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[leftSequence].TypeId);
-            Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[rightSequence].TypeId);
-            Assert.Equal(
-                [helloId.Value, whatId.Value],
-                Trajectory.Constituents(trajectories[leftSequence]));
-            Assert.Equal(
-                [holaId.Value, comoId.Value],
-                Trajectory.Constituents(trajectories[rightSequence]));
-            Assert.True(languageSubjects.SetEquals([leftSequence, rightSequence]));
-
-            // Every constituent of an alignment is content: its schema text, the language
-            // pair as written, and the ordinals as numbers.
-            Hash128 pairReference = ContentEmitter.RootId("en-es")!.Value;
-            Hash128 start = ContentEmitter.RootId("1")!.Value;
-            Hash128 end = ContentEmitter.RootId("2")!.Value;
-            Hash128 alignmentSchema =
-                ContentEmitter.RootId("opensubtitles/alignment-block512/schema/v1")!.Value;
-            Hash128[] alignmentMembers =
-            [
-                alignmentSchema, pairReference,
-                enId, leftSequence, esId, rightSequence, start, end,
-            ];
-            Hash128 alignment = Hash128.Merkle(EntityTier.Document, alignmentMembers);
-            Assert.Equal(EntityTypeRegistry.OpenSubtitlesAlignment, entities[alignment].TypeId);
-            Assert.Equal(
-                alignmentMembers,
-                Trajectory.Constituents(trajectories[alignment]));
+            Assert.Equal(2, entities.Values.Count(e => e.TypeId == EntityTypeRegistry.OpenSubtitlesAlignment));
+            foreach (var (left, right) in new[] { (helloId!.Value, holaId!.Value), (whatId!.Value, comoId!.Value) })
+            {
+                Hash128 Utterance(Hash128 language, Hash128 sentence)
+                {
+                    byte tier = checked((byte)(Math.Max(entities[language].Tier, entities[sentence].Tier) + 1));
+                    var id = Hash128.Merkle(tier, [language, sentence]);
+                    Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[id].TypeId);
+                    Assert.Equal(tier, entities[id].Tier);
+                    Assert.Equal([language, sentence], Trajectory.Constituents(trajectories[id]));
+                    return id;
+                }
+                Hash128 leftUtterance = Utterance(enId, left);
+                Hash128 rightUtterance = Utterance(esId, right);
+                byte floor = checked((byte)(Math.Max(entities[leftUtterance].Tier, entities[rightUtterance].Tier) + 1));
+                Hash128 alignment = Hash128.Merkle(floor, [leftUtterance, rightUtterance]);
+                Assert.Equal(EntityTypeRegistry.OpenSubtitlesAlignment, entities[alignment].TypeId);
+                Assert.Equal(floor, entities[alignment].Tier);
+                Assert.Equal([leftUtterance, rightUtterance], Trajectory.Constituents(trajectories[alignment]));
+            }
         }
         finally
         {

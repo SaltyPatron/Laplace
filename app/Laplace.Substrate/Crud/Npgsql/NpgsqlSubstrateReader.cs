@@ -64,34 +64,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE layer = $1)");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
-        try
-        {
-            return await cmd.ExecuteScalarAsync(ct) is true;
-        }
-        catch (PostgresException)
-        {
-            return false;
-        }
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.layer_completed", layerOrder);
+        return await cmd.ExecuteScalarAsync(ct) is true;
     }
 
     public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion "
-            + "WHERE witness_id = $1 AND layer = $2)");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
-        try
-        {
-            return await cmd.ExecuteScalarAsync(ct) is true;
-        }
-        catch (PostgresException)
-        {
-            return false;
-        }
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.source_completed", sourceId.ToBytes(), layerOrder);
+        return await cmd.ExecuteScalarAsync(ct) is true;
     }
 
     public async Task<bool> HasFileCompletedAsync(
@@ -105,8 +85,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     /// <summary>
     /// One round trip for N source witnesses against the layer completion key
-    /// (witness_id, layer). An unreadable completion table yields "not known complete":
-    /// re-observation is idempotent, while a false "complete" would skip admission.
+    /// (witness_id, layer). Database failures propagate: an unreadable completion
+    /// receipt does not authorize replaying testimony that may already be accepted.
     /// </summary>
     public async Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
         IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
@@ -114,26 +94,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var done = new HashSet<Hash128>();
         if (sourceIds.Count == 0) return done;
 
-        await using var cmd = _ds.CreateCommand(
-            "SELECT c.witness_id FROM laplace.ingest_layer_completion c "
-            + "WHERE c.witness_id = ANY($1) AND c.layer = $2");
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            Value = ToByteArrays(sourceIds),
-            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-        });
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
-        try
-        {
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-                done.Add(Hash128.FromBytes((byte[])r[0]));
-            return done;
-        }
-        catch (PostgresException)
-        {
-            return new HashSet<Hash128>();
-        }
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.sources_completed", ToByteArrays(sourceIds), layerOrder);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            done.Add(Hash128.FromBytes((byte[])r[0]));
+        return done;
     }
 
     /// <summary>
@@ -147,29 +112,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var done = new HashSet<Hash128>();
         if (fileIds.Count == 0) return done;
 
-        await using var cmd = _ds.CreateCommand(
-            "SELECT DISTINCT c.unit_id FROM laplace.ingest_unit_completion c "
-            + "WHERE c.witness_id = $1 AND c.unit_id = ANY($2) AND c.layer = $3 "
-            + "AND c.digest IS NULL");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            Value = ToByteArrays(fileIds),
-            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-        });
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Integer, layerOrder);
-        try
-        {
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-                done.Add(Hash128.FromBytes((byte[])r[0]));
-        }
-        catch (PostgresException)
-        {
-            // Unreadable completion state means not known complete; re-observation
-            // is idempotent, skipping a file is not.
-            done.Clear();
-        }
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.files_completed",
+            decomposerSourceId.ToBytes(), ToByteArrays(fileIds), layerOrder);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            done.Add(Hash128.FromBytes((byte[])r[0]));
         return done;
     }
 

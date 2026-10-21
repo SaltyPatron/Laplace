@@ -4,6 +4,25 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class FideRatingSnapshotTests
 {
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"Version\":1,\"SourceUrl\":null,\"Players\":null}")]
+    [InlineData("{\"Version\":1,\"SourceUrl\":\"https://ratings.fide.com/download/players_list_xml.zip\",\"ArchiveSha256\":null}")]
+    public async Task StructurallyCorruptSnapshotIsRejectedWithoutNullReferenceCrash(string json)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "laplace-fide-corrupt-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "snapshot.gz");
+        try
+        {
+            await using (var raw = File.Create(path))
+            await using (var gzip = new System.IO.Compression.GZipStream(raw, System.IO.Compression.CompressionMode.Compress))
+                await gzip.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
+            Assert.Null(await FideRatingSnapshot.TryLoadAsync(path, CancellationToken.None));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task Snapshot_RoundTripsProjectedEstateAndRejectsTampering()
     {

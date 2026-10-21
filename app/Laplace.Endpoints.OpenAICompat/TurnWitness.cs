@@ -1,5 +1,8 @@
 using System.Text;
+using System.Diagnostics;
 using System.Threading.Channels;
+using Serilog.Context;
+using Serilog.Core;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
@@ -27,8 +30,29 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
     /// </summary>
     private readonly record struct TurnItem(
         string Tenant, string? UserKey, Hash128 SessionId, string Prompt, string? Reply,
-        TaskCompletionSource<bool>? Completion = null, string? OccurrenceKey = null,
-        ConversationContent.TurnPhase Phase = ConversationContent.TurnPhase.Complete);
+        TaskCompletionSource<TurnCommit>? Completion = null, string? OccurrenceKey = null,
+        ConversationContent.TurnPhase Phase = ConversationContent.TurnPhase.Complete,
+        ILogEventEnricher? Diagnostics = null, ActivityContext ParentTrace = default);
+
+    private readonly record struct TurnCommit(bool Committed, Exception? Failure);
+
+    private static TurnItem CaptureTurn(
+        string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply,
+        TaskCompletionSource<TurnCommit>? completion = null, string? occurrenceKey = null,
+        ConversationContent.TurnPhase phase = ConversationContent.TurnPhase.Complete)
+        => new(tenant, userKey, sessionId, prompt, reply, completion, occurrenceKey, phase,
+            LogContext.Clone(), Activity.Current?.Context ?? default);
+
+    private static Activity TraceTurn(ActivityContext parent)
+    {
+        var activity = new Activity("laplace.turn.witness").SetIdFormat(ActivityIdFormat.W3C);
+        if (parent.TraceId != default)
+        {
+            activity.SetParentId(parent.TraceId, parent.SpanId, parent.TraceFlags);
+            activity.TraceStateString = parent.TraceState;
+        }
+        return activity.Start();
+    }
 
     public bool IsOnline { get; private set; }
 
@@ -47,7 +71,7 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             return false;
         if (!ConversationContent.IsValidIdentifier(tenant))
             return false;
-        return _queue.Writer.TryWrite(new TurnItem(tenant, userKey, sessionId, prompt, reply));
+        return _queue.Writer.TryWrite(CaptureTurn(tenant, userKey, sessionId, prompt, reply));
     }
 
     public async Task RecordTurnAsync(
@@ -58,11 +82,13 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         if (!IsOnline || string.IsNullOrEmpty(prompt) || sessionId == Hash128.Zero
             || !ConversationContent.IsValidIdentifier(tenant))
             throw new SubstrateUnavailableException("The conversation turn could not enter the witness writer.");
-        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await _queue.Writer.WriteAsync(new TurnItem(
+        var completion = new TaskCompletionSource<TurnCommit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await _queue.Writer.WriteAsync(CaptureTurn(
             tenant, userKey, sessionId, prompt, reply, completion, occurrenceKey, phase), ct).ConfigureAwait(false);
-        if (!await completion.Task.WaitAsync(ct).ConfigureAwait(false))
-            throw new SubstrateUnavailableException("The conversation turn did not commit to the substrate.");
+        var result = await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+        if (!result.Committed)
+            throw new SubstrateUnavailableException("The conversation turn did not commit to the substrate.",
+                result.Failure ?? new InvalidOperationException("The witness writer returned without a commit receipt."));
     }
 
     public async Task<string> RecordPromptAsync(
@@ -116,7 +142,10 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         {
         await foreach (var item in _queue.Reader.ReadAllAsync(ct))
         {
+            using var diagnostics = item.Diagnostics is { } context ? LogContext.Push(context) : null;
+            using var trace = TraceTurn(item.ParentTrace);
             bool deposited = false;
+            Exception? depositFailure = null;
             try
             {
                 // Each turn is its own witnessing event: content dedups by id, but a
@@ -127,23 +156,30 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
 
                 if (!deposited)
                 {
-                    _log.LogWarning("turn-witness could not commit turn");
+                    depositFailure = closer.LastFailure;
+                    if (depositFailure is { } failure)
+                        _log.LogError(failure, "turn-witness could not commit turn");
+                    else
+                        _log.LogWarning("turn-witness could not commit turn");
                     continue;
                 }
 
                 _log.LogInformation("turn witnessed: tenant={Tenant} session={Session}",
                     item.Tenant, item.SessionId);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
             {
+                depositFailure = ex;
+                _log.LogWarning(ex, "turn-witness stopped while awaiting turn commit");
                 IsOnline = false;
                 return;
             }
             catch (Exception ex)
             {
+                depositFailure = ex;
                 _log.LogWarning(ex, "turn-witness deposit failed");
             }
-            finally { item.Completion?.TrySetResult(deposited); }
+            finally { item.Completion?.TrySetResult(new TurnCommit(deposited, depositFailure)); }
         }
         }
         finally
@@ -151,7 +187,13 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             IsOnline = false;
             _queue.Writer.TryComplete();
             while (_queue.Reader.TryRead(out var abandoned))
-                abandoned.Completion?.TrySetResult(false);
+            {
+                using var diagnostics = abandoned.Diagnostics is { } context ? LogContext.Push(context) : null;
+                using var trace = TraceTurn(abandoned.ParentTrace);
+                var failure = new InvalidOperationException("The witness writer stopped before committing the queued turn.");
+                _log.LogWarning(failure, "turn-witness abandoned pending turn during shutdown");
+                abandoned.Completion?.TrySetResult(new TurnCommit(false, failure));
+            }
         }
     }
 

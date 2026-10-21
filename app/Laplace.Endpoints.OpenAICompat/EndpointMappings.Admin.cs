@@ -20,6 +20,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// </summary>
 internal static class AdminEndpoints
 {
+    private static readonly SemaphoreSlim AgentConfigWriteGate = new(1, 1);
     public static void MapAdminEndpoints(this WebApplication app)
     {
         // ---- agent routing ------------------------------------------------
@@ -56,6 +57,7 @@ internal static class AdminEndpoints
             }
             catch (AgentException ex)
             {
+                app.Logger.LogError(ex, "Agent routing configuration could not be loaded.");
                 return EndpointJson.BadRequest("agent_config_error", ex.Message);
             }
         }).WithTags("admin");
@@ -101,19 +103,32 @@ internal static class AdminEndpoints
                 return EndpointJson.BadRequest("agent_config_error",
                     "No writable config location — set LAPLACE_AGENTS_CONFIG or LAPLACE_APP_DIR.");
 
+            string temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            await AgentConfigWriteGate.WaitAsync(ct);
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 // Write-then-move: every `ask` reads agents.json per call, so a
                 // partial file is never observable.
-                var temp = target + ".tmp";
-                await File.WriteAllTextAsync(temp, content, ct);
+                await using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    bufferSize: 4096, useAsync: true))
+                await using (var writer = new StreamWriter(stream))
+                    await writer.WriteAsync(content.AsMemory(), ct);
                 File.Move(temp, target, overwrite: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return EndpointJson.BadRequest("agent_config_error",
-                    $"could not write {target}: {ex.Message}");
+                app.Logger.LogError(ex, "Agent configuration write failed for {ConfigPath}", target);
+                return Results.Problem("The agent configuration could not be saved. See the correlated server log.", statusCode: 503);
+            }
+            finally
+            {
+                AgentConfigWriteGate.Release();
+                try { File.Delete(temp); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    app.Logger.LogWarning(ex, "Agent configuration temporary file cleanup failed for {TemporaryPath}", temp);
+                }
             }
 
             return Results.Json(new JsonObject
@@ -255,7 +270,12 @@ internal static class AdminEndpoints
     {
         error = null;
         try { return AgentCatalog.DiscoverConfigPath(); }
-        catch (AgentException ex) { error = ex.Message; return null; }
+        catch (AgentException ex)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(AdminEndpoints), ex, "Agent configuration discovery failed.");
+            error = ex.Message;
+            return null;
+        }
     }
 
 }

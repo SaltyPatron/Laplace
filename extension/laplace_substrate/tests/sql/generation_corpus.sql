@@ -146,9 +146,9 @@ $routing_state$;
 DO $$
 DECLARE
     type_t    bytea := public.laplace_hash128_blake3('Type');
-    type_word bytea := public.laplace_hash128_blake3('Word');
-    type_sent bytea := public.laplace_hash128_blake3('Sentence');
-    type_doc  bytea := public.laplace_hash128_blake3('Document');
+    type_word bytea := laplace.entity_type_id('Word');
+    type_sent bytea := laplace.entity_type_id('Sentence');
+    type_doc  bytea := laplace.entity_type_id('Document');
     src       bytea := public.laplace_hash128_blake3('test/corpus/source');
     w_the     bytea := public.laplace_hash128_blake3('test/corpus/word-the');
     w_capital bytea := public.laplace_hash128_blake3('test/corpus/word-capital');
@@ -181,17 +181,22 @@ BEGIN
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
-    -- HAS_CHARACTER_PROPERTY → [General_Category, Space_Separator] — and
+    -- gc → [General_Category, Space_Separator] — and
     -- generation.separator_ids() resolves it.
     INSERT INTO laplace.attestations (id, subject_id, type_id, object_id, source_id,
                               context_id, outcome, last_observed_at, observation_count,
                               sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES (public.laplace_hash128_blake3('test/corpus/att-sp-zs'), sp,
-            laplace.relation_type_id('HAS_CHARACTER_PROPERTY'), zs_cat, src,
+            laplace.relation_type_id('gc'), zs_cat, src,
             NULL, 2, now(), 1, 1000000000, 30000000000);
 
     IF NOT (sp = ANY (generation.separator_ids())) THEN
         RAISE EXCEPTION 'FAIL: attested Zs token not in generation.separator_ids()';
+    END IF;
+    IF (SELECT array_agg(vocab_idx ORDER BY vocab_idx)
+        FROM generation.corpus_whitespace_vocab_indices(ARRAY[sp,w_the,sp]))
+        IS DISTINCT FROM ARRAY[0,2]::int[] THEN
+        RAISE EXCEPTION 'FAIL: source gc claims lost separator ordinals or rendered an attested token';
     END IF;
 
     -- sent = the ␣ capital ␣ of ␣ france
@@ -360,7 +365,7 @@ BEGIN
     -- Consensus floor: a dead-end context continues through COMPLETES_TO with
     -- stride_used = 0.
     INSERT INTO laplace.entities (id, tier, type_id)
-    VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'), src)
+    VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'))
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)

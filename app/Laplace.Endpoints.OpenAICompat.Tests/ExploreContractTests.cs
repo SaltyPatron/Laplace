@@ -120,7 +120,7 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
         Assert.NotNull(body.DatabasePerfcacheError);
         Assert.Null(body.PerfcacheAligned);
 
-        var root = Assert.Single(body.Nodes.Where(n => n.Ordinal == body.NaturalUnitOrdinal));
+        var root = Assert.Single(body.Nodes, n => n.Ordinal == body.NaturalUnitOrdinal);
         Assert.Equal(32, root.HilbertHex.Length);
         Assert.InRange(root.Radius, 0.0, 1.000000000001);
         Assert.NotEmpty(root.PackedVertices);

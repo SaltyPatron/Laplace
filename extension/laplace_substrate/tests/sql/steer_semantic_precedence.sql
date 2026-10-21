@@ -7,8 +7,8 @@ BEGIN;
 DO $$
 DECLARE
     type_t       bytea := public.laplace_hash128_blake3(convert_to('Type', 'UTF8'));
-    type_word    bytea := public.laplace_hash128_blake3(convert_to('Word', 'UTF8'));
-    type_sent    bytea := public.laplace_hash128_blake3(convert_to('Sentence', 'UTF8'));
+    type_word    bytea := laplace.entity_type_id('Word');
+    type_sent    bytea := laplace.entity_type_id('Sentence');
     src          bytea := public.laplace_hash128_blake3(convert_to('test/steer/source', 'UTF8'));
     ctx          bytea := public.laplace_hash128_blake3(convert_to('test/steer/context', 'UTF8'));
     noise        bytea := public.laplace_hash128_blake3(convert_to('test/steer/noise', 'UTF8'));
@@ -36,7 +36,7 @@ BEGIN
         (unrelated, 2, type_word),
         (sent_noise, 3, type_sent),
         (sent_sem, 3, type_sent),
-        (rel, 0, laplace.entity_type_id('RelationType'), src)
+        (rel, 0, laplace.entity_type_id('RelationType'))
     ON CONFLICT DO NOTHING;
 
     -- S6 sees a very strong sequence prior for noise: thirty-two distinct

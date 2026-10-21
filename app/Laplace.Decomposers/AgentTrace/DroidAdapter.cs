@@ -46,7 +46,7 @@ public sealed class DroidAdapter : IAgentTraceAdapter
         AgentUsage? totals = null;
         string sidecar = Path.ChangeExtension(filePath, null) + ".settings.json";
         if (File.Exists(sidecar)
-            && JsonAstDocument.TryParse(await File.ReadAllBytesAsync(sidecar, ct)) is { } sideDoc)
+            && await AdapterJson.ReadDocumentAsync(sidecar, ct) is { } sideDoc)
         {
             using (sideDoc)
             {

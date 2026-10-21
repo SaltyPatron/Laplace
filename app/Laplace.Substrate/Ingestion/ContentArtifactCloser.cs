@@ -137,6 +137,7 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
                 applied,
                 clock.Elapsed,
                 ct).ConfigureAwait(false);
+            Broken = false;
             return value.Ids;
         }
         catch (OperationCanceledException)
@@ -153,7 +154,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
             // retired, since its fold lane may stay faulted; later files get a fresh one.
             var failedWriter = _writer;
             _writer = null;
-            Broken = false;
+            Broken = true;
+            Trace.TraceError("User artifact deposit failed: {0}", ex);
             if (failedWriter is not null)
             {
                 try
@@ -162,6 +164,7 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
                 }
                 catch (Exception disposeError)
                 {
+                    Trace.TraceError("User artifact writer retirement failed: {0}", disposeError);
                     _warn?.Invoke($"user artifact writer reset failed: {disposeError.Message}");
                 }
             }

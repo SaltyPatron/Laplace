@@ -80,7 +80,7 @@ public sealed class ChessEngineService : IAsyncDisposable
     {
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
-        _log = log ?? NullLogger.Instance;
+        _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessEngineService).FullName!);
     }
 
     /// <summary>
@@ -96,7 +96,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         _readOnlyDataSource = readOnlyDataSource ?? throw new ArgumentNullException(nameof(readOnlyDataSource));
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
-        _log = log ?? NullLogger.Instance;
+        _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessEngineService).FullName!);
     }
 
     /// <summary>Connection policy used by runtime hosts and standalone chess readers.</summary>
@@ -287,9 +287,10 @@ public sealed class ChessEngineService : IAsyncDisposable
                         (_lpMg, _lpEg) = blended;
                     }
                 }
-                catch
+                catch (Exception error)
                 {
                     lock (_learnedGate) { _lpMg = null; _lpEg = null; }
+                    _log.LogWarning(error, "Learned piece-square refresh failed; learned tables are unavailable.");
                 }
             });
         }
@@ -672,7 +673,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 RecordGame(g);
                 played++;
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex) { _log.LogWarning(ex, "chess train game failed"); }
         }
     }
@@ -697,7 +698,12 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         StopTraining();
-        if (_trainTask is not null) { try { await _trainTask; } catch { } }
+        if (_trainTask is not null)
+        {
+            try { await _trainTask; }
+            catch (OperationCanceledException) when (_trainCts?.IsCancellationRequested == true) { }
+            catch (Exception error) { _log.LogError(error, "Chess training worker failed during shutdown."); }
+        }
         _writeInitGate.Dispose();
         _initGate.Dispose();
     }

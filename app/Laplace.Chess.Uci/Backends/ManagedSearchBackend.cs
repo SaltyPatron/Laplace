@@ -84,10 +84,10 @@ public sealed class ManagedSearchBackend : IChessBackend
             _positionFen = fen;
             _positionMoves = moves as string[] ?? moves.ToArray();
         }
-        catch (FormatException)
+        catch (FormatException error)
         {
-            // Malformed "position fen ..." must not crash the engine process — keep whatever
-            // position was already current, same as how a real UCI engine degrades.
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(ManagedSearchBackend), error,
+                "Malformed UCI position rejected; the previous position is retained.");
         }
     }
 

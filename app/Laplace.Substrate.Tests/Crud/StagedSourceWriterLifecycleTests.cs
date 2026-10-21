@@ -1,11 +1,51 @@
 using global::Npgsql;
 using Laplace.SubstrateCRUD.Npgsql;
+using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
 public sealed class StagedSourceWriterLifecycleTests
 {
+    [Fact]
+    public async Task RecoveredConcurrencyFailureRetainsTheFailedAttemptDiagnostic()
+    {
+        await using var ds = NpgsqlDataSource.Create("Host=localhost");
+        var log = new Capture();
+        await using var writer = new StagedSourceWriter(new ControlledWriter(), ds,
+            PostgresWriteDurability.Asynchronous, 1, log);
+        var failure = new PostgresException("deadlock detected", "ERROR", "ERROR", "40P01");
+        int calls = 0;
+        await writer.ForEachAsync(new[] { 1 }, _ =>
+        {
+            if (++calls == 1) throw failure;
+            return Task.CompletedTask;
+        }, CancellationToken.None);
+
+        Assert.Equal(2, calls);
+        var retry = Assert.Single(log.Rows, row => row.Exception is not null);
+        Assert.Equal(LogLevel.Warning, retry.Level);
+        Assert.Same(failure, retry.Exception);
+        Assert.NotNull(failure.StackTrace);
+        Assert.Equal(1, retry.Fields["FailedAttempt"]);
+        Assert.Equal(2, retry.Fields["NextAttempt"]);
+        Assert.Equal(10, retry.Fields["MaxAttempts"]);
+        Assert.True(Convert.ToDouble(retry.Fields["DelayMs"]) >= 0);
+        Assert.StartsWith("laplace_stage_", Assert.IsType<string>(retry.Fields["Stage"]));
+    }
+
+    private sealed record Entry(LogLevel Level, Exception? Exception, Dictionary<string, object?> Fields);
+    private sealed class Capture : ILogger
+    {
+        public ConcurrentQueue<Entry> Rows { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Rows.Enqueue(new(level, exception,
+                ((IEnumerable<KeyValuePair<string, object?>>)(object)state!).ToDictionary(x => x.Key, x => x.Value)));
+    }
+
     [Theory]
     [InlineData(6, 100, 2, 6)]
     [InlineData(6, 7, 3, 2)]

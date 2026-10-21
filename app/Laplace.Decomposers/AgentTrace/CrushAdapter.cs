@@ -31,9 +31,8 @@ public sealed class CrushAdapter : IAgentTraceAdapter
     {
         await Task.CompletedTask;
         using var conn = SqliteSniff.OpenReadOnly(filePath);
-        if (conn is null || !SqliteSniff.HasTable(conn, "sessions")
-            || !SqliteSniff.HasTable(conn, "messages"))
-            yield break;
+        SqliteSniff.RequireTable(conn, "sessions", filePath);
+        SqliteSniff.RequireTable(conn, "messages", filePath);
 
         // One ordered join streams every session with its messages, so the container
         // decodes in one command regardless of session count.
@@ -96,7 +95,7 @@ public sealed class CrushAdapter : IAgentTraceAdapter
             long ts = created > 10_000_000_000L ? created * 1000 : created * 1_000_000;
             string? model = r.IsDBNull(9) ? null : r.GetString(9);
             if (BuildTurn(turns, callsById, role, r.IsDBNull(8) ? "[]" : r.GetString(8),
-                    model, ts) is { } turn)
+                    model, ts, $"{filePath} session={sessionId}") is { } turn)
                 turns.Add(turn);
         }
 
@@ -106,10 +105,10 @@ public sealed class CrushAdapter : IAgentTraceAdapter
     private static AgentTurn? BuildTurn(
         List<AgentTurn> turns,
         Dictionary<string, (int TurnAt, AgentToolCall Call)> callsById,
-        string role, string partsJson, string? model, long ts)
+        string role, string partsJson, string? model, long ts, string location)
     {
-        using var doc = JsonAstDocument.TryParse(partsJson);
-        if (doc is null || !doc.Root.IsArray) return null;
+        using var doc = AdapterJson.ParseRequired(partsJson, location);
+        if (!doc.Root.IsArray) throw new InvalidDataException($"Agent transcript parts must be an array: {location}");
 
         var text = new StringBuilder();
         var thinking = new StringBuilder();

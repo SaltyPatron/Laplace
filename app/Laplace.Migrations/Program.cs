@@ -17,22 +17,22 @@ internal static class Program
     public static int Main(string[] args)
     {
         ILoggerFactory? logs = null;
+        int exitCode = 1;
         try
         {
             logs = Laplace.Ops.LaplaceLogging.FileOnly("migrations");
             NpgsqlLoggingConfiguration.InitializeLogging(logs, parameterLoggingEnabled: false);
-            var exitCode = Run(args, logs);
+            exitCode = Run(args, logs);
             if (exitCode != 0) logs.CreateLogger("migrations")
                 .LogWarning("Migration command {Command} ended with exit code {ExitCode}.", args.FirstOrDefault() ?? "up", exitCode);
-            return exitCode;
         }
         catch (Exception ex)
         {
-            logs?.CreateLogger("migrations").LogCritical(ex, "Migration process terminated unexpectedly.");
-            Console.Error.WriteLine(ex);
-            return 1;
+            Laplace.Ops.LaplaceLogging.ReportProcessFailure("Laplace.Migrations", ex,
+                failure => logs?.CreateLogger("migrations").LogCritical(failure, "Migration process terminated unexpectedly."));
+            exitCode = 1;
         }
-        finally { logs?.Dispose(); }
+        return Laplace.Ops.LaplaceLogging.CompleteProcess(logs, "Laplace.Migrations", exitCode);
     }
 
     private static int Run(string[] args, ILoggerFactory logs)

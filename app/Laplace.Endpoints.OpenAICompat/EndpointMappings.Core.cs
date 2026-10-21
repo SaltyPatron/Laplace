@@ -12,9 +12,9 @@ internal static class CoreEndpoints
 
 
 
-        app.MapGet("/health/ready", async (ISubstrateClient substrate, CancellationToken ct) =>
+        app.MapGet("/health/ready", async (ISubstrateClient substrate, Laplace.Ops.PersistentLogHealth logHealth, CancellationToken ct) =>
         {
-            var report = await substrate.ReadinessAsync(ct);
+            var report = WithLogging(await substrate.ReadinessAsync(ct), logHealth);
             return Results.Json(report, statusCode: report.Ready
                 ? StatusCodes.Status200OK
                 : StatusCodes.Status503ServiceUnavailable);
@@ -24,8 +24,8 @@ internal static class CoreEndpoints
 
         // The same readiness document as /health/ready, always with 200; /health/ready
         // answers 503 when not ready.
-        app.MapGet("/health/status", async (ISubstrateClient substrate, CancellationToken ct) =>
-            Results.Json(await substrate.ReadinessAsync(ct)))
+        app.MapGet("/health/status", async (ISubstrateClient substrate, Laplace.Ops.PersistentLogHealth logHealth, CancellationToken ct) =>
+            Results.Json(WithLogging(await substrate.ReadinessAsync(ct), logHealth)))
           .WithTags("core")
           .Produces<ReadinessResponse>();
 
@@ -63,5 +63,12 @@ internal static class CoreEndpoints
             return Results.Json(new CapabilitiesResponse("laplace", endpoints));
         })
         .WithTags("core").Produces<CapabilitiesResponse>();
+    }
+
+    private static ReadinessResponse WithLogging(ReadinessResponse report, Laplace.Ops.PersistentLogHealth health)
+    {
+        var logging = health.Snapshot();
+        return report with { Ready = report.Ready && logging.Ready,
+            LoggingReady = logging.Ready, LoggingFailureCount = logging.FailureCount };
     }
 }

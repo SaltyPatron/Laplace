@@ -146,14 +146,16 @@ public sealed class AgentTraceDecomposer
             yield break;
         }
 
-        if (IngestInput.IsSingleFile(ecosystemPath))
+        // Explicit input must be readable. Exists() would turn access and missing
+        // path errors into a successful inventory containing zero files.
+        if ((File.GetAttributes(ecosystemPath) & FileAttributes.Directory) == 0)
         {
-            if (AgentTraceAdapters.Resolve(ecosystemPath) is { } single)
-                yield return (ecosystemPath, single);
+            var single = AgentTraceAdapters.Resolve(ecosystemPath)
+                ?? throw new InvalidDataException($"No agent transcript adapter recognizes the selected file: {ecosystemPath}");
+            yield return (ecosystemPath, single);
             yield break;
         }
 
-        if (!Directory.Exists(ecosystemPath)) yield break;
         foreach (var f in EnumerateOrdered(ecosystemPath))
             if (AgentTraceAdapters.Resolve(f) is { } adapter)
                 yield return (f, adapter);

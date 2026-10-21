@@ -50,14 +50,14 @@ public sealed class ChessUnitCompletionTests
     }
 
     [Theory]
-    [InlineData("analysis", 21)]
-    [InlineData("transitions", 22)]
-    [InlineData("positions", 22)]
-    [InlineData("tactics", 24)]
-    [InlineData("player-context", 25)]
-    [InlineData("trajectory", 21)]
-    [InlineData("opening-no-hit", 21)]
-    public void FailedReplayCannotIssueCompletionOverItsPartialOutput(string lane, int layer)
+    [InlineData("analysis")]
+    [InlineData("transitions")]
+    [InlineData("positions")]
+    [InlineData("tactics")]
+    [InlineData("player-context")]
+    [InlineData("trajectory")]
+    [InlineData("opening-no-hit")]
+    public void FailedReplayCannotIssueCompletionOverItsPartialOutput(string lane)
     {
         CodepointPerfcache.LoadDefault();
         var parsed = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(Game));

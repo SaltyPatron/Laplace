@@ -358,10 +358,10 @@ public sealed class IngestMutexGateTests
             StringComparison.Ordinal);
         Assert.Contains("LANGUAGE C VOLATILE", installer,
             StringComparison.Ordinal);
-        Assert.Contains("SET plan_cache_mode = force_custom_plan", installer,
-            StringComparison.Ordinal);
-        Assert.Contains("SET plan_cache_mode = force_custom_plan", refresher,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("SET plan_cache_mode", installer,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SET plan_cache_mode", refresher,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("LANGUAGE plpgsql", installer,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("laplace_entity_masks_apply(deposits, n_deposits)", native,
@@ -439,8 +439,8 @@ public sealed class IngestMutexGateTests
         Assert.Contains("guc.Transaction = tx;", body);
         Assert.Contains("SET LOCAL lock_timeout = 0", body);
         Assert.Contains("return tx;", body);
-        Assert.Contains("tx.RollbackAsync(CancellationToken.None)", body);
-        Assert.Contains("tx.DisposeAsync()", body);
+        // Rollback/disposal failure behavior is exercised against PostgreSQL in
+        // NativeSqlCatalogPreparationTests; this gate owns only lock placement.
         Assert.DoesNotMatch(DatabaseAdvisoryLock, body);
         Assert.DoesNotContain("HoldMeasurementLaneAsync(", body);
         Assert.Matches(DatabaseAdvisoryLock, source[named..]);

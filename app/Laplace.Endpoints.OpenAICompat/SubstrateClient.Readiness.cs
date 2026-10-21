@@ -21,6 +21,8 @@ internal sealed partial class SubstrateClient
         }
         catch (Exception ex) when (IsChessObservationFailure(ex))
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Chess readiness could not initialize process perfcaches.");
             failure = ex.GetType().Name;
         }
         try
@@ -30,6 +32,8 @@ internal sealed partial class SubstrateClient
         }
         catch (Exception ex) when (IsChessObservationFailure(ex))
         {
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
+                "Chess readiness could not observe the position perfcache.");
             failure ??= ex.GetType().Name;
         }
         // The transition map is observed even when the position map failed; only

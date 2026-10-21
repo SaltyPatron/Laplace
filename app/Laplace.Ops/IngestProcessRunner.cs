@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Laplace.Engine.Core;
+using Serilog;
+using Serilog.Context;
 
 namespace Laplace.Ops;
 
@@ -14,8 +16,17 @@ namespace Laplace.Ops;
 /// </summary>
 public static class IngestProcessRunner
 {
-    private sealed record OwnedProcess(Process Process, StartReceipt Receipt);
+    private sealed class OwnedProcess(CapturedProcess process, StartReceipt receipt, Serilog.ILogger log)
+    {
+        public CapturedProcess Process { get; } = process;
+        public StartReceipt Receipt { get; } = receipt;
+        public Serilog.ILogger Log { get; } = log;
+        public TaskCompletionSource<CompletionReceipt> Observed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int StopRequested;
+    }
     private static readonly ConcurrentDictionary<int, OwnedProcess> OwnedProcesses = new();
+    private static readonly ConcurrentQueue<CompletionReceipt> Completed = new();
 
     public sealed record StartReceipt(
         int ProcessId,
@@ -23,7 +34,19 @@ public static class IngestProcessRunner
         string? Path,
         string CliPath,
         IReadOnlyList<string> Arguments,
-        DateTimeOffset StartedAt);
+        DateTimeOffset StartedAt)
+    {
+        public Guid ProcessRunId { get; init; } = Guid.NewGuid();
+    }
+
+    public sealed record CompletionReceipt(StartReceipt Start, DateTimeOffset EndedAt,
+        string Status, int? ExitCode, bool OutputIncomplete)
+    {
+        // Bounded by CapturedProcess, including for a caller that starts waiting
+        // after the child leaves the active list.
+        public string Stdout { get; init; } = "";
+        public string Stderr { get; init; } = "";
+    }
 
     public sealed record StopReceipt(
         int ProcessId,
@@ -69,57 +92,64 @@ public static class IngestProcessRunner
         };
         foreach (var value in args) start.ArgumentList.Add(value);
 
-        var process = Process.Start(start)
-            ?? throw new InvalidOperationException("Laplace.Cli ingest process did not start.");
-        var pid = process.Id;
-        var receipt = new StartReceipt(pid, source, path, cliPath, args, DateTimeOffset.UtcNow);
-        process.EnableRaisingEvents = true;
-        process.Exited += (_, _) => ReleaseOwnedProcess(pid);
+        return Start(start, source, path, args);
+    }
 
-        if (!OwnedProcesses.TryAdd(pid, new OwnedProcess(process, receipt)))
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            finally { process.Dispose(); }
-            throw new InvalidOperationException($"Ingest process {pid} could not be registered for operator control.");
-        }
-
-        // The process can exit between Process.Start and event registration. Close that
-        // race immediately; ObjectDisposedException derives from InvalidOperationException,
-        // so this one catch covers both the exited/disposed handle races.
+    internal static StartReceipt Start(ProcessStartInfo start, string source, string? path = null,
+        IReadOnlyList<string>? arguments = null)
+    {
+        var runId = Guid.NewGuid();
+        // Clone request context now; completion and stop can run after the request ends.
+        var log = Log.ForContext(LogContext.Clone()).ForContext("SourceContext", typeof(IngestProcessRunner).FullName)
+            .ForContext("ProcessRunId", runId).ForContext("Source", source);
+        CapturedProcess process;
         try
         {
-            if (process.HasExited)
-                ReleaseOwnedProcess(pid);
+            process = CapturedProcess.Start(start, output: (stream, text) =>
+            {
+                log.Write(stream == "stderr" ? Serilog.Events.LogEventLevel.Warning
+                    : Serilog.Events.LogEventLevel.Information,
+                    "INGEST_CHILD_OUTPUT run={ProcessRunId} stream={ChildStream} {ChildOutput}", runId, stream, text);
+            });
         }
-        catch (InvalidOperationException) { }
-
+        catch (Exception ex)
+        {
+            log.Error(ex, "INGEST_CHILD_START_FAILED run={ProcessRunId} cli={CliPath}", runId, start.FileName);
+            throw;
+        }
+        var receipt = new StartReceipt(process.Id, source, path, start.FileName,
+            arguments?.ToArray() ?? start.ArgumentList.ToArray(), DateTimeOffset.UtcNow) { ProcessRunId = runId };
+        var owned = new OwnedProcess(process, receipt, log.ForContext("ChildProcessId", process.Id));
+        if (!OwnedProcesses.TryAdd(process.Id, owned))
+        {
+            // Retain observation even if a previous exit's terminal receipt is being finalized.
+            _ = ObserveAsync(owned);
+            try { process.TerminateAsync().GetAwaiter().GetResult(); }
+            catch (Exception ex) { owned.Log.Error(ex, "INGEST_CHILD_REGISTRATION_CLEANUP_FAILED run={ProcessRunId}", runId); }
+            throw new InvalidOperationException($"Ingest process {process.Id} could not be registered for operator control.");
+        }
+        owned.Log.Information("INGEST_CHILD_STARTED run={ProcessRunId} cli={CliPath}", runId, receipt.CliPath);
+        _ = ObserveAsync(owned);
         return receipt;
     }
 
-    public static IReadOnlyList<StartReceipt> ActiveProcesses()
+    public static IReadOnlyList<StartReceipt> ActiveProcesses() => OwnedProcesses.Values
+        .Where(owned => !owned.Process.Completion.IsCompleted).Select(owned => owned.Receipt)
+        .OrderByDescending(receipt => receipt.StartedAt).ToArray();
+
+    public static IReadOnlyList<CompletionReceipt> CompletedProcesses() => Completed.ToArray()
+        .OrderByDescending(receipt => receipt.EndedAt).ToArray();
+
+    public static async Task<CompletionReceipt> WaitForCompletionAsync(Guid runId, CancellationToken ct = default)
     {
-        var active = new List<StartReceipt>();
-        foreach (var pair in OwnedProcesses.ToArray())
-        {
-            try
-            {
-                if (pair.Value.Process.HasExited)
-                {
-                    ReleaseOwnedProcess(pair.Key);
-                    continue;
-                }
-                active.Add(pair.Value.Receipt);
-            }
-            catch (InvalidOperationException)
-            {
-                // Includes ObjectDisposedException: both mean the cached handle is no
-                // longer a live process we can safely expose or control.
-                ReleaseOwnedProcess(pair.Key);
-            }
-        }
-        active.Sort(static (left, right) => right.StartedAt.CompareTo(left.StartedAt));
-        return active;
+        ct.ThrowIfCancellationRequested();
+        var completed = Completed.FirstOrDefault(item => item.Start.ProcessRunId == runId);
+        if (completed is not null) return completed;
+        var owned = OwnedProcesses.Values.FirstOrDefault(item => item.Receipt.ProcessRunId == runId);
+        if (owned is not null) return await owned.Observed.Task.WaitAsync(ct).ConfigureAwait(false);
+        // Completion can move from active ownership to retained history between reads.
+        return Completed.FirstOrDefault(item => item.Start.ProcessRunId == runId)
+            ?? throw new KeyNotFoundException($"Ingest process run {runId} is not retained.");
     }
 
     public static StopReceipt Stop(int processId)
@@ -127,33 +157,56 @@ public static class IngestProcessRunner
         if (processId <= 0)
             throw new ArgumentOutOfRangeException(nameof(processId), "Process id must be positive.");
 
-        if (!OwnedProcesses.TryRemove(processId, out var owned))
+        if (!OwnedProcesses.TryGetValue(processId, out var owned))
             return new StopReceipt(processId, Found: false, WasRunning: false, StopRequested: false);
 
-        var process = owned.Process;
         try
         {
-            if (process.HasExited)
+            if (owned.Process.Completion.IsCompleted)
                 return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
-
-            // Kill the whole tree: the CLI's workers would otherwise keep writing.
-            process.Kill(entireProcessTree: true);
+            Interlocked.Exchange(ref owned.StopRequested, 1);
+            owned.Process.TerminateAsync().GetAwaiter().GetResult();
+            owned.Log.Information("INGEST_CHILD_STOP_CONFIRMED run={ProcessRunId}", owned.Receipt.ProcessRunId);
             return new StopReceipt(processId, Found: true, WasRunning: true, StopRequested: true);
         }
-        catch (InvalidOperationException)
+        catch (Exception ex)
         {
-            return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
-        }
-        finally
-        {
-            process.Dispose();
+            // Keep ownership while alive so a failed termination remains observable and retryable.
+            owned.Log.Error(ex, "INGEST_CHILD_STOP_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
+            throw;
         }
     }
 
-    private static void ReleaseOwnedProcess(int processId)
+    private static async Task ObserveAsync(OwnedProcess owned)
     {
-        if (OwnedProcesses.TryRemove(processId, out var owned))
-            owned.Process.Dispose();
+        CompletionReceipt completed;
+        try
+        {
+            var result = await owned.Process.Completion.ConfigureAwait(false);
+            string status = result.OutputIncomplete ? "observation_failed"
+                : Volatile.Read(ref owned.StopRequested) != 0 ? "stopped"
+                : result.ExitCode == 0 ? "completed" : "failed";
+            completed = new(owned.Receipt, DateTimeOffset.UtcNow, status, result.ExitCode, result.OutputIncomplete)
+                { Stdout = result.Stdout, Stderr = result.Stderr };
+            owned.Log.Write(status is "failed" or "observation_failed" ? Serilog.Events.LogEventLevel.Error
+                : Serilog.Events.LogEventLevel.Information,
+                "INGEST_CHILD_EXITED run={ProcessRunId} status={ChildStatus} exit_code={ExitCode} output_incomplete={OutputIncomplete} stderr={ChildStderr}",
+                owned.Receipt.ProcessRunId, status, result.ExitCode, result.OutputIncomplete, result.Stderr);
+        }
+        catch (Exception ex)
+        {
+            owned.Log.Error(ex, "INGEST_CHILD_OBSERVATION_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
+            completed = new(owned.Receipt, DateTimeOffset.UtcNow, "observation_failed", null, true);
+        }
+        Completed.Enqueue(completed);
+        while (Completed.Count > 128) Completed.TryDequeue(out _);
+        OwnedProcesses.TryRemove(new KeyValuePair<int, OwnedProcess>(owned.Receipt.ProcessId, owned));
+        try { owned.Process.Dispose(); }
+        catch (Exception ex)
+        {
+            owned.Log.Error(ex, "INGEST_CHILD_RELEASE_FAILED run={ProcessRunId}", owned.Receipt.ProcessRunId);
+        }
+        finally { owned.Observed.TrySetResult(completed); }
     }
 
     public static string? ResolveCliBinary()

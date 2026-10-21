@@ -43,7 +43,8 @@ internal sealed partial class SubstrateClient
         if (artifactVertices is not null)
         {
             var ordered = artifactVertices.OrderBy(static v => v.Ordinal).ToArray();
-            if (ordered.Length != 2) return null;
+            if (ordered.Length != 2)
+                throw new InvalidDataException("Confirmed file content has an invalid content/metadata trajectory.");
 
             byte[] contentIdBytes = Convert.FromHexString(ordered[0].ChildIdHex);
             byte[] metadataIdBytes = Convert.FromHexString(ordered[1].ChildIdHex);
@@ -51,24 +52,15 @@ internal sealed partial class SubstrateClient
             Hash128 metadataId = ReadHash(metadataIdBytes);
             Hash128 documentId = contentId;
 
-            byte[] metadata;
-            FileMetadata fileMetadata;
-            try
-            {
-                metadata = await NpgsqlContentReconstructor.ReconstructUtf8Async(
-                    _dataSource, metadataId, ct).ConfigureAwait(false);
-                fileMetadata = FileMetadata.ParseIdentityCanonicalUtf8(metadata);
-                if (fileMetadata.Modality is { Length: > 0 } modality
-                    && !string.Equals(
-                        UserContentEndpointMappings.ResolveGrammarModality(fileMetadata.RelativePath),
-                        modality,
-                        StringComparison.Ordinal))
-                    return null;
-            }
-            catch (InvalidDataException)
-            {
-                return null;
-            }
+            byte[] metadata = await NpgsqlContentReconstructor.ReconstructUtf8Async(
+                _dataSource, metadataId, ct).ConfigureAwait(false);
+            FileMetadata fileMetadata = FileMetadata.ParseIdentityCanonicalUtf8(metadata);
+            if (fileMetadata.Modality is { Length: > 0 } modality
+                && !string.Equals(
+                    UserContentEndpointMappings.ResolveGrammarModality(fileMetadata.RelativePath),
+                    modality,
+                    StringComparison.Ordinal))
+                throw new InvalidDataException("Confirmed file metadata modality does not match its recorded path.");
 
             // Content reconstruction and the observation read run concurrently.
             var contentTask = NpgsqlContentReconstructor.ReconstructUtf8Async(
@@ -90,7 +82,8 @@ internal sealed partial class SubstrateClient
                     contentModality,
                     GrammarCompositionMode.FullSource);
                 OrderedCompositionComponent root = composer.RootComponent();
-                if (root.Id != contentId) return null;
+                if (root.Id != contentId)
+                    throw new InvalidDataException("Confirmed file content does not reproduce its recorded grammar root.");
                 reconstructed = FileEntity.Resolve(root, fileMetadata);
             }
             else
@@ -100,7 +93,7 @@ internal sealed partial class SubstrateClient
             if (reconstructed.FileId != ReadHash(requested)
                 || reconstructed.ContentRootId != contentId
                 || reconstructed.MetadataRootId != metadataId)
-                return null;
+                throw new InvalidDataException("Confirmed file reconstruction does not reproduce its recorded identity.");
 
             return new UserContentExportResponse(
                 Kind: fileMetadata.Modality is null ? "document" : "code",

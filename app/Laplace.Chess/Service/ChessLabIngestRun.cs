@@ -55,7 +55,7 @@ internal sealed class ChessLabIngestRun
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ct.ThrowIfCancellationRequested();
-        var journal = new NpgsqlIngestObservability(dataSource);
+        var journal = new NpgsqlIngestObservability(dataSource, logger: log);
         var run = new ChessLabIngestRun(journal, log, jobId, label, () => journal.RunId);
         await Task.Run(run.Start, CancellationToken.None).ConfigureAwait(false);
         return run;

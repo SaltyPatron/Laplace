@@ -57,7 +57,7 @@ public static class AgentTraceAdapters
     }
 }
 
-/// <summary>Shared parsing helpers for adapters. All tolerant: absent/malformed → null.</summary>
+/// <summary>Shared adapter parsing and metadata helpers. Selected input failures propagate.</summary>
 internal static class AdapterJson
 {
     /// <summary>ISO-8601 → unix microseconds; 0 when absent/unparseable.</summary>
@@ -99,14 +99,31 @@ internal static class AdapterJson
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         using var reader = new StreamReader(filePath);
+        long lineNumber = 0;
         while (await reader.ReadLineAsync(ct) is { } line)
         {
-            if (line.Length == 0) continue;
-            if (JsonAstDocument.TryParse(line) is { } doc) yield return doc;
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            yield return ParseRequired(System.Text.Encoding.UTF8.GetBytes(line), $"{filePath} line={lineNumber}");
         }
     }
 
-    /// <summary>First non-empty line, for cheap format sniffs. Null on IO failure.</summary>
+    internal static async Task<JsonAstDocument> ReadDocumentAsync(string path, CancellationToken ct) =>
+        ParseRequired(await File.ReadAllBytesAsync(path, ct), path);
+
+    internal static JsonAstDocument ParseRequired(byte[] source, string location)
+    {
+        var document = JsonAstDocument.TryParse(source);
+        if (document is not null && document.SyntaxComplete) return document;
+        document?.Dispose();
+        // Retain the failed location without copying transcript bodies to diagnostics.
+        throw new InvalidDataException($"Agent transcript JSON is incomplete or invalid: {location}");
+    }
+
+    internal static JsonAstDocument ParseRequired(string source, string location) =>
+        ParseRequired(System.Text.Encoding.UTF8.GetBytes(source), location);
+
+    /// <summary>First non-empty line, for cheap format sniffs. Null for an empty file.</summary>
     internal static string? FirstLine(string filePath, int maxBytes = 4096)
     {
         foreach (var line in FirstLines(filePath, 1, maxBytes)) return line;
@@ -121,36 +138,26 @@ internal static class AdapterJson
     internal static IEnumerable<string> FirstLines(string filePath, int count, int maxBytes = 65536)
     {
         var lines = new List<string>(count);
-        try
+        using var reader = new StreamReader(filePath);
+        var buf = new char[maxBytes];
+        int n = reader.Read(buf, 0, maxBytes);
+        int start = 0;
+        for (int i = 0; i < n && lines.Count < count; i++)
         {
-            using var reader = new StreamReader(filePath);
-            var buf = new char[maxBytes];
-            int n = reader.Read(buf, 0, maxBytes);
-            int start = 0;
-            for (int i = 0; i < n && lines.Count < count; i++)
-            {
-                if (buf[i] != '\n') continue;
-                if (i > start) lines.Add(new string(buf, start, i - start));
-                start = i + 1;
-            }
-            if (lines.Count < count && n > start) lines.Add(new string(buf, start, n - start));
+            if (buf[i] != '\n') continue;
+            if (i > start) lines.Add(new string(buf, start, i - start));
+            start = i + 1;
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        if (lines.Count < count && n > start) lines.Add(new string(buf, start, n - start));
         return lines;
     }
 
     /// <summary>First bytes of the file as text, for whole-document sniffs.</summary>
     internal static string? Head(string filePath, int maxBytes = 512)
     {
-        try
-        {
-            using var fs = File.OpenRead(filePath);
-            var buf = new byte[maxBytes];
-            int n = fs.Read(buf, 0, maxBytes);
-            return n <= 0 ? null : System.Text.Encoding.UTF8.GetString(buf, 0, n);
-        }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        using var fs = File.OpenRead(filePath);
+        var buf = new byte[maxBytes];
+        int n = fs.Read(buf, 0, maxBytes);
+        return n <= 0 ? null : System.Text.Encoding.UTF8.GetString(buf, 0, n);
     }
 }

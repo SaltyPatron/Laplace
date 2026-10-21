@@ -247,10 +247,12 @@ internal static class FideRatingList
             }
             catch (IOException ex)
             {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingList), ex, "FIDE snapshot read failed.");
                 _lastRefreshError = $"FIDE snapshot read failed: {ex.Message}";
             }
             catch (UnauthorizedAccessException ex)
             {
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingList), ex, "FIDE snapshot read failed.");
                 _lastRefreshError = $"FIDE snapshot read failed: {ex.Message}";
             }
 
@@ -293,6 +295,7 @@ internal static class FideRatingList
                     // Stale-while-refresh: the last valid publication remains live. The
                     // error is retained for diagnostics rather than poisoning readers.
                     _lastRefreshError = $"FIDE background refresh failed: {ex.Message}";
+                    Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingList), ex, "FIDE background refresh failed; retaining the last valid publication.");
                 }
                 finally
                 {
@@ -324,10 +327,12 @@ internal static class FideRatingList
         }
         catch (IOException ex)
         {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingList), ex, "FIDE snapshot persistence failed.");
             persistenceError = $"FIDE snapshot persist failed: {ex.Message}";
         }
         catch (UnauthorizedAccessException ex)
         {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(FideRatingList), ex, "FIDE snapshot persistence failed.");
             persistenceError = $"FIDE snapshot persist failed: {ex.Message}";
         }
 

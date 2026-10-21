@@ -87,6 +87,8 @@ public sealed class UciProcess : IDisposable
     private bool _broken;
     private int _disposed;
     private Task? _relay;
+    private Exception? _outputFailure;
+    private readonly TaskCompletionSource _stderrClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public EngineIdentity Identity { get; private set; }
     public IReadOnlyDictionary<string, UciOptionInfo> Options => _options;
@@ -102,6 +104,7 @@ public sealed class UciProcess : IDisposable
         _stdin = stdin;
         _stdout = stdout;
         Identity = identity;
+        if (proc is null) _stderrClosed.TrySetResult();
     }
 
     /// <summary>A client over streams instead of a process (tests drive a scripted engine this way).</summary>
@@ -156,7 +159,13 @@ public sealed class UciProcess : IDisposable
             start.NetworkPath is { Length: > 0 } net ? Path.GetFullPath(net) : null,
             start.NetworkPath is { Length: > 0 } n && File.Exists(n) ? FileSha256(n) : null));
         // An unread redirected stderr can fill its pipe and block the engine before it writes bestmove.
-        proc.ErrorDataReceived += static (_, _) => { };
+        proc.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is null) client._stderrClosed.TrySetResult();
+            else if (args.Data.Length > 0)
+                Serilog.Log.ForContext<UciProcess>().Information(
+                    "Engine {Engine} stderr: {EngineDiagnostic}", exe, args.Data);
+        };
         proc.BeginErrorReadLine();
         _ = client.PumpAsync();
         try
@@ -303,11 +312,26 @@ public sealed class UciProcess : IDisposable
         _relay ??= Task.Run(async () =>
         {
             await foreach (var line in _lines.Reader.ReadAllAsync()) sink(line);
+            if (_outputFailure is { } failure)
+                throw new UciEngineException(UciFailure.Unavailable, "Engine output failed.", failure);
         });
         return _relay;
     }
 
-    public bool WaitForExit(TimeSpan timeout) => _proc?.WaitForExit(timeout) ?? true;
+    public int? ExitCode => _proc is null ? 0 : _proc.HasExited ? _proc.ExitCode : null;
+
+    public bool WaitForExit(TimeSpan timeout)
+    {
+        if (_proc is null) return true;
+        long started = Stopwatch.GetTimestamp();
+        if (!_proc.WaitForExit(timeout)) return false;
+        // A timed process wait does not guarantee redirected stderr callbacks
+        // have drained. Keep them inside the same budget before disposing handles.
+        TimeSpan remaining = timeout == Timeout.InfiniteTimeSpan ? Timeout.InfiniteTimeSpan
+            : timeout - Stopwatch.GetElapsedTime(started);
+        return _stderrClosed.Task.Wait(remaining == Timeout.InfiniteTimeSpan || remaining > TimeSpan.Zero
+            ? remaining : TimeSpan.Zero);
+    }
 
     /// <summary>Send quit and wait for the engine to exit; its exit code (0 for an attached client), or null when it did
     /// not exit in time (Dispose then kills it).</summary>
@@ -316,7 +340,7 @@ public sealed class UciProcess : IDisposable
         TrySend("quit");
         _ended = true;
         if (_proc is null) return 0;
-        return _proc.WaitForExit(timeout) ? _proc.ExitCode : null;
+        return WaitForExit(timeout) ? _proc.ExitCode : null;
     }
 
     private bool ObserveFront(string line)
@@ -350,14 +374,21 @@ public sealed class UciProcess : IDisposable
             while (await _stdout.ReadLineAsync().ConfigureAwait(false) is { } line)
                 _lines.Writer.TryWrite(line);
         }
-        catch { }
+        catch (Exception error)
+        {
+            _outputFailure = error;
+            _broken = true;
+            if (Volatile.Read(ref _disposed) == 0)
+                Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProcess), error,
+                    "Engine output reader failed for {Engine}.", Identity.ExePath);
+        }
         finally { _ended = true; _lines.Writer.TryComplete(); }
     }
 
     private void Send(string cmd)
     {
         if (_relay is null && Broken && cmd != "quit")
-            throw new UciEngineException(UciFailure.Unavailable, $"{(Identity.Name.Length > 0 ? Identity.Name : Identity.ExePath)} is not running.");
+            throw new UciEngineException(UciFailure.Unavailable, $"{(Identity.Name.Length > 0 ? Identity.Name : Identity.ExePath)} is not running.", _outputFailure);
         try
         {
             _stdin.WriteLine(cmd);
@@ -370,7 +401,15 @@ public sealed class UciProcess : IDisposable
         }
     }
 
-    private void TrySend(string cmd) { try { Send(cmd); } catch { } }
+    private void TrySend(string cmd)
+    {
+        try { Send(cmd); }
+        catch (Exception error)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProcess), error,
+                "Engine control command {Command} failed for {Engine}.", cmd, Identity.ExePath);
+        }
+    }
 
     private void WaitFor(string marker, TimeSpan timeout, Action<string>? observe = null)
     {
@@ -402,7 +441,12 @@ public sealed class UciProcess : IDisposable
         var wait = _lines.Reader.WaitToReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(remaining / (double)Stopwatch.Frequency));
         try
         {
-            if (!wait.GetAwaiter().GetResult()) return null;
+            if (!wait.GetAwaiter().GetResult())
+            {
+                if (_outputFailure is { } failure)
+                    throw new UciEngineException(UciFailure.Unavailable, "Engine output failed.", failure);
+                return null;
+            }
         }
         catch (TimeoutException) { throw; }
         return _lines.Reader.TryRead(out var line) ? line : ReadLine(deadline);
@@ -411,14 +455,28 @@ public sealed class UciProcess : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        try { if (!Broken) { _stdin.WriteLine("quit"); _stdin.Flush(); } } catch { }
-        if (_proc is null) { try { _stdin.Dispose(); } catch { } return; }
+        if (!Broken) TrySend("quit");
+        if (_proc is null)
+        {
+            try { _stdin.Dispose(); }
+            catch (Exception error) { Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProcess), error, "Attached engine input cleanup failed."); }
+            return;
+        }
         try
         {
-            if (!_proc.HasExited && !_proc.WaitForExit(1000))
-                _proc.Kill(entireProcessTree: true);
+            if (!WaitForExit(TimeSpan.FromSeconds(1)))
+            {
+                if (!_proc.HasExited) _proc.Kill(entireProcessTree: true);
+                if (!WaitForExit(TimeSpan.FromSeconds(5)))
+                    Serilog.Log.ForContext<UciProcess>().Error(
+                        "Engine {Engine} process or stderr reader did not finish during cleanup.", Identity.ExePath);
+            }
         }
-        catch { }
-        _proc.Dispose();
+        catch (Exception error)
+        {
+            Laplace.Ops.LaplaceLogging.LogWarning(typeof(UciProcess), error,
+                "Engine process cleanup failed for {Engine}.", Identity.ExePath);
+        }
+        finally { _proc.Dispose(); }
     }
 }

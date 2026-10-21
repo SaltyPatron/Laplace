@@ -428,7 +428,12 @@ int laplace_grammar_row_iter_feed_parsed(laplace_grammar_row_iter_t* it,
             rows[out_n].row_len  = raw[i].row_len;
             out_n++;
         } else {
-            free(raw[i].row_utf8);
+            if (ast) laplace_ast_free(ast);
+            for (size_t j = i; j < raw_n; j++) free(raw[j].row_utf8);
+            free(raw);
+            laplace_grammar_row_iter_free_rows(rows, out_n);
+            if (r == -3 || r == 0) it->oom = 1;
+            return r != 0 ? r : -3;
         }
     }
     free(raw);
@@ -474,7 +479,12 @@ int laplace_grammar_row_iter_feed(laplace_grammar_row_iter_t* it,
             rows[out_n].row_len = raw[i].row_len;
             out_n++;
         } else {
-            free(raw[i].row_utf8);
+            if (ast) laplace_ast_free(ast);
+            for (size_t j = i; j < raw_n; j++) free(raw[j].row_utf8);
+            free(raw);
+            laplace_grammar_row_iter_free_rows(rows, out_n);
+            if (rc == -3 || rc == 0) it->oom = 1;
+            return rc != 0 ? rc : -3;
         }
     }
     free(raw);

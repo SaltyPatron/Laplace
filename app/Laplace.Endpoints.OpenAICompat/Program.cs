@@ -16,10 +16,13 @@ using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Events;
 
+Serilog.ILogger? processLogger = null;
+var logHealth = new PersistentLogHealth();
 try
 {
-Log.Logger = new LoggerConfiguration().MinimumLevel.Information()
-    .ApplyLaplaceSinks("api", console: true, consoleToStdErr: false).CreateBootstrapLogger();
+processLogger = new LoggerConfiguration().MinimumLevel.Information()
+    .ApplyLaplaceSinks("api", console: true, consoleToStdErr: false, health: logHealth).CreateLogger();
+Log.Logger = processLogger;
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -33,8 +36,8 @@ builder.WebHost.ConfigureKestrel(options =>
             ? devPort
             : LaplaceInstall.EndpointPort));
 
-builder.Host.UseSerilog((_, lc) =>
-    lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true, consoleToStdErr: false));
+builder.Host.UseSerilog(processLogger, dispose: false);
+builder.Services.AddSingleton(logHealth);
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddSingleton<AdminPostgresDataSources>();
@@ -213,13 +216,17 @@ app.Run();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "API host terminated unexpectedly.");
-    Console.Error.WriteLine($"Laplace API startup/runtime failure: {ex}");
+    LaplaceLogging.ReportProcessFailure("Laplace API startup/runtime failure", ex,
+        failure => Log.Fatal(failure, "API host terminated unexpectedly."), logHealth);
     Environment.ExitCode = 1;
 }
 finally
 {
-    Log.CloseAndFlush();
+    Environment.ExitCode = LaplaceLogging.CompleteProcess(() =>
+    {
+        if (ReferenceEquals(Log.Logger, processLogger)) Log.CloseAndFlush();
+        else (processLogger as IDisposable)?.Dispose();
+    }, "laplace-api", Environment.ExitCode, logHealth);
 }
 
 public partial class Program;

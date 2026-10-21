@@ -163,9 +163,8 @@ public sealed class GooseAdapter : IAgentTraceAdapter
     private IEnumerable<AgentSession> ParseDb(string dbPath, CancellationToken ct)
     {
         using var conn = SqliteSniff.OpenReadOnly(dbPath);
-        if (conn is null || !SqliteSniff.HasTable(conn, "sessions")
-            || !SqliteSniff.HasTable(conn, "messages"))
-            yield break;
+        SqliteSniff.RequireTable(conn, "sessions", dbPath);
+        SqliteSniff.RequireTable(conn, "messages", dbPath);
 
         // Stream sessions and their messages in one ordered scan: one command per
         // container, not one per session.
@@ -208,8 +207,8 @@ public sealed class GooseAdapter : IAgentTraceAdapter
                 model = null;
                 if (!r.IsDBNull(3))
                 {
-                    using var modelDoc = JsonAstDocument.TryParse(r.GetString(3));
-                    model = modelDoc?.Root.String("model");
+                    using var modelDoc = AdapterJson.ParseRequired(r.GetString(3), $"{dbPath} session={sessionId} model");
+                    model = modelDoc.Root.String("model");
                 }
             }
 
@@ -218,8 +217,8 @@ public sealed class GooseAdapter : IAgentTraceAdapter
             long ts = raw > 10_000_000_000L ? raw * 1000 : raw * 1_000_000;
             string wrapper = $"{{\"role\":\"{r.GetString(4)}\",\"created\":0,\"content\":"
                              + (r.IsDBNull(5) ? "[]" : r.GetString(5)) + "}";
-            using var doc = JsonAstDocument.TryParse(wrapper);
-            if (doc is null || BuildTurn(turns, doc.Root) is not { } turn) continue;
+            using var doc = AdapterJson.ParseRequired(wrapper, $"{dbPath} session={sessionId} message");
+            if (BuildTurn(turns, doc.Root) is not { } turn) continue;
             turn = turn with { TimestampUnixUs = ts, Model = model };
             if (ts > 0) { if (firstUs == 0) firstUs = ts; lastUs = ts; }
             turns.Add(turn);

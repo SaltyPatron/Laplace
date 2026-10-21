@@ -34,6 +34,7 @@ set(REGRESS_TESTS bootstrap journal_batch glicko2_aggregate entities_exist_bitma
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 list(APPEND REGRESS_TESTS text_root_placements content_carrier_vertices forward_seed_parity physicality_readback physicality_readback_cold leaf_swap_routing relation_band_counts inspection_display)
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
+list(APPEND REGRESS_TESTS unicode_source_predicates)
 
 add_test(NAME regress_setup_laplace_substrate
     COMMAND ${BASH} -c

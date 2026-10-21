@@ -19,7 +19,7 @@ BEGIN
     )
     SELECT DISTINCT p.id,p.tier,laplace.entity_type_id(CASE p.tier
         WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme' WHEN 2 THEN 'Word'
-        WHEN 3 THEN 'Sentence' ELSE 'Document' END),p_source
+        WHEN 3 THEN 'Sentence' ELSE 'Document' END)
       FROM nodes p
      WHERE NOT EXISTS (
         SELECT 1 FROM unary_children u JOIN nodes c ON c.node_index=u.child_index
@@ -49,6 +49,7 @@ BEGIN
         2000000000000,30000000000,60000000,5,now())
     ON CONFLICT (id,type_id,subject_id) DO UPDATE
        SET rating=2000000000000,rd=30000000000,witness_count=5;
+    PERFORM consensus.highway_mask_deposit(ARRAY[p_subject,p_object],ARRAY[p_type,p_type]);
 END
 $cell$;
 
@@ -58,7 +59,7 @@ RETURNS bytea LANGUAGE plpgsql AS $projection$
 DECLARE v_id bytea := public.laplace_hash128_merkle(4::smallint,p_flat);
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    VALUES(v_id,4,laplace.entity_type_id(p_type),p_source)
+    VALUES(v_id,4,laplace.entity_type_id(p_type))
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
@@ -103,7 +104,7 @@ BEGIN
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('ud/parse/tokens-end/v1')];
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker'),p_source
+    SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker')
       FROM unnest(v_flat) value
      WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id=value)
     ON CONFLICT (id) DO NOTHING;
@@ -130,7 +131,7 @@ BEGIN
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i]];
         INSERT INTO laplace.entities(id,tier,type_id)
-        VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
+        VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v1')];
@@ -163,7 +164,7 @@ BEGIN
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]];
         INSERT INTO laplace.entities(id,tier,type_id)
-        VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
+        VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v2')];
@@ -237,7 +238,7 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT value,2,laplace.entity_type_id('CodeConcept'),v_source
+    SELECT value,2,laplace.entity_type_id('CodeConcept')
       FROM unnest(ARRAY[v_source,v_context,v_language,v_answer,v_changed,v_answer_a,v_answer_b]) value;
     v_exemplar := pg_temp.shape_parse('ζξ őűȝ',ARRAY['ζξ','őűȝ'],ARRAY[0,1],
         v_deps,v_language,v_source,v_context);
@@ -320,7 +321,7 @@ BEGIN
 
     -- An unrelated smaller summary and a second same-type facet must neither
     -- erase this exact current form's Word membership nor duplicate candidates.
-    IF (SELECT type_id FROM laplace.entities WHERE id=v_original)<>decode(repeat('00',16),'hex') THEN
+    IF (SELECT type_id FROM laplace.entities WHERE id=v_original) IS DISTINCT FROM v_word THEN
         RAISE EXCEPTION 'FAIL: current-form fixture changed the entity row type';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
@@ -405,7 +406,7 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_other_context,v_other_source,
+    SELECT value,2,v_concept FROM unnest(ARRAY[v_source,v_context,v_other_context,v_other_source,
         v_language,v_input,v_answer,v_changed,v_other_answer,v_other_input]) value;
     v_exemplar := pg_temp.shape_parse('ζαλκ próbulo',ARRAY['ζαλκ','próbulo'],ARRAY[0,1],
         v_deps,v_language,v_source,v_context);
@@ -473,6 +474,7 @@ BEGIN
     -- must break execution.
     UPDATE laplace.entities SET type_id=decode(repeat('00',16),'hex') WHERE id=v_input;
     PERFORM pg_temp.shape_reject('semantic input without its declared type membership',v_prompt);
+    UPDATE laplace.entities SET type_id=v_concept WHERE id=v_input;
     RAISE NOTICE 'task shapes: complete source and context testimony plus declared semantic input types are required';
 
     PERFORM pg_temp.shape_surface('«ζαλκ ñébulo»',v_source);
@@ -554,7 +556,7 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_language] || v_inputs || v_answers) value;
+    SELECT value,2,v_concept FROM unnest(ARRAY[v_source,v_context,v_language] || v_inputs || v_answers) value;
     v_exemplar := pg_temp.shape_parse('ψόλκ cáreno féreno',ARRAY['ψόλκ','cáreno','féreno'],
         ARRAY[0,1,1],v_deps,v_language,v_source,v_context);
     PERFORM pg_temp.shape_surface(v_prompt,v_source);
@@ -597,7 +599,7 @@ DECLARE
     r record;
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_input,v_answer]) value;
+    SELECT value,2,v_concept FROM unnest(ARRAY[v_source,v_context,v_input,v_answer]) value;
     PERFORM pg_temp.shape_cell(v_input,v_predicate,v_answer,v_source,v_context);
     FOR i IN 1..2 LOOP
         v_language := public.laplace_hash128_blake3(convert_to('test/task-shapes/language-' || i,'UTF8'));
@@ -615,7 +617,7 @@ BEGIN
             RAISE EXCEPTION 'FAIL: language-specific surface structure changed the shared semantic input/result: %',r;
         END IF;
         IF i=1 THEN
-            IF (SELECT type_id FROM laplace.entities WHERE id=v_input)<>decode(repeat('00',16),'hex') THEN
+            IF (SELECT type_id FROM laplace.entities WHERE id=v_input) IS DISTINCT FROM v_concept THEN
                 RAISE EXCEPTION 'FAIL: semantic fixture changed the entity row type';
             END IF;
             SELECT * INTO r FROM pg_temp.shape_receipt(v_cue || ' ' || v_word);

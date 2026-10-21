@@ -53,7 +53,6 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
     private IEnumerable<AgentSession> ParseDb(string dbPath, CancellationToken ct)
     {
         using var conn = SqliteSniff.OpenReadOnly(dbPath);
-        if (conn is null) yield break;
 
         // One ordered join streams the whole container; rows are grouped here into
         // sessions, messages and parts, so decode is one SQLite command.
@@ -75,7 +74,7 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
         void FlushMessage()
         {
             if (messageId is not null
-                && BuildTurn(turns.Count, messageJson ?? "{}", parts, messageTs) is { } turn)
+                && BuildTurn(turns.Count, messageJson ?? "{}", parts, messageTs, $"{dbPath} message={messageId}") is { } turn)
                 turns.Add(turn);
             messageId = null;
             messageJson = null;
@@ -128,8 +127,7 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
 
     private async Task<AgentSession?> ParseJsonEraAsync(string sessionPath, CancellationToken ct)
     {
-        using var doc = JsonAstDocument.TryParse(await File.ReadAllBytesAsync(sessionPath, ct));
-        if (doc is null) return null;
+        using var doc = await AdapterJson.ReadDocumentAsync(sessionPath, ct);
         var info = doc.Root;
         string? sessionId = info.String("id");
         if (sessionId is null) return null;
@@ -153,7 +151,7 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
                 foreach (var partPath in Directory.EnumerateFiles(partDir, "*.json")
                              .OrderBy(p => p, StringComparer.Ordinal))
                     parts.Add(await File.ReadAllTextAsync(partPath, ct));
-            if (BuildTurn(turns.Count, data, parts, 0) is { } turn) turns.Add(turn);
+            if (BuildTurn(turns.Count, data, parts, 0, messagePath) is { } turn) turns.Add(turn);
         }
         if (turns.Count == 0) return null;
 
@@ -168,10 +166,9 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
 
     // ── shared message/part shaping ───────────────────────────────────────────────
 
-    private static AgentTurn? BuildTurn(int ordinal, string messageJson, List<string> partJsons, long fallbackTs)
+    private static AgentTurn? BuildTurn(int ordinal, string messageJson, List<string> partJsons, long fallbackTs, string location)
     {
-        using var doc = JsonAstDocument.TryParse(messageJson);
-        if (doc is null) return null;
+        using var doc = AdapterJson.ParseRequired(messageJson, location);
         var m = doc.Root;
         string role = AgentRoles.Normalize(m.String("role"));
         long ts = AdapterJson.MsUs(m.Property("time").Int64("created"));
@@ -182,8 +179,7 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
         var calls = new List<AgentToolCall>();
         foreach (var partJson in partJsons)
         {
-            using var partDoc = JsonAstDocument.TryParse(partJson);
-            if (partDoc is null) continue;
+            using var partDoc = AdapterJson.ParseRequired(partJson, location + " part");
             var p = partDoc.Root;
             switch (p.String("type"))
             {
@@ -238,18 +234,13 @@ internal static class SqliteSniff
 {
     internal static bool IsSqlite(string filePath)
     {
-        try
-        {
-            using var fs = File.OpenRead(filePath);
-            Span<byte> magic = stackalloc byte[16];
-            return fs.Read(magic) == 16
-                && Encoding.ASCII.GetString(magic[..15]) == "SQLite format 3";
-        }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        using var fs = File.OpenRead(filePath);
+        Span<byte> magic = stackalloc byte[16];
+        return fs.Read(magic) == 16
+            && Encoding.ASCII.GetString(magic[..15]) == "SQLite format 3";
     }
 
-    internal static SqliteConnection? OpenReadOnly(string dbPath)
+    internal static SqliteConnection OpenReadOnly(string dbPath)
     {
         var conn = new SqliteConnection(new SqliteConnectionStringBuilder
         {
@@ -258,7 +249,7 @@ internal static class SqliteSniff
             Pooling = false,
         }.ToString());
         try { conn.Open(); }
-        catch (SqliteException) { conn.Dispose(); return null; }
+        catch { conn.Dispose(); throw; }
         return conn;
     }
 
@@ -268,5 +259,11 @@ internal static class SqliteSniff
         cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$t";
         cmd.Parameters.AddWithValue("$t", table);
         return cmd.ExecuteScalar() is not null;
+    }
+
+    internal static void RequireTable(SqliteConnection conn, string table, string path)
+    {
+        if (!HasTable(conn, table))
+            throw new InvalidDataException($"Agent transcript container is missing table '{table}': {path}");
     }
 }

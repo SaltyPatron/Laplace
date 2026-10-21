@@ -108,8 +108,7 @@ internal static class AdvisoryTxLock
             }
             catch
             {
-                try { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-                await tx.DisposeAsync().ConfigureAwait(false);
+                await RollbackAndDisposeAsync(tx, lockName, log).ConfigureAwait(false);
                 throw;
             }
         }
@@ -143,17 +142,29 @@ internal static class AdvisoryTxLock
             }
             catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.LockNotAvailable)
             {
-                try { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-                await tx.DisposeAsync().ConfigureAwait(false);
+                await RollbackAndDisposeAsync(tx, lockName, log).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
                 await LogHolderAsync(conn, lockName, attempt, log, ct).ConfigureAwait(false);
             }
             catch
             {
-                try { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
-                await tx.DisposeAsync().ConfigureAwait(false);
+                await RollbackAndDisposeAsync(tx, lockName, log).ConfigureAwait(false);
                 throw;
             }
+        }
+    }
+
+    private static async Task RollbackAndDisposeAsync(NpgsqlTransaction transaction, string lockName, ILogger log)
+    {
+        try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception failure)
+        {
+            log.LogWarning(failure, "Substrate transaction rollback failed for {LockName}; retaining the primary failure.", lockName);
+        }
+        try { await transaction.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception failure)
+        {
+            log.LogWarning(failure, "Substrate transaction disposal failed for {LockName}; retaining the primary failure.", lockName);
         }
     }
 

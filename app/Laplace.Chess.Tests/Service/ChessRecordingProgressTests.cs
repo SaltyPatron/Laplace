@@ -121,8 +121,8 @@ public sealed class ChessRecordingProgressTests : IDisposable
             Assert.Equal(150, writer.GetProperty("interruptedExits").GetInt64());
             Assert.Equal(750, writer.GetProperty("totalMilliseconds").GetDouble());
             Assert.True(measurement.WriterLog.DroppedEntries > 0);
-            var readback = Assert.Single(timings.GetProperty("readbackOperations").EnumerateArray()
-                .Where(value => value.GetProperty("operation").GetString() == "ExactWitnessBodies"));
+            var readback = Assert.Single(timings.GetProperty("readbackOperations").EnumerateArray(),
+                value => value.GetProperty("operation").GetString() == "ExactWitnessBodies");
             Assert.Equal(1, readback.GetProperty("returnedCalls").GetInt64());
             Assert.Equal(1, readback.GetProperty("interruptedCalls").GetInt64());
             Assert.Equal(.525, readback.GetProperty("totalSeconds").GetDouble(), 6);

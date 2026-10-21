@@ -5,6 +5,12 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class ExploreEndpoints
 {
+    private static IResult Unavailable(WebApplication app, string code, InvalidOperationException exception)
+    {
+        app.Logger.LogError(exception, "Explore operation unavailable: {FailureCode}", code);
+        return EndpointJson.ServiceUnavailable(code, exception.Message);
+    }
+
     public static void MapExploreEndpoints(this WebApplication app)
     {
         MapMatchupEndpoints(app);
@@ -29,7 +35,7 @@ internal static class ExploreEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return EndpointJson.ServiceUnavailable("decompose_unavailable", ex.Message);
+                return Unavailable(app, "decompose_unavailable", ex);
             }
 
             // Browse members are the word-tier ids the native text spine emitted for
@@ -194,7 +200,7 @@ internal static class ExploreEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return EndpointJson.ServiceUnavailable("decompose_unavailable", ex.Message);
+                return Unavailable(app, "decompose_unavailable", ex);
             }
         })
         .WithTags("explore")
@@ -205,7 +211,7 @@ internal static class ExploreEndpoints
         app.MapGet("/v1/explore/unicode/cloud", (ExploreDecomposeService decompose) =>
         {
             try { return Results.Json(decompose.UnicodeCloud()); }
-            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
+            catch (InvalidOperationException ex) { return Unavailable(app, "unicode_cloud_unavailable", ex); }
         }).WithTags("explore").Produces<UnicodeCloudResponse>();
 
         app.MapGet("/v1/explore/unicode/positions/{receipt}.bin", (
@@ -224,7 +230,7 @@ internal static class ExploreEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message);
+                return Unavailable(app, "unicode_cloud_unavailable", ex);
             }
         }).WithTags("explore").Produces(StatusCodes.Status200OK, contentType: "application/octet-stream");
 
@@ -232,7 +238,7 @@ internal static class ExploreEndpoints
         {
             try { return Results.Json(decompose.UnicodePoint(codepoint)); }
             catch (ArgumentOutOfRangeException) { return EndpointJson.NotFound("unicode_codepoint_not_found", $"U+{codepoint:X} is outside the selected Unicode window."); }
-            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_point_unavailable", ex.Message); }
+            catch (InvalidOperationException ex) { return Unavailable(app, "unicode_point_unavailable", ex); }
         }).WithTags("explore").Produces<UnicodePointResponse>();
 
         app.MapPost("/v1/explore/storage-proof", async (
@@ -258,6 +264,7 @@ internal static class ExploreEndpoints
                 }
                 catch (SubstrateUnavailableException ex)
                 {
+                    app.Logger.LogWarning(ex, "Storage proof could not obtain the database perfcache receipt.");
                     databaseReceiptError = ex.Message;
                 }
 
@@ -275,7 +282,7 @@ internal static class ExploreEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return EndpointJson.ServiceUnavailable("storage_proof_unavailable", ex.Message);
+                return Unavailable(app, "storage_proof_unavailable", ex);
             }
         })
         .WithTags("explore")

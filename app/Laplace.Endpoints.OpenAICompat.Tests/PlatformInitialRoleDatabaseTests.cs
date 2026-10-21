@@ -45,13 +45,13 @@ public sealed class PlatformInitialRoleDatabaseTests
         {
             await store.SetRoleAsync(user, "administrator", null, default, onlyIfNeverAssigned: true);
             Assert.Equal("administrator", await store.RoleAsync(user, default));
-            var created = Assert.Single((await store.EventsAsync(default)).Where(e => e.UserId == user));
+            var created = Assert.Single(await store.EventsAsync(default), e => e.UserId == user);
             Assert.Null(created.PreviousRole);
             Assert.Equal("administrator", created.Role);
             Assert.Equal("installation-credential", created.Actor);
             await Assert.ThrowsAsync<AccessChangeException>(() =>
                 store.SetRoleAsync(user, "administrator", null, default, onlyIfNeverAssigned: true));
-            Assert.Equal(created, Assert.Single((await store.EventsAsync(default)).Where(e => e.UserId == user)));
+            Assert.Equal(created, Assert.Single(await store.EventsAsync(default), e => e.UserId == user));
         }
         finally { await Cleanup(database, user); }
     }
@@ -91,7 +91,7 @@ public sealed class PlatformInitialRoleDatabaseTests
             await Assert.ThrowsAsync<AccessChangeException>(() =>
                 store.SetRoleAsync(user, "administrator", null, default, onlyIfNeverAssigned: true));
             Assert.Equal("observer", await store.RoleAsync(user, default));
-            Assert.Empty((await store.EventsAsync(default)).Where(e => e.UserId == user));
+            Assert.DoesNotContain(await store.EventsAsync(default), e => e.UserId == user);
         }
         finally { await Cleanup(database, user); }
     }
@@ -114,9 +114,9 @@ public sealed class PlatformInitialRoleDatabaseTests
                 catch (AccessChangeException) { return false; }
             }
             var results = await Task.WhenAll(Assign(), Assign());
-            Assert.Single(results.Where(succeeded => succeeded));
+            Assert.Single(results, succeeded => succeeded);
             Assert.Equal("administrator", await store.RoleAsync(user, default));
-            Assert.Single((await store.EventsAsync(default)).Where(e => e.UserId == user));
+            Assert.Single(await store.EventsAsync(default), e => e.UserId == user);
         }
         finally { await Cleanup(database, user); }
     }

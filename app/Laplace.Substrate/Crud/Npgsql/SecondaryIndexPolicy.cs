@@ -138,7 +138,11 @@ public sealed class SecondaryIndexPolicy
 
             try { await tx.RollbackAsync(CancellationToken.None); }
 
-            catch { }
+            catch (Exception failure)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "Secondary-index transaction rollback failed; retaining the primary failure: {0}", failure);
+            }
 
             throw;
 
