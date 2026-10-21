@@ -240,7 +240,7 @@ internal static class Program
         // its scripts go there and nowhere else; the substrate database takes the rest. One database takes all.
         foreach (var (target, filter, label) in selected)
         {
-            EnsureDatabase.For.PostgresqlDatabase(target);
+            EnsureDatabase.For.PostgresqlDatabase(target, new LiteralSafeUpgradeLog());
             var engine = BuildEngine(target, filter);
             if (IncludesApplication(filter) && engine.GetScriptsToExecute().Count == 0 && !HasAllAppTables(target))
             {

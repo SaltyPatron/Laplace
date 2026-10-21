@@ -48,18 +48,6 @@ $psql=$access.psql
 if(-not(Test-Path -LiteralPath $psql -PathType Leaf)){throw 'The declared PostgreSQL client is missing.'}
 if(-not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){throw 'The declared PostgreSQL root certificate is missing.'}
 $null=Get-Command dotnet -ErrorAction Stop
-$savedNoColor=$env:NO_COLOR
-try {
-    $env:NO_COLOR='1'
-    $help=& dotnet $MigrationRuntime --help 2>&1
-}finally{
-    [Environment]::SetEnvironmentVariable('NO_COLOR',$savedNoColor)
-}
-if($LASTEXITCODE){throw 'The selected migration runtime cannot start.'}
-$needed=if($Database -eq 'application'){@('app-status','app-up','app-check','app-reset','app-nuke')}else{@('substrate-status','substrate-up','reset','nuke')}
-foreach($verb in $needed){
-    if(($help -join "`n") -notmatch ('(?m)^\s*'+[regex]::Escape($verb)+'(?:\s|$)')){throw "The selected migration runtime does not support $verb. Publish the matching migration runtime before maintenance."}
-}
 Write-Host "$Operation $Database database $selected on $($access.database_host):$($access.port) as $($access.admin_role)"
 if($Operation -in 'remigrate','recreate' -and -not $Yes){
     $effect=if($Operation -eq 'recreate'){'delete its data and recreate it'}else{'clear its migration journal and reapply migrations'}
@@ -100,6 +88,20 @@ try {
     $env:LAPLACE_DB=Connection $access.substrate_database
     $env:LAPLACE_APP_DB=Connection $access.application_database
     $env:LAPLACE_OPS_LOG_DIR=Join-Path $receiptRoot 'logs'
+    # Even --help initializes persistent logging. Configure its mutable output
+    # before starting the staged runtime; the package manifest must remain sealed.
+    $savedNoColor=$env:NO_COLOR
+    try {
+        $env:NO_COLOR='1'
+        $help=& dotnet $MigrationRuntime --help 2>&1
+    }finally{
+        [Environment]::SetEnvironmentVariable('NO_COLOR',$savedNoColor)
+    }
+    if($LASTEXITCODE){throw "The selected migration runtime cannot start (exit $LASTEXITCODE): $($help -join "`n")"}
+    $needed=if($Database -eq 'application'){@('app-status','app-up','app-check','app-reset','app-nuke')}else{@('substrate-status','substrate-up','reset','nuke')}
+    foreach($verb in $needed){
+        if(($help -join "`n") -notmatch ('(?m)^\s*'+[regex]::Escape($verb)+'(?:\s|$)')){throw "The selected migration runtime does not support $verb. Publish the matching migration runtime before maintenance."}
+    }
     if($Database -eq 'application'){
         $identityRecord=$null
         $receipt.platform_owner_policy='no-owner-config'

@@ -40,6 +40,12 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
 '@ | Set-Content "$work/psql.ps1"
     function global:dotnet {
         $verb=$args[1]
+        # The real migration entrypoint opens its log sink before parsing even
+        # --help. Every invocation needs an external, receipt-owned destination.
+        if(-not $env:LAPLACE_OPS_LOG_DIR -or $env:LAPLACE_OPS_LOG_DIR.StartsWith(
+            [IO.Path]::GetDirectoryName($args[0]),[StringComparison]::OrdinalIgnoreCase)){
+            throw 'Migration invocation would write logs inside the immutable package.'
+        }
         if($verb -eq '--help'){
             $global:LASTEXITCODE=0
             if($env:TEST_OLD_RUNTIME -eq '1'){'up';'status';'reset';'nuke';return}

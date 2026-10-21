@@ -169,7 +169,16 @@ function Test-IisPackage([string]$Path) {
     foreach($required in 'Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','cli\Laplace.Cli.exe'){
         if($required -notin $listed){throw "Untracked required package file: $required"}
     }
-    if(@(Get-ChildItem -LiteralPath $Path -File -Recurse|Where-Object Name -NE 'iis-package.json').Count -ne $listed.Count){throw 'Package files differ from the manifest.'}
+    $actual=@(Get-ChildItem -LiteralPath $Path -File -Recurse | Where-Object Name -NE 'iis-package.json' |
+        ForEach-Object {[IO.Path]::GetRelativePath($Path,$_.FullName)})
+    $listedSet=[Collections.Generic.HashSet[string]]::new([string[]]$listed,[StringComparer]::OrdinalIgnoreCase)
+    $actualSet=[Collections.Generic.HashSet[string]]::new([string[]]$actual,[StringComparer]::OrdinalIgnoreCase)
+    if($listedSet.Count -ne $listed.Count){throw 'The package manifest contains duplicate file paths.'}
+    $missing=@($listed | Where-Object {-not $actualSet.Contains($_)})
+    $unlisted=@($actual | Where-Object {-not $listedSet.Contains($_)})
+    if($missing.Count -or $unlisted.Count){
+        throw "Package files differ from the manifest. Missing ($($missing.Count)): $(($missing | Select-Object -First 20) -join ', '); unlisted ($($unlisted.Count)): $(($unlisted | Select-Object -First 20) -join ', ')."
+    }
     $assets=Get-IisPageAssets (Get-Content -LiteralPath (Join-Path $Path 'wwwroot/index.html') -Raw)
     if(-not $assets){throw 'The UI entry point has no compiled asset references.'}
     foreach($asset in $assets){
