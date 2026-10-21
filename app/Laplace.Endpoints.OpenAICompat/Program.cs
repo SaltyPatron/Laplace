@@ -216,14 +216,17 @@ app.Run();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "API host terminated unexpectedly.");
-    Console.Error.WriteLine($"Laplace API startup/runtime failure: {ex}");
+    LaplaceLogging.ReportProcessFailure("Laplace API startup/runtime failure", ex,
+        failure => Log.Fatal(failure, "API host terminated unexpectedly."), logHealth);
     Environment.ExitCode = 1;
 }
 finally
 {
-    if (ReferenceEquals(Log.Logger, processLogger)) Log.CloseAndFlush();
-    else (processLogger as IDisposable)?.Dispose();
+    Environment.ExitCode = LaplaceLogging.CompleteProcess(() =>
+    {
+        if (ReferenceEquals(Log.Logger, processLogger)) Log.CloseAndFlush();
+        else (processLogger as IDisposable)?.Dispose();
+    }, "laplace-api", Environment.ExitCode, logHealth);
 }
 
 public partial class Program;

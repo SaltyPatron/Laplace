@@ -5,6 +5,7 @@ using Serilog;
 using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Formatting;
+using Serilog.Extensions.Logging;
 using Xunit;
 
 namespace Laplace.Core.Tests;
@@ -48,7 +49,100 @@ public sealed class PersistentLogSinkTests
             Assert.False(health.Snapshot().Ready);
             Assert.True(health.Snapshot().FailureCount > 0);
             Assert.NotNull(health.Snapshot().LastFailureUtc);
+            var output = CaptureCompletion(() => LaplaceLogging.CompleteProcess(
+                new SerilogLoggerFactory(logger, dispose: false), "controlled-command", 0, health));
+            Assert.Equal(1, output.ExitCode);
+            Assert.Contains("LOGGING_UNAVAILABLE", output.Stderr);
+            Assert.Empty(output.Stdout);
+            Assert.Equal(37, LaplaceLogging.CompleteProcess((IDisposable?)null, "controlled-command", 37, health));
         });
+    }
+
+    [Fact]
+    public void HealthyCompletionFlushesAndClosesRealSinksWithoutChangingTheResult()
+    {
+        WithLogDirectory(directory =>
+        {
+            var health = new PersistentLogHealth();
+            var logger = new LoggerConfiguration().ApplyLaplaceSinks("completion", false, health: health).CreateLogger();
+            logger.Information("completion-fixture-event");
+            var output = CaptureCompletion(() => LaplaceLogging.CompleteProcess(
+                new SerilogLoggerFactory(logger, dispose: true), "healthy-command", 0, health));
+            Assert.Equal(0, output.ExitCode);
+            Assert.Empty(output.Stderr);
+            Assert.Empty(output.Stdout);
+            string closed = Path.Combine(directory, "closed.csv");
+            File.Move(Path.Combine(directory, "laplace-completion.csv"), closed);
+            Assert.Contains("completion-fixture-event", ReadShared(closed));
+        });
+    }
+
+    [Fact]
+    public void DisposalFailureIsHandledAndKeepsAnExistingCommandFailureCode()
+    {
+        var health = new PersistentLogHealth();
+        health.Initialized();
+        var output = CaptureCompletion(() => LaplaceLogging.CompleteProcess(new FailedDisposal(), "mcp", 23, health));
+        Assert.Equal(23, output.ExitCode);
+        Assert.Contains("logger-disposal-fixture", output.Stderr);
+        Assert.Contains("disposal-inner-cause", output.Stderr);
+        Assert.False(health.Snapshot().Ready);
+        Assert.Empty(output.Stdout);
+    }
+
+    [Fact]
+    public void FatalReportingFailureRetainsTheOriginalCauseAndSignalsLoggingFailure()
+    {
+        var health = new PersistentLogHealth();
+        health.Initialized();
+        var output = CaptureCompletion(() =>
+        {
+            LaplaceLogging.ReportProcessFailure("mcp", new IOException("original-process-fixture"),
+                _ => throw new InvalidOperationException("fatal-logger-fixture"), health);
+            return LaplaceLogging.CompleteProcess((IDisposable?)null, "mcp", 0, health);
+        });
+        Assert.Equal(1, output.ExitCode);
+        Assert.Contains("original-process-fixture", output.Stderr);
+        Assert.Contains("fatal-logger-fixture", output.Stderr);
+        Assert.Empty(output.Stdout);
+    }
+
+    [Fact]
+    public void ClosedEmergencyOutputCannotEscapeAsAnUnhandledException()
+    {
+        var previous = Console.Error;
+        var closed = new StringWriter();
+        closed.Dispose();
+        var health = new PersistentLogHealth();
+        health.Initialized();
+        try
+        {
+            Console.SetError(closed);
+            LaplaceLogging.ReportProcessFailure("mcp", new IOException("closed-output-fixture"), health: health);
+            Assert.Equal(1, LaplaceLogging.CompleteProcess((IDisposable?)null, "mcp", 0, health));
+            Assert.False(health.Snapshot().Ready);
+        }
+        finally { Console.SetError(previous); }
+    }
+
+    private static (int ExitCode, string Stdout, string Stderr) CaptureCompletion(Func<int> operation)
+    {
+        var previousOut = Console.Out;
+        var previousError = Console.Error;
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        try
+        {
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            return (operation(), stdout.ToString(), stderr.ToString());
+        }
+        finally { Console.SetOut(previousOut); Console.SetError(previousError); }
+    }
+
+    private sealed class FailedDisposal : IDisposable
+    {
+        public void Dispose() => throw new IOException("logger-disposal-fixture", new IOException("disposal-inner-cause"));
     }
 
     [Theory]

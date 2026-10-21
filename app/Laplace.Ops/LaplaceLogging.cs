@@ -34,6 +34,56 @@ public static class LaplaceLogging
     public static Microsoft.Extensions.Logging.ILogger CreateLogger(string category)
         => new SerilogLoggerFactory(Log.Logger, dispose: false).CreateLogger(category);
 
+    /// <summary>Retain the original process failure even if reporting it fails too.</summary>
+    public static void ReportProcessFailure(string component, Exception failure,
+        Action<Exception>? reportPersistent = null, PersistentLogHealth? health = null)
+    {
+        var persistent = health ?? PersistentHealth;
+        try { reportPersistent?.Invoke(failure); }
+        catch (Exception loggingFailure)
+        {
+            persistent.Failed();
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=fatal-report: {loggingFailure}", persistent);
+        }
+        Emergency($"{component}: pid={Environment.ProcessId} {failure}", persistent);
+    }
+
+    /// <summary>Observe flush/disposal and sink health before declaring process success.</summary>
+    public static int CompleteProcess(IDisposable? logging, string component, int operationExitCode,
+        PersistentLogHealth? health = null)
+    {
+        Action? closeLogging = logging is null ? null : logging.Dispose;
+        return CompleteProcess(closeLogging, component, operationExitCode, health);
+    }
+
+    public static int CompleteProcess(Action? closeLogging, string component, int operationExitCode,
+        PersistentLogHealth? health = null)
+    {
+        var persistent = health ?? PersistentHealth;
+        try { closeLogging?.Invoke(); }
+        catch (Exception failure)
+        {
+            persistent.Failed();
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=shutdown: {failure}", persistent);
+        }
+        var snapshot = persistent.Snapshot();
+        if (snapshot.Ready) return operationExitCode;
+        Emergency($"LOGGING_UNAVAILABLE component={component} pid={Environment.ProcessId} initialized={snapshot.Initialized} "
+            + $"failures={snapshot.FailureCount} operation_exit={operationExitCode}", persistent);
+        return operationExitCode == 0 ? 1 : operationExitCode;
+    }
+
+    private static void Emergency(string message, PersistentLogHealth health)
+    {
+        try { Console.Error.WriteLine(message); }
+        catch (Exception)
+        {
+            // Never recurse through a failed diagnostic channel. The final process
+            // result still reports failure when stderr itself cannot accept output.
+            health.Failed();
+        }
+    }
+
     public static ILoggerFactory ConsoleAndFile(string role, LogEventLevel min = LogEventLevel.Information)
         => Factory(role, console: true, min);
 

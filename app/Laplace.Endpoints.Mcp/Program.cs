@@ -10,19 +10,20 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         ILoggerFactory? loggerFactory = null;
+        int exitCode = 1;
         try
         {
             loggerFactory = LaplaceLogging.FileOnly("mcp");
             Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(loggerFactory, parameterLoggingEnabled: false);
-            return await RunAsync(args, loggerFactory);
+            exitCode = await RunAsync(args, loggerFactory);
         }
         catch (Exception ex)
         {
-            loggerFactory?.CreateLogger("server").LogCritical(ex, "MCP process terminated unexpectedly.");
-            Console.Error.WriteLine($"laplace-mcp: {ex}");
-            return 1;
+            LaplaceLogging.ReportProcessFailure("laplace-mcp", ex,
+                failure => loggerFactory?.CreateLogger("server").LogCritical(failure, "MCP process terminated unexpectedly."));
+            exitCode = 1;
         }
-        finally { loggerFactory?.Dispose(); }
+        return LaplaceLogging.CompleteProcess(loggerFactory, "laplace-mcp", exitCode);
     }
 
     private static async Task<int> RunAsync(string[] args, ILoggerFactory loggerFactory)
