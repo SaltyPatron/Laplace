@@ -10,7 +10,9 @@ Set-Content -LiteralPath (Join-Path $scripts 'machine-env.ps1') -Value '# Fixtur
 Set-Content -LiteralPath (Join-Path $scripts 'laplace-paths.ps1') -Value 'function Import-LaplaceEnv {}'
 Set-Content -LiteralPath (Join-Path $deploy 'iis-runtime.ps1') -Value 'function Read-IisInstallation { throw "fixture: installation read" }'
 Set-Content -LiteralPath (Join-Path $scripts 'build-engine.cmd') -Encoding Ascii -Value "@exit /b 73`r`n"
-$names=@('VSCMD_VER','SETVARS_COMPLETED','LAPLACE_IIS_INSTALLATION','LAPLACE_API_KEY','LAPLACE_ENGINE_BUILD','LAPLACE_ROOT')
+$names=@('VSCMD_VER','SETVARS_COMPLETED','LAPLACE_IIS_INSTALLATION','LAPLACE_API_KEY','LAPLACE_ENGINE_BUILD','LAPLACE_ROOT',
+    'LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER','LAPLACE_TEST_CHECK_FILE','PGSERVICE','PGHOSTADDR','PGOPTIONS','PGPASSWORD',
+    'PGSSLMODE','PGSSLROOTCERT','PGREQUIREAUTH','PGCONNECT_TIMEOUT','PGBIN')
 $saved=@{}
 foreach($name in $names){$saved[$name]=[Environment]::GetEnvironmentVariable($name)}
 function icx.exe {}
@@ -42,6 +44,47 @@ try {
     $env:LAPLACE_API_KEY='fixture-only-not-a-credential'
     Expect-Failure @{Publish=$true} 'fixture: installation read'
     Write-Host 'PASS publication checks its installation and workload credential before building.'
+
+    # Controlled build/installer boundaries: assert configuration selection,
+    # ordering and restoration without touching an installed database or DLL.
+    Set-Content -LiteralPath (Join-Path $scripts 'build-engine.cmd') -Encoding Ascii -Value "@exit /b 0`r`n"
+    Set-Content -LiteralPath (Join-Path $deploy 'iis-runtime.ps1') -Value 'function Read-IisInstallation($Path) { Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }'
+    $certificate=Join-Path $work 'test-root.crt'
+    Set-Content -LiteralPath $certificate -Value 'fixture-only'
+    $accessPath=Join-Path $work 'access.json'
+    @{database_host=$env:COMPUTERNAME;port=5432;authentication='sspi';admin_role='fixture_owner';root_certificate=$certificate} |
+        ConvertTo-Json | Set-Content -LiteralPath $accessPath
+    $env:LAPLACE_IIS_INSTALLATION=Join-Path $work 'installation.json'
+    @{database_access_file=$accessPath;database=@{host=$env:COMPUTERNAME;port=5432}} |
+        ConvertTo-Json | Set-Content -LiteralPath $env:LAPLACE_IIS_INSTALLATION
+    $env:LAPLACE_TEST_CHECK_FILE=Join-Path $work 'preflight-ran'
+    Set-Content -LiteralPath (Join-Path $scripts 'install-extensions.cmd') -Encoding Ascii -Value @'
+@echo off
+if not "%~1"=="--check-connection" exit /b 91
+if defined PGSERVICE exit /b 92
+if defined PGHOSTADDR exit /b 93
+if defined PGOPTIONS exit /b 94
+if defined PGPASSWORD exit /b 95
+if not "%PGSSLMODE%"=="verify-full" exit /b 96
+if not "%PGREQUIREAUTH%"=="sspi" exit /b 97
+if not "%LAPLACE_PGHOST%"=="%COMPUTERNAME%" exit /b 98
+if not "%LAPLACE_PGUSER%"=="fixture_owner" exit /b 99
+if not "%PGBIN%"=="fixture-postgresql-tools" exit /b 100
+echo checked>"%LAPLACE_TEST_CHECK_FILE%"
+exit /b 17
+'@
+    Set-Content -LiteralPath (Join-Path $scripts 'build-extensions.cmd') -Encoding Ascii -Value '@echo unexpected>"%LAPLACE_TEST_CHECK_FILE%.build"'
+    foreach($name in 'PGSERVICE','PGHOSTADDR','PGOPTIONS','PGPASSWORD','LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER'){
+        [Environment]::SetEnvironmentVariable($name,'ambient-fixture-value')
+    }
+    $env:PGBIN='fixture-postgresql-tools'
+    Expect-Failure @{Publish=$true} 'PostgreSQL extension connection preflight failed; installed extension files were not changed.'
+    if(-not(Test-Path -LiteralPath $env:LAPLACE_TEST_CHECK_FILE)){throw 'Installer did not receive the isolated declared SSPI configuration.'}
+    if(Test-Path -LiteralPath ($env:LAPLACE_TEST_CHECK_FILE+'.build')){throw 'Extension build ran after failed connection preflight.'}
+    foreach($name in 'PGSERVICE','PGHOSTADDR','PGOPTIONS','PGPASSWORD','LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER'){
+        if([Environment]::GetEnvironmentVariable($name) -cne 'ambient-fixture-value'){throw "Caller environment was not restored: $name"}
+    }
+    Write-Host 'PASS declared SSPI connection is isolated from ambient settings; failed preflight stops extension installation and restores caller state.'
 } finally {
     foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$saved[$name])}
     $resolved=[IO.Path]::GetFullPath($work)

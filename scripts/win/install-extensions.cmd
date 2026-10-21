@@ -6,14 +6,31 @@ set "DEPLOY=%LAPLACE_DEPLOY%"
 set "RECYCLE=0"
 set "FILES_ONLY=0"
 set "SKIP_BUILD=0"
+set "CHECK_CONNECTION=0"
 :parse_install
 if "%~1"=="" goto parse_install_done
 if /i "%~1"=="--recycle" ( set "RECYCLE=1" & shift /1 & goto parse_install )
 if /i "%~1"=="--files-only" ( set "FILES_ONLY=1" & shift /1 & goto parse_install )
 if /i "%~1"=="--skip-build" ( set "SKIP_BUILD=1" & shift /1 & goto parse_install )
+if /i "%~1"=="--check-connection" ( set "CHECK_CONNECTION=1" & shift /1 & goto parse_install )
 echo install-extensions: unknown flag %~1
 exit /b 2
 :parse_install_done
+if "%CHECK_CONNECTION%"=="1" if "%FILES_ONLY%"=="1" (
+  echo install-extensions: --check-connection and --files-only cannot be combined
+  exit /b 2
+)
+rem Authenticate before building or replacing any installed files. Keep the
+rem actual libpq error in the deployment stage log; connection failure is not
+rem evidence that the Windows service is stopped.
+set "PSQL=%PGBIN%\psql.exe"
+if not defined PGCONNECT_TIMEOUT set "PGCONNECT_TIMEOUT=10"
+set "PGAPPNAME=laplace-install-extensions"
+if "%FILES_ONLY%"=="0" (
+  call :check_connection
+  if errorlevel 1 exit /b 1
+)
+if "%CHECK_CONNECTION%"=="1" exit /b 0
 
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
@@ -112,18 +129,6 @@ if "%FILES_ONLY%"=="1" (
   exit /b 0
 )
 
-set "PSQL=%PGBIN%\psql.exe"
-if "%LAPLACE_PGHOST%"=="" set "LAPLACE_PGHOST=localhost"
-if "%LAPLACE_PGPORT%"=="" set "LAPLACE_PGPORT=5432"
-"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;" >nul 2>&1
-if errorlevel 1 (
-  echo [install-extensions] ERROR: Postgres is not accepting connections.
-  echo   Files are deployed under %DEPLOY% but postgresql.auto.conf was NOT updated.
-  echo   Start postgresql-x64-18, then re-run: scripts\win\install-extensions.cmd
-  echo   Or cold-bootstrap: install-extensions.cmd --files-only, start PG, install-extensions.cmd again.
-  exit /b 1
-)
-
 set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
 > "%GUC_SQL%" (
   echo ALTER SYSTEM SET extension_control_path = '%LAPLACE_DEPLOY_PG%/share;$system';
@@ -135,16 +140,29 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo SELECT CASE WHEN current_setting^('shared_preload_libraries'^) ~ '\mlaplace_substrate\M' THEN current_setting^('shared_preload_libraries'^) WHEN current_setting^('shared_preload_libraries'^) = '' THEN 'laplace_substrate' ELSE current_setting^('shared_preload_libraries'^) ^|^| ',laplace_substrate' END AS spl \gset
   rem unquoted: a list setting takes its elements one by one; one quoted text holding commas would be one library name
   echo ALTER SYSTEM SET shared_preload_libraries = :spl;
-  echo SELECT pg_reload_conf^(^);
+  echo DO $$ BEGIN IF NOT pg_reload_conf^(^) THEN RAISE EXCEPTION 'PostgreSQL rejected the configuration reload request' USING ERRCODE = '55000'; END IF; END $$;
 )
-"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
-"%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;"
+"%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
+"%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;" || exit /b 1
 if "%RECYCLE%"=="1" (
   echo recycling laplace backends so fresh DLLs/SQL load on next connection...
-  "%PSQL%" -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -tAc "SELECT count(pg_terminate_backend(pid)) || ' backend(s) recycled' FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid <> pg_backend_pid();"
+  > "%GUC_SQL%" echo DO $$ DECLARE recycled_count integer; recycled_ok boolean; BEGIN WITH attempts AS MATERIALIZED ^(SELECT pg_terminate_backend^(pid^) AS recycled FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid ^<^> pg_backend_pid^(^)^) SELECT count^(*^) FILTER ^(WHERE recycled^), COALESCE^(bool_and^(recycled^),true^) INTO recycled_count,recycled_ok FROM attempts; IF NOT recycled_ok THEN RAISE EXCEPTION 'PostgreSQL could not recycle every selected backend' USING ERRCODE = '55000'; END IF; RAISE NOTICE '%% backend^(s^) recycled',recycled_count; END $$;
+  "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
 )
 echo wired: extension_control_path + dynamic_library_path + t0/highway/chess perfcache GUCs -^> %DEPLOY%
 exit /b 0
+
+:check_connection
+echo install-extensions: authenticate %LAPLACE_PGHOST%:%LAPLACE_PGPORT%/postgres as %LAPLACE_PGUSER%
+"%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -Atc "SELECT current_user, system_user, inet_server_addr(), current_setting('data_directory');"
+if not errorlevel 1 exit /b 0
+echo [install-extensions] ERROR: PostgreSQL authentication/connection check failed; see the client error above.
+echo   No extension files or server settings were changed by this invocation.
+echo   Windows process identity:
+whoami
+echo   Verify the declared host, port, database role and TLS/authentication settings.
+echo   For an intentionally stopped server, --files-only stages files without configuring PostgreSQL.
+exit /b 1
 
 :verify_deploy
 set "OK=1"

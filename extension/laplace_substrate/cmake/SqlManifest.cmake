@@ -44,6 +44,13 @@ function(laplace_manifest_files out_var manifest_file src_sql_dir)
         endif()
         list(APPEND _files "${src_sql_dir}/${_line}")
     endforeach()
+    # Both extensions hash these inputs at configure time. A build dependency
+    # alone only rewrites the output under its old version, so installed
+    # databases then skip the changed SQL. Track contents as configure inputs.
+    file(GLOB _templates CONFIGURE_DEPENDS
+        "${src_sql_dir}/*.in" "${src_sql_dir}/../*.control.in")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${manifest_file}" ${_files} ${_templates})
     set(${out_var} "${_files}" PARENT_SCOPE)
 endfunction()
 

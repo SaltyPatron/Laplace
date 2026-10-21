@@ -49,23 +49,39 @@ if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 & (Join-Path $repo 'scripts/win/build-engine.cmd') laplace_core laplace_syzygy laplace_dynamics laplace_synthesis laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_chess_transition_perfcache
 if($LASTEXITCODE){throw 'Native runtime build failed; no application package was created.'}
 if($Publish){
-    & (Join-Path $repo 'scripts/win/build-extensions.cmd')
-    if($LASTEXITCODE){throw 'PostgreSQL extension build failed; no application package was created.'}
     $iisConfig=Read-IisInstallation $Installation
     $accessPath=if($iisConfig.database_access_file){$iisConfig.database_access_file}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
-    if(Test-Path -LiteralPath $accessPath -PathType Leaf){
-        $access=Get-Content -LiteralPath $accessPath -Raw | ConvertFrom-Json
-        if($access.database_host){$env:LAPLACE_PGHOST=$access.database_host}
-        if($access.port){$env:LAPLACE_PGPORT=[string]$access.port}
-        if($access.admin_role){$env:LAPLACE_PGUSER=$access.admin_role}
-        if($access.authentication -eq 'sspi'){
-            $env:PGSSLMODE='verify-full'
-            $env:PGSSLROOTCERT=$access.root_certificate
-            $env:PGREQUIREAUTH='sspi'
-        }
+    if(-not(Test-Path -LiteralPath $accessPath -PathType Leaf)){throw "The declared local database access file is missing: $accessPath"}
+    $access=Get-Content -LiteralPath $accessPath -Raw | ConvertFrom-Json
+    if($access.authentication -ne 'sspi' -or $access.database_host -ine $env:COMPUTERNAME -or
+        $iisConfig.database.host -ine $access.database_host -or $iisConfig.database.port -ne $access.port -or
+        -not $access.admin_role -or -not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){
+        throw 'Extension publication requires the declared local IIS database, Windows SSPI role and TLS root certificate.'
     }
-    & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build --recycle
-    if($LASTEXITCODE){throw 'PostgreSQL extension installation failed; no application package was created.'}
+    # Match database maintenance: inherited PGHOSTADDR/PGSERVICE/PGOPTIONS or
+    # password settings must not redirect the declared SSPI installation.
+    $savedPg=@{}
+    $pgNames=@(Get-ChildItem Env: | Where-Object {$_.Name -like 'PG*' -and $_.Name -ne 'PGBIN'} | ForEach-Object Name)+@(
+        'LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER','PGSSLMODE','PGSSLROOTCERT','PGREQUIREAUTH','PGCONNECT_TIMEOUT')
+    foreach($name in $pgNames | Select-Object -Unique){
+        $savedPg[$name]=[Environment]::GetEnvironmentVariable($name)
+        if($name -notlike 'LAPLACE_*'){Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue}
+    }
+    try {
+        $env:LAPLACE_PGHOST=$access.database_host
+        $env:LAPLACE_PGPORT=[string]$access.port
+        $env:LAPLACE_PGUSER=$access.admin_role
+        $env:PGSSLMODE='verify-full';$env:PGSSLROOTCERT=$access.root_certificate
+        $env:PGREQUIREAUTH='sspi';$env:PGCONNECT_TIMEOUT='10'
+        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --check-connection
+        if($LASTEXITCODE){throw 'PostgreSQL extension connection preflight failed; installed extension files were not changed.'}
+        & (Join-Path $repo 'scripts/win/build-extensions.cmd')
+        if($LASTEXITCODE){throw 'PostgreSQL extension build failed; no application package was created.'}
+        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build --recycle
+        if($LASTEXITCODE){throw 'PostgreSQL extension installation failed; no application package was created.'}
+    } finally {
+        foreach($name in $savedPg.Keys){[Environment]::SetEnvironmentVariable($name,$savedPg[$name])}
+    }
 }
 $work=Join-Path $env:LAPLACE_WORK ('iis-packages/'+$revision+'-'+[Guid]::NewGuid().ToString('N'))
 $published=Join-Path $work 'published';$package=Join-Path $work 'package'
