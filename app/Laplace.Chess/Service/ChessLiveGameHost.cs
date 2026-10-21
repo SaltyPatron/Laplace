@@ -624,7 +624,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     lineId, ChessVocabulary.HasSetupType, positionId,
                     ChessVocabulary.SourceId, playingId, WitnessWeight));
             }
-            catch (FormatException) { }
+            catch (FormatException failure)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "CHESS_SETUP_ATTESTATION_SKIPPED game={0}; invalid starting position: {1}", playingId, failure);
+            }
         }
 
         if (Clean(meta.ExternalGameId) is { Length: > 0 } external

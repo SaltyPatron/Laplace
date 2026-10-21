@@ -78,39 +78,26 @@ internal static class ProvenanceExtractor
 
 
 
-    private static async Task<List<SourceProvenance>> BuildSourcesAsync(
+    internal static async Task<List<SourceProvenance>> BuildSourcesAsync(
         NpgsqlDataSource ds, string modelName, CancellationToken ct)
     {
         var sources = new List<SourceProvenance>();
 
 
-        try
+        var recipes = await NpgsqlSubstrateReads.ModelRecipesAsync(ds, ct);
+        foreach (var recipe in recipes)
         {
-            var recipes = await NpgsqlSubstrateReads.ModelRecipesAsync(ds, ct);
-            foreach (var recipe in recipes)
+            var rid = Hash128.FromBytes(recipe.RecipeId);
+            sources.Add(new SourceProvenance
             {
-                var rid = Hash128.FromBytes(recipe.RecipeId);
-                string name = modelName;
-                try
-                {
-                    using var doc = JsonDocument.Parse(recipe.RecipeJson);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("model_type", out var mt) && mt.GetString() is { } s)
-                        name = s;
-                }
-                catch { }
-                sources.Add(new SourceProvenance
-                {
-                    SourceId = Hex(rid),
-                    Domain = "substrate/source/model/v1",
-                    Kind = "ingested-model",
-                    Label = name,
-                    Completed = true,
-                    TrustClass = "AIModelProbe",
-                });
-            }
+                SourceId = Hex(rid),
+                Domain = "substrate/source/model/v1",
+                Kind = "ingested-model",
+                Label = RecipeModelLabel(recipe.RecipeJson, modelName, rid),
+                Completed = true,
+                TrustClass = "AIModelProbe",
+            });
         }
-        catch { }
 
 
 
@@ -143,21 +130,32 @@ internal static class ProvenanceExtractor
         return sources;
     }
 
-    private static async Task<Dictionary<Hash128, long>> CountByTypesAsync(
+    internal static async Task<Dictionary<Hash128, long>> CountByTypesAsync(
         NpgsqlDataSource ds, IReadOnlyList<Hash128> typeIds, CancellationToken ct)
     {
         var map = new Dictionary<Hash128, long>(typeIds.Count);
         if (typeIds.Count == 0) return map;
+        var raw = new byte[typeIds.Count][];
+        for (int i = 0; i < typeIds.Count; i++) raw[i] = typeIds[i].ToBytes();
+        var rows = await NpgsqlSubstrateReads.EntityCountsByTypesAsync(ds, raw, ct);
+        foreach (var row in rows)
+            map[Hash128.FromBytes(row.TypeId)] = row.Count;
+        return map;
+    }
+
+    internal static string RecipeModelLabel(string json, string fallback, Hash128 recipeId)
+    {
         try
         {
-            var raw = new byte[typeIds.Count][];
-            for (int i = 0; i < typeIds.Count; i++) raw[i] = typeIds[i].ToBytes();
-            var rows = await NpgsqlSubstrateReads.EntityCountsByTypesAsync(ds, raw, ct);
-            foreach (var row in rows)
-                map[Hash128.FromBytes(row.TypeId)] = row.Count;
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("model_type", out var type)
+                ? type.GetString() ?? fallback : fallback;
         }
-        catch { }
-        return map;
+        catch (Exception failure) when (failure is JsonException or InvalidOperationException)
+        {
+            throw new InvalidDataException(
+                $"Model recipe {Hex(recipeId)} cannot supply valid provenance metadata.", failure);
+        }
     }
 
 

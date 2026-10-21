@@ -590,11 +590,21 @@ public static partial class CutechessRunner
         {
             // Cancellation throws out of the loop above and Process.Dispose kills nothing, so
             // the process tree (cutechess and both engines) is killed here.
-            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+            catch (Exception failure)
+            {
+                Trace.TraceWarning("CHESS_CONDUCTOR_STOP_FAILED conductor={0} pid={1}: {2}",
+                    conductorName, proc.Id, failure);
+            }
         }
 
         await proc.WaitForExitAsync(CancellationToken.None);
-        try { await pumps.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); } catch { /* best effort */ }
+        try { await pumps.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); }
+        catch (Exception failure)
+        {
+            Trace.TraceWarning("CHESS_CONDUCTOR_OUTPUT_INCOMPLETE conductor={0} pid={1}: {2}",
+                conductorName, proc.Id, failure);
+        }
 
         int exitCode = proc.ExitCode;
         yield return new ChessLabTerminalEvent(ChessLabStream.Runner, $"{conductorName} exited with code {exitCode}");
@@ -641,10 +651,12 @@ public static partial class CutechessRunner
                 foreach (var fen in OpeningSeed.Fens(OpeningSeed.DefaultDir, Math.Max(1, o.OpeningPlies), openingCount))
                     if (!fens.Contains(fen, StringComparer.Ordinal)) fens.Add(fen);
             }
-            catch
+            catch (Exception failure)
             {
                 // A missing opening corpus does not stop the run; the built-in positions
                 // below keep the gauntlet paired.
+                Trace.TraceWarning("CHESS_OPENINGS_FALLBACK directory={0}; using built-in positions: {1}",
+                    OpeningSeed.DefaultDir, failure);
             }
 
             for (int i = 0; fens.Count < openingCount; i++)
