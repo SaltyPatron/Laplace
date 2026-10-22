@@ -53,14 +53,14 @@ public sealed class IsoRetirementTests
     // The tests below run the per-row rule (IsoRetirementRemedy.Classify) over the admitted
     // retirement table, not just the remedy parser.
     // The table the iso639/20260415 recipe admits (its required selector), under the data
-    // root (LAPLACE_DATA_ROOT, else the estate's /vault/Data). A flat root copy is only
+    // root (LAPLACE_DATA, else the estate's /vault/Data). A flat root copy is only
     // equivalent packaging: the estate's flat copies are a later SIL edition (2026-07-15
     // adds mrd and shl), so the pinned table is read whenever it is present.
     private static readonly string Retirements = ResolveRetirements();
 
     private static string ResolveRetirements()
     {
-        string root = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT") is { Length: > 0 } configured
+        string root = Environment.GetEnvironmentVariable("LAPLACE_DATA") is { Length: > 0 } configured
             ? configured : "/vault/Data";
         string iso = Path.Combine(root, "ISO639");
         string pinned = Path.Combine(iso, "iso-639-3_Code_Tables_20260415",

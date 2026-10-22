@@ -1,65 +1,96 @@
+using System.Text.RegularExpressions;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 
 namespace Laplace.Cli;
 
-/// <summary>
-/// Default on-disk location per ingest source key, relative to the install's ingest root.
-/// This records directory layout only; which keys dispatch is IngestDispatchTable's.
-/// The media keys `rgba-image` / `track-audio` / `frame-video` share the staged
-/// test-data corpora with the `image` / `audio` path keys. Each key has exactly one location:
-/// nothing here falls back to a second directory when the declared one is absent.
-/// </summary>
+/// <summary>Resolves corpus locations from the native recipe estate, never a second path roster.</summary>
 internal static class IngestDataPaths
 {
-    private static readonly Dictionary<string, string> RelativeByCli = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["unicode"] = "UCD/Public/UCD/latest",
-        ["uca"] = "UCD/Public/UCD/latest/uca",
-        ["iso639"] = "ISO639",
-        ["document"] = "test-data/text",
-        ["project-gutenberg"] = "ProjectGutenberg/text",
-        ["cili"] = "CILI",
-        ["wordnet"] = "Wordnet",
-        ["oewn"] = "OpenEnglishWordNet-2025-plus",
-        ["omw"] = "OMW-2.0",
-        ["verbnet"] = "VerbNet/verbnet-cu-clear",
-        ["verbnet-gl"] = "VerbNet/verbnet-cu-clear/vn-gl",
-        ["propbank"] = "PropBank/propbank-frames",
-        ["framenet"] = "FrameNet/framenet_v17",
-        ["semlink"] = "SemLink",
-        ["mapnet"] = "MapNet-0.1",
-        ["wordframenet"] = "WordFrameNet",
-        ["conceptnet"] = "ConceptNet",
-        ["atomic2020"] = "Atomic/Atomic2020",
-        ["ud"] = "UD-Treebanks",
-        ["wiktionary"] = "Wiktionary",
-        ["tatoeba"] = "Tatoeba",
-        ["opensubtitles"] = "OpenSubtitles",
-        ["stack"] = "../models/stack-v2",
-        ["tiny-codes"] = "../models/tiny-codes",
-        ["image"] = "test-data/images",
-        ["audio"] = "test-data/audio",
-        ["rgba-image"] = "test-data/images",
-        ["track-audio"] = "test-data/audio",
-        ["frame-video"] = "test-data/video",
-    };
-
     public static string Resolve(string cliSource, string? cliPath = null)
     {
-        if (!string.IsNullOrWhiteSpace(cliPath))
-            return Path.GetFullPath(cliPath);
-
+        if (!string.IsNullOrWhiteSpace(cliPath)) return Path.GetFullPath(cliPath);
         if (cliSource.Equals("operational", StringComparison.OrdinalIgnoreCase))
             return Laplace.Decomposers.Operational.OperationalDecomposer.BundledPath;
 
-        if (!RelativeByCli.TryGetValue(cliSource, out var relative))
-            throw new InvalidOperationException($"no manifest path for ingest source '{cliSource}'");
+        // Operator-supplied media/model lanes are not corpus-order entries.
+        var utility = cliSource.ToLowerInvariant() switch
+        {
+            "document" => "test-data/text",
+            "image" or "rgba-image" => "test-data/images",
+            "audio" or "track-audio" => "test-data/audio",
+            "video" or "frame-video" => "test-data/video",
+            _ => null
+        };
+        if (utility is not null) return LaplaceInstall.ResolvePathUnderIngest(utility);
+        if (cliSource is "stack" or "tiny-codes")
+            return LaplaceInstall.ResolvePathUnderModels(cliSource == "stack" ? "stack-v2" : "tiny-codes");
 
-        string ingestRoot = LaplaceInstall.ResolveIngestRoot();
-        // One declared location per source (Laplace-Engine recipes/BRIEF.md): no second root is
-        // probed when it is absent. The coding corpora live in the models directory beside the
-        // ingest root (/vault/models), declared as such above; an absent location is never replaced by another.
-        string primary = Path.GetFullPath(Path.Combine(ingestRoot, relative));
-        return primary;
+        var roots = ResolveRoots(cliSource).SelectMany(ExpandDirectories).Distinct().ToArray();
+        return roots.Length switch
+        {
+            1 => roots[0],
+            0 => throw new DirectoryNotFoundException($"No declared root exists for '{cliSource}'."),
+            _ => throw new InvalidOperationException($"'{cliSource}' declares multiple roots; select a path explicitly or use its native recipe ingestion route.")
+        };
+    }
+
+    public static IReadOnlyList<string> ResolveRoots(string cliSource)
+    {
+        var source = Path.Combine(EtlManifest.RecipesRoot, cliSource, "source");
+        if (!EtlManifest.SourceOrder.Contains(cliSource, StringComparer.Ordinal))
+            throw new InvalidOperationException($"Unknown canonical ingest source '{cliSource}'. Read recipes/order.");
+        var lines = File.ReadLines(source).Select(line => line.Trim()).ToArray();
+        var roots = lines.Where(line => line.StartsWith("root ", StringComparison.Ordinal))
+            .Select(line => ExpandRoot(line[5..].Trim())).ToArray();
+        // A file-only source (tokenizers) declares its roots through absolute
+        // file patterns. The stable prefix is configuration, not a corpus scan.
+        if (roots.Length == 0)
+            roots = lines.Where(line => line.StartsWith("files ", StringComparison.Ordinal))
+                .Select(line => FilePatternRoot(ExpandRoot(line[6..].Trim()))).ToArray();
+        return roots
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string FilePatternRoot(string pattern)
+    {
+        var at = pattern.IndexOfAny(['*', '?']);
+        if (at < 0) return Path.GetDirectoryName(Path.GetFullPath(pattern))!;
+        var prefix = pattern[..at];
+        return Path.EndsInDirectorySeparator(prefix)
+            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(prefix))
+            : Path.GetDirectoryName(Path.GetFullPath(prefix))!;
+    }
+
+    private static string ExpandRoot(string root) => Regex.Replace(root, @"\$(?:\{(?<name>[A-Z_]+)\}|(?<name>[A-Z_]+))", match =>
+    {
+        var name = match.Groups["name"].Value;
+        return name switch
+        {
+            "DATA" or "LAPLACE_DATA" => LaplaceInstall.DeclaredIngestRoot(),
+            "MODELS" or "LAPLACE_MODELS" => LaplaceInstall.DeclaredModelsRoot(),
+            "SRC" or "LAPLACE_SRC" => Environment.GetEnvironmentVariable("LAPLACE_SRC")
+                ?? throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code."),
+            _ => throw new InvalidDataException($"Unsupported recipe-root variable: {name}")
+        };
+    });
+
+    private static IEnumerable<string> ExpandDirectories(string root)
+    {
+        var absolute = Path.GetFullPath(root);
+        if (absolute.IndexOfAny(['*', '?']) < 0) return [absolute];
+        var drive = Path.GetPathRoot(absolute)!;
+        IEnumerable<string> directories = [drive];
+        foreach (var part in absolute[drive.Length..].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        {
+            if (part.Length == 0) continue;
+            directories = part.IndexOfAny(['*', '?']) >= 0
+                ? directories.Where(Directory.Exists).SelectMany(directory => Directory.EnumerateDirectories(directory, part))
+                : directories.Select(directory => Path.Combine(directory, part));
+            // Materialize each frontier before the next component captures it.
+            directories = directories.ToArray();
+        }
+        return directories.Where(Directory.Exists);
     }
 }

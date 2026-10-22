@@ -61,8 +61,7 @@ public static class ChessLabPaths
     /// <summary>
     /// Syzygy package root (including nested WDL/DTZ and men-count directories).
     /// An explicit <c>LAPLACE_SYZYGY</c> or <c>chess-lab.env</c> selection is authoritative;
-    /// otherwise use the complete corpus root under <c>LAPLACE_DATA</c> (legacy
-    /// <c>LAPLACE_DATA_ROOT</c> when no corpus root is declared). Selecting
+    /// otherwise use the complete corpus root under <c>LAPLACE_DATA</c>. Selecting
     /// only the largest bracket hides the smaller tables needed after captures/promotions.
     /// </summary>
     public static Probe SyzygyDir => ResolveSyzygyDir();
@@ -83,8 +82,7 @@ public static class ChessLabPaths
     private static Probe ResolveSyzygyDir()
     {
         string? selected = ChessRuntimeConfiguration.Read("LAPLACE_SYZYGY");
-        string? root = ChessRuntimeConfiguration.Read("LAPLACE_DATA")
-            ?? ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT");
+        string? root = ChessRuntimeConfiguration.Read("LAPLACE_DATA");
         if (selected is null && root is null) return new Probe(null, false, "unconfigured");
         return ResolveSyzygyDirCore(selected, root ?? "");
     }

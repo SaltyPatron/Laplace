@@ -17,7 +17,7 @@ rem Installation roots come from machine.env; derived paths do not choose a driv
 
 if not defined LAPLACE_BUILD_ROOT if defined LAPLACE_BUILD set "LAPLACE_BUILD_ROOT=%LAPLACE_BUILD%\Laplace"
 
-if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_DATA_ROOT%\deploy"
+if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_WORK%\deploy"
 rem geos/proj/gdal (and sqlite for PROJ) from external/ — scripts\win\build-deps.cmd
 if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DEPS%"
 if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"
@@ -29,7 +29,7 @@ rem Linux ${LAPLACE_DEPS_PREFIX}/pgsql-18 install prefix from external/CMakeList
 if not defined LAPLACE_PG_BUILD set "LAPLACE_PG_BUILD=%LAPLACE_BUILD_ROOT%\build-pg"
 if not defined LAPLACE_PG_PREFIX if defined LAPLACE_PG_DIR set "LAPLACE_PG_PREFIX=%LAPLACE_PG_DIR%"
 if not defined LAPLACE_PG_PREFIX set "LAPLACE_PG_PREFIX=%LAPLACE_DEPS_PREFIX%\pgsql-18"
-if not defined LAPLACE_TOOLS set "LAPLACE_TOOLS=%LAPLACE_DATA_ROOT%\tools"
+if not defined LAPLACE_TOOLS set "LAPLACE_TOOLS=%LAPLACE_WORK%\tools"
 rem MSYS2 (make, sh, curl, mingw-w64-ucrt gcc): the one Laplace-Operations declares (LAPLACE_MSYS2); ensure-stockfish-toolchain.ps1
 rem builds Stockfish with it, and installs a copy under LAPLACE_TOOLS only when none is declared.
 if not defined MSYS2_ROOT if defined LAPLACE_MSYS2 set "MSYS2_ROOT=%LAPLACE_MSYS2%"
@@ -38,7 +38,7 @@ if not defined LAPLACE_CUTECHESS_BUILD set "LAPLACE_CUTECHESS_BUILD=%LAPLACE_BUI
 if not defined LAPLACE_OUT set "LAPLACE_OUT=%LAPLACE_BUILD_ROOT%\out"
 if not defined LAPLACE_PUBLISH_ENDPOINT set "LAPLACE_PUBLISH_ENDPOINT=%LAPLACE_OUT%\endpoint"
 if not defined LAPLACE_PUBLISH_MIGRATIONS set "LAPLACE_PUBLISH_MIGRATIONS=%LAPLACE_OUT%\migrations"
-if not defined LAPLACE_IIS_API set "LAPLACE_IIS_API=%LAPLACE_DATA_ROOT%\iis\laplace-api"
+if not defined LAPLACE_IIS_API set "LAPLACE_IIS_API=%LAPLACE_WORK%\iis\laplace-api"
 rem Ingest / CLI binary is the ReadyToRun publish tree. Plain `dotnet build` output
 rem under net10.0 is for IDE/build only — runtime clrjit 0xc0000409 killed ingest on
 rem .NET 10.0.9; build-app publishes and verifies this tree. seed-step uses the
@@ -51,7 +51,7 @@ if not defined PGBIN set "PGBIN=%LAPLACE_PG_PREFIX%\bin"
 rem The external source tree the engine, the extensions and the app read (blake3, eigen, spectra, fathom, tree-sitter,
 rem postgis, tree-sitter-grammars), under the data root; on HART-DESKTOP each entry is a junction to the checkout the
 rem Laplace-Operations manifest keeps under D:\Libraries\src (and the grammars under D:\Data\Ingest\TreeSitter).
-if not defined LAPLACE_EXTERNAL set "LAPLACE_EXTERNAL=%LAPLACE_DATA_ROOT%\external"
+if not defined LAPLACE_EXTERNAL set "LAPLACE_EXTERNAL=%LAPLACE_WORK%\external"
 rem Versioned dependency prefixes and runtime DLL paths come from the installed manifest.
 if not defined MKLROOT if defined LAPLACE_ONEAPI set "MKLROOT=%LAPLACE_ONEAPI%\mkl\latest"
 rem The DLLs the engine's core loads at run time (the app's OpenAPI emission and the perfcache tools load it too).
@@ -109,14 +109,14 @@ if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_
 if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_highway_perfcache.bin"
 if not defined LAPLACE_CHESS_POSITION_PERFCACHE_BIN set "LAPLACE_CHESS_POSITION_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_chess_position_perfcache.bin"
 rem Extension deploy MUST stay outside PGDATA (fsync/sharing-violation if under D:\Data\Postgres\laplace).
-if not defined LAPLACE_PGDATA set "LAPLACE_PGDATA=%LAPLACE_DATA_ROOT%\pgdata"
+if not defined LAPLACE_PGDATA set "LAPLACE_PGDATA=%LAPLACE_WORK%\pgdata"
 if not defined INGEST if defined LAPLACE_DATA set "INGEST=%LAPLACE_DATA%"
 
 rem UCD seed inputs live with ingest data, not under the build tree.
 if not defined LAPLACE_UCD_ROOT set "LAPLACE_UCD_ROOT=%INGEST%\UCD\Public\UCD\latest"
 if not defined REPOS if defined LAPLACE_SRC set "REPOS=%LAPLACE_SRC%"
 
-if not defined LAPLACE_MODEL_HUB set "LAPLACE_MODEL_HUB=%LAPLACE_DATA_ROOT%\models\hub"
+if not defined LAPLACE_MODEL_HUB set "LAPLACE_MODEL_HUB=%LAPLACE_MODELS%\hub"
 
 set "LAPLACE_ENV_LOADED=1"
 exit /b 0
