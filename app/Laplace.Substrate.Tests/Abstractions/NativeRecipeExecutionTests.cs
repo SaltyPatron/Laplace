@@ -75,4 +75,37 @@ public sealed class NativeRecipeExecutionTests
         Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task NativeNormalizationRecipeRetainsEveryNonIdentityResultAndItsForm()
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out var repository));
+        string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
+            "normalization", "NormalizationTest.txt");
+        static string Characters(string codepoints) => string.Concat(codepoints.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(static hex => char.ConvertFromUtf32(Convert.ToInt32(hex, 16))));
+        string[] forms = ["NFC", "NFD", "NFKC", "NFKD"];
+        var expected = new List<string>();
+        foreach (string line in File.ReadLines(path))
+        {
+            if (line.Length == 0 || line[0] is '#' or '@') continue;
+            var fields = line.Split('#', 2)[0].Split(';', StringSplitOptions.TrimEntries);
+            string source = Characters(fields[0]);
+            for (int form = 0; form < forms.Length; form++)
+            {
+                string result = Characters(fields[form + 1]);
+                if (result != source) expected.Add($"claim\t0\t1\t{source}\tnormalizes to {forms[form]}\t{result}");
+            }
+        }
+        Assert.Equal(16, expected.Count);
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await NativeRecipeExecution.Configured().ExecuteAsync(
+            new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path], Threads: 2), output, error);
+        string stdout = Encoding.UTF8.GetString(output.ToArray());
+        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + stdout);
+        Assert.Equal(expected, stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
+            .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal)));
+        Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
+    }
+
 }
