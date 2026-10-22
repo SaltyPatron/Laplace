@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -151,9 +152,16 @@ def main() -> int:
     parser.add_argument("--recipes", type=Path)
     parser.add_argument("--format", choices=("json", "markdown", "names"), default="json")
     parser.add_argument("--resolve")
+    parser.add_argument("--check-engine", type=Path, help="Verify the actual Engine exposes the same complete catalog")
     args = parser.parse_args()
     catalog = load_catalog(args.recipes)
-    if args.resolve:
+    if args.check_engine:
+        native = json.loads(subprocess.check_output(
+            [str(args.check_engine.resolve()), "ingest", "-r", str(args.recipes or recipe_root()), "--catalog"], text=True))
+        if native != catalog:
+            raise ValueError("Engine and operator recipe catalogs differ")
+        print(f"Engine/operator catalog parity: {len(catalog['sources'])} sources, {len(catalog['formats'])} formats")
+    elif args.resolve:
         print(canonical_source(args.resolve, catalog))
     elif args.format == "names":
         print("\n".join(s["name"] for s in catalog["sources"]))

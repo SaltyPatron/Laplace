@@ -146,6 +146,7 @@ native() {
     -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR" \
     -DLAPLACE_CHESS_OPENINGS="$DATA/Games/Chess/lichess-openings"
   cmake --build "$BUILD" -j "$(nproc)"
+  python3 scripts/ingest_catalog.py --check-engine "$BUILD/core/recipe_engine/laplace"
   test -s "$LAPLACE_TIER0" || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
   "$BUILD/core/recipe_engine/laplace" flags -u "$UCD" -o "$LAPLACE_FLAGS"
   end

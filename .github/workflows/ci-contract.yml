@@ -296,7 +296,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: c68627ff2f62142db66e186e7ebeb0ac14cf2027
+          ref: 9b0ae6575c732d4123741962689a83f666898ae8
           path: .ci-dependencies/laplace-engine
           persist-credentials: false
 
