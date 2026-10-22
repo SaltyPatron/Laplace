@@ -22,14 +22,11 @@ if(WIN32)
     # /Qfma- overrides the FMA contraction /fp:precise would allow: identity and
     # geometry arithmetic must round identically on every host. icx warns about
     # that override, so only that diagnostic is silenced.
-    set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma- -Wno-overriding-option)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
-    set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option)
 else()
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
     # The same deterministic floating-point contract in GCC/Clang spelling.
-    set(LAPLACE_ENGINE_FP_FLAGS -fno-fast-math -ffp-contract=off)
 endif()
 
 # Emit CodeView debug info + a linker PDB for optimized Release native builds so a
@@ -243,6 +240,10 @@ if(NOT TARGET laplace_text)
     message(FATAL_ERROR "Native text decomposition requires the provisioned ICU 78 installation (LAPLACE_ICU_DIR)")
 endif()
 set(CMAKE_WARN_DEPRECATED ON CACHE BOOL "" FORCE)
+
+# Consume the same Operations floating-point contract as Native and CORE-MATH.
+# Intel arch-consistency intrinsics require the vendor libm that this contract excludes.
+laplace_fp_flags(LAPLACE_ENGINE_FP_FLAGS LAPLACE_ENGINE_FP_LINK_FLAGS)
 target_compile_options(blake3 PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-w>")
 
 
@@ -303,11 +304,19 @@ add_subdirectory(synthesis)
 
 foreach(_laplace_engine_target IN ITEMS
         laplace_core laplace_core_static
-        laplace_dynamics laplace_dynamics_static
+        laplace_syzygy laplace_dynamics laplace_dynamics_static laplace_dynamics_pg_static
         laplace_synthesis
         laplace_core_tests laplace_dynamics_tests laplace_synthesis_tests)
     if(TARGET ${_laplace_engine_target})
         target_compile_options(${_laplace_engine_target} PRIVATE ${LAPLACE_ENGINE_FP_FLAGS})
+        get_target_property(_laplace_target_type ${_laplace_engine_target} TYPE)
+        if(NOT _laplace_target_type STREQUAL "STATIC_LIBRARY")
+            target_link_options(${_laplace_engine_target} PRIVATE ${LAPLACE_ENGINE_FP_LINK_FLAGS})
+        endif()
     endif()
 endforeach()
 unset(_laplace_engine_target)
+
+if(UNIX AND NOT APPLE)
+    target_link_options(laplace_core PRIVATE "LINKER:-z,defs")
+endif()
