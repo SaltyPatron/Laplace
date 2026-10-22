@@ -14,9 +14,6 @@ public static class NpgsqlConsensusCell
 {
     public readonly record struct Row(long Rating, long Rd, long WitnessCount);
 
-    private const string Sql =
-        "SELECT rating, rd, witness_count FROM consensus.cell($1, $2, $3)";
-
     public static async Task<Row?> ReadAsync(
         NpgsqlDataSource dataSource, Hash128 subject, Hash128 typeId, Hash128 obj,
         CancellationToken ct = default)
@@ -27,7 +24,7 @@ public static class NpgsqlConsensusCell
         var oriented = Laplace.Decomposers.Abstractions.NativeAttestation.CategoricalResolved(
             subject, typeId, obj, Hash128.Zero, null, 1);
         var rows = await NpgsqlRead.ReadRowsAsync(
-            dataSource, Sql,
+            dataSource, SqlCatalog.Get("consensus.cell"),
             static r => new Row(r.GetInt64(0), r.GetInt64(1), r.GetInt64(2)),
             p =>
             {

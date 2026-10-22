@@ -16,22 +16,16 @@ public static class NpgsqlConsensusByIds
     /// </summary>
     public readonly record struct Row(double EffMu, double Rd, double Witnesses);
 
-    private const string Sql =
-        "SELECT id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)";
-
-    private const string PairSql = """
-        SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)
-        UNION ALL
-        SELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)
-        """;
-
     /// <summary>Synchronous read for callers inside non-async search.</summary>
     public static Dictionary<Hash128, Row> Read(
         NpgsqlDataSource dataSource, IReadOnlyCollection<Hash128> edgeIds, Hash128 relationType)
     {
         using var conn = dataSource.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        Bind(cmd, edgeIds, relationType);
+        using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("consensus.by_ids"), parameters =>
+        {
+            AddIds(parameters, edgeIds);
+            AddType(parameters, relationType);
+        });
         using var reader = cmd.ExecuteReader();
         var map = new Dictionary<Hash128, Row>(edgeIds.Count);
         while (reader.Read())
@@ -50,12 +44,13 @@ public static class NpgsqlConsensusByIds
         IReadOnlyCollection<Hash128> secondIds, Hash128 secondRelationType)
     {
         using var conn = dataSource.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = PairSql;
-        AddIds(cmd, firstIds);
-        AddType(cmd, firstRelationType);
-        AddIds(cmd, secondIds);
-        AddType(cmd, secondRelationType);
+        using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("consensus.by_ids_pair"), parameters =>
+        {
+            AddIds(parameters, firstIds);
+            AddType(parameters, firstRelationType);
+            AddIds(parameters, secondIds);
+            AddType(parameters, secondRelationType);
+        });
         using var reader = cmd.ExecuteReader();
         var first = new Dictionary<Hash128, Row>(firstIds.Count);
         var second = new Dictionary<Hash128, Row>(secondIds.Count);
@@ -82,20 +77,15 @@ public static class NpgsqlConsensusByIds
         IReadOnlyCollection<Hash128> thirdIds, Hash128 thirdRelationType)
     {
         using var conn = dataSource.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)
-            UNION ALL
-            SELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)
-            UNION ALL
-            SELECT 2, id, eff_mu, rd, witness_count FROM consensus.by_ids($5, $6)
-            """;
-        AddIds(cmd, firstIds);
-        AddType(cmd, firstRelationType);
-        AddIds(cmd, secondIds);
-        AddType(cmd, secondRelationType);
-        AddIds(cmd, thirdIds);
-        AddType(cmd, thirdRelationType);
+        using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("consensus.by_ids_triple"), parameters =>
+        {
+            AddIds(parameters, firstIds);
+            AddType(parameters, firstRelationType);
+            AddIds(parameters, secondIds);
+            AddType(parameters, secondRelationType);
+            AddIds(parameters, thirdIds);
+            AddType(parameters, thirdRelationType);
+        });
         using var reader = cmd.ExecuteReader();
         var first = new Dictionary<Hash128, Row>(firstIds.Count);
         var second = new Dictionary<Hash128, Row>(secondIds.Count);
@@ -119,8 +109,11 @@ public static class NpgsqlConsensusByIds
         CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        Bind(cmd, edgeIds, relationType);
+        await using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("consensus.by_ids"), parameters =>
+        {
+            AddIds(parameters, edgeIds);
+            AddType(parameters, relationType);
+        });
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var map = new Dictionary<Hash128, Row>(edgeIds.Count);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -129,28 +122,21 @@ public static class NpgsqlConsensusByIds
         return map;
     }
 
-    private static void Bind(NpgsqlCommand cmd, IReadOnlyCollection<Hash128> edgeIds, Hash128 relationType)
-    {
-        cmd.CommandText = Sql;
-        AddIds(cmd, edgeIds);
-        AddType(cmd, relationType);
-    }
-
-    private static void AddIds(NpgsqlCommand cmd, IReadOnlyCollection<Hash128> edgeIds)
+    private static void AddIds(NpgsqlParameterCollection parameters, IReadOnlyCollection<Hash128> edgeIds)
     {
         var raw = new byte[edgeIds.Count][];
         var i = 0;
         foreach (var id in edgeIds) raw[i++] = id.ToBytes();
-        cmd.Parameters.Add(new NpgsqlParameter
+        parameters.Add(new NpgsqlParameter
         {
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             Value = raw,
         });
     }
 
-    private static void AddType(NpgsqlCommand cmd, Hash128 relationType)
+    private static void AddType(NpgsqlParameterCollection parameters, Hash128 relationType)
     {
-        cmd.Parameters.Add(new NpgsqlParameter
+        parameters.Add(new NpgsqlParameter
         {
             NpgsqlDbType = NpgsqlDbType.Bytea,
             Value = relationType.ToBytes(),

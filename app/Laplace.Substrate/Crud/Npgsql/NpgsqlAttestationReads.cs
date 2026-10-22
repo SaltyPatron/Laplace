@@ -53,12 +53,7 @@ public static class NpgsqlAttestationReads
         if (ids.Length == 0)
             return Task.FromResult<IReadOnlyList<byte[]>>(Array.Empty<byte[]>());
 
-        return NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT a.id
-            FROM laplace.attestations a
-            WHERE a.type_id = @type
-              AND a.id = ANY(@ids::bytea[])
-            """,
+        return NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("attestations.present_ids"),
             static r => r.GetFieldValue<byte[]>(0),
             p =>
             {
