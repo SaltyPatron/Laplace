@@ -1,4 +1,5 @@
 using System.Text;
+using Laplace.Decomposers.Composition;
 using Laplace.Decomposers.OMW;
 using Xunit;
 
@@ -77,8 +78,6 @@ public class GrammarSpineConformanceTests
             ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
-            // Atomic: several triple files, the same ExtractFileAsync unit via RelationTripleMultiFile.
-            ("Atomic2020", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleMultiFileDecomposerBase"]),
         };
 
         foreach (var (project, needles) in grammarSpine)
@@ -93,6 +92,11 @@ public class GrammarSpineConformanceTests
                     $"{project} must use grammar spine pattern '{needle}' in CODE "
                     + "(comments are stripped — a mention is not a use)");
         }
+
+        // Canonical corpora use the Native recipe engine, never a second managed
+        // per-record provider registered under the same source name.
+        Assert.Empty(EtlManifest.SourceOrder.Intersect(
+            SeedIngestComposition.RegisteredSourceKeys, StringComparer.OrdinalIgnoreCase));
     }
 
     [Fact]
