@@ -76,6 +76,78 @@ foreach($command in $commands){
         }
     }
 }
+# Independent CLI processes share one role journal. Force rollover while every
+# archive is retained, then account for each process in strict CSV and JSONL.
+$sharedLogs=Join-Path $evidence 'concurrent-cli-logs'
+$cli=(Resolve-Path -LiteralPath (Join-Path $binaryRoot 'Laplace.Cli/Release/net10.0/Laplace.Cli.dll')).Path
+$ownedIds=@()
+foreach($batch in 0..3){
+    $owned=@()
+    try{
+        foreach($index in 0..7){
+            $start=[Diagnostics.ProcessStartInfo]::new('dotnet')
+            foreach($argument in @($cli,'--api-client','op',"retention-$batch-$index")){$start.ArgumentList.Add($argument)}
+            $start.UseShellExecute=$false
+            $start.CreateNoWindow=$true
+            $start.WindowStyle='Hidden'
+            $start.RedirectStandardOutput=$true
+            $start.RedirectStandardError=$true
+            $start.Environment['LAPLACE_OPS_LOG_DIR']=$sharedLogs
+            $start.Environment['LAPLACE_LOG_FILE_BYTES']='8192'
+            $start.Environment['LAPLACE_LOG_RETAINED_FILES']=if($batch -eq 3){'3'}else{'1000'}
+            # A controlled argument error produces a real typed event without
+            # native engine startup, network traffic, or operator credentials.
+            $start.Environment['LAPLACE_API_URL']='invalid-validation-origin'
+            $start.Environment['LAPLACE_API_KEY_FILE']=''
+            $process=[Diagnostics.Process]::Start($start)
+            $owned+=@{Process=$process;Out=$process.StandardOutput.ReadToEndAsync();Err=$process.StandardError.ReadToEndAsync()}
+        }
+        foreach($child in $owned){
+            $process=$child.Process
+            if(-not $process.WaitForExit(30000)){throw 'Concurrent logging child did not complete within 30 seconds.'}
+            $stdout=$child.Out.GetAwaiter().GetResult()
+            $stderr=$child.Err.GetAwaiter().GetResult()
+            [IO.File]::WriteAllText((Join-Path $evidence ("concurrent-$($process.Id).stdout.log")),$stdout)
+            [IO.File]::WriteAllText((Join-Path $evidence ("concurrent-$($process.Id).stderr.log")),$stderr)
+            if($process.ExitCode -ne 1 -or $stderr.Contains('LOGGING_') -or $stderr.Contains('CSV_RETENTION_FAILED')){
+                throw "Concurrent logging child $($process.Id) lost its expected operation failure or reported a logging failure."
+            }
+            if($stdout.Length){throw 'Concurrent CLI argument failure contaminated stdout.'}
+            if($batch -lt 3){$ownedIds+=$process.Id}
+        }
+        if($batch -eq 2){
+            $csvEvents=@(Get-ChildItem -LiteralPath $sharedLogs -Filter 'laplace-cli*.csv' | ForEach-Object {
+                Import-Csv -LiteralPath $_.FullName -Header log_time,application_name,error_severity,category,message,detail | ForEach-Object {
+                    if($_.application_name -ne 'cli' -or -not $_.detail){throw 'Malformed concurrent CSV record.'}
+                    $_.detail | ConvertFrom-Json
+                }
+            })
+            $jsonEvents=@(Get-ChildItem -LiteralPath $sharedLogs -Filter 'laplace-cli-*.jsonl' | ForEach-Object {
+                Get-Content -LiteralPath $_.FullName | ForEach-Object {$_ | ConvertFrom-Json}
+            })
+            foreach($childId in $ownedIds){
+                foreach($events in @(@{Name='CSV';Rows=$csvEvents},@{Name='JSONL';Rows=$jsonEvents})){
+                    $failures=@($events.Rows | Where-Object {$_.Properties.ProcessId -eq $childId -and $_.Exception -like '*ArgumentException*'})
+                    if($failures.Count -ne 1){throw "$($events.Name) retained $($failures.Count) typed failures for process $childId; expected exactly one."}
+                    if(-not $failures[0].Properties.OperationId){throw 'Concurrent event lost its operation correlation.'}
+                }
+            }
+            $results+=@{role='cli';mode='concurrent-rollover';processes=$ownedIds.Count;csv_events=$csvEvents.Count;json_events=$jsonEvents.Count;passed=$true}
+        }
+    }finally{
+        foreach($child in $owned){
+            try{
+                if(-not $child.Process.HasExited){
+                    $child.Process.Kill($true)
+                    if(-not $child.Process.WaitForExit(5000)){throw 'Owned concurrent logging child did not stop.'}
+                }
+            }finally{$child.Process.Dispose()}
+        }
+    }
+}
+if(@(Get-ChildItem -LiteralPath $sharedLogs -Filter 'laplace-cli*.csv').Count -ne 3){throw 'CSV retention did not prune to three files.'}
+if(@(Get-ChildItem -LiteralPath $sharedLogs -Filter 'laplace-cli-*.jsonl').Count -ne 3){throw 'JSONL retention did not prune to three files.'}
+$results+=@{role='cli';mode='retention-prune';retained_files_per_format=3;passed=$true}
 @{schema='laplace.process-logging-acceptance/v1';checked_utc=[DateTimeOffset]::UtcNow.ToString('o');managed_bin_root=$binaryRoot;checks=$results} |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'receipt.json')
-Write-Host 'PASS real CLI, MCP, migrations and UCI process exits, protocol output, and controlled CSV/JSONL startup failures.'
+Write-Host 'PASS process exits, protocol output, CSV/JSONL failures, 24 concurrent-writer event accounts, and bounded retention.'

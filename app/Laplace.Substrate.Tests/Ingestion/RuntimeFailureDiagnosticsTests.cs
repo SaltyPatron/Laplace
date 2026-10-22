@@ -5,6 +5,7 @@ using Laplace.Engine.Core;
 using Laplace.Ingestion;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -12,6 +13,43 @@ namespace Laplace.SubstrateCRUD.Tests;
 [Collection("GrammarPerfcache")]
 public sealed class RuntimeFailureDiagnosticsTests
 {
+    [Fact]
+    public void ApplyPhaseLoggerFailuresRetainTheirCausesAndCannotReplaceTheOperationFailure()
+    {
+        using var capture = new FailureCapture();
+        var sinkFailure = new IOException("apply-log-sink-fixture", new InvalidOperationException("apply-log-inner"));
+        var operationFailure = new InvalidDataException("original-apply-operation-fixture");
+        var returned = Assert.Throws<InvalidDataException>((Action)(() =>
+        {
+            using var phase = new NpgsqlSubstrateWriter.ApplyDiagnosticPhase(new ThrowingApplyLogger(sinkFailure),
+                "control-transaction-commit", null, null, null, null);
+            throw operationFailure;
+        }));
+        Assert.Same(operationFailure, returned);
+        Assert.Contains("APPLY_DIAGNOSTIC_FAILED phase=control-transaction-commit boundary=entered", capture.Text);
+        Assert.Contains("boundary=exited", capture.Text);
+        Assert.Contains(sinkFailure.ToString(), capture.Text);
+    }
+
+    [Fact]
+    public void ApplyPhaseEnabledCheckFailureIsReportedWithoutOpeningADatabaseConnection()
+    {
+        using var capture = new FailureCapture();
+        using var source = UnreachableDatabase();
+        var writer = new NpgsqlSubstrateWriter(source, new ThrowingApplyLogger(new IOException("apply-enabled-check-fixture"), true));
+        Assert.Null(writer.MeasureApplyPhase("managed-staging"));
+        Assert.Contains("APPLY_DIAGNOSTIC_FAILED phase=managed-staging boundary=enabled-check", capture.Text);
+        Assert.Contains("apply-enabled-check-fixture", capture.Text);
+    }
+
+    private sealed class ThrowingApplyLogger(Exception failure, bool failEnabled = false) : ILogger<NpgsqlSubstrateWriter>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => failEnabled ? throw failure : true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => throw failure;
+    }
+
     private static NpgsqlDataSource UnreachableDatabase() => NpgsqlDataSource.Create(
         "Host=127.0.0.1;Port=1;Username=failure-test;Database=failure-test;SSL Mode=Disable;Timeout=1;Pooling=false");
 

@@ -11,9 +11,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The shared ops-logging foundation (GH #602/#635 refactor): Serilog does the hard
-         parts — concurrent shared-file append, buffering, flush — that were hand-rolled in
-         Laplace.Core. Referenced by the console deployables only, so Core stays dependency-free. -->
+    <!-- Serilog owns structured routing, JSONL rolling and sink failure reporting.
+         The CSV compatibility sink keeps the file_fdw pathname stable across
+         bounded rollover. Core stays independent of the logging packages. -->
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Serilog.Sinks.Console" />
