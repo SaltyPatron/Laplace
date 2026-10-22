@@ -62,9 +62,6 @@ public sealed class DecomposerArchitectureGateTests
         GenericDecomposer,
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
-        "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
-        // links.csv resolves row ids through the id → content-root map built from
-        // sentences.csv, so sentences precede links.
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
     };
 
@@ -222,8 +219,6 @@ public sealed class DecomposerArchitectureGateTests
         // the decomposer's parser.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "app/Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
-            "app/Laplace.Decomposers/SemLink/SemLinkIngestAdapter.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryDecomposer.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryEntry.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryGrammarWitness.cs",
