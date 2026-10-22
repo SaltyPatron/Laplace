@@ -7,7 +7,8 @@
   "selected": true,
   "root": "UD-Treebanks",
   "aliases": [
-    "ud"
+    "ud",
+    "universal-dependencies"
   ],
   "artifacts": [
     {
