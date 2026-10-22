@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using NpgsqlTypes;
@@ -20,18 +21,7 @@ public static partial class NpgsqlSubstrateReads
         byte[] sourceId,
         CancellationToken ct)
     {
-        bool? exists = await NpgsqlRead.ExecuteScalarAsync<bool>(connection, """
-            SELECT EXISTS (
-                SELECT 1
-                FROM laplace.attestations a
-                JOIN laplace.entities e
-                  ON e.id = a.object_id
-                 AND e.type_id = @file_type
-                WHERE a.subject_id = @source AND a.source_id = @source
-                  AND a.object_id = @file AND a.type_id = @type
-                  AND a.outcome = @outcome
-            )
-            """,
+        bool? exists = await NpgsqlRead.ExecuteScalarAsync<bool>(connection, SqlCatalog.Get("content.confirmed_user_artifact_occurrence"),
             parameters =>
             {
                 parameters.Add("source", NpgsqlDbType.Bytea).Value = sourceId;
@@ -47,16 +37,6 @@ public static partial class NpgsqlSubstrateReads
             label: "confirmed_user_artifact_occurrence").ConfigureAwait(false);
         return exists is true;
     }
-
-    private const string UserArtifactObservationSql = """
-        SELECT bytes, modified_at
-        FROM laplace.ingest_file_journal
-        WHERE source_name = @source_name
-          AND file_id = @file
-          AND status = 'ok'
-        ORDER BY ended_at DESC NULLS LAST, run_id DESC
-        LIMIT 1
-        """;
 
     private static UserArtifactObservation MapUserArtifactObservation(NpgsqlDataReader reader) => new(
         reader.GetInt64(0),
@@ -77,7 +57,7 @@ public static partial class NpgsqlSubstrateReads
         byte[] fileId,
         CancellationToken ct)
     {
-        var rows = await NpgsqlRead.ReadRowsAsync(connection, UserArtifactObservationSql,
+        var rows = await NpgsqlRead.ReadRowsAsync(connection, SqlCatalog.Get("content.user_artifact_observation"),
             MapUserArtifactObservation,
             parameters => BindUserArtifactObservation(parameters, sourceName, fileId),
             ct: ct,
@@ -93,7 +73,7 @@ public static partial class NpgsqlSubstrateReads
         byte[] fileId,
         CancellationToken ct)
     {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, UserArtifactObservationSql,
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("content.user_artifact_observation"),
             MapUserArtifactObservation,
             parameters => BindUserArtifactObservation(parameters, sourceName, fileId),
             ct: ct,
@@ -108,15 +88,7 @@ public static partial class NpgsqlSubstrateReads
         byte[] promptId,
         byte[] promptSourceId,
         CancellationToken ct) =>
-        NpgsqlRead.ReadRowsAsync(connection, """
-            SELECT DISTINCT encode(COALESCE(context_id, object_id), 'hex')
-            FROM laplace.attestations
-            WHERE subject_id = @subject
-              AND source_id = @source
-              AND type_id = @type
-              AND outcome = @outcome
-            ORDER BY 1
-            """,
+        NpgsqlRead.ReadRowsAsync(connection, SqlCatalog.Get("content.confirmed_prompt_contexts"),
             static reader => reader.GetString(0),
             parameters =>
             {

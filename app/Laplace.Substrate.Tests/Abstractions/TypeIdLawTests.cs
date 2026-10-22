@@ -121,8 +121,9 @@ public class TypeIdLawTests
     {
         var repoRoot = FindRepoRoot();
         var cliDir = Path.Combine(repoRoot, "app", "Laplace.Cli");
-        var reads = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
-            "NpgsqlSubstrateReads.cs");
+        var readFolder = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql");
+        var reads = string.Join("\n", Directory.EnumerateFiles(readFolder, "NpgsqlSubstrateReads*.cs")
+            .Select(File.ReadAllText));
 
         var sb = new System.Text.StringBuilder();
         foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
@@ -130,7 +131,7 @@ public class TypeIdLawTests
         var text = sb.ToString();
         // CLI and HTTP consume the canonical forward-turn rows via the native catalog.
         Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
-        Assert.Contains("SqlCatalog.Get(\"conversation.forward_turn\")", File.ReadAllText(reads), StringComparison.Ordinal);
+        Assert.Contains("\"conversation.forward_turn\"", reads, StringComparison.Ordinal);
         Assert.Contains("converse.forward_turn($1,$2,$3,$4,$5,$6)",
             File.ReadAllText(Path.Combine(repoRoot,"engine","core","src","sql_catalog.def")), StringComparison.Ordinal);
         Assert.DoesNotContain("generation.generate(", text, StringComparison.Ordinal);

@@ -47,4 +47,13 @@ public sealed class ReadPathSqlScannerTests
         Assert.False(ReadPathArchitectureGateTests.HasHandWrittenSql(comment));
         Assert.True(ReadPathArchitectureGateTests.HasHandWrittenSql(comment + "var sql = @\"SELECT 1\";"));
     }
+
+    [Fact]
+    public void StorageSqlScanChecksLiteralsWithoutTreatingCatalogCommandCreationAsSql()
+    {
+        const string catalog = "var command = NpgsqlRead.CreateCommand(source, SqlCatalog.Get(\"entity.facets\"));";
+        Assert.False(ReadPathArchitectureGateTests.HasInlineSql(catalog));
+        Assert.True(ReadPathArchitectureGateTests.HasInlineSql(catalog + "var sql = \"SELECT 1\";"));
+        Assert.True(ReadPathArchitectureGateTests.HasInlineSql("#if OTHER_PLATFORM\nvar sql = \"SELECT 1\";\n#endif"));
+    }
 }

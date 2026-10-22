@@ -1,6 +1,6 @@
 using System.Text;
 using global::Npgsql;
-using NpgsqlTypes;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -12,12 +12,7 @@ public static partial class NpgsqlSubstrateReads
     // from earlier attempts, which the program takes as its DISCOURSE operand. No
     // source family is selected here; COUPLE and ROUTE find whatever testimony bears
     // on the prompt.
-    internal const string ForwardCodeSql = """
-        SELECT g.step, g.entity, g.stride_used
-        FROM generation.forward_text(
-            $1, $2, $3, $4, $5, NULL::bigint, 4, 16, $6::bytea[]) g
-        ORDER BY g.step
-        """;
+    internal static string ForwardCodeSql => SqlCatalog.Get("generation.forward_code").Text;
 
     public static async Task<string?> ForwardCodeAsync(
         NpgsqlDataSource dataSource,
@@ -30,14 +25,8 @@ public static partial class NpgsqlSubstrateReads
         CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var command = new NpgsqlCommand(ForwardCodeSql, connection);
-        command.Parameters.AddWithValue(NpgsqlDbType.Text, prompt);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, steps);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, maxStride);
-        command.Parameters.AddWithValue(NpgsqlDbType.Double, spread);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, topK);
-        command.Parameters.AddWithValue(
-            NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+        await using var command = NpgsqlCatalog.Command(connection, null, "generation.forward_code",
+            prompt, steps, maxStride, spread, topK,
             feedbackRoots.Count == 0 ? Array.Empty<byte[]>() : feedbackRoots.ToArray());
 
         var text = new StringBuilder();
