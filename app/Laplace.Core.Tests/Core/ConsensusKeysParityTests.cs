@@ -5,10 +5,8 @@ namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
 /// ConsensusKeys.EdgeId is byte-identical to SQL laplace.consensus_id (BLAKE3 over
-/// subject(16)‖type(16)‖object-or-zero(16), FOLD_IDENT_LEN = 48), so one typed triple's
-/// consensus cell has one id in C# and in the extension. Expected values are
-/// laplace.consensus_id outputs; a failure is a divergence to fix in code, not in the
-/// fixture.
+/// the actual strand vertices). Three-vertex vectors retain their known server
+/// bytes; an absent object is not an invented zero-filled third vertex.
 /// </summary>
 public class ConsensusKeysParityTests
 {
@@ -37,12 +35,14 @@ public class ConsensusKeysParityTests
     }
 
     [Fact]
-    public void EdgeId_NullObject_MatchesServerConsensusId_ZeroPadded()
+    public void EdgeId_NullObject_ComposesOnlyItsTwoActualVertices()
     {
         var subject = H(0x00);
         var type = H(0x10);
-        Assert.Equal("bb7fea3858e878658da23d1ed4bd8236",
-            Hex(ConsensusKeys.EdgeId(subject, type, (Hash128?)null)));
+        Assert.Equal(Hash128.Merkle(0, [subject, type]),
+            ConsensusKeys.EdgeId(subject, type, (Hash128?)null));
+        Assert.NotEqual(ConsensusKeys.EdgeId(subject, type, Hash128.Zero),
+            ConsensusKeys.EdgeId(subject, type, (Hash128?)null));
     }
 
     [Fact]

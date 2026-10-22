@@ -22,6 +22,14 @@ DECLARE
     leafname text;
     dup_ok   boolean := false;
 BEGIN
+    -- The writer and SQL must compose exactly the existing strand vertices.
+    -- A missing object is absent, and is distinct from an explicit zero ID.
+    IF laplace.consensus_id(subj,rel_a,NULL) <> public.laplace_hash128_merkle(
+            0::smallint,ARRAY[subj,rel_a])
+       OR laplace.consensus_id(subj,rel_a,NULL) = laplace.consensus_id(
+            subj,rel_a,decode(repeat('00',16),'hex')) THEN
+        RAISE EXCEPTION 'FAIL: consensus identity invents a missing object vertex';
+    END IF;
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (src, 0, type_t), (rel_a, 0, type_t), (subj, 0, type_t),
         (o1, 0, type_t), (o2, 0, type_t)
@@ -38,6 +46,11 @@ BEGIN
         ARRAY[t1, t1, t1]);
     IF affected <> 3 THEN
         RAISE EXCEPTION 'FAIL: fresh upsert affected % rows, expected 3', affected;
+    END IF;
+    IF NOT EXISTS (SELECT FROM laplace.consensus
+            WHERE id = public.laplace_hash128_merkle(0::smallint,ARRAY[subj,rel_a])
+              AND subject_id=subj AND type_id=rel_a AND object_id IS NULL) THEN
+        RAISE EXCEPTION 'FAIL: native fold writer diverges from actual-arity consensus identity';
     END IF;
 
     SELECT * INTO row1 FROM laplace.consensus
