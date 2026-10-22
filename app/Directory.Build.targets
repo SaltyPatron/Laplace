@@ -66,8 +66,8 @@
     <Exec Command="&quot;$(LaplaceRepoRoot)\scripts\win\engine-runtime.cmd&quot; &quot;$(PublishDir)&quot;" />
     <Exec Command="pwsh -NoProfile -File &quot;$(LaplaceRepoRoot)\scripts\win\publish-zstd.ps1&quot; -Destination &quot;$(PublishDir).&quot;" />
     <ItemGroup>
-      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_t0_perfcache.bin" />
-      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_highway_perfcache.bin" />
+      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\tier0.bin" />
+      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\highway.bin" />
       <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_chess_position_perfcache.bin" />
       <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_chess_transition_perfcache.bin" />
     </ItemGroup>
