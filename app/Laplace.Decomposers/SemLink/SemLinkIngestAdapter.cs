@@ -16,16 +16,16 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
     public async IAsyncEnumerable<GrammarIngestRecord> RecordsAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        IntPtr recipe = GrammarDecomposer.LookupById("json");
-        if (recipe == IntPtr.Zero) yield break;
-
-        byte[]? utf8 = await ReadFileBytesAsync(_path, ct);
-        if (utf8 is null || utf8.Length == 0) yield break;
+        ct.ThrowIfCancellationRequested();
+        byte[] utf8 = await ReadFileBytesAsync(_path, ct);
 
         // Span discovery is one sequential Utf8JsonReader pass, not a full grammar AST of
         // the document plus a reparse of every pair.
-        var pairSpans = ReadTopLevelPairSpans(utf8, recipe);
+        var pairSpans = ReadTopLevelPairSpansUtf8(utf8);
         if (pairSpans.Count == 0) yield break;
+        IntPtr recipe = GrammarDecomposer.LookupById("json");
+        if (recipe == IntPtr.Zero)
+            throw new InvalidOperationException($"SemLink source '{_path}' requires the native JSON grammar.");
 
         int rowIndex = 0;
         long rowsTotal = pairSpans.Count;
@@ -34,6 +34,12 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
             ct.ThrowIfCancellationRequested();
             byte[] subDoc = WrapSinglePair(utf8, start, end);
             var ast = GrammarDecomposer.Parse(subDoc, recipe);
+            try
+            {
+                if (!ast.Diagnostics.SyntaxComplete)
+                    throw new InvalidDataException($"SemLink native JSON parse recovered incomplete syntax at source '{_path}', record {rowIndex}.");
+            }
+            catch { ast.Dispose(); throw; }
             yield return new GrammarIngestRecord(subDoc, ast, rowIndex++, rowsTotal);
             await Task.Yield();
         }
@@ -41,72 +47,37 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
 
     internal static async Task<long?> CountRecordsAsync(string path, CancellationToken ct)
     {
-        byte[]? utf8 = await ReadFileBytesAsync(path, ct);
-        if (utf8 is null || utf8.Length == 0) return null;
-        try
-        {
-            return ReadTopLevelPairSpansUtf8(utf8).Count;
-        }
-        catch (JsonException)
-        {
-            IntPtr recipe = GrammarDecomposer.LookupById("json");
-            return recipe == IntPtr.Zero ? null : ReadTopLevelPairSpans(utf8, recipe).Count;
-        }
-    }
-
-    /// <summary>
-    /// Top-level object property byte ranges, from <see cref="Utf8JsonReader"/>; a file the
-    /// JSON reader rejects is read with one grammar AST walk instead.
-    /// </summary>
-    internal static List<(uint Start, uint End)> ReadTopLevelPairSpans(byte[] utf8, IntPtr recipe)
-    {
-        try
-        {
-            var viaReader = ReadTopLevelPairSpansUtf8(utf8);
-            if (viaReader.Count > 0) return viaReader;
-        }
-        catch (JsonException)
-        {
-            // Read with the grammar AST below.
-        }
-
-        var spans = new List<(uint, uint)>();
-        using var ast = GrammarDecomposer.Parse(utf8, recipe);
-        int rootObj = JsonGrammarHelper.FindRootObjectNode(ast);
-        if (rootObj < 0) return spans;
-
-        for (int i = 0; i < ast.NodeCount; i++)
-        {
-            var node = ast.GetNode(i);
-            if (node.Parent != (uint)rootObj) continue;
-            if (ast.NodeTypeName(node.NodeTypeId) != "pair") continue;
-            if (node.EndByte <= node.StartByte || node.EndByte > utf8.Length) continue;
-            spans.Add((node.StartByte, node.EndByte));
-        }
-        return spans;
+        byte[] utf8 = await ReadFileBytesAsync(path, ct);
+        return ReadTopLevelPairSpansUtf8(utf8).Count;
     }
 
     private static List<(uint Start, uint End)> ReadTopLevelPairSpansUtf8(byte[] utf8)
     {
         var spans = new List<(uint, uint)>();
-        var reader = new Utf8JsonReader(utf8, isFinalBlock: true, state: default);
+        int preamble = utf8.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf }) ? 3 : 0;
+        var reader = new Utf8JsonReader(utf8.AsSpan(preamble), isFinalBlock: true, state: default);
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
-            return spans;
+            throw new InvalidDataException("SemLink JSON source must contain one complete top-level object.");
 
         while (reader.Read())
         {
             if (reader.TokenType == JsonTokenType.EndObject)
-                break;
+            {
+                // Reading through EOF also rejects trailing garbage/a second
+                // document instead of admitting only a valid-looking prefix.
+                if (reader.Read()) throw new JsonException("SemLink source contains more than one JSON value.");
+                return spans;
+            }
             if (reader.TokenType != JsonTokenType.PropertyName)
                 continue;
 
-            long start = reader.TokenStartIndex;
+            long start = preamble + reader.TokenStartIndex;
             reader.Skip();
-            long end = reader.BytesConsumed;
+            long end = preamble + reader.BytesConsumed;
             if (end > start && end <= utf8.Length)
                 spans.Add(((uint)start, (uint)end));
         }
-        return spans;
+        throw new JsonException("SemLink JSON source ended before the top-level object closed.");
     }
 
     internal static byte[] WrapSinglePair(byte[] utf8, uint start, uint end)
@@ -119,28 +90,19 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
         return buf;
     }
 
-    private static async Task<byte[]?> ReadFileBytesAsync(string file, CancellationToken ct)
+    private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
     {
-        try
-        {
-            var fi = new FileInfo(file);
-            if (!fi.Exists || fi.Length == 0
-                || fi.Length > IngestSizing.ResolveContiguousPayloadBytes()) return null;
-            var bytes = new byte[(int)fi.Length];
-            await using var fs = IngestIo.OpenSequentialRead(file, useAsync: true);
-            int off = 0;
-            while (off < bytes.Length)
-            {
-                int n = await fs.ReadAsync(bytes.AsMemory(off), ct);
-                if (n == 0) return null;
-                off += n;
-            }
-            return bytes;
-        }
-        catch
-        {
-            return null;
-        }
+        ct.ThrowIfCancellationRequested();
+        await using var fs = IngestIo.OpenSequentialRead(file, useAsync: true);
+        long length = fs.Length;
+        long limit = Math.Min(Array.MaxLength, IngestSizing.ResolveContiguousPayloadBytes());
+        if (length == 0) throw new InvalidDataException($"SemLink JSON source '{file}' is empty.");
+        if (length > limit)
+            throw new InvalidDataException($"SemLink JSON source '{file}' has {length} bytes, exceeding the contiguous payload limit of {limit} bytes.");
+        var bytes = new byte[checked((int)length)];
+        await fs.ReadExactlyAsync(bytes, ct);
+        if (fs.Length != length) throw new IOException($"SemLink JSON source '{file}' changed length while being read.");
+        return bytes;
     }
 }
 

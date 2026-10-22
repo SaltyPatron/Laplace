@@ -46,9 +46,9 @@ public static class LaplaceLogging
         catch (Exception loggingFailure)
         {
             persistent.Failed();
-            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=fatal-report: {loggingFailure}", persistent);
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=fatal-report: {ExceptionText(loggingFailure, persistent)}", persistent);
         }
-        Emergency($"{component}: pid={Environment.ProcessId} {failure}", persistent);
+        Emergency($"{component}: pid={Environment.ProcessId} {ExceptionText(failure, persistent)}", persistent);
     }
 
     /// <summary>Observe flush/disposal and sink health before declaring process success.</summary>
@@ -67,13 +67,26 @@ public static class LaplaceLogging
         catch (Exception failure)
         {
             persistent.Failed();
-            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=shutdown: {failure}", persistent);
+            Emergency($"LOGGING_FAILURE component={component} pid={Environment.ProcessId} stage=shutdown: {ExceptionText(failure, persistent)}", persistent);
         }
         var snapshot = persistent.Snapshot();
         if (snapshot.Ready) return operationExitCode;
         Emergency($"LOGGING_UNAVAILABLE component={component} pid={Environment.ProcessId} initialized={snapshot.Initialized} "
             + $"failures={snapshot.FailureCount} operation_exit={operationExitCode}", persistent);
         return operationExitCode == 0 ? 1 : operationExitCode;
+    }
+
+    private static string ExceptionText(Exception failure, PersistentLogHealth health)
+    {
+        try { return failure.ToString(); }
+        catch (Exception formattingFailure)
+        {
+            health.Failed();
+            string message;
+            try { message = failure.Message; }
+            catch (Exception) { message = "<exception message unavailable>"; }
+            return $"{failure.GetType().FullName}: {message} [exception formatting failed: {formattingFailure.GetType().FullName}]";
+        }
     }
 
     private static void Emergency(string message, PersistentLogHealth health)
@@ -183,6 +196,7 @@ public static class LaplaceLogging
         }
 
         persistent.Initialized();
+        ProcessFailureEvents.Register(role, persistent);
         return config;
     }
 

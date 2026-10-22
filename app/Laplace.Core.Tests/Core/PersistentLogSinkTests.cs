@@ -342,6 +342,94 @@ public sealed class PersistentLogSinkTests
         Assert.Empty(output.Stdout);
     }
 
+    [Theory]
+    [InlineData("operation")]
+    [InlineData("reporter")]
+    [InlineData("shutdown")]
+    public void AnExceptionWithBrokenFormattingCannotCrashTheFailureReporter(string boundary)
+    {
+        var health = new PersistentLogHealth();
+        health.Initialized();
+        var failure = new UnrenderableException("unrenderable-fixture-cause");
+        var output = CaptureCompletion(() =>
+        {
+            if (boundary == "shutdown")
+                return LaplaceLogging.CompleteProcess(() => throw failure, "formatting-fixture", 0, health);
+            LaplaceLogging.ReportProcessFailure("formatting-fixture",
+                boundary == "operation" ? failure : new IOException("original-operation-fixture"),
+                boundary == "reporter" ? _ => throw failure : null, health);
+            return LaplaceLogging.CompleteProcess((IDisposable?)null, "formatting-fixture", 0, health);
+        });
+        Assert.Equal(1, output.ExitCode);
+        Assert.Contains(nameof(UnrenderableException), output.Stderr);
+        Assert.Contains("unrenderable-fixture-cause", output.Stderr);
+        Assert.Empty(output.Stdout);
+    }
+
+    private sealed class UnrenderableException(string message) : Exception(message)
+    {
+        public override string ToString() => throw new IOException("exception-ToString-fixture");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RuntimeFailureNotificationRetainsTheCauseAndTerminationState(bool terminating)
+    {
+        WithLogDirectory(directory =>
+        {
+            var previous = Log.Logger;
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("runtime-failure", false, health: health).CreateLogger();
+            try
+            {
+                Log.Logger = logger;
+                var output = CaptureCompletion(() =>
+                {
+                    // Exercise the registered notification handler directly. This
+                    // test does not create an unhandled exception/crash dialog.
+                    ProcessFailureEvents.OnUnhandledException(null, new UnhandledExceptionEventArgs(
+                        new IOException("runtime-event-fixture", new InvalidOperationException("runtime-inner-fixture")), terminating));
+                    return 0;
+                });
+                Assert.Contains("runtime-inner-fixture", output.Stderr);
+                Assert.Empty(output.Stdout);
+                using var json = JsonDocument.Parse(ReadShared(Assert.Single(Directory.GetFiles(directory, "*.jsonl"))));
+                Assert.Equal("Fatal", json.RootElement.GetProperty("Level").GetString());
+                Assert.Contains("runtime-inner-fixture", json.RootElement.GetProperty("Exception").GetString());
+                Assert.Equal(terminating, json.RootElement.GetProperty("Properties").GetProperty("IsTerminating").GetBoolean());
+                Assert.Contains("runtime-inner-fixture", ReadShared(Path.Combine(directory, "laplace-runtime-failure.csv")));
+                Assert.True(health.Snapshot().Ready);
+            }
+            finally { Log.Logger = previous; }
+        });
+    }
+
+    [Fact]
+    public void UnobservedTaskNotificationIsLoggedWithoutChangingRuntimeObservationPolicy()
+    {
+        WithLogDirectory(directory =>
+        {
+            var previous = Log.Logger;
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("task-failure", false, health: health).CreateLogger();
+            try
+            {
+                Log.Logger = logger;
+                var notification = new UnobservedTaskExceptionEventArgs(new AggregateException(new IOException("unobserved-task-fixture")));
+                var output = CaptureCompletion(() => { ProcessFailureEvents.OnUnobservedTaskException(null, notification); return 0; });
+                Assert.False(notification.Observed);
+                Assert.Contains("unobserved-task-fixture", output.Stderr);
+                Assert.Empty(output.Stdout);
+                using var json = JsonDocument.Parse(ReadShared(Assert.Single(Directory.GetFiles(directory, "*.jsonl"))));
+                Assert.Equal("Error", json.RootElement.GetProperty("Level").GetString());
+                Assert.Contains("unobserved-task-fixture", json.RootElement.GetProperty("Exception").GetString());
+                Assert.True(health.Snapshot().Ready);
+            }
+            finally { Log.Logger = previous; }
+        });
+    }
+
     [Fact]
     public void ClosedEmergencyOutputCannotEscapeAsAnUnhandledException()
     {
