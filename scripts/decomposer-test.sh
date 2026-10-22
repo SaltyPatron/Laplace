@@ -39,7 +39,7 @@ export LAPLACE_DB="Host=${PGHOST:-/var/run/postgresql};Username=${PGUSER:-laplac
 for prereq in ${PREREQ_SOURCES:-}; do
   echo "==== prerequisite ingest: $prereq ===="
   if [[ "$prereq" == "document" ]]; then
-    doc="${LAPLACE_DATA_ROOT:-/vault/Data}/test-data/text"
+    doc="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/test-data/text"
     [[ -d "$doc" ]] || { echo "document prerequisite requires $doc" >&2; exit 1; }
     "$SCRIPTS/ingest-source.sh" document "$doc"
   else
@@ -49,7 +49,7 @@ done
 
 echo "==== target ingest: $SOURCE ===="
 if [[ "$SOURCE" == "document" ]]; then
-  doc="${LAPLACE_DATA_ROOT:-/vault/Data}/test-data/text"
+  doc="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/test-data/text"
   [[ -d "$doc" ]] || { echo "document test requires $doc" >&2; exit 1; }
   "$SCRIPTS/ingest-source.sh" document "$doc"
 else
