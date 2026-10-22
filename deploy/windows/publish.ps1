@@ -9,6 +9,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+. "$PSScriptRoot/iis-runtime.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
 if($Installation){& "$PSScriptRoot/Build-IisPackage.ps1" -Installation $Installation -Publish;return}
 if(-not $OutDir){$OutDir=$env:LAPLACE_IIS_API}
@@ -29,7 +30,7 @@ try {
   $needCi = $true
   if ((Test-Path "node_modules") -and (Test-Path $lock) -and (Test-Path $stamp)) {
     $lockHash = (Get-FileHash $lock -Algorithm SHA256).Hash
-    $prev = (Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue).Trim()
+    $prev = (Get-Content -LiteralPath $stamp -Raw).Trim()
     if ($prev -eq $lockHash) {
       Write-Host "    npm ci skipped (package-lock stamp fresh)" -ForegroundColor DarkGray
       $needCi = $false
@@ -49,19 +50,19 @@ try {
 }
 finally { Pop-Location }
 
-Write-Host "==> [2/6] publish API + UCI in parallel -> staging" -ForegroundColor Cyan
+Write-Host "==> [2/6] publish API + UCI -> staging" -ForegroundColor Cyan
 $stage = Join-Path $env:TEMP "laplace-api-stage"
 $uciStage = Join-Path $env:TEMP "laplace-uci-stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 if (Test-Path $uciStage) { Remove-Item $uciStage -Recurse -Force }
 $apiLog = Join-Path $env:TEMP "laplace-publish-api.log"
 $uciLog = Join-Path $env:TEMP "laplace-publish-uci-iis.log"
-$api = Start-Process -FilePath "dotnet" -ArgumentList @("publish", $proj, "-c", $Configuration, "--no-self-contained", "-o", $stage) -PassThru -NoNewWindow -RedirectStandardOutput $apiLog -RedirectStandardError ($apiLog + ".err")
-$uci = Start-Process -FilePath "dotnet" -ArgumentList @("publish", $uciProj, "-c", $Configuration, "--no-self-contained", "-o", $uciStage) -PassThru -NoNewWindow -RedirectStandardOutput $uciLog -RedirectStandardError ($uciLog + ".err")
-Wait-Process -Id $api.Id, $uci.Id
-Get-Content $apiLog, ($apiLog + ".err"), $uciLog, ($uciLog + ".err") -ErrorAction SilentlyContinue
-if ($api.ExitCode -ne 0) { throw "dotnet publish API failed (rc=$($api.ExitCode))" }
-if ($uci.ExitCode -ne 0) { throw "laplace-uci publish failed (rc=$($uci.ExitCode))" }
+# Both publishes share managed dependency outputs. Await each command so a
+# failed launch cannot abandon its sibling, and paths retain native quoting.
+Invoke-IisNativeCommand 'dotnet' @('publish',$proj,'-c',$Configuration,'--no-self-contained','-o',$stage) |
+  Tee-Object -FilePath $apiLog | ForEach-Object { Write-Host $_ }
+Invoke-IisNativeCommand 'dotnet' @('publish',$uciProj,'-c',$Configuration,'--no-self-contained','-o',$uciStage) |
+  Tee-Object -FilePath $uciLog | ForEach-Object { Write-Host $_ }
 Get-ChildItem $uciStage -File | Copy-Item -Destination $stage -Force
 $uciExe = Join-Path $stage "laplace-uci.exe"
 if (-not (Test-Path $uciExe)) { throw "laplace-uci.exe missing from staging — publish step failed" }
@@ -91,24 +92,22 @@ $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
 $pool = "LaplacePool"
 if (Test-Path $appcmd) {
   Write-Host "    stopping IIS app pool $pool" -ForegroundColor DarkGray
-  & $appcmd stop apppool "/apppool.name:$pool" 2>$null | Out-Null
+  Invoke-IisNativeCommand $appcmd @('stop','apppool',"/apppool.name:$pool") | Out-Null
   $deadline = (Get-Date).AddSeconds(60)
   while ((Get-Date) -lt $deadline) {
-    $running = & $appcmd list wp 2>$null | Select-String -Pattern 'LaplacePool' -Quiet
+    $running = Invoke-IisNativeCommand $appcmd @('list','wp') | Select-String -Pattern 'LaplacePool' -Quiet
     if (-not $running) { break }
     Start-Sleep -Seconds 1
   }
-  if (& $appcmd list wp 2>$null | Select-String -Pattern 'LaplacePool' -Quiet) {
+  if (Invoke-IisNativeCommand $appcmd @('list','wp') | Select-String -Pattern 'LaplacePool' -Quiet) {
     throw "LaplacePool worker still running — cannot sync to $OutDir"
   }
 }
 $offline = Join-Path $OutDir "app_offline.htm"
 Set-Content -Path $offline -Value "<h1>Laplace is deploying…</h1>" -Encoding utf8
 Start-Sleep -Seconds 1
-robocopy $stage $OutDir /MIR /XD logs /XF app_offline.htm /NFL /NDL /NJH /NJS /NP | Out-Null
-$rc = $LASTEXITCODE
-Remove-Item $offline -Force -ErrorAction SilentlyContinue
-if ($rc -ge 8) { throw "robocopy failed ($rc)" }
+Invoke-IisNativeCommand 'robocopy' @($stage,$OutDir,'/MIR','/XD','logs','/XF','app_offline.htm','/NFL','/NDL','/NJH','/NJS','/NP') -MaxSuccessExitCode 7 | Out-Null
+Remove-Item -LiteralPath $offline -Force
 if (-not (Test-Path (Join-Path $OutDir "laplace-uci.exe"))) { throw "laplace-uci.exe missing from $OutDir after sync" }
 $mainDll = Join-Path $OutDir "Laplace.Endpoints.OpenAICompat.dll"
 $stageDll = Join-Path $stage "Laplace.Endpoints.OpenAICompat.dll"
@@ -117,8 +116,8 @@ if ((Get-FileHash $stageDll).Hash -ne (Get-FileHash $mainDll).Hash) {
 }
 if (Test-Path $appcmd) {
   Write-Host "    starting IIS app pool $pool" -ForegroundColor DarkGray
-  & $appcmd start apppool "/apppool.name:$pool" 2>$null | Out-Null
-  & $appcmd start site "/site.name:Laplace" 2>$null | Out-Null
+  Invoke-IisNativeCommand $appcmd @('start','apppool',"/apppool.name:$pool") | Out-Null
+  Invoke-IisNativeCommand $appcmd @('start','site','/site.name:Laplace') | Out-Null
 }
 $global:LASTEXITCODE = 0
 Write-Host "OK published to $OutDir (laplace-uci.exe at install root)" -ForegroundColor Green

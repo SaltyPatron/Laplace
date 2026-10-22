@@ -66,22 +66,10 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         long lines = 0;
         foreach (var f in EnumerateFiles(context.EcosystemPath, _scope))
-        {
-            try
-            {
-                using var r = new StreamReader(f);
-                string? line;
-                while ((line = await r.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
-                    if (ParseRow(line) is not null) lines++;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"ChessOpeningsDecomposer: failed to estimate rows in {f}: {ex.Message}");
-            }
-        }
+            await foreach (var row in StreamRowsAsync(f, ct)) lines++;
         return lines == 0 ? null : lines;
     }
 
@@ -105,7 +93,8 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
             foreach (var san in sans)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
-                if (mv is null) return;
+                if (mv is null)
+                    throw new InvalidDataException($"Opening {eco} '{name}' has illegal SAN '{san}' at ply {moves.Count + 1}.");
                 moves.Add(ChessGraph.ComposeMovePoint(
                     state.Board.Squares[mv.Value.From], mv.Value));
                 state = m.Apply(state, mv.Value);
@@ -149,29 +138,42 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     internal static List<string> ExtractSans(string movetext)
     {
-        var bytes = Encoding.UTF8.GetBytes(movetext);
+        // TSV supplies a movetext fragment. The fixed header/unknown termination
+        // frame it for the PGN grammar; only source moves become testimony.
+        var tail = movetext.AsSpan().TrimEnd();
+        bool terminated = tail.EndsWith("*", StringComparison.Ordinal)
+            || tail.EndsWith("1-0", StringComparison.Ordinal)
+            || tail.EndsWith("0-1", StringComparison.Ordinal)
+            || tail.EndsWith("1/2-1/2", StringComparison.Ordinal);
+        var bytes = Encoding.UTF8.GetBytes("[Event \"Opening fragment\"]\n\n" + movetext + (terminated ? "\n" : "\n*"));
         using var ast = GrammarDecomposer.Parse(bytes, "pgn");
+        if (!ast.Diagnostics.SyntaxComplete)
+            throw new InvalidDataException($"Opening movetext has incomplete native PGN syntax (errors={ast.Diagnostics.ErrorNodeCount}, missing={ast.Diagnostics.MissingNodeCount}).");
         return PgnMovetext.Extract(ast, bytes).Moves;
     }
 
-    internal static (string Eco, string Name, string Movetext)? ParseRow(string line)
+    internal static (string Eco, string Name, string Movetext)? ParseRow(string line, string? path = null, int lineNumber = 0)
     {
-        if (line.Length == 0) return null;
+        if (string.IsNullOrWhiteSpace(line)) return null;
         var cols = line.Split('\t');
-        if (cols.Length < 3) return null;
+        if (cols.Length < 3)
+            throw new InvalidDataException($"Opening TSV {path ?? "input"}:{lineNumber} requires ECO, name and movetext columns.");
         string eco = cols[0].Trim(), name = cols[1].Trim(), movetext = cols[2].Trim();
-        if (eco.Length == 0 || movetext.Length == 0) return null;
         if (string.Equals(eco, "eco", StringComparison.OrdinalIgnoreCase)) return null;
+        if (eco.Length == 0 || movetext.Length == 0)
+            throw new InvalidDataException($"Opening TSV {path ?? "input"}:{lineNumber} has an empty ECO or movetext field.");
         return (eco, name, movetext);
     }
 
     private static async IAsyncEnumerable<(string Eco, string Name, string Movetext)> StreamRowsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         string? line;
+        int lineNumber = 0;
         while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
-            if (ParseRow(line) is { } row)
+            if (ParseRow(line, path, ++lineNumber) is { } row)
                 yield return row;
     }
 
@@ -195,11 +197,13 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     private static long CountParsableRows(string path, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         long n = 0;
+        int lineNumber = 0;
         foreach (var line in File.ReadLines(path))
         {
             ct.ThrowIfCancellationRequested();
-            if (ParseRow(line) is not null) n++;
+            if (ParseRow(line, path, ++lineNumber) is not null) n++;
         }
         return n;
     }

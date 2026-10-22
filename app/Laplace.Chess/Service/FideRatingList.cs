@@ -511,14 +511,7 @@ internal static class FideRatingList
         catch
         {
             pipelineCts.Cancel();
-            try
-            {
-                Task.WhenAll(inFlight.Select(static x => x.Work)).GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // The initiating parser/worker exception remains the failure contract.
-            }
+            DrainFailedWorkers(inFlight.Select(static x => (Task)x.Work));
             throw;
         }
 
@@ -550,6 +543,22 @@ internal static class FideRatingList
                 BirthYear(p.Birthday),
                 p.Flag.Trim()))
             .ToArray();
+    }
+
+    internal static void DrainFailedWorkers(IEnumerable<Task> workers)
+    {
+        try { Task.WhenAll(workers).Wait(); }
+        catch (Exception failure)
+        {
+            var causes = (failure is AggregateException aggregate
+                    ? aggregate.Flatten().InnerExceptions : new[] { failure }.AsEnumerable())
+                .Where(error => error is not OperationCanceledException)
+                .Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+            if (causes.Length == 0) return;
+            var retained = new AggregateException("FIDE projection workers failed during failure cleanup.", causes);
+            Laplace.Ops.LaplaceLogging.ReportProcessFailure("FIDE_WORKER_DRAIN_FAILED", retained,
+                error => System.Diagnostics.Trace.TraceWarning("FIDE_WORKER_DRAIN_FAILED: {0}", error));
+        }
     }
 
     private static PlayerBuilder[] ParsePlayerProjectionBatch(

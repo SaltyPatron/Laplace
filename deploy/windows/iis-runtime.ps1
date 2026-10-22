@@ -1,6 +1,18 @@
 # Shared data validation for setup, credential rendering and ordinary publication.
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/database-connection.ps1"
+function Invoke-IisNativeCommand([string]$FilePath,[string[]]$Arguments,[int]$MaxSuccessExitCode=0) {
+    # These callers pass pool/site names and paths, never credential arguments.
+    # Own native exit policy locally so redirected stderr and the actual return
+    # code survive regardless of the caller's PSNativeCommand preference.
+    $PSNativeCommandUseErrorActionPreference=$false
+    $output=@(& $FilePath @Arguments 2>&1)
+    $code=$LASTEXITCODE
+    if($code -lt 0 -or $code -gt $MaxSuccessExitCode){
+        throw "Native IIS publication command failed (exit $code): $FilePath $($Arguments -join ' ')`n$($output -join [Environment]::NewLine)"
+    }
+    return $output
+}
 function Get-IisDatabaseAuthentication($c) {
     $authentication=if($c.database.PSObject.Properties['authentication']){$c.database.authentication}else{'scram'}
     Get-LaplaceWindowsDatabaseAuthentication @{host=$c.database.host;authentication=$authentication}

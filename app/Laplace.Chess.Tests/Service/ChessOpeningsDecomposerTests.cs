@@ -15,11 +15,37 @@ public sealed class ChessOpeningsDecomposerTests
         => Assert.Null(ChessOpeningsDecomposer.ParseRow("eco\tname\tpgn"));
 
     [Theory]
-    [InlineData("")]
     [InlineData("A00\tName only")]
     [InlineData("A00\tName\t")]
     public void ParseRow_RejectsMalformed(string line)
-        => Assert.Null(ChessOpeningsDecomposer.ParseRow(line));
+        => Assert.Throws<InvalidDataException>(() => ChessOpeningsDecomposer.ParseRow(line));
+
+    [Fact]
+    public void ParseRow_BlankIsNotARecord() => Assert.Null(ChessOpeningsDecomposer.ParseRow(""));
+
+    [Theory]
+    [InlineData("1. e4 e5 {unterminated")]
+    [InlineData("this is not PGN")]
+    public void ExtractSans_RejectsRecoveredSyntaxInsteadOfAdmittingAPrefix(string movetext)
+        => Assert.Throws<InvalidDataException>(() => ChessOpeningsDecomposer.ExtractSans(movetext));
+
+    [Fact]
+    public void OpeningMovetextHasCompleteNativeSyntaxWhenFramedAsAnUnfinishedGame()
+    {
+        using var ast = GrammarDecomposer.Parse(Encoding.UTF8.GetBytes("[Event \"Opening fragment\"]\n\n1. e4 e5\n*"), "pgn");
+        Assert.True(ast.Diagnostics.SyntaxComplete,
+            $"errors={ast.Diagnostics.ErrorNodeCount} missing={ast.Diagnostics.MissingNodeCount} root_error={ast.Diagnostics.RootHasError}");
+    }
+
+    [Theory]
+    [InlineData("e5")]
+    [InlineData("e4,e5,e4")]
+    public void IllegalOpeningReplayIsAFailureInsteadOfASuccessfulEmptyOrPartialChange(string moves)
+    {
+        var failure = Assert.Throws<InvalidDataException>(() =>
+            ChessOpeningsDecomposer.ComposeLineForTest("A00", "invalid-fixture", moves.Split(',')));
+        Assert.Contains("A00", failure.Message);
+    }
 
     [Fact]
     public void ParseRow_SplitsColumns()
@@ -44,6 +70,13 @@ public sealed class ChessOpeningsDecomposerTests
         var sans = ChessOpeningsDecomposer.ExtractSans("1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 6. O-O");
         Assert.Equal(new[] { "e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "b4", "Bxb4", "c3", "Ba5", "O-O" }, sans);
     }
+
+    [Theory]
+    [InlineData("1. e4 e5 *")]
+    [InlineData("1. e4 e5 1-0")]
+    [InlineData("1. e4 e5 1-0 {source annotation}")]
+    public void ExtractSans_PreservesValidTerminationAndAnnotationInputs(string movetext)
+        => Assert.Equal(new[] { "e4", "e5" }, ChessOpeningsDecomposer.ExtractSans(movetext));
 
     [Fact]
     public void Replays_RuyLopez_ToExpectedPosition()
