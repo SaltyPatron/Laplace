@@ -1,7 +1,5 @@
 using System.Globalization;
-using Laplace.Decomposers.Abstractions.Tests;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -19,15 +17,7 @@ public sealed class OpeningCatalogOrderingTests(LocalPgFixture pg)
         // Exercise the actual production projection/order in PostgreSQL over the
         // terminal relation it consumes. No game ingestion or fold is needed to
         // produce this ordering counterexample, and no persistent rows are written.
-        string source = File.ReadAllText(Path.Combine(
-            TypeIdLawTests.FindRepoRootPublic(), "app", "Laplace.Substrate",
-            "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
-        var method = CSharpSyntaxTree.ParseText(source).GetRoot()
-            .DescendantNodes().OfType<MethodDeclarationSyntax>()
-            .Single(node => node.Identifier.ValueText == "OpeningCatalogAsync");
-        string query = method.DescendantNodes().OfType<LiteralExpressionSyntax>()
-            .Select(node => node.Token.ValueText)
-            .Single(value => value.Contains("WITH named AS MATERIALIZED", StringComparison.Ordinal));
+        string query = SqlCatalog.Get("chess.opening_catalog").Text;
         const string projection = "SELECT position_id, name_id, eco_id";
         int finalSelect = query.LastIndexOf(projection, StringComparison.Ordinal);
         Assert.True(finalSelect >= 0);
