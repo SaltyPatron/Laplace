@@ -105,7 +105,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 if (Regex.IsMatch(contract.Text, @"\{[a-z_][a-z0-9_]*\}", RegexOptions.IgnoreCase))
                 {
                     Assert.True(name.StartsWith("stage.", StringComparison.Ordinal)
-                        || name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal),
+                        || name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal)
+                        || name.StartsWith("operation.", StringComparison.Ordinal),
                         $"No lifecycle verification owns template {name}.");
                     templates.Add(name);
                     continue;
@@ -159,6 +160,26 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var drop = new NpgsqlCommand($"DROP TABLE {relation}", connection);
             await drop.ExecuteNonQueryAsync();
         }
+    }
+
+    [Fact]
+    public async Task CatalogOperationTemplateExecutesNamedTypedArgumentsAgainstPostgres()
+    {
+        // The real PostgreSQL operation supplies the names/types. Only the command
+        // rendering is under test here; this does not bypass ops.api in InvokeAsync.
+        await using var metadata = _source.CreateCommand(
+            "SELECT pg_get_function_arguments('pg_catalog.make_interval(integer,integer,integer,integer,integer,integer,double precision)'::regprocedure)");
+        var signature = InstalledOpInvoker.ParseSignature((string)(await metadata.ExecuteScalarAsync())!);
+        var days = signature.Single(parameter => parameter.Name == "days");
+        var seconds = signature.Single(parameter => parameter.Name == "secs");
+        var operation = InstalledOpInvoker.QualifiedCatalogName("pg_catalog.make_interval");
+        var arguments = new (string Name, string Type, NpgsqlParameter Parameter)[]
+        {
+            (days.Name, days.Type, InstalledOpInvoker.BindArg("a0", "2")),
+            (seconds.Name, seconds.Type, InstalledOpInvoker.BindArg("a1", "1.5")),
+        };
+        await using var command = NpgsqlCatalog.InstalledOperationCommand(_source, false, operation, arguments, 2);
+        Assert.Equal(TimeSpan.FromDays(2) + TimeSpan.FromSeconds(1.5), await command.ExecuteScalarAsync());
     }
 
     [Fact]
