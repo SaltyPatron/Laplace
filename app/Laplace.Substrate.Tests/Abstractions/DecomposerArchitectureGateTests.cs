@@ -219,10 +219,6 @@ public sealed class DecomposerArchitectureGateTests
         // the decomposer's parser.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "app/Laplace.Decomposers/Wiktionary/WiktionaryDecomposer.cs",
-            "app/Laplace.Decomposers/Wiktionary/WiktionaryEntry.cs",
-            "app/Laplace.Decomposers/Wiktionary/WiktionaryGrammarWitness.cs",
-            "app/Laplace.Decomposers/Wiktionary/WiktionaryJsonFilter.cs",
             "app/Laplace.Decomposers/ISO/LanguageGraph.cs",
             "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
             "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",
