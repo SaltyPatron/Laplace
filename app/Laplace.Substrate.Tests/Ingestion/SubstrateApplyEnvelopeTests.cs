@@ -11,6 +11,120 @@ namespace Laplace.Ingestion.Tests;
 public sealed class SubstrateApplyEnvelopeTests
 {
     [Fact]
+    public void SourceReleaseFailureDoesNotAbandonTheOtherLeases()
+    {
+        var failure = new IOException("source close failed");
+        var first = new TrackedLifetime(failure);
+        var second = new TrackedLifetime();
+        var changes = new[] { OwnedChange(first, 0), OwnedChange(second, 1) };
+        try
+        {
+            Assert.Same(failure, Assert.Throws<IOException>(() => SubstrateApplyEnvelope.Release(changes)));
+            Assert.Equal(1, first.DisposeCount);
+            Assert.Equal(1, second.DisposeCount);
+        }
+        finally { SubstrateApplyEnvelope.Release(changes); }
+    }
+
+    [Fact]
+    public async Task FailedApplyAndFailedSourceReleaseBothReachTheCallerAfterAllLeasesClose()
+    {
+        var applyFailure = new InvalidDataException("apply refused the source");
+        var closeFailure = new IOException("source close failed");
+        var first = new TrackedLifetime(closeFailure);
+        var second = new TrackedLifetime();
+        var decomposer = new OwnedChangesDecomposer([OwnedChange(first, 0), OwnedChange(second, 1)]);
+        var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task),
+            new EmptyReader(), NullLoggerFactory.Instance);
+        var error = await Assert.ThrowsAsync<AggregateException>(() => runner.RunAsync(decomposer,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true, SkipSourceCompletion = true }));
+        Assert.Contains(applyFailure, error.Flatten().InnerExceptions);
+        Assert.Contains(closeFailure, error.Flatten().InnerExceptions);
+        Assert.Equal(1, first.DisposeCount);
+        Assert.Equal(1, second.DisposeCount);
+    }
+
+    [Fact]
+    public async Task FailedCancellationCallbackDoesNotAbandonQueuedSourceLeasesOrHideTheApplyFailure()
+    {
+        var applyFailure = new InvalidDataException("apply refused the source");
+        var cancelFailure = new IOException("producer cancellation callback failed");
+        var first = new TrackedLifetime();
+        var queued = new TrackedLifetime();
+        var barrier = new IngestApplyBarrier();
+        SubstrateChange boundary = new SubstrateChangeBuilder(
+            Hash128.OfCanonical("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
+        var decomposer = new OwnedChangesDecomposer(
+            [OwnedChange(first, 0), boundary, OwnedChange(queued, 1)], cancelFailure);
+        var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task),
+            new EmptyReader(), NullLoggerFactory.Instance);
+        var error = await Assert.ThrowsAsync<AggregateException>(() => runner.RunAsync(decomposer,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true, SkipSourceCompletion = true }));
+        Assert.Contains(applyFailure, error.Flatten().InnerExceptions);
+        Assert.Contains(cancelFailure, error.Flatten().InnerExceptions);
+        Assert.Equal(1, first.DisposeCount);
+        Assert.Equal(1, queued.DisposeCount);
+        Assert.Same(applyFailure, await Assert.ThrowsAsync<InvalidDataException>(() => barrier.WaitAsync()));
+    }
+
+    private static SubstrateChange OwnedChange(TrackedLifetime lifetime, int index) =>
+        new SubstrateChangeBuilder(Hash128.OfCanonical("test/cleanup/source"), $"cleanup-{index}").Build()
+            with { ApplyEnvelope = SubstrateApplyEnvelope.Own(lifetime, _ => ValueTask.CompletedTask) };
+
+    [Fact]
+    public async Task ApplyAndAbortFailuresAreBothRetained()
+    {
+        var applyFailure = new InvalidDataException("apply refused the source");
+        var abortFailure = new IOException("bulk writer abort failed");
+        var source = new TrackedLifetime();
+        var decomposer = new OwnedChangesDecomposer([OwnedChange(source, 0)]);
+        var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task, abortFailure),
+            new EmptyReader(), NullLoggerFactory.Instance);
+        var failure = await Assert.ThrowsAsync<AggregateException>(() => runner.RunAsync(decomposer,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true, SkipSourceCompletion = true }));
+        Assert.Contains(applyFailure, failure.Flatten().InnerExceptions);
+        Assert.Contains(abortFailure, failure.Flatten().InnerExceptions);
+        Assert.Equal(1, source.DisposeCount);
+    }
+
+    private sealed class OwnedChangesDecomposer(SubstrateChange[] changes, Exception? cancelFailure = null) : IDecomposer
+    {
+        internal TaskCompletionSource Enumerated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Hash128 SourceId => Hash128.OfCanonical("test/cleanup/source");
+        public string SourceName => "CleanupOwnership";
+        public int LayerOrder => 0;
+        public Hash128 TrustClassId => TrustClassRegistry.Id("SubstrateMandate");
+        public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) => Task.FromResult<long?>(changes.Length);
+        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(IDecomposerContext context,
+            DecomposerOptions options, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            if (cancelFailure is not null) ct.Register(() => throw cancelFailure);
+            try { foreach (var change in changes) { ct.ThrowIfCancellationRequested(); yield return change; await Task.Yield(); } }
+            finally { Enumerated.TrySetResult(); }
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class FailedWriter(Exception failure, Task enumerated, Exception? abortFailure = null) : ISubstrateWriter
+    {
+        public async Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
+        {
+            await enumerated.WaitAsync(ct);
+            throw failure;
+        }
+        public async Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes,
+            Func<CancellationToken, ValueTask> precommitVerifier, CancellationToken ct = default)
+        {
+            await enumerated.WaitAsync(ct);
+            await precommitVerifier(ct);
+            throw failure;
+        }
+        public Task AbortBulkRunAsync(CancellationToken ct = default) => abortFailure is null
+            ? Task.CompletedTask : Task.FromException(abortFailure);
+    }
+
+    [Fact]
     public async Task ProducerCompletion_DoesNotReleaseSourceBeforeTransactionalVerification()
     {
         var lifetime = new TrackedLifetime();
@@ -183,7 +297,7 @@ public sealed class SubstrateApplyEnvelopeTests
             0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero, false);
     }
 
-    private sealed class TrackedLifetime : IDisposable
+    private sealed class TrackedLifetime(Exception? failure = null) : IDisposable
     {
         private int _disposeCount;
         public int DisposeCount => Volatile.Read(ref _disposeCount);
@@ -194,7 +308,11 @@ public sealed class SubstrateApplyEnvelopeTests
                 throw new ObjectDisposedException(nameof(TrackedLifetime));
         }
 
-        public void Dispose() => Interlocked.Increment(ref _disposeCount);
+        public void Dispose()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            if (failure is not null) throw failure;
+        }
     }
 
     private sealed class EmptyReader : ISubstrateReader

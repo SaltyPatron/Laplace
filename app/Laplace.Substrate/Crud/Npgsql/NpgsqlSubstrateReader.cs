@@ -621,8 +621,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// Retracts a source's testimony and refolds every consensus cell it touched
     /// (<c>ops.evict_source</c>). The procedure commits per batch, so it runs with no
     /// command timeout. Null <paramref name="relationIds"/> means every relation the
-    /// source testified under; null <paramref name="markerTypeIds"/> means no marker
-    /// cleanup. The proven-presence cache generation is replaced afterwards.
+    /// source testified under. <paramref name="markerTypeIds"/> is a legacy
+    /// compatibility argument; the backend warns when it is supplied because
+    /// canonical content is never source-owned. Completion receipts are cleared.
+    /// The proven-presence cache generation is replaced afterwards.
     /// </summary>
     public async Task EvictSourceAsync(
         Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
@@ -635,7 +637,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         finally
         {
             // The procedure commits in batches, so even a failed or cancelled call
-            // may have deleted entities. Swapping the generation discards every
+            // may have retracted testimony. Swapping the generation discards every
             // pre-eviction presence claim and detaches in-flight probes.
             Interlocked.Exchange(ref _proven, new ProvenPresence());
         }
@@ -645,45 +647,13 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
         IReadOnlyList<Hash128>? markerTypeIds, CancellationToken ct)
     {
-        await using var cmd = _ds.CreateCommand("CALL ops.evict_source($1, $2, $3)");
+        await using var cmd = NpgsqlCatalog.Command(_ds,"source.evict",sourceId.ToBytes(),
+            relationIds?.Select(r => r.ToBytes()).ToArray(),
+            markerTypeIds?.Select(m => m.ToBytes()).ToArray());
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-        cmd.Parameters.AddWithValue(
-            NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            relationIds is null
-                ? DBNull.Value
-                : (object)relationIds.Select(r => r.ToBytes()).ToArray());
-        cmd.Parameters.AddWithValue(
-            NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            markerTypeIds is null
-                ? DBNull.Value
-                : (object)markerTypeIds.Select(m => m.ToBytes()).ToArray());
         await cmd.ExecuteNonQueryAsync(ct);
 
-        // Delete entities this source testified about as subject that have no
-        // physicality and appear in no attestation as subject, object or context.
-        await using var cleanup = _ds.CreateCommand(
-            "WITH invalid AS MATERIALIZED ("
-            + " SELECT e.id"
-            + " FROM laplace.entities e"
-            + " WHERE EXISTS (SELECT 1 FROM laplace.attestations a"
-            + "               WHERE a.source_id = $1 AND a.subject_id = e.id)"
-            + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
-            + "                   WHERE p.entity_id = e.id)"
-            + "), orphan_ids AS MATERIALIZED ("
-            + " SELECT i.id FROM invalid i"
-            + " WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
-            + "                   WHERE p.entity_id = i.id)"
-            + "   AND NOT EXISTS (SELECT 1 FROM laplace.attestations a"
-            + "                   WHERE a.subject_id = i.id"
-            + "                      OR a.object_id = i.id"
-            + "                      OR a.context_id = i.id)"
-            + ")"
-            + " DELETE FROM laplace.entities e USING orphan_ids o"
-            + " WHERE e.id = o.id");
-        cleanup.CommandTimeout = 0;
-        cleanup.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-        await cleanup.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        // Canonical entities and physicalities are independent of the witness.
     }
 
     /// <summary>
@@ -692,10 +662,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// </summary>
     public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT ops.evidence_count(p_source => $1)");
+        await using var cmd = NpgsqlCatalog.Command(_ds,"source.evidence_count",sourceId.ToBytes());
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-        return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+        object? result = await cmd.ExecuteScalarAsync(ct);
+        return result is long count && count >= 0 ? count
+            : throw new InvalidDataException("Source evidence count did not return an exact non-negative bigint.");
     }
 }

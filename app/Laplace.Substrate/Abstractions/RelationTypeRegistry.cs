@@ -30,8 +30,23 @@ public static class RelationTypeRegistry
         ArgumentException.ThrowIfNullOrEmpty(canonicalName);
         unsafe
         {
-            Hash128 id;
-            NativeInterop.RelationTypeIdNative(canonicalName, &id);
+            Hash128 id = default;
+            int rc;
+            if (CodepointPerfcache.IsLoaded)
+                rc = NativeInterop.RelationTypeIdNative(canonicalName, &id);
+            else lock (LaplaceCoreGate.Native)
+            {
+                // ASCII governed labels can resolve without a mapped floor.
+                // Dynamic labels compose through it; failure is not a zero id.
+                rc = NativeInterop.RelationTypeIdNative(canonicalName, &id);
+                if (rc < 0)
+                {
+                    CodepointPerfcache.LoadDefault();
+                    rc = NativeInterop.RelationTypeIdNative(canonicalName, &id);
+                }
+            }
+            if (rc < 0 || id == Hash128.Zero)
+                throw new InvalidOperationException($"Relation {canonicalName} could not resolve its native content identity (rc={rc}).");
             return id;
         }
     }
@@ -46,15 +61,28 @@ public static class RelationTypeRegistry
     {
         unsafe
         {
-            Hash128 typeId, parentId;
-            double rank;
-            byte flip;
-            int symmetry;
-            int rc = NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+            Hash128 typeId = default, parentId = default;
+            double rank = 0;
+            byte flip = 0;
+            int symmetry = 0;
+            int rc;
+            if (CodepointPerfcache.IsLoaded)
+                rc = NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+            else lock (LaplaceCoreGate.Native)
+            {
+                rc = NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+                if (rc < 0 && rc != RetiredRelation)
+                {
+                    CodepointPerfcache.LoadDefault();
+                    rc = NativeInterop.RelationResolveSurface(name, &typeId, &rank, &symmetry, &flip, &parentId);
+                }
+            }
             if (rc == RetiredRelation)
                 throw new InvalidOperationException(
                     $"Relation {name} is retired: emit its successor with the claim's qualifiers "
                     + "(engine/manifest/relation_types.toml, qualifiers.toml).");
+            if (rc < 0 || typeId == Hash128.Zero)
+                throw new InvalidOperationException($"Relation {name} could not resolve its native surface (rc={rc}).");
 
             string canonical = Marshal.PtrToStringUTF8(NativeInterop.RelationCanonicalForTypeId(&typeId)) ?? name;
             Hash128? parent = parentId.Equals(Hash128.Zero) ? null : parentId;

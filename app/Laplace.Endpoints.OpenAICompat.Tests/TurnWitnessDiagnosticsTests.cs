@@ -80,9 +80,12 @@ public sealed class TurnWitnessDiagnosticsTests
                     using (LogContext.PushProperty("CorrelationId", "shutdown-pending"))
                         queued = Record(witness, "shutdown-pending");
                     using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    await witness.StopAsync(stop.Token);
-                    var pendingFailure = await Assert.ThrowsAsync<SubstrateUnavailableException>(() => queued);
+                    Task stopping = witness.StopAsync(stop.Token);
+                    var pendingFailure = await Assert.ThrowsAsync<SubstrateUnavailableException>(() =>
+                        queued.WaitAsync(TimeSpan.FromSeconds(5)));
                     Assert.IsType<InvalidOperationException>(pendingFailure.InnerException);
+                    socket.Dispose(); // release the real handshake owner after the queued receipt settled
+                    await stopping.WaitAsync(TimeSpan.FromSeconds(10));
                     await Assert.ThrowsAsync<SubstrateUnavailableException>(() => active);
                     Assert.Single(events.Rows, e => e.MessageTemplate.Text == "turn-witness abandoned pending turn during shutdown"
                         && Correlation(e) == "shutdown-pending");

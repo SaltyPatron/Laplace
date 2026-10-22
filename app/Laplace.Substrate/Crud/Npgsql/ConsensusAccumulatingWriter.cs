@@ -267,7 +267,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     /// <summary>
     /// One rating period within a cell: the opponent rating, opponent deviation
     /// (phi), and exact unit score, fixed-point 1e9. Ordered so a cell's periods
-    /// serialize stably and match the SQL evidence grouping in consensus.evidence_rows_typed.
+    /// serialize stably and match the SQL evidence grouping in consensus.evidence_rows_batch.
     /// </summary>
     private readonly record struct PeriodKey(
         long OpponentRatingFp1e9, long PhiFp1e9, long UnitScoreFp1e9)

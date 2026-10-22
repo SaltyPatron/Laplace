@@ -184,10 +184,14 @@ if(WIN32)
     )
     # 128-bit integer arithmetic (__modti3, __floattidf) comes from the compiler's own runtime, which link.exe does
     # not find by itself; the execution module below links it too
-    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(EXISTS "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
-        target_link_libraries(${EXT_NAME} PRIVATE "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir
+        OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY)
+    set(_laplace_compiler_builtins "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
+    if(NOT EXISTS "${_laplace_compiler_builtins}")
+        message(FATAL_ERROR "Required native integer runtime is missing: ${_laplace_compiler_builtins}")
     endif()
+    target_link_libraries(${EXT_NAME} PRIVATE "${_laplace_compiler_builtins}")
 else()
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
     set_target_properties(${EXT_NAME} PROPERTIES
@@ -239,10 +243,7 @@ if(WIN32)
     target_compile_definitions(laplace_execution PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
     target_link_libraries(laplace_execution PRIVATE ${EXT_NAME} "${LAPLACE_PG_LIBDIR}/postgres.lib")
     # 128-bit integer conversions (__floattidf) come from the compiler's own runtime, which link.exe does not find by itself
-    execute_process(COMMAND "${CMAKE_C_COMPILER}" /clang:-print-resource-dir OUTPUT_VARIABLE _icx_resource OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(EXISTS "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
-        target_link_libraries(laplace_execution PRIVATE "${_icx_resource}/lib/windows/clang_rt.builtins-x86_64.lib")
-    endif()
+    target_link_libraries(laplace_execution PRIVATE "${_laplace_compiler_builtins}")
 endif()
 
 # These generated files live in the shared build tree. Preserve unchanged mtimes

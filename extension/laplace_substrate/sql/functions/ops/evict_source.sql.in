@@ -11,21 +11,17 @@
 --   (a) DELETE a batch of the source's evidence under the relation (a literal
 --       type in EXECUTE so the plan is not generic), queue every touched
 --       endpoint into highway_mask_dirty, and collect the touched cells.
---   (b) REFOLD each touched cell in place from its SURVIVING evidence through
---       the consensus_fold aggregate, the SQL face of the native fold ingest
---       runs, from the neutral prior: all surviving rows form one rating period
---       from their persisted opponent ratings/RDs, observation counts, and
---       score sums. (last_observed_at, id) is a deterministic traversal, not a
---       reconstruction of original period boundaries; the contract is the
---       grouped fold of surviving evidence, not bit parity with history.
---   (c) DELETE cells with zero surviving evidence, never zero them: absence is
---       not refutation.
+--   (b/c) The native retraction owner locks every touched cell, takes a fresh
+--       retained-evidence snapshot, refolds survivors from their persisted
+--       grouped inputs, and deletes cells with no surviving evidence. Absence
+--       is not refutation. This is the same lock/snapshot/fold owner admission
+--       uses, so a concurrent admission cannot be overwritten by an old read.
 --   (d) With p_drain, highway_mask_drain recomputes queued masks from scratch,
 --       which can clear bits that inline deposit only ever sets.
 -- Entities and physicalities are never deleted: content is source-independent
 -- and geometry is a deterministic function of constituents, not testimony.
 --
--- p_relations NULL discovers the source's relations per attestations leaf.
+-- p_relations NULL discovers every source relation through the source indexes.
 -- A source with no rows is a no-op. Resumable: each batch commits evidence
 -- deletion and its refold together, so re-running an interrupted eviction
 -- ends in the state one run would. No SET clause: a procedure carrying one
@@ -45,11 +41,9 @@ DECLARE
     operational_types bytea[];
     operational_total bigint := 0;
     rel            bytea;
-    leaf           oid;
-    leaf_types     bytea[];
-    t              bytea;
     n_del          bigint;
     n_cells        bigint;
+    retraction_counts bigint[];
     n              bigint;
     evidence_total bigint := 0;
     refold_total   bigint := 0;
@@ -59,69 +53,46 @@ DECLARE
     replay_total   bigint := 0;
     t0             timestamptz := clock_timestamp();
 BEGIN
+    IF p_batch IS NULL OR p_batch <= 0 THEN
+        RAISE EXCEPTION 'evict_source: p_batch must be positive' USING ERRCODE='22023';
+    END IF;
+    IF p_source IS NULL OR octet_length(p_source) <> 16 THEN
+        RAISE EXCEPTION 'evict_source: source must be a 16-byte identity' USING ERRCODE='22023';
+    END IF;
+    IF EXISTS (SELECT FROM unnest(p_relations) AS requested(id)
+               WHERE id IS NULL OR octet_length(id) <> 16) THEN
+        RAISE EXCEPTION 'evict_source: relations must be 16-byte identities' USING ERRCODE='22023';
+    END IF;
+    IF row_security_active('laplace.attestations'::regclass) THEN
+        RAISE EXCEPTION 'evict_source: retraction requires complete visibility of retained testimony'
+            USING ERRCODE='42501';
+    END IF;
+    IF cardinality(p_marker_types) > 0 THEN
+        RAISE WARNING 'evict_source: marker entity deletion is retired; canonical content is source-independent; witness completion receipts are cleared';
+    END IF;
     -- Plain TEMP table (per-batch COMMIT would drop ON COMMIT DROP), truncated
     -- per batch and dropped at the end.
     CREATE TEMP TABLE IF NOT EXISTS _evict_cells (
         subject_id bytea NOT NULL,
-        object_id  bytea,
-        consensus_leaf oid NOT NULL,
+        object_id bytea,
         UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
     TRUNCATE _evict_cells;
-    -- A session's existing temp table may lack consensus_leaf; add it once.
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_attribute a
-        WHERE a.attrelid = 'pg_temp._evict_cells'::regclass
-          AND a.attname = 'consensus_leaf'
-          AND NOT a.attisdropped
-    ) THEN
-        ALTER TABLE _evict_cells ADD COLUMN consensus_leaf oid;
+    -- Native batch routing replaced the old scalar partition_leaf call per
+    -- cell. Remove that obsolete column if an interrupted older call left it.
+    IF EXISTS (SELECT FROM pg_attribute
+               WHERE attrelid='pg_temp._evict_cells'::regclass
+                 AND attname='consensus_leaf' AND NOT attisdropped) THEN
+        ALTER TABLE _evict_cells DROP COLUMN consensus_leaf;
     END IF;
-    ALTER TABLE _evict_cells
-        ALTER COLUMN consensus_leaf SET NOT NULL;
-    CREATE INDEX IF NOT EXISTS _evict_cells_leaf_idx
-        ON _evict_cells (consensus_leaf);
-
     IF p_relations IS NOT NULL THEN
         rels := p_relations;
     ELSE
-        -- Discover the source's relations per attestations leaf: DISTINCT
-        -- type_id in a leaf with a DEFAULT-bound ancestor, otherwise a single
-        -- indexed LIMIT-1 probe. The ancestor check matters because a leaf's
-        -- own bound is its HASH bound, not an ancestor's DEFAULT.
-        rels := ARRAY[]::bytea[];
-        FOR leaf IN
-            SELECT pt.relid
-            FROM pg_extension e
-            JOIN pg_namespace ns ON ns.oid = e.extnamespace
-            CROSS JOIN LATERAL pg_partition_tree(
-                (quote_ident(ns.nspname) || '.attestations')::regclass) pt
-            WHERE e.extname = 'laplace_substrate' AND pt.isleaf
-        LOOP
-            IF EXISTS (
-                SELECT 1
-                FROM pg_partition_ancestors(leaf::regclass) pa
-                JOIN pg_class c ON c.oid = pa.relid
-                WHERE pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'
-            ) THEN
-                EXECUTE format(
-                    'SELECT COALESCE(array_agg(DISTINCT a.type_id), ARRAY[]::bytea[]) '
-                    'FROM %s a WHERE a.source_id = $1', leaf::regclass)
-                INTO leaf_types USING p_source;
-            ELSE
-                EXECUTE format(
-                    'SELECT ARRAY(SELECT a.type_id FROM %s a WHERE a.source_id = $1 LIMIT 1)',
-                    leaf::regclass)
-                INTO leaf_types USING p_source;
-            END IF;
-            FOREACH t IN ARRAY leaf_types LOOP
-                IF NOT (t = ANY(rels)) THEN
-                    rels := rels || t;
-                END IF;
-            END LOOP;
-        END LOOP;
+        -- Every HASH(subject_id) leaf can hold every relation type. Discover
+        -- the complete set in one source-indexed statement; LIMIT 1 per leaf
+        -- silently omitted testimony from unrestricted eviction.
+        SELECT array_agg(DISTINCT a.type_id ORDER BY a.type_id) INTO rels
+        FROM laplace.attestations a WHERE a.source_id=p_source;
     END IF;
-
     -- Operational relation types (the writer's admission receipts) carry no
     -- rating observations and are retracted separately below.
     operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
@@ -221,79 +192,29 @@ BEGIN
                           SELECT d.object_id FROM del d WHERE d.object_id IS NOT NULL) u
                     ON CONFLICT (id) DO NOTHING),
                 cells AS (
-                    INSERT INTO _evict_cells (subject_id, object_id, consensus_leaf)
-                    SELECT DISTINCT d.subject_id, d.object_id,
-                           consensus.partition_leaf(%L::bytea, d.subject_id)::oid
+                    INSERT INTO _evict_cells (subject_id, object_id)
+                    SELECT DISTINCT d.subject_id, d.object_id
                     FROM del d
                     ON CONFLICT DO NOTHING
                     RETURNING 1)
                 SELECT (SELECT count(*) FROM del), (SELECT count(*) FROM cells)
-            $q$, rel, p_batch, rel, rel)
+            $q$, rel, p_batch, rel)
             INTO n_del, n_cells
             USING p_source;
 
             EXIT WHEN n_del = 0;
             evidence_total := evidence_total + n_del;
 
-            -- (b) refold each touched cell in place from surviving evidence:
-            --     one grouped period, neutral-prior seed.
-            EXECUTE format($q$
-                INSERT INTO laplace.consensus AS c
-                    (id, subject_id, type_id, object_id,
-                     rating, rd, volatility, witness_count, last_observed_at)
-                SELECT laplace.consensus_id(f.subject_id, %L::bytea, f.object_id),
-                       f.subject_id, %L::bytea, f.object_id,
-                       (f.acc).rating, (f.acc).rd, (f.acc).volatility,
-                       (f.acc).witness_count, f.last_ts
-                FROM (
-                    SELECT t.subject_id, t.object_id,
-                           laplace.consensus_fold(false, NULL, NULL, NULL,
-                               a.opponent_rating_fp1e9,
-                               a.opponent_rd_fp1e9,
-                               GREATEST(a.observation_count, 1),
-                               a.sum_score_fp1e9,
-                               consensus.glicko2_tau()
-                               ORDER BY a.last_observed_at, a.id) AS acc,
-                           max(a.last_observed_at) AS last_ts
-                    FROM _evict_cells t
-                    JOIN laplace.attestations a
-                      ON a.type_id = %L::bytea
-                     AND a.subject_id = t.subject_id
-                     AND a.object_id IS NOT DISTINCT FROM t.object_id
-                    GROUP BY t.subject_id, t.object_id
-                ) f
-                ON CONFLICT (id, type_id, subject_id) DO UPDATE
-                SET object_id        = EXCLUDED.object_id,
-                    rating           = EXCLUDED.rating,
-                    rd               = EXCLUDED.rd,
-                    volatility       = EXCLUDED.volatility,
-                    witness_count    = EXCLUDED.witness_count,
-                    last_observed_at = EXCLUDED.last_observed_at
-            $q$, rel, rel, rel);
-            GET DIAGNOSTICS n = ROW_COUNT;
-            refold_total := refold_total + n;
-
-            -- (c) zero-survivor cells are DELETED, not zeroed.
-            FOR leaf IN
-                SELECT DISTINCT consensus_leaf FROM _evict_cells
-            LOOP
-                EXECUTE format($q$
-                    DELETE FROM ONLY %s c
-                    USING _evict_cells t
-                    WHERE t.consensus_leaf = %s::oid
-                      AND c.type_id = %L::bytea
-                      AND c.subject_id = t.subject_id
-                      AND c.id = laplace.consensus_id(t.subject_id, %L::bytea, t.object_id)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM laplace.attestations a
-                          WHERE a.type_id = %L::bytea
-                            AND a.subject_id = t.subject_id
-                            AND a.object_id IS NOT DISTINCT FROM t.object_id)
-                $q$, leaf::regclass, leaf, rel, rel, rel);
-                GET DIAGNOSTICS n = ROW_COUNT;
-                culled_total := culled_total + n;
-            END LOOP;
-
+            -- The native owner locks the exact target set, reads a fresh
+            -- snapshot after any concurrent admission, refolds survivors and
+            -- removes zero-survivor cells in this same evidence transaction.
+            SELECT consensus.refold_after_retraction_type(
+                rel,
+                array_agg(subject_id ORDER BY subject_id,object_id NULLS FIRST),
+                array_agg(object_id ORDER BY subject_id,object_id NULLS FIRST))
+            INTO retraction_counts FROM _evict_cells;
+            refold_total := refold_total + retraction_counts[1];
+            culled_total := culled_total + retraction_counts[2];
             RAISE LOG 'evict_source: relation % — batch of % evidence row(s) over % cell(s) (running: % deleted, % refolded, % culled) — %s elapsed',
                 encode(rel, 'hex'), n_del, n_cells,
                 evidence_total, refold_total, culled_total,
@@ -310,6 +231,13 @@ BEGIN
         CALL laplace.highway_mask_drain(p_batch);
     END IF;
 
+    IF p_relations IS NULL THEN
+        SELECT count(*) INTO n FROM laplace.attestations WHERE source_id=p_source;
+        IF n <> 0 THEN
+            RAISE EXCEPTION 'evict_source: unrestricted retraction left % testimony row(s) for source %',
+                n,encode(p_source,'hex');
+        END IF;
+    END IF;
     RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % layer completion(s) removed, % unit completion(s) removed, % replay claim(s) removed in %s',
         encode(p_source, 'hex'), evidence_total, refold_total, culled_total,
         layer_completion_total, unit_completion_total, replay_total,

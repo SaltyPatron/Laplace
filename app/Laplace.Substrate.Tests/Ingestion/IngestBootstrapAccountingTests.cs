@@ -241,7 +241,33 @@ public sealed class IngestBootstrapAccountingTests
         }
     }
 
-    private sealed class InsertAllWriter(bool deferContent = false) : ISubstrateWriter, IConsensusFoldMetrics, IDeferredApplyMetrics
+    [Fact]
+    public async Task CancelledBulkCompletionCannotReturnSuccessOrWriteTheLayerCompletion()
+    {
+        var expected = new OperationCanceledException("bulk durability completion cancelled");
+        var writer = new InsertAllWriter(completionFailure: expected);
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => runner.RunAsync(
+            new BootstrapThenContentDecomposer(), IngestRunOptions.Default with { SkipLayerOrderingCheck = true }));
+        Assert.Same(expected, failure);
+        Assert.True(writer.Aborted);
+        Assert.DoesNotContain(writer.AppliedUnits, unit => unit.StartsWith("layer-complete/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CallerCancellationDuringBulkCompletionCannotBeReportedAsSuccessfulSourceCompletion()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var writer = new InsertAllWriter(onCompletion: cancellation.Cancel);
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(
+            new BootstrapThenContentDecomposer(), IngestRunOptions.Default with { SkipLayerOrderingCheck = true },
+            cancellation.Token));
+        Assert.DoesNotContain(writer.AppliedUnits, unit => unit.StartsWith("layer-complete/", StringComparison.Ordinal));
+    }
+
+    private sealed class InsertAllWriter(bool deferContent = false, Exception? completionFailure = null,
+        Action? onCompletion = null) : ISubstrateWriter, IConsensusFoldMetrics, IDeferredApplyMetrics
     {
         private (long Entities, long Physicalities, long Attestations) _pending;
         public (long Entities, long Physicalities, long Attestations) DeferredRowsInserted { get; private set; } = (11, 13, 17);
@@ -285,6 +311,8 @@ public sealed class IngestBootstrapAccountingTests
         public Task CompleteBulkRunAsync(CancellationToken ct = default)
         {
             Assert.True(Begun, "bulk-run completion cannot precede bulk-run begin");
+            if (completionFailure is not null) throw completionFailure;
+            onCompletion?.Invoke();
             Completed = true;
             DeferredRowsInserted = (DeferredRowsInserted.Entities + _pending.Entities,
                 DeferredRowsInserted.Physicalities + _pending.Physicalities,
