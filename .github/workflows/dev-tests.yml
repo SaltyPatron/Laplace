@@ -50,15 +50,22 @@ jobs:
           ref: 25104e87337084087d5e53f0d0d4ff6c62cc6bc0
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
-      - name: Materialize the pinned Operations contract from the declared host source
+      - name: Materialize the verified Operations build contract
         run: |
           set -euo pipefail
           source=/repos/src/Laplace-Operations
-          revision=c5c6a18c125cb4c624b22c5554aa4c9d7553ae13
-          mkdir -p "$LAPLACE_CI_OPERATIONS_SOURCE"
-          git -c safe.directory="$source" -C "$source" archive "$revision" | tar -xf - -C "$LAPLACE_CI_OPERATIONS_SOURCE"
-          test -f "$LAPLACE_CI_OPERATIONS_SOURCE/toolchain/flags.cmake"
-          echo "Operations contract revision: $revision"
+          # File identities are pinned to Operations c5c6a18c125cb4c624b22c5554aa4c9d7553ae13.
+          # This needs the declared build contract, not a private cross-repository checkout token
+          # or an unrelated commit object in the host's source checkout.
+          while read -r blob path; do
+            [[ -z "$blob" || "$blob" == \#* ]] && continue
+            destination="$LAPLACE_CI_OPERATIONS_SOURCE/$path"
+            mkdir -p "$(dirname "$destination")"
+            cp "$source/$path" "$destination"
+            actual=$(git hash-object --no-filters "$destination")
+            [[ "$actual" == "$blob" ]] || { echo "::error::Operations contract differs from its pin: $path"; exit 1; }
+          done < scripts/ci/operations-build-contract.tsv
+          echo "Operations build contract: c5c6a18c125cb4c624b22c5554aa4c9d7553ae13"
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:

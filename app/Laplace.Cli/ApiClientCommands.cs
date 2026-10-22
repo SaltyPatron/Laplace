@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Laplace.Engine.Core;
-using Microsoft.Extensions.Logging;
 
 namespace Laplace.Cli;
 
@@ -20,7 +19,7 @@ internal static class ApiClientCommands
         laplace-mono chat [--session <session>] <prompt>
         """;
 
-    public static async Task<int> RunAsync(string[] args)
+    public static async Task<int> RunAsync(string[] args, Action<Exception, string>? logError = null)
     {
         if (args.Length == 0 || args[0] is "--help" or "-h")
         {
@@ -42,7 +41,7 @@ internal static class ApiClientCommands
             using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
             using var client = new HttpClient(handler) { BaseAddress = origin, Timeout = Timeout.InfiniteTimeSpan };
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
-            return await RunAsync(args, client, Console.Out, Console.Error, cancellation.Token);
+            return await RunAsync(args, client, Console.Out, Console.Error, cancellation.Token, logError);
         }
         catch (OperationCanceledException)
         {
@@ -51,7 +50,7 @@ internal static class ApiClientCommands
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException)
         {
-            CliRuntime.LoggerFactory.CreateLogger("api-client").LogError(ex, "API client command failed.");
+            logError?.Invoke(ex, "API client command failed.");
             await Console.Error.WriteLineAsync("laplace-mono: " + ex.Message);
             return 1;
         }
@@ -68,7 +67,8 @@ internal static class ApiClientCommands
     }
 
     internal static async Task<int> RunAsync(
-        string[] args, HttpClient client, TextWriter output, TextWriter error, CancellationToken ct = default)
+        string[] args, HttpClient client, TextWriter output, TextWriter error, CancellationToken ct = default,
+        Action<Exception, string>? logError = null)
     {
         try
         {
@@ -106,7 +106,7 @@ internal static class ApiClientCommands
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or JsonException)
         {
-            CliRuntime.LoggerFactory.CreateLogger("api-client").LogError(ex, "API operation failed.");
+            logError?.Invoke(ex, "API operation failed.");
             await error.WriteLineAsync("laplace-mono: " + ex.Message);
             return 1;
         }
