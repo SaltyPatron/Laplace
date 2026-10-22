@@ -175,6 +175,12 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "codepoint_table_lookup_id")]
     internal static partial int CodepointTableLookupId(Hash128* id, uint* outCp);
 
+    [LibraryImport(Library, EntryPoint = "codepoint_table_lookup")]
+    internal static partial CodepointRecord* CodepointTableLookup(uint scalar);
+
+    [LibraryImport(Library, EntryPoint = "codepoint_table_flags")]
+    internal static partial uint CodepointTableFlags(uint scalar);
+
     [LibraryImport(Library, EntryPoint = "codepoint_table_presence_bitmap")]
     internal static partial int CodepointTablePresenceBitmap(
         Hash128* ids, nuint count, byte* bitmap, nuint bitmapBytes);
@@ -1022,6 +1028,24 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "highway_table_is_loaded")]
     internal static partial int HighwayTableIsLoaded();
+
+    [LibraryImport(Library, EntryPoint = "highway_table_records")]
+    internal static partial int HighwayTableRecords(out nint records, out ulong count);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_find")]
+    internal static partial nint HighwayTableFind(Hash128* id);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_at", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint HighwayTableAt(string list, uint slot);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_key", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial long HighwayTableKey(string list, string key);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_fingerprint")]
+    internal static partial int HighwayTableFingerprint(byte* fingerprint);
+
+    [LibraryImport(Library, EntryPoint = "highway_table_edge_span", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int HighwayTableEdgeSpan(string from, uint slot, string to, out nint edges, out ulong count);
 
     [LibraryImport(Library, EntryPoint = "highway_table_relation_by_hash")]
     internal static partial int HighwayTableRelationByHash(

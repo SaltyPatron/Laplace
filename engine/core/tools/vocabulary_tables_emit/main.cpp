@@ -165,21 +165,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "cannot load t0 perfcache %s\n", cli.t0.c_str());
         return 4;
     }
-    laplace_perfcache_header_t t0{};
-    {
-        std::ifstream tf(cli.t0, std::ios::binary);
-        tf.read(reinterpret_cast<char*>(&t0), sizeof(t0));
-        if (!tf || t0.magic != LAPLACE_PERFCACHE_MAGIC) {
-            std::fprintf(stderr, "bad t0 header\n");
-            return 4;
-        }
-    }
+    hash128_t t0_fingerprint{};
+    if (codepoint_table_copy_receipt(&t0_fingerprint) != 0) return 4;
 
     static const char* const kTables[LAPLACE_VOCABULARY_FAMILY_COUNT] = {
         "upos", "deprel", "deprel_subtype", "feature", "feature_value"};
     std::string texts[LAPLACE_VOCABULARY_FAMILY_COUNT];
     std::vector<uint8_t> mix;
-    put(mix, t0.ucd_hash);
+    put(mix, t0_fingerprint);
     for (const char* t = LAPLACE_VOCABULARY_PERFCACHE_GENERATOR_TAG; *t; ++t) mix.push_back(uint8_t(*t));
     for (int f = 0; f < LAPLACE_VOCABULARY_FAMILY_COUNT; ++f) {
         texts[f] = read_file(cli.manifest + "/" + kTables[f] + ".tsv");

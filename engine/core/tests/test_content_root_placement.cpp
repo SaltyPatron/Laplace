@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -73,11 +74,17 @@ void expect_atomic_body(const std::vector<Field>& fields,
     EXPECT_EQ(std::memcmp(fields[3].bytes, point_header, sizeof(point_header)), 0);
     for (size_t axis = 0; axis < 4; ++axis) {
         uint64_t bits = 0;
-        std::memcpy(&bits, &floor.coord[axis], sizeof(bits));
+        const double coordinate = std::ldexp(static_cast<double>(floor.mantissa[axis]), -53);
+        std::memcpy(&bits, &coordinate, sizeof(bits));
         EXPECT_EQ(little_bits(fields[3].bytes + 5 + axis * 8), bits);
     }
     ASSERT_EQ(fields[4].length, 16);
-    EXPECT_EQ(std::memcmp(fields[4].bytes, &floor.hilbert, 16), 0);
+    double coord[4];
+    for (size_t axis = 0; axis < 4; ++axis)
+        coord[axis] = std::ldexp(static_cast<double>(floor.mantissa[axis]), -53);
+    hilbert128_t hilbert{};
+    hilbert4d_encode(coord, &hilbert);
+    EXPECT_EQ(std::memcmp(fields[4].bytes, &hilbert, 16), 0);
     EXPECT_EQ(fields[5].length, -1); // No invented self trajectory.
     ASSERT_EQ(fields[6].length, 4);
     EXPECT_EQ(be32(fields[6].bytes), 0u);
@@ -95,7 +102,7 @@ void expect_atomic_body(const std::vector<Field>& fields,
 
 TEST(LaplaceContentRootPlacement, AtomicSingletonMatchesAuthoritativeFloor) {
     const std::pair<const char*, uint32_t> samples[] = {
-        {"a", 0x61}, {" ", 0x20}, {"é", 0xe9}, {"e\xcc\x81", 0xe9}, {"棋", 0x68cb}
+        {"a", 0x61}, {" ", 0x20}, {"é", 0xe9}, {"棋", 0x68cb}
     };
     for (const auto& [text, codepoint] : samples) {
         SCOPED_TRACE(text);

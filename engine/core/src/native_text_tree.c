@@ -77,7 +77,7 @@ int native_text_tree_build(const uint8_t *utf8, size_t length, tier_tree_t **out
         if (i - start != size || memcmp(utf8 + start, canonical, size)) return -2;
     }
     lp_text *text = text_identity_thread_context();
-    const lp_tier0_record *floor = lp_tier0_map(NULL);
+    const lp_tier0_record *floor = text_identity_scalar_floor();
     if (!text || !floor) return -3;
     Recording recording = { .floor = floor, .definitions = lp_idmap_sized(sizeof(Definition)) };
     lp_ref root = lp_text_decompose(text, utf8, length, record_composition, &recording);

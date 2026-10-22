@@ -13,19 +13,17 @@ public static unsafe class CodepointPerfcache
         ArgumentException.ThrowIfNullOrEmpty(path);
         lock (LaplaceCoreGate.Native)
         {
-            // One immutable mapping per process: readers hold its records lock-free,
-            // and a native reload unmaps the table under them.
-            if (IsLoadedUnlocked()) { PublishRecordsUnlocked(); return; }
+            // Native retains one immutable mapping. Validate an explicitly selected
+            // alias instead of silently accepting a wrong path after an earlier load.
             int rc = NativeInterop.CodepointTableLoadPerfcache(path);
             if (rc != 0)
             {
                 string why = rc switch
                 {
                     -1 => "open/stat/mmap failure (missing or unreadable file)",
-                    -2 => "bad magic / unsupported format version",
-                    -3 => "record count / size mismatch",
-                    -4 => "body CRC mismatch (corrupt blob)",
-                    -5 => "UCD version mismatch (stale or wrong Unicode authority)",
+                    -3 => "expected exactly 1,112,064 Native 64-byte scalar records",
+                    -4 => "selected file differs from the canonical Native scalar floor",
+                    -5 => "canonical Native LAPLACE_TIER0 mapping unavailable",
                     _ => "unknown error",
                 };
                 throw new InvalidOperationException(
@@ -94,11 +92,11 @@ public static unsafe class CodepointPerfcache
         if (rc != 0)
             throw new InvalidOperationException(
                 "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
-        // Native reverse lookup builds an index lazily. Complete that one-time
-        // initialization under the same gate before publishing lock-free readers;
-        // otherwise concurrent first lookups can race the index/count publication.
-        // Every supported blob contains ASCII, including this non-NUL codepoint.
-        var probe = recs['A'].Hash;
+        // The mapped records are sorted by ID, not by scalar ordinal. Native
+        // already validated and indexed the entire floor before publication.
+        var ascii = NativeInterop.CodepointTableLookup('A');
+        if (ascii == null) throw new InvalidOperationException("Native scalar floor has no ASCII A.");
+        var probe = ascii->Hash;
         uint codepoint;
         if (NativeInterop.CodepointTableLookupId(&probe, &codepoint) != 0 || codepoint != 'A')
             throw new InvalidOperationException("codepoint perf-cache reverse index initialization failed");
@@ -152,6 +150,23 @@ public static unsafe class CodepointPerfcache
     }
 
     public static bool IsKnownCodepointId(Hash128 id) => TryLookupCodepoint(id, out _);
+
+    public static bool TryLookupScalar(uint scalar, out CodepointRecord record)
+    {
+        record = default;
+        if (!_ready) return false;
+        var entry = NativeInterop.CodepointTableLookup(scalar);
+        if (entry == null) return false;
+        record = *entry; return true;
+    }
+
+    public static ref readonly CodepointRecord LookupScalar(uint scalar)
+    {
+        if (!_ready) throw new InvalidOperationException("Load the Native scalar floor before lookup.");
+        var entry = NativeInterop.CodepointTableLookup(scalar);
+        if (entry == null) throw new ArgumentOutOfRangeException(nameof(scalar), "Not a Unicode scalar in the Native floor.");
+        return ref *entry;
+    }
 
     /// <summary>One native batch over the mapped floor; zero bits remain unresolved.</summary>
     public static byte[] KnownIdsBitmap(IReadOnlyList<Hash128> ids)

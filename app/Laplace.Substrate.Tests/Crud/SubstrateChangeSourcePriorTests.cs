@@ -290,7 +290,7 @@ public sealed class SubstrateChangeSourcePriorTests
         CodepointPerfcache.LoadDefault();
         static OrderedCompositionComponent Atom(char value)
         {
-            var p = CodepointPerfcache.Records[value];
+            var p = CodepointPerfcache.LookupScalar((uint)value);
             return new(p.Hash, 0, p.CoordX, p.CoordY, p.CoordZ, p.CoordM, value, true);
         }
         using var stage = IntentStage.New(4);

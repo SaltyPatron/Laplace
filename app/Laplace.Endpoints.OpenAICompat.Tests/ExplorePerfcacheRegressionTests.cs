@@ -28,7 +28,7 @@ public sealed class ExplorePerfcacheRegressionTests
     public void StorageProof_UsesThePublishedTier0Rom()
     {
         CodepointPerfcache.LoadDefault();
-        ref readonly CodepointRecord cached = ref CodepointPerfcache.Records['A'];
+        ref readonly CodepointRecord cached = ref CodepointPerfcache.LookupScalar((uint)'A');
 
         StorageProofResponse proof = new ExploreDecomposeService().StorageProof("A");
         StorageProofNodeRow leaf = Assert.Single(proof.Nodes);
@@ -58,7 +58,7 @@ public sealed class ExplorePerfcacheRegressionTests
     public async Task ParallelExplorerAndReverseLookup_UseOneInitializedMapping()
     {
         CodepointPerfcache.LoadDefault();
-        var expected = CodepointPerfcache.Records['d'].Hash;
+        var expected = CodepointPerfcache.LookupScalar((uint)'d').Hash;
         await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
         {
             Assert.NotEmpty(new ExploreDecomposeService().Decompose("dog").Nodes);

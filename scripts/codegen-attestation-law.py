@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Codegen attestation law: manifests -> relation, POS, entity-type, language, deprel,
-qualifier and trust-class laws (.c/.h), seed SQL, highway perfcache. The POS and deprel
+qualifier and trust-class laws (.c/.h), seed SQL, relation selector metadata. The POS and deprel
 vocabularies are generated from their authorities (scripts/refresh-vocabulary-manifest.py)."""
 from __future__ import annotations
 
-import hashlib
 import re
-import struct
 import sys
 from pathlib import Path
 
@@ -909,7 +907,6 @@ def emit_pos_law() -> None:
     
 
 
-_HIGHWAY_MAGIC = 0x5957484C
 _RANK_BANDS = [
     "mandate",
     "definitional",
@@ -1056,8 +1053,8 @@ def _rank_to_band(rank_key: str) -> int:
         return len(_RANK_BANDS) - 1
 
 
-def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
-    """Generate laplace_highway_perfcache.bin + highway_manifest.h from relation_types.toml.
+def emit_relation_mask_manifest(rel: dict) -> None:
+    """Generate relation selector constants from relation_types.toml; no private ROM.
 
     ADR 0001 / GH #551: bits are an explicit append-only registry in the TOML
     (`bit = N`). Codegen VALIDATES (required, unique, in-range, no reuse) and
@@ -1107,64 +1104,9 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
 
     band_masks: list[bytearray] = [bytearray(32) for _ in range(N_BANDS)]
 
-    string_section = bytearray()
-    name_off: dict[str, int] = {}
-    for _bit, name in ordered:
-        name_off[name] = len(string_section)
-        string_section.extend(name.encode("utf-8"))
-        string_section.append(0)
-
-    HEADER_SIZE   = 128
-    REL_REC_SIZE  = 32
-    BAND_MASK_SIZE = 32
-    rel_offset  = HEADER_SIZE
-    band_offset = rel_offset  + N      * REL_REC_SIZE
-    str_offset  = band_offset + N_BANDS * BAND_MASK_SIZE
-
-    toml_bytes  = (MANIFEST / "relation_types.toml").read_bytes()
-    fingerprint = hashlib.sha256(toml_bytes).digest()[:8]
-
-    header = struct.pack(
-        "<IIQQQQQQ8s64x",
-        _HIGHWAY_MAGIC, 1,
-        N, rel_offset,
-        N_BANDS, band_offset,
-        str_offset, len(string_section),
-        fingerprint,
-    )
-    assert len(header) == HEADER_SIZE, f"header {len(header)}"
-
-    records = bytearray()
     for bit_pos, name in ordered:
-        r        = name_to_rel[name]
-        rank_key = r["rank"]
-        rank_val = float(ranks.get(rank_key, 0.09))
-        band     = _rank_to_band(rank_key)
-        sym      = 1 if r.get("symmetry") == "symmetric" else 0
-        noff     = name_off[name]
-        nlen     = len(name.encode("utf-8"))
-
-        parent    = r.get("parent")
-        parent_bit: int = -1
-        if parent and parent in name_to_rel:
-            parent_bit = int(name_to_rel[parent]["bit"])
-
-        rec = struct.pack("<IBBBBfh18x",
-                          noff, nlen, band, bit_pos, sym, rank_val, parent_bit)
-        assert len(rec) == REL_REC_SIZE, f"rec {len(rec)}"
-        records.extend(rec)
-
+        band = _rank_to_band(name_to_rel[name]["rank"])
         band_masks[band][bit_pos // 8] |= 1 << (bit_pos % 8)
-
-    binary = bytearray(header)
-    binary.extend(records)
-    for bm in band_masks:
-        binary.extend(bm)
-    binary.extend(string_section)
-
-    bin_out_dir.mkdir(parents=True, exist_ok=True)
-    out_bin = bin_out_dir / "laplace_highway_perfcache.bin"
-    _write_if_changed(out_bin, bytes(binary))
 
     bucket_size = 1
     while bucket_size < N * 4:
@@ -1177,8 +1119,6 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         "/* Generated from engine/manifest/relation_types.toml — do not edit. */",
         "/* Bits are the explicit append-only registry (ADR 0001 / GH #551). */",
         "",
-        f"#define LAPLACE_HIGHWAY_MAGIC    0x{_HIGHWAY_MAGIC:08X}u",
-        "#define LAPLACE_HIGHWAY_VERSION  1u",
         f"#define LAPLACE_HIGHWAY_REL_COUNT   {N}u",
         f"#define LAPLACE_HIGHWAY_BAND_COUNT  {N_BANDS}u",
         f"#define HIGHWAY_BUCKET_SIZE         {bucket_size}u",
@@ -1197,11 +1137,22 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     for band_idx, band_name in enumerate(_RANK_BANDS):
         lines.append(f"#define HIGHWAY_BAND_{band_name.upper():<45} {band_idx}u")
 
+    # Same alphabetical order as emit_relation_law: pointer subtraction yields
+    # O(1) selector metadata after the existing relation-ID lookup.
+    lines += ["", "#include <stdint.h>",
+              "typedef struct { uint8_t bit, band; } highway_relation_selector;",
+              "static const highway_relation_selector highway_relation_selectors[] = {"]
+    for name in sorted(name_to_rel):
+        r = name_to_rel[name]
+        lines.append(f"    {{ {r['bit']}, {_rank_to_band(r['rank'])} }}, /* {name} */")
+    lines += ["};", "static const uint64_t highway_relation_band_masks[][4] = {"]
+    for mask in band_masks:
+        words = [int.from_bytes(mask[i:i+8], "little") for i in range(0,32,8)]
+        lines.append("    { " + ", ".join(f"UINT64_C(0x{w:016x})" for w in words) + " },")
+    lines += ["};"]
+
     out_manifest = OUT_CORE / "include/laplace/core/highway_manifest.h"
     _write_text_if_changed(out_manifest, "\n".join(lines) + "\n")
-
-    print(f"highway perfcache ok: {out_bin} ({len(binary)} bytes,"
-          f" {N} relations, {N_BANDS} bands, {bucket_size}-slot table)")
 
 
 
@@ -1616,15 +1567,6 @@ def emit_trust_class_law(path: Path) -> None:
 def main() -> int:
     global CHECK_MODE
     CHECK_MODE = "--check" in sys.argv[1:]
-    bin_out_dir = OUT_CORE / "src/generated"
-    for i, arg in enumerate(sys.argv[1:], 1):
-        if arg == "--bin-out-dir" and i < len(sys.argv) - 1:
-            bin_out_dir = Path(sys.argv[i + 1])
-            break
-        if arg.startswith("--bin-out-dir="):
-            bin_out_dir = Path(arg.split("=", 1)[1])
-            break
-
     rel = parse_simple_toml(MANIFEST / "relation_types.toml")
     emit_relation_law(rel)
     emit_pos_law()
@@ -1634,7 +1576,7 @@ def main() -> int:
     emit_qualifier_law(MANIFEST / "qualifiers.toml", {r["canonical"] for r in rel["relation"]})
     emit_trust_class_law(MANIFEST / "trust_classes.toml")
     emit_firmware_law(MANIFEST / "firmware.toml")
-    emit_highway_perfcache(rel, bin_out_dir)
+    emit_relation_mask_manifest(rel)
     if CHECK_MODE:
         if DRIFT:
             print("generated outputs differ from engine/manifest", file=sys.stderr)

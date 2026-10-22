@@ -45,7 +45,7 @@ public sealed class UnicodeDecomposerTests
         var highByteEntities = new HashSet<Hash128>();
         long codepointPhysicalities = 0, passThreeEntities = 0, inputUnits = 0;
         bool allTier0 = true;
-        CodepointRecord cachedA = CodepointPerfcache.Records['A'];
+        CodepointRecord cachedA = CodepointPerfcache.LookupScalar((uint)'A');
         bool aEntity = false;
         double[]? aCoord = null;
         Hilbert128? aHilbert = null;
@@ -591,9 +591,9 @@ public sealed class UnicodeDecomposerTests
         Hash128 alphabeticYes = PropertyValue("Alphabetic", "Yes");
         AttestationRow[] alphabetic = rows.Where(row => row.TypeId == relation && row.ObjectId == alphabeticYes).ToArray();
         Assert.Equal(2, alphabetic.Length);
-        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x41].Hash);
-        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x43].Hash);
-        Assert.DoesNotContain(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x42].Hash);
+        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.LookupScalar((uint)0x41).Hash);
+        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.LookupScalar((uint)0x43).Hash);
+        Assert.DoesNotContain(alphabetic, row => row.SubjectId == CodepointPerfcache.LookupScalar((uint)0x42).Hash);
     }
 
     [Fact]
@@ -629,10 +629,10 @@ public sealed class UnicodeDecomposerTests
         AttestationRow[] alpha = rows.Where(row => row.TypeId == alphabeticProperty && row.ObjectId == alphabeticYes).ToArray();
         AttestationRow[] gc = rows.Where(row => row.TypeId == categoryProperty && row.ObjectId == uppercase).ToArray();
         Assert.Single(alpha);
-        Assert.Equal(CodepointPerfcache.Records[0x41].Hash, alpha[0].SubjectId);
+        Assert.Equal(CodepointPerfcache.LookupScalar((uint)0x41).Hash, alpha[0].SubjectId);
         Assert.Equal(2, gc.Length);
-        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.Records[0x41].Hash);
-        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.Records[0x42].Hash);
+        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.LookupScalar((uint)0x41).Hash);
+        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.LookupScalar((uint)0x42).Hash);
     }
 
     [Fact]
