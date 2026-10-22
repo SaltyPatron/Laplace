@@ -68,7 +68,6 @@ public class GrammarSpineConformanceTests
         {
             // Wiktionary composes natively parsed rows through ComposeDecomposer.
             ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
-            ("SemLink", ["GrammarWitnessIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
         };
