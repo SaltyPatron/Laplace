@@ -231,23 +231,20 @@ public static class LaplaceInstall
 
     public static string ResolveT0Perfcache()
     {
-        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN");
+        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_TIER0")
+            ?? TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             var selected = Path.GetFullPath(fromEnv.Trim());
-            if (!File.Exists(selected)) throw new FileNotFoundException("The selected LAPLACE_PERFCACHE_BIN does not exist.", selected);
+            if (!File.Exists(selected)) throw new FileNotFoundException("The selected Native tier0.bin does not exist.", selected);
             return selected;
         }
 
-        if (TryResolveEngineBuildRoot(out var engineBuild))
+        var work = TryGetProcessOrMachineSetting("LAPLACE_WORK");
+        if (!string.IsNullOrWhiteSpace(work))
         {
-            var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_t0_perfcache.bin");
-            if (File.Exists(fromBuild)) return fromBuild;
-            // Sorted so a build tree holding more than one matching blob resolves the same
-            // codepoint table on every run, independent of filesystem listing order.
-            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_t0_perfcache.bin", SearchOption.AllDirectories)
-                                         .OrderBy(static p => p, StringComparer.Ordinal))
-                return hit;
+            var fromWork = Path.Combine(work, "tier0", "tier0.bin");
+            if (File.Exists(fromWork)) return fromWork;
         }
 
         var installPrefix = TryGetProcessOrMachineSetting("LAPLACE_INSTALL_PREFIX");
@@ -255,19 +252,12 @@ public static class LaplaceInstall
             : Path.Combine(installPrefix.Trim(), "share", "laplace");
         if (Directory.Exists(share))
         {
-            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin")
-                               .OrderBy(static p => p, StringComparer.Ordinal).FirstOrDefault();
-            if (hit is not null) return hit;
+            var hit = Path.Combine(share, "tier0.bin");
+            if (File.Exists(hit)) return hit;
         }
 
-        // The error names exactly the locations this resolution probed.
         throw new InvalidOperationException(
-            "T0 perfcache not found. Searched: "
-            + $"LAPLACE_PERFCACHE_BIN={TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN") ?? "(unset)"}; "
-            + (TryResolveEngineBuildRoot(out var probed)
-                ? $"engine build root '{probed}' (core/perfcache/ and recursive)"
-                : "no engine build root resolved from AppContext.BaseDirectory or cwd")
-            + $"; {share}. Build the engine, or set LAPLACE_PERFCACHE_BIN to the blob.");
+            $"Canonical Native tier0.bin not found. Configure LAPLACE_TIER0; checked LAPLACE_WORK={work ?? "(unset)"} and {share}.");
     }
 
     public static string ResolveIngestRoot()
@@ -320,25 +310,24 @@ public static class LaplaceInstall
 
     public static string ResolveHighwayPerfcache()
     {
-        var t0 = ResolveT0Perfcache();
-        var dir = Path.GetDirectoryName(t0);
-        if (!string.IsNullOrEmpty(dir))
+        var configured = Environment.GetEnvironmentVariable("LAPLACE_HIGHWAY");
+        if (!string.IsNullOrWhiteSpace(configured))
         {
-            var sibling = Path.Combine(dir, "laplace_highway_perfcache.bin");
-            if (File.Exists(sibling)) return sibling;
+            var path = Path.GetFullPath(configured.Trim());
+            if (!File.Exists(path)) throw new FileNotFoundException("The selected Native highway cache does not exist.", path);
+            return path;
         }
-
-        if (TryResolveEngineBuildRoot(out var engineBuild))
+        if (TryResolveEngineBuildRoot(out var build))
         {
-            var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_highway_perfcache.bin");
-            if (File.Exists(fromBuild)) return fromBuild;
-            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_highway_perfcache.bin", SearchOption.AllDirectories)
-                                         .OrderBy(static p => p, StringComparer.Ordinal))
-                return hit;
+            var packaged = Path.Combine(build, "core", "perfcache", "highway.bin");
+            if (File.Exists(packaged)) return Path.GetFullPath(packaged);
         }
-
-        throw new InvalidOperationException(
-            "Highway perfcache not found — build the engine (laplace_highway_perfcache.bin beside T0 blob).");
+        var sibling = Path.Combine(Path.GetDirectoryName(ResolveT0Perfcache())!, "highway.bin");
+        if (File.Exists(sibling)) return Path.GetFullPath(sibling);
+        var prefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
+        var installed = Path.Combine(string.IsNullOrWhiteSpace(prefix) ? InstallRoot : prefix, "share", "laplace", "highway.bin");
+        if (File.Exists(installed)) return Path.GetFullPath(installed);
+        throw new InvalidOperationException("Native highway.bin not found. Set LAPLACE_HIGHWAY to the cache built by Laplace-Engine.");
     }
 
     public static string ResolveModelHub()

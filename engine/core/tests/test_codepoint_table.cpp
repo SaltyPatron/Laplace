@@ -16,7 +16,7 @@ TEST(LaplaceCoreCodepointTable, DirectIndexIsCodepoint) {
     for (uint32_t cp : {0x41u, 0x61u, 0x20u, 0x4E2Du, 0x10FFFFu}) {
         const codepoint_entry_t* e = codepoint_table_lookup(cp);
         ASSERT_NE(e, nullptr) << "cp=" << cp;
-        EXPECT_EQ(e->codepoint, cp);
+        uint32_t decoded; ASSERT_EQ(codepoint_table_lookup_id(&e->hash, &decoded), 0); EXPECT_EQ(decoded, cp);
     }
 }
 
@@ -29,20 +29,19 @@ TEST(LaplaceCoreCodepointTable, CoordOnUnitGlome) {
     const codepoint_entry_t* e = codepoint_table_lookup(0x41u);
     ASSERT_NE(e, nullptr);
     double r2 = 0.0;
-    for (int k = 0; k < 4; ++k) r2 += e->coord[k] * e->coord[k];
+    for (int k = 0; k < 4; ++k) { double value = (double)e->mantissa[k] / 9007199254740992.0; r2 += value * value; }
     EXPECT_NEAR(r2, 1.0, 1e-9);
 }
 
 
-TEST(LaplaceCoreCodepointTable, PerfcacheCarriesCanonicalOpenPlacement) {
-    for (uint32_t cp : {0u, 0x20u, 0x41u, 0x61u, 0x0301u, 0x4E2Du, 0x1F600u, 0x10FFFFu}) {
-        const codepoint_entry_t* e = codepoint_table_lookup(cp);
-        ASSERT_NE(e, nullptr) << "cp=" << cp;
-        double expected[4];
-        super_fibonacci_point_open(e->uca_order, expected);
-        EXPECT_EQ(0, std::memcmp(e->coord, expected, sizeof(expected)))
-            << "perfcache is not the v4 open-placement floor at cp=" << cp
-            << " uca_order=" << e->uca_order;
+TEST(LaplaceCoreCodepointTable, CoordinatesAreTheNativeFixedPointValues) {
+    for (uint32_t cp : {0u, 0x20u, 0x41u, 0x61u, 0x0301u, 0x4e2du, 0x1f600u, 0x10ffffu}) {
+        const auto *entry = codepoint_table_lookup(cp); ASSERT_NE(entry, nullptr);
+        hash128_t id; double coord[4]; hilbert128_t placement;
+        ASSERT_EQ(codepoint_table_resolve_atom(cp, &id, coord, &placement), 0);
+        EXPECT_EQ(std::memcmp(&id, &entry->hash, sizeof id), 0);
+        for (int axis = 0; axis < 4; axis++)
+            EXPECT_EQ(coord[axis], (double)entry->mantissa[axis] / 9007199254740992.0);
     }
 }
 
@@ -69,11 +68,11 @@ TEST(LaplaceCoreCodepointTable, UcdPropertyCensusRejectsAllOtherOrTruncatedTable
     uint64_t count = 0;
     ASSERT_EQ(codepoint_table_records(&records, &count), 0);
     ASSERT_NE(records, nullptr);
-    ASSERT_EQ(count, static_cast<uint64_t>(LAPLACE_PERFCACHE_RECORD_COUNT));
+    ASSERT_EQ(count, static_cast<uint64_t>(LAPLACE_SCALAR_COUNT));
 
-    for (uint32_t cp = 0; cp < count; ++cp) {
-        const uint8_t wb = laplace_pc_wb(records[cp].flags);
-        const uint8_t gb = laplace_pc_gb(records[cp].flags);
+    for (uint32_t cp = 0; cp < 0x110000; ++cp) {
+        const uint8_t wb = codepoint_table_wb(cp);
+        const uint8_t gb = codepoint_table_gb(cp);
         if (wb == LAPLACE_WB_ALETTER) ++aletter;
         if (gb == LAPLACE_GB_EXTEND) ++extend;
         if (wb == LAPLACE_WB_HEBREW_LETTER) ++hebrew;
@@ -109,15 +108,12 @@ TEST(LaplaceCoreCodepointTable, CanonicalComposition) {
     EXPECT_EQ(codepoint_table_compose(0x41u, 0x42u, &composed), 0);
 }
 
-TEST(LaplaceCoreCodepointTable, BulkRecordsExposesWholeArray) {
-    const codepoint_entry_t* recs = nullptr;
-    uint64_t count = 0;
-    ASSERT_EQ(codepoint_table_records(&recs, &count), 0);
-    ASSERT_NE(recs, nullptr);
-    EXPECT_EQ(count, 1114112u);
-    EXPECT_EQ(recs[0x41].codepoint, 0x41u);
-    EXPECT_EQ(&recs[0x41], codepoint_table_lookup(0x41u));
-    EXPECT_EQ(recs[count - 1].codepoint, 0x10FFFFu);
+TEST(LaplaceCoreCodepointTable, BulkRecordsAreNativeSizedAndIdSorted) {
+    const codepoint_entry_t *records = nullptr; uint64_t count = 0;
+    ASSERT_EQ(codepoint_table_records(&records, &count), 0);
+    ASSERT_NE(records, nullptr); ASSERT_EQ(count, 1112064u); ASSERT_EQ(sizeof(*records), 64u);
+    for (uint64_t i = 1; i < count; i++)
+        ASSERT_LT(std::memcmp(&records[i - 1].hash, &records[i].hash, 16), 0);
 }
 
 TEST(LaplaceCoreCodepointTable, RejectsBadPath) {
@@ -148,7 +144,7 @@ TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndRejectsSurrogates) 
     uint32_t cp = 42;
     ASSERT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0)->hash, &cp), 0);
     EXPECT_EQ(cp, 0u);
-    EXPECT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0xD800)->hash, &cp), -1);
+    EXPECT_EQ(codepoint_table_lookup(0xd800), nullptr); EXPECT_EQ(codepoint_table_lookup(0xdfff), nullptr);
 }
 
 TEST(LaplaceCoreCodepointTable, RejectsLegacyBandedPerfcacheFormat) {
@@ -172,7 +168,7 @@ TEST(LaplaceCoreCodepointTable, RejectsLegacyBandedPerfcacheFormat) {
         ASSERT_TRUE(stream.good());
     }
 
-    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -2);
+    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -4);
     EXPECT_TRUE(codepoint_table_is_loaded());
     std::filesystem::remove(mutated, ec);
 }
@@ -199,11 +195,11 @@ TEST(LaplaceCoreCodepointTable, RejectsStaleUcdVersionAndKeepsActiveTable) {
         ASSERT_TRUE(stream.good());
     }
 
-    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -5);
+    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -4);
     EXPECT_TRUE(codepoint_table_is_loaded());
     const codepoint_entry_t* a = codepoint_table_lookup(0x41u);
     ASSERT_NE(a, nullptr);
-    EXPECT_EQ(a->codepoint, 0x41u);
+    uint32_t decoded; EXPECT_EQ(codepoint_table_lookup_id(&a->hash, &decoded), 0); EXPECT_EQ(decoded, 0x41u);
     std::filesystem::remove(mutated, ec);
 }
 

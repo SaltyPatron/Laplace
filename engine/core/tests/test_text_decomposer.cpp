@@ -11,161 +11,126 @@
 #include "laplace/core/tier_tree.h"
 
 namespace {
-
-struct TreeStats {
-    int leaves = 0;
-    int graphemes = 0;
-    int words = 0;
-    int sentences = 0;
-    int docs = 0;
-};
-
-static TreeStats classify(tier_tree_t* t) {
-    TreeStats s;
-    size_t n = tier_tree_node_count(t);
-    for (size_t i = 0; i < n; ++i) {
-        tier_node_view_t v;
-        tier_tree_get_node(t, (uint32_t)i, &v);
-        switch (v.tier) {
-            case 0: s.leaves++; break;
-            case 1: s.graphemes++; break;
-            case 2: s.words++; break;
-            case 3: s.sentences++; break;
-            case 4: s.docs++; break;
+struct TreeStats { int leaves = 0, roots = 0, compositions = 0; };
+static TreeStats classify(tier_tree_t* tree) {
+    TreeStats result;
+    const size_t count = tier_tree_node_count(tree);
+    EXPECT_EQ(0, laplace_text_decomposer_validate_roundtrip(tree));
+    for (uint32_t i = 0; i < count; ++i) {
+        tier_node_view_t node{};
+        EXPECT_EQ(0, tier_tree_get_node(tree, i, &node));
+        if (!node.tier) ++result.leaves;
+        if (node.parent_idx == TIER_TREE_INVALID) ++result.roots;
+        if (node.child_count > 1) ++result.compositions;
+        for (uint32_t c = 0; c < node.child_count; ++c) {
+            tier_node_view_t child{};
+            EXPECT_EQ(0, tier_tree_get_node(tree, node.first_child_idx + c, &child));
+            EXPECT_EQ(i, child.parent_idx);
+            EXPECT_LT(child.tier, node.tier);
+            EXPECT_GE(child.text_range_off, node.text_range_off);
+            EXPECT_LE(child.text_range_off + child.text_range_len,
+                      node.text_range_off + node.text_range_len);
         }
     }
-    return s;
+    EXPECT_EQ(count ? 1 : 0, result.roots);
+    return result;
+}
 }
 
+TEST(LaplaceCoreTextDecomposer, EmptyInputHasNoInventedContentRoot) {
+    tier_tree_t* tree = nullptr;
+    ASSERT_EQ(0, laplace_text_decomposer_run(nullptr, 0, &tree));
+    ASSERT_NE(nullptr, tree);
+    EXPECT_EQ(0u, tier_tree_node_count(tree));
+    EXPECT_EQ(0, classify(tree).leaves);
+    tier_tree_free(tree);
 }
-
-TEST(LaplaceCoreTextDecomposer, EmptyInputProducesRootOnly) {
-    tier_tree_t* t = nullptr;
-    ASSERT_EQ(0, laplace_text_decomposer_run(nullptr, 0, &t));
-    ASSERT_NE(nullptr, t);
-    EXPECT_EQ(1u, tier_tree_node_count(t));
-    auto s = classify(t);
-    EXPECT_EQ(0, s.leaves);
-    EXPECT_EQ(1, s.docs);
-    tier_tree_free(t);
-}
-
 TEST(LaplaceCoreTextDecomposer, RejectsNullOutPointer) {
     EXPECT_EQ(-1, laplace_text_decomposer_run((const uint8_t*)"hi", 2, nullptr));
 }
-
 TEST(LaplaceCoreTextDecomposer, RejectsInvalidUtf8) {
-    tier_tree_t* t = nullptr;
-    uint8_t bad[] = {0xFF, 0xFE, 0xFD};
-    EXPECT_EQ(-2, laplace_text_decomposer_run(bad, sizeof(bad), &t));
-    EXPECT_EQ(nullptr, t);
+    tier_tree_t* tree = nullptr;
+    const uint8_t invalid[] = {0xFF, 0xFE, 0xFD};
+    EXPECT_EQ(-2, laplace_text_decomposer_run(invalid, sizeof(invalid), &tree));
+    EXPECT_EQ(nullptr, tree);
 }
-
 TEST(LaplaceCoreTextDecomposer, ASCIIHelloWorldTopology) {
-    tier_tree_t* t = nullptr;
-    const char* s = "Hello world.";
-    ASSERT_EQ(0, laplace_text_decomposer_run(
-        (const uint8_t*)s, std::strlen(s), &t));
-    auto stats = classify(t);
+    tier_tree_t* tree = nullptr;
+    const char* text = "Hello world.";
+    ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text, std::strlen(text), &tree));
+    const auto stats = classify(tree);
     EXPECT_EQ(12, stats.leaves);
-    EXPECT_EQ(12, stats.graphemes);
-    EXPECT_EQ(1, stats.docs);
-    EXPECT_GE(stats.words, 1);
-    EXPECT_GE(stats.sentences, 1);
-    tier_tree_free(t);
+    EXPECT_GT(stats.compositions, 1);
+    tier_tree_free(tree);
 }
-
-TEST(LaplaceCoreTextDecomposer, NormalizationFormsConverge) {
-    
-    
-    
-    
-    const uint8_t pre[] = {0xC3, 0xA9};        
-    const uint8_t dec[] = {0x65, 0xCC, 0x81};  
-
-    tier_tree_t* a = nullptr;
-    tier_tree_t* b = nullptr;
+TEST(LaplaceCoreTextDecomposer, NormalizationIsExplicitAndOriginalScalarsAreRetained) {
+    const uint8_t pre[] = {0xC3, 0xA9};
+    const uint8_t dec[] = {0x65, 0xCC, 0x81};
+    tier_tree_t *a = nullptr, *b = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(pre, sizeof(pre), &a));
     ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &b));
-    ASSERT_EQ(tier_tree_node_count(a), tier_tree_node_count(b));
-    tier_node_view_t la, lb;
-    tier_tree_get_node(a, 0, &la);
-    tier_tree_get_node(b, 0, &lb);
-    EXPECT_EQ(0u, la.tier); EXPECT_EQ(0x00E9u, la.atom);  
-    EXPECT_EQ(0u, lb.tier); EXPECT_EQ(0x00E9u, lb.atom);
-    tier_tree_free(a);
-    tier_tree_free(b);
-
-    
-    hash128_t id_nfc, id_nfd;
-    ASSERT_EQ(0, laplace_content_root_id(pre, sizeof(pre), &id_nfc));
-    ASSERT_EQ(0, laplace_content_root_id(dec, sizeof(dec), &id_nfd));
-    EXPECT_EQ(id_nfc.hi, id_nfd.hi);
-    EXPECT_EQ(id_nfc.lo, id_nfd.lo);
+    EXPECT_EQ(1, classify(a).leaves);
+    EXPECT_EQ(2, classify(b).leaves);
+    tier_node_view_t first{}, second{};
+    ASSERT_EQ(0, tier_tree_get_node(b, 0, &first));
+    ASSERT_EQ(0, tier_tree_get_node(b, 1, &second));
+    EXPECT_EQ(0x65u, first.atom);
+    EXPECT_EQ(0x301u, second.atom);
+    hash128_t nfc{}, nfd{};
+    ASSERT_EQ(0, laplace_content_root_id(pre, sizeof(pre), &nfc));
+    ASSERT_EQ(0, laplace_content_root_id(dec, sizeof(dec), &nfd));
+    EXPECT_FALSE(hash128_equals(&nfc, &nfd));
+    tier_tree_free(a); tier_tree_free(b);
 }
-
 TEST(LaplaceCoreTextDecomposer, DeterministicAcrossRuns) {
-    const char* s = "The quick brown fox jumps over the lazy dog.";
-    tier_tree_t* a = nullptr;
-    tier_tree_t* b = nullptr;
-    ASSERT_EQ(0, laplace_text_decomposer_run(
-        (const uint8_t*)s, std::strlen(s), &a));
-    ASSERT_EQ(0, laplace_text_decomposer_run(
-        (const uint8_t*)s, std::strlen(s), &b));
+    const char* text = "The quick brown fox jumps over the lazy dog.";
+    tier_tree_t *a = nullptr, *b = nullptr;
+    ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text, std::strlen(text), &a));
+    ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text, std::strlen(text), &b));
     ASSERT_EQ(tier_tree_node_count(a), tier_tree_node_count(b));
-    for (size_t i = 0; i < tier_tree_node_count(a); ++i) {
-        tier_node_view_t va, vb;
-        tier_tree_get_node(a, (uint32_t)i, &va);
-        tier_tree_get_node(b, (uint32_t)i, &vb);
+    for (uint32_t i = 0; i < tier_tree_node_count(a); ++i) {
+        tier_node_view_t va{}, vb{};
+        ASSERT_EQ(0, tier_tree_get_node(a, i, &va));
+        ASSERT_EQ(0, tier_tree_get_node(b, i, &vb));
         EXPECT_EQ(va.tier, vb.tier);
         EXPECT_EQ(va.atom, vb.atom);
         EXPECT_EQ(va.first_child_idx, vb.first_child_idx);
         EXPECT_EQ(va.child_count, vb.child_count);
         EXPECT_EQ(va.parent_idx, vb.parent_idx);
+        EXPECT_TRUE(hash128_equals(&va.id, &vb.id));
+        EXPECT_EQ(0, std::memcmp(va.coord, vb.coord, sizeof(va.coord)));
     }
-    tier_tree_free(a);
-    tier_tree_free(b);
+    tier_tree_free(a); tier_tree_free(b);
 }
-
 TEST(LaplaceCoreTextDecomposer, MultiLanguageInputSegmentsCleanly) {
-    const char* s = "Hello мир 中国 שלום";
-    tier_tree_t* t = nullptr;
-    ASSERT_EQ(0, laplace_text_decomposer_run(
-        (const uint8_t*)s, std::strlen(s), &t));
-    auto stats = classify(t);
-    EXPECT_GT(stats.leaves, 10);
-    EXPECT_EQ(1, stats.docs);
-    EXPECT_GE(stats.words, 4);
-    tier_tree_free(t);
+    const char* text = "Hello мир 中国 שלום";
+    tier_tree_t* tree = nullptr;
+    ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text, std::strlen(text), &tree));
+    EXPECT_EQ(17, classify(tree).leaves);
+    tier_tree_free(tree);
 }
-
-TEST(LaplaceCoreTextDecomposer, GraphemeCountMatchesUserPerceivedChars) {
-    tier_tree_t* a = nullptr;
-    const uint8_t dec[] = {0x65, 0xCC, 0x81};
-    ASSERT_EQ(0, laplace_text_decomposer_run(dec, sizeof(dec), &a));
-    auto sa = classify(a);
-    EXPECT_EQ(1, sa.graphemes) << "decomposed é should be one grapheme cluster";
-    tier_tree_free(a);
+TEST(LaplaceCoreTextDecomposer, GraphemeCompositionPreservesBothScalars) {
+    const uint8_t text[] = {0x65, 0xCC, 0x81};
+    tier_tree_t* tree = nullptr;
+    ASSERT_EQ(0, laplace_text_decomposer_run(text, sizeof(text), &tree));
+    const auto stats = classify(tree);
+    EXPECT_EQ(2, stats.leaves);
+    EXPECT_EQ(1, stats.compositions);
+    tier_tree_free(tree);
 }
-
 TEST(LaplaceCoreTextDecomposer, FinalizedParentIdxIsCorrect) {
-    const char* s = "hello";
-    tier_tree_t* t = nullptr;
-    ASSERT_EQ(0, laplace_text_decomposer_run(
-        (const uint8_t*)s, std::strlen(s), &t));
-    uint32_t last = (uint32_t)(tier_tree_node_count(t) - 1);
-    tier_node_view_t v;
-    tier_tree_get_node(t, last, &v);
-    EXPECT_EQ(4, v.tier);
-    EXPECT_EQ(TIER_TREE_INVALID, v.parent_idx);
-    tier_tree_get_node(t, 0, &v);
-    EXPECT_EQ(0, v.tier);
-    EXPECT_NE(TIER_TREE_INVALID, v.parent_idx);
-    tier_tree_free(t);
+    const char* text = "hello";
+    tier_tree_t* tree = nullptr;
+    ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text, std::strlen(text), &tree));
+    classify(tree);
+    tier_node_view_t root{};
+    ASSERT_EQ(0, tier_tree_get_node(tree, (uint32_t)tier_tree_node_count(tree) - 1, &root));
+    EXPECT_GT(root.tier, 0);
+    EXPECT_EQ(TIER_TREE_INVALID, root.parent_idx);
+    EXPECT_EQ(0u, root.text_range_off);
+    EXPECT_EQ(std::strlen(text), root.text_range_len);
+    tier_tree_free(tree);
 }
-
-
-
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
@@ -303,8 +268,7 @@ TEST(LaplaceGraphemeFloorLaw, SingleCharReusesCodepointAndRetainsAtomicObservati
 // ---- GH #1039/#1040/#1042: the offset-space, tier-nesting, and whitespace laws ----
 
 namespace {
-// Collect emitted word spans through the segment callback: the spans must be
-// sliced from the tree's own (post-NFC) text, never the caller's buffer.
+// Segment bytes retain the original input, including decomposed Unicode.
 struct SegCollect {
     std::vector<std::string> words;
 };
@@ -313,20 +277,15 @@ static void seg_collect(void* ctx, uint32_t, const uint8_t* span, uint32_t len, 
 }
 }
 
-TEST(LaplaceCoreTextDecomposer, TreeOwnsPostNfcText_OffsetsIndexIt) {
-    // NFD "café " + "shop": e + COMBINING ACUTE (0xCC 0x81) recomposes under NFC
-    // to 0xC3 0xA9. Pre-#1039 the tree's NFC-space offsets sliced the caller's
-    // NFD buffer: 'cafe\xCC' split mid-UTF-8 and the trailing word lost bytes.
+TEST(LaplaceCoreTextDecomposer, TreeOwnsOriginalText_OffsetsIndexIt) {
     const uint8_t nfd[] = { 'c','a','f','e', 0xCC, 0x81, ' ', 's','h','o','p' };
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(nfd, sizeof(nfd), &t));
     size_t text_len = 0;
     const uint8_t* text = tier_tree_text(t, &text_len);
     ASSERT_NE(nullptr, text);
-    // NFC form: "café shop" with é as 0xC3 0xA9 (10 bytes, one shorter than NFD).
-    ASSERT_EQ(10u, text_len);
-    EXPECT_EQ(0xC3, text[3]);
-    EXPECT_EQ(0xA9, text[4]);
+    ASSERT_EQ(sizeof(nfd), text_len);
+    EXPECT_EQ(0, std::memcmp(text, nfd, sizeof(nfd)));
     // Every node's range must lie inside the tree's own text.
     size_t n = tier_tree_node_count(t);
     for (size_t i = 0; i < n; ++i) {
@@ -339,35 +298,28 @@ TEST(LaplaceCoreTextDecomposer, TreeOwnsPostNfcText_OffsetsIndexIt) {
     SegCollect got;
     ASSERT_EQ(0, laplace_content_word_segment(nfd, sizeof(nfd), seg_collect, &got));
     ASSERT_EQ(2u, got.words.size());
-    EXPECT_EQ(std::string("caf\xC3\xA9"), got.words[0]);
+    EXPECT_EQ(std::string("cafe\xCC\x81"), got.words[0]);
     EXPECT_EQ(std::string("shop"), got.words[1]);
 }
 
-TEST(LaplaceCoreTextDecomposer, NfcExpansionStaysInBounds) {
-    // U+0958 (composition exclusion) EXPANDS under NFC (3 -> 6 bytes). Pre-#1039
-    // the word span read 3 bytes past the caller's allocation and returned
-    // adjacent heap as SQL text.
+TEST(LaplaceCoreTextDecomposer, CompositionExclusionKeepsOriginalWordBytes) {
     const uint8_t qa[] = { 'x', ' ', 0xE0, 0xA5, 0x98, ' ', 'y' };
     SegCollect got;
     ASSERT_EQ(0, laplace_content_word_segment(qa, sizeof(qa), seg_collect, &got));
     ASSERT_EQ(3u, got.words.size());
-    // NFC of U+0958 is U+0915 U+093C (6 bytes) — sliced whole from tree text.
-    EXPECT_EQ(std::string("\xE0\xA4\x95\xE0\xA4\xBC"), got.words[1]);
+    EXPECT_EQ(std::string("\xE0\xA5\x98"), got.words[1]);
     EXPECT_EQ(std::string("x"), got.words[0]);
     EXPECT_EQ(std::string("y"), got.words[2]);
 }
 
-TEST(LaplaceCoreTextDecomposer, WordBoundarySnapsToGraphemeBoundary) {
-    // "A" + U+0E33 (THAI SARA AM, GB=SpacingMark, WB=Other): one grapheme
-    // cluster that UAX #29 word rules split mid-cluster. Pre-#1040 this made
-    // TWO tier-2 words sharing ONE grapheme child — same id for two surfaces,
-    // one node orphaned. Snap-outward keeps grapheme ⊂ word invariant: ONE word.
+TEST(LaplaceCoreTextDecomposer, ThaiSpacingMarkRetainsContiguousOwnership) {
+    // Every scalar occurrence has exactly one parent, including spacing marks.
     const uint8_t thai[] = { 'A', 0xE0, 0xB8, 0xB3 };
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(thai, sizeof(thai), &t));
     auto s = classify(t);
-    EXPECT_EQ(1, s.words);
-    EXPECT_EQ(1, s.sentences);
+    EXPECT_EQ(2, s.leaves);
+    EXPECT_EQ(1, s.roots);
     // No node may be orphaned (parent set for every non-root after finalize).
     size_t n = tier_tree_node_count(t);
     for (size_t i = 0; i + 1 < n; ++i) {  // last node is the root
@@ -378,44 +330,28 @@ TEST(LaplaceCoreTextDecomposer, WordBoundarySnapsToGraphemeBoundary) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreTextDecomposer, SentenceBoundarySnapsToWordBoundary) {
-    // "a.א": WB6/7 keep ALetter-ATerm-HebrewLetter one word; SB11 breaks after
-    // the ATerm. Pre-#1040 two tier-3 sentences shared the containing word's
-    // id and the emit dedup dropped them — sentences vanished. Snapped: ONE
-    // sentence spanning the word.
+TEST(LaplaceCoreTextDecomposer, HebrewPunctuationRetainsAllScalars) {
+    // Native tailors punctuation into its own segment and retains every byte.
     const uint8_t heb[] = { 'a', '.', 0xD7, 0x90 };
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(heb, sizeof(heb), &t));
     auto s = classify(t);
-    EXPECT_EQ(1, s.words);
-    EXPECT_EQ(1, s.sentences);
+    EXPECT_EQ(3, s.leaves);
+    EXPECT_EQ(1, s.roots);
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreTextDecomposer, WhitespaceRunsSplitPerGrapheme_NoRunWords) {
-    // "a  b\r\nc": pre-#1042 the two-space run and CRLF became tier-2 Word
-    // COMPOSITIONS (words no human wrote, placed at norm 1.0 in the arena).
-    // Runs now split per grapheme: single-child slots collapse to their
-    // atom/cluster, so NO multi-child tier-2 node is whitespace-only, while
-    // the parent trajectory keeps every byte for exact reconstruction.
+TEST(LaplaceCoreTextDecomposer, WhitespaceAndLineBreakBytesAreRetained) {
     const uint8_t ws[] = { 'a', ' ', ' ', 'b', '\r', '\n', 'c' };
     tier_tree_t* t = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(ws, sizeof(ws), &t));
     size_t text_len = 0;
     const uint8_t* text = tier_tree_text(t, &text_len);
     ASSERT_NE(nullptr, text);
+    ASSERT_EQ(sizeof(ws), text_len);
+    EXPECT_EQ(0, std::memcmp(text, ws, sizeof(ws)));
+    EXPECT_EQ(7, classify(t).leaves);
     size_t n = tier_tree_node_count(t);
-    for (size_t i = 0; i < n; ++i) {
-        tier_node_view_t v;
-        tier_tree_get_node(t, (uint32_t)i, &v);
-        if (v.tier != 2 || v.child_count <= 1) continue;
-        bool all_ws = true;
-        for (uint32_t k = 0; k < v.text_range_len; ++k) {
-            uint8_t c = text[v.text_range_off + k];
-            if (c != ' ' && c != '\t' && c != '\r' && c != '\n') { all_ws = false; break; }
-        }
-        EXPECT_FALSE(all_ws) << "whitespace-run composition at node " << i;
-    }
     // Byte coverage is intact: the root spans the whole text.
     tier_node_view_t root;
     tier_tree_get_node(t, (uint32_t)(n - 1), &root);

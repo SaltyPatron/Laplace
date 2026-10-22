@@ -177,7 +177,7 @@ public sealed class WriterThroughputTests
                 int[] codepoints = [32 + ordinal / (95 * 95), 32 + ordinal / 95 % 95, 32 + ordinal % 95];
                 var children = codepoints.Select(codepoint =>
                 {
-                    var atom = CodepointPerfcache.Records[codepoint];
+                    var atom = CodepointPerfcache.LookupScalar((uint)codepoint);
                     return new OrderedCompositionComponent(atom.Hash, 0,
                         atom.CoordX, atom.CoordY, atom.CoordZ, atom.CoordM, checked((uint)codepoint), true);
                 }).ToArray();

@@ -1325,9 +1325,7 @@ internal sealed class SubstrateTools : IMcpTools
     internal static unsafe int PerfcacheResolver(
         uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
     {
-        var recs = CodepointPerfcache.Records;
-        if (atom >= (uint)recs.Length) return -1;
-        ref readonly var r = ref recs[(int)atom];
+        if (!CodepointPerfcache.TryLookupScalar(atom, out var r)) return -1;
         *outId = r.Hash;
         outCoord[0] = r.CoordX;
         outCoord[1] = r.CoordY;

@@ -16,11 +16,11 @@ public sealed class PerfcacheReaderTests
         var reader = new NpgsqlSubstrateReader(source);
         await source.DisposeAsync();
         Hash128[] ids = [
-            CodepointPerfcache.Records['A'].Hash,
-            CodepointPerfcache.Records[' '].Hash,
-            CodepointPerfcache.Records['狼'].Hash,
-            CodepointPerfcache.Records['A'].Hash,
-            CodepointPerfcache.Records[0].Hash];
+            CodepointPerfcache.LookupScalar((uint)'A').Hash,
+            CodepointPerfcache.LookupScalar((uint)' ').Hash,
+            CodepointPerfcache.LookupScalar((uint)'狼').Hash,
+            CodepointPerfcache.LookupScalar((uint)'A').Hash,
+            CodepointPerfcache.LookupScalar((uint)0).Hash];
 
         Assert.Equal(new byte[] { 31 }, await reader.EntitiesExistBitmapAsync(ids));
         Assert.Equal(new byte[] { 31 }, await reader.TierBatchExistenceProbeAsync(ids, 0));
@@ -31,7 +31,7 @@ public sealed class PerfcacheReaderTests
     public void FloorMembershipLeavesUnknownsUnresolvedAndPreservesRepeatedIds()
     {
         CodepointPerfcache.LoadDefault();
-        var a = CodepointPerfcache.Records['A'].Hash;
+        var a = CodepointPerfcache.LookupScalar((uint)'A').Hash;
         var unknown = new Hash128(0x1234, 0x5678);
         Assert.Equal(new byte[] { 5 }, CodepointPerfcache.KnownIdsBitmap([a, unknown, a]));
     }

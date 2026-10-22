@@ -1,26 +1,19 @@
 #pragma once
 
 #include <stddef.h>
-#include "laplace/core/perfcache_format.h"
+#include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int laplace_unicode_seed_compute(const char* ucdxml_path,
-                                 const char* ducet_path,
-                                 laplace_perfcache_record_t* out_records,
-                                 size_t out_capacity);
-
 int laplace_unicode_seed_validate_ucdxml(const char* ucdxml_path);
 
 typedef struct laplace_unicode_seed_snapshot laplace_unicode_seed_snapshot_t;
 
-/* Parse the authoritative UCDXML + DUCET inputs once into an immutable in-memory
- * seed snapshot. This is source-ingest working state, not the installed perfcache.
- * Unicode admission stages PostgreSQL rows from this snapshot; the runtime ROM is
- * downstream derived state and must never feed the database seed. */
+/* Retain the source XML bytes for semantic ingestion. Scalar identities and
+ * coordinates refer to the one Native floor; no second table is generated. */
 int laplace_unicode_seed_snapshot_open(
     const char* ucdxml_path,
     const char* ducet_path,
@@ -38,21 +31,11 @@ int laplace_unicode_seed_snapshot_xml_copy(
     size_t destination_capacity,
     size_t* out_copied);
 
-/* Stage one bounded contiguous codepoint range directly into the native ingest
- * IntentStage: one tier-0 Codepoint entity and one atomic Content physicality
- * per codepoint. One managed/native crossing owns the complete range. */
-int laplace_unicode_seed_snapshot_stage(
-    const laplace_unicode_seed_snapshot_t* snapshot,
-    size_t first,
-    size_t count,
-    intent_stage_t* stage,
-    const hash128_t* source_id);
-
-/* Exact source-derived record readback for parity/tests; never a runtime cache API. */
+/* Native 64-byte scalar record readback; never admits floor rows to PostgreSQL. */
 int laplace_unicode_seed_snapshot_copy_record(
     const laplace_unicode_seed_snapshot_t* snapshot,
     size_t index,
-    laplace_perfcache_record_t* out_record);
+    codepoint_entry_t* out_record);
 
 #ifdef __cplusplus
 }

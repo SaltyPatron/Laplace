@@ -6,11 +6,8 @@
 #include "laplace/core/text_decomposer.h"
 #include "laplace/core/tier_tree.h"
 
-TEST(LaplaceTextRoundtripGate, AcceptsCanonicalNfcExpansion) {
-    // U+0958 is a composition exclusion: NFC expands the 3-byte scalar to
-    // U+0915 U+093C (6 bytes). The gate reconstructs those tier-0 atoms and
-    // must compare against the tree-owned post-NFC buffer, not the caller's
-    // shorter input allocation (#1039).
+TEST(LaplaceTextRoundtripGate, PreservesCompositionExclusionBytes) {
+    // Ordinary decomposition preserves source bytes; NFC is explicit.
     const uint8_t input[] = { 'x', 0xE0, 0xA5, 0x98, 'y' };
     tier_tree_t* tree = nullptr;
     ASSERT_EQ(0, laplace_text_decomposer_run(input, sizeof(input), &tree));
@@ -19,13 +16,10 @@ TEST(LaplaceTextRoundtripGate, AcceptsCanonicalNfcExpansion) {
     size_t text_len = 0;
     const uint8_t* text = tier_tree_text(tree, &text_len);
     ASSERT_NE(nullptr, text);
-    ASSERT_EQ(8u, text_len);
+    ASSERT_EQ(sizeof(input), text_len);
     EXPECT_EQ(0, laplace_text_decomposer_validate_roundtrip(tree));
 
-    const uint8_t expected[] = {
-        'x', 0xE0, 0xA4, 0x95, 0xE0, 0xA4, 0xBC, 'y'
-    };
-    EXPECT_EQ(0, std::memcmp(text, expected, sizeof(expected)));
+    EXPECT_EQ(0, std::memcmp(text, input, sizeof(input)));
     tier_tree_free(tree);
 }
 

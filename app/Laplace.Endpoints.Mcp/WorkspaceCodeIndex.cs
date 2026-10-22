@@ -1134,7 +1134,6 @@ internal static class WorkspaceCodeIndex
         if (WordCache.TryGetValue(token, out var cached))
             return cached;
 
-        var recs = CodepointPerfcache.Records;
         Span<Hash128> cpIds = stackalloc Hash128[Math.Min(64, token.Length)];
         Span<double> cpCoords = stackalloc double[cpIds.Length * 4];
         var count = 0;
@@ -1144,9 +1143,8 @@ internal static class WorkspaceCodeIndex
             if (count >= cpIds.Length)
                 break;
             var cp = (uint)rune.Value;
-            if (cp < (uint)recs.Length)
+            if (CodepointPerfcache.TryLookupScalar(cp, out var r))
             {
-                ref readonly var r = ref recs[(int)cp];
                 cpIds[count] = r.Hash;
                 cpCoords[count * 4] = r.CoordX;
                 cpCoords[count * 4 + 1] = r.CoordY;

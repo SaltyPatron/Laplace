@@ -4,7 +4,7 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class UnicodeSeed
 {
-    public const int CodepointCount = 0x110000;
+    public const int CodepointCount = 1_112_064;
 
     /// <summary>Read/decompress and parse one UCD XML artifact to completion.</summary>
     public static void ValidateUcdXml(string ucdxmlPath)
@@ -17,17 +17,15 @@ public static unsafe class UnicodeSeed
     }
 
     /// <summary>
-    /// Parse the authoritative UCD XML + DUCET inputs into immutable source-ingest
-    /// working state. This snapshot is not the installed T0 perfcache and never maps it.
+    /// Retain source XML for semantic ingestion while reading scalar records from
+    /// the shared Native floor. This does not regenerate or seed a second floor.
     /// </summary>
     public static UnicodeSeedSnapshot OpenSnapshot(string ucdxmlPath, string ducetPath) =>
         UnicodeSeedSnapshot.Open(ucdxmlPath, ducetPath);
 }
 
 /// <summary>
-/// Immutable native Unicode source snapshot used while admitting the Tier-0 codepoint
-/// window. PostgreSQL receives rows staged from this object; the runtime perfcache is
-/// derived from that admitted state and is not reachable through this API.
+/// Source XML bytes plus a read-only view of the shared Native scalar mapping.
 /// </summary>
 public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
 {
@@ -39,6 +37,7 @@ public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
     {
         ArgumentException.ThrowIfNullOrEmpty(ucdxmlPath);
         ArgumentException.ThrowIfNullOrEmpty(ducetPath);
+        CodepointPerfcache.LoadDefault();
         IntPtr native = IntPtr.Zero;
         int rc = NativeInterop.UnicodeSeedSnapshotOpen(ucdxmlPath, ducetPath, &native);
         if (rc != 0 || native == IntPtr.Zero)
@@ -107,48 +106,6 @@ public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
     {
         ObjectDisposedException.ThrowIf(IsClosed, this);
         return new SnapshotXmlStream(this);
-    }
-
-    /// <summary>
-    /// One managed/native crossing stages a complete contiguous floor range. Native owns
-    /// entity/physicality tuple construction; managed code only records the source span.
-    /// </summary>
-    public void StageRange(IntentStage stage, int first, int count, Hash128 sourceId)
-    {
-        ObjectDisposedException.ThrowIf(IsClosed, this);
-        ArgumentNullException.ThrowIfNull(stage);
-        ArgumentOutOfRangeException.ThrowIfNegative(first);
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if ((long)first + count > Count)
-            throw new ArgumentOutOfRangeException(nameof(count));
-
-        int firstEntity = stage.EntityCount;
-        int firstPhysicality = stage.PhysicalityCount;
-        bool addRef = false;
-        try
-        {
-            DangerousAddRef(ref addRef);
-            Hash128 source = sourceId;
-            int rc = NativeInterop.UnicodeSeedSnapshotStage(
-                DangerousGetHandle(), checked((nuint)first), checked((nuint)count),
-                stage.DangerousNativeHandle, &source);
-            GC.KeepAlive(stage);
-            if (rc != 0)
-                throw new InvalidOperationException(
-                    $"laplace_unicode_seed_snapshot_stage(first={first}, count={count}) failed (rc={rc}).");
-        }
-        finally
-        {
-            if (addRef) DangerousRelease();
-        }
-
-        int entityCount = stage.EntityCount - firstEntity;
-        int physicalityCount = stage.PhysicalityCount - firstPhysicality;
-        if (entityCount != count || physicalityCount != count)
-            throw new InvalidOperationException(
-                $"Unicode source stage emitted {entityCount} entities/{physicalityCount} physicalities for {count} codepoints.");
-
-        stage.RecordPhysicalitySourceRange(firstPhysicality, physicalityCount, sourceId);
     }
 
     private sealed class SnapshotXmlStream : Stream

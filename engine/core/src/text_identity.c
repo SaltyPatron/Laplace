@@ -1,5 +1,6 @@
 #include "laplace/core/text_identity.h"
 #include "laplace/tier0.h"
+#include <stdatomic.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -9,8 +10,22 @@
 
 _Static_assert(sizeof(hash128_t) == sizeof(lp_id), "text identities are Native IDs");
 
+static _Atomic(const lp_tier0_record *) scalar_floor;
+const void *text_identity_load_scalar_floor(const char *path) {
+    const lp_tier0_record *floor = atomic_load_explicit(&scalar_floor, memory_order_acquire);
+    if (!floor) {
+        const lp_tier0_record *candidate = lp_tier0_map(path);
+        if (!candidate) return NULL;
+        atomic_compare_exchange_strong_explicit(&scalar_floor, &floor, candidate,
+                                                memory_order_acq_rel, memory_order_acquire);
+        floor = atomic_load_explicit(&scalar_floor, memory_order_acquire);
+    }
+    return floor;
+}
+const void *text_identity_scalar_floor(void) { return text_identity_load_scalar_floor(NULL); }
+
 void *text_identity_create(void) {
-    const lp_tier0_record *floor = lp_tier0_map(NULL);
+    const lp_tier0_record *floor = text_identity_scalar_floor();
     return floor ? lp_text_new(floor) : NULL;
 }
 
@@ -71,7 +86,7 @@ void *text_identity_thread_context(void) { return thread_text(); }
 
 int text_identity_atom(uint32_t scalar, hash128_t *id, double coord[4], hilbert128_t *hilbert) {
     if (!id || !coord || !hilbert || !lp_unicode_scalar(scalar)) return -1;
-    const lp_tier0_record *floor = lp_tier0_map(NULL);
+    const lp_tier0_record *floor = text_identity_scalar_floor();
     if (!floor) return -2;
     lp_ref atom = lp_ref_atom(floor, scalar);
     memcpy(id, &atom.id, sizeof *id);

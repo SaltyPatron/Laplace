@@ -16,7 +16,7 @@ public sealed class LaplaceInstallPathTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         foreach (var name in new[] { "LAPLACE_MACHINE_ENV", "LAPLACE_DATA", "LAPLACE_WORK", "LAPLACE_MODELS", "LAPLACE_BUILD", "LAPLACE_BUILD_ROOT", "LAPLACE_ENGINE_BUILD",
-                     "LAPLACE_PERFCACHE_BIN", "LAPLACE_INSTALL_PREFIX", "LAPLACE_OUT", "HF_HUB_CACHE", "HF_HOME" })
+                     "LAPLACE_TIER0", "LAPLACE_PERFCACHE_BIN", "LAPLACE_INSTALL_PREFIX", "LAPLACE_OUT", "HF_HUB_CACHE", "HF_HOME" })
         {
             _prior[name] = Environment.GetEnvironmentVariable(name);
             Environment.SetEnvironmentVariable(name, null);
@@ -58,7 +58,7 @@ public sealed class LaplaceInstallPathTests : IDisposable
     public void InstalledArtifactUsesDeclaredPrefix()
     {
         var share = Directory.CreateDirectory(Path.Combine(_root, "share", "laplace")).FullName;
-        var artifact = Path.Combine(share, "laplace_t0_perfcache.bin");
+        var artifact = Path.Combine(share, "tier0.bin");
         File.WriteAllBytes(artifact, [1]);
         Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", _root);
         Assert.Equal(artifact, LaplaceInstall.ResolveT0Perfcache());
