@@ -9,24 +9,23 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/math4d.h"
+#include "laplace/core/codepoint_table.h"
 #include "laplace/core/tier_tree.h"
+#include "laplace/laplace.h"
 
 namespace {
 
 int synth_resolver(uint32_t atom, void*,
                    hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb) {
-    uint8_t bytes[4];
-    bytes[0] = (uint8_t)(atom & 0xFF);
-    bytes[1] = (uint8_t)((atom >> 8) & 0xFF);
-    bytes[2] = (uint8_t)((atom >> 16) & 0xFF);
-    bytes[3] = (uint8_t)((atom >> 24) & 0xFF);
-    hash128_blake3(bytes, sizeof(bytes), out_id);
-    out_coord[0] = (double)atom / 1000.0;
-    out_coord[1] = 0.0;
-    out_coord[2] = 0.0;
-    out_coord[3] = 0.0;
-    hilbert4d_encode(out_coord, out_hb);
-    return 0;
+    return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
+}
+
+lp_ref native_atom(uint32_t cp) {
+    lp_ref result{};
+    double coordinate[4]; hilbert128_t hilbert;
+    EXPECT_EQ(0, codepoint_table_resolve_atom(cp, reinterpret_cast<hash128_t*>(&result.id), coordinate, &hilbert));
+    EXPECT_TRUE(lp_coord_of_xyzm(coordinate, &result.c));
+    return result;
 }
 
 int err_resolver(uint32_t, void*,
@@ -79,7 +78,7 @@ TEST(LaplaceCoreHashComposer, LeafIdMatchesResolver) {
     hilbert128_t dummy_hb;
     synth_resolver(42, nullptr, &expected, dummy_coord, &dummy_hb);
     EXPECT_TRUE(hash128_equals(&v.id, &expected));
-    EXPECT_EQ(0.042, v.coord[0]);
+    for (int axis = 0; axis < 4; axis++) EXPECT_EQ(dummy_coord[axis], v.coord[axis]);
     tier_tree_free(t);
 }
 
@@ -107,8 +106,11 @@ TEST(LaplaceCoreHashComposer, InteriorCoordIsChildCentroid) {
     ASSERT_EQ(0, hash_composer_run(t, synth_resolver, nullptr));
     tier_node_view_t v;
     ASSERT_EQ(0, tier_tree_get_node(t, 4, &v));
-    EXPECT_DOUBLE_EQ(0.1005, v.coord[0]);
-    EXPECT_DOUBLE_EQ(0.0, v.coord[1]);
+    lp_ref children[2] = {native_atom(100), native_atom(101)};
+    lp_ref expected = lp_ref_compose(children, 2, 1);
+    double coordinate[4]; lp_coord_xyzm(&expected.c, coordinate);
+    for (int axis = 0; axis < 4; axis++) EXPECT_EQ(coordinate[axis], v.coord[axis]);
+    tier_tree_free(t);
 }
 
 TEST(LaplaceCoreHashComposer, RootIdMatchesMerkleOfMerkles) {
@@ -141,7 +143,13 @@ TEST(LaplaceCoreHashComposer, RootCoordIsCentroidOfInteriorCentroids) {
     ASSERT_EQ(0, hash_composer_run(t, synth_resolver, nullptr));
     tier_node_view_t v;
     ASSERT_EQ(0, tier_tree_get_node(t, 6, &v));
-    EXPECT_DOUBLE_EQ(0.1015, v.coord[0]);
+    lp_ref first[2] = {native_atom(100), native_atom(101)};
+    lp_ref second[2] = {native_atom(102), native_atom(103)};
+    lp_ref children[2] = {lp_ref_compose(first, 2, 1), lp_ref_compose(second, 2, 1)};
+    lp_ref expected = lp_ref_compose(children, 2, 2);
+    double coordinate[4]; lp_coord_xyzm(&expected.c, coordinate);
+    for (int axis = 0; axis < 4; axis++) EXPECT_EQ(coordinate[axis], v.coord[axis]);
+    tier_tree_free(t);
 }
 
 TEST(LaplaceCoreHashComposer, IsDeterministicAcrossRuns) {

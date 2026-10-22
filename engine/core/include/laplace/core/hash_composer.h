@@ -36,7 +36,9 @@ int hash_composer_run_workers(
     void*                          resolver_user_data,
     size_t                         worker_count);
 
-void hash_composer_compose_node(
+/* Native fixed-point centroid; returns -1 on invalid buffers or coordinates,
+ * leaving every output untouched. */
+int hash_composer_compose_node(
     uint8_t          tier,
     const hash128_t* child_ids,
     const double*    child_coords,

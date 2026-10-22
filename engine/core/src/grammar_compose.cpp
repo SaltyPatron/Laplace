@@ -472,8 +472,14 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
 
         double out_coord[4];
         hilbert128_t hb;
-        hash_composer_compose_node(tier, child_ids, child_coords, m,
-                                   &st->comp_id[idx], out_coord, &hb);
+        rc = hash_composer_compose_node(tier, child_ids, child_coords, m,
+                                       &st->comp_id[idx], out_coord, &hb);
+        if (rc != 0) {
+            free(child_ids);
+            free(child_coords);
+            free(child_flags);
+            goto done;
+        }
         if (leaf_root_id.hi != 0 || leaf_root_id.lo != 0)
             st->comp_id[idx] = leaf_root_id;
         memcpy(st->comp_coord + idx * 4, out_coord, 4 * sizeof(double));

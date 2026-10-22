@@ -23,6 +23,13 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <filesystem>
+#endif
+
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
@@ -173,7 +180,8 @@ int main(int argc, char** argv) {
     std::string texts[LAPLACE_VOCABULARY_FAMILY_COUNT];
     std::vector<uint8_t> mix;
     put(mix, t0_fingerprint);
-    for (const char* t = LAPLACE_VOCABULARY_PERFCACHE_GENERATOR_TAG; *t; ++t) mix.push_back(uint8_t(*t));
+    for (const char* t = LAPLACE_VOCABULARY_PERFCACHE_GENERATOR_TAG "/native-fixed53"; *t; ++t)
+        mix.push_back(uint8_t(*t));
     for (int f = 0; f < LAPLACE_VOCABULARY_FAMILY_COUNT; ++f) {
         texts[f] = read_file(cli.manifest + "/" + kTables[f] + ".tsv");
         mix.push_back(0);
@@ -292,7 +300,14 @@ int main(int argc, char** argv) {
             return 5;
         }
     }
-    if (std::rename(tmp.c_str(), cli.output.c_str()) != 0) {
+#ifdef _WIN32
+    const bool published = MoveFileExW(std::filesystem::u8path(tmp).c_str(),
+        std::filesystem::u8path(cli.output).c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    const bool published = std::rename(tmp.c_str(), cli.output.c_str()) == 0;
+#endif
+    if (!published) {
         std::fprintf(stderr, "cannot publish %s\n", cli.output.c_str());
         return 5;
     }
