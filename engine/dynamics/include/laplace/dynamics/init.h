@@ -10,6 +10,8 @@ extern "C" {
 
 int laplace_runtime_resolve_thread_count(void);
 
+/* 0: ready; -1: invalid configuration/CNR failure; -2: MKL unavailable;
+ * -3: Intel OpenMP loader failure; -4: MKL threading selection refused. */
 int laplace_runtime_init(int host, int mkl_threads);
 
 int laplace_runtime_host(void);

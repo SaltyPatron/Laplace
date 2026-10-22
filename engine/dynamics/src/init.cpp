@@ -6,10 +6,14 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <cstdio>
 #include <mutex>
 
 #ifdef LAPLACE_HAS_MKL
 #include <mkl.h>
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 #ifndef LAPLACE_MKL_CBWR_MODE
 #  if defined(LAPLACE_MKL_CBWR_AVX512)
 #    define LAPLACE_MKL_CBWR_MODE MKL_CBWR_AVX512
@@ -59,6 +63,27 @@ int resolve_thread_count() {
 int g_mkl_num_threads = -1;
 int g_runtime_host = -1;
 
+int initialize_mkl_threading() {
+#if defined(__linux__)
+    // Managed hosts load the app-local engine with RTLD_LOCAL. MKL's SDL
+    // subsequently opens its threading plugin, whose OpenMP references need
+    // process-global scope. Reuse/promote the packaged Intel runtime by SONAME;
+    // keep its handle for the same process lifetime as MKL and the engine.
+    static void* openmp_runtime = nullptr;
+    if (!openmp_runtime)
+        openmp_runtime = dlopen("libiomp5.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!openmp_runtime) {
+        std::fprintf(stderr, "laplace runtime: Intel OpenMP initialization failed: %s\n", dlerror());
+        return -3;
+    }
+#endif
+    // SDL selection must precede every other MKL call. TBB still schedules
+    // engine work, while Intel OpenMP supplies MKL's reproducible kernels.
+    if (mkl_set_threading_layer(MKL_THREADING_INTEL) != MKL_THREADING_INTEL)
+        return -4;
+    return 0;
+}
+
 }
 
 #endif
@@ -105,6 +130,10 @@ extern "C" int laplace_runtime_init(int host, int mkl_threads) {
         if (g_mkl_num_threads <= 0)
             return -1;
     }
+
+    const int threading_rc = initialize_mkl_threading();
+    if (threading_rc != 0)
+        return threading_rc;
 
     mkl_set_dynamic(0);
     mkl_set_num_threads(g_mkl_num_threads);

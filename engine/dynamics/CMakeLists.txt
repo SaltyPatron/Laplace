@@ -64,6 +64,7 @@ target_include_directories(laplace_dynamics
 
 target_link_libraries(laplace_dynamics
     PUBLIC  laplace_core laplace_spectra
+    PRIVATE ${CMAKE_DL_LIBS}
 )
 
 option(LAPLACE_REQUIRE_MKL "Fail configure if MKL/TBB not found (Epic D production)" OFF)
@@ -86,7 +87,6 @@ if(MKL_FOUND AND TBB_FOUND)
         EIGEN_USE_BLAS
         EIGEN_USE_LAPACKE
         MKL_LP64
-        MKL_THREADING_TBB
         LAPLACE_HAS_MKL=1
     )
     target_link_libraries(laplace_dynamics PRIVATE MKL::MKL TBB::tbb)

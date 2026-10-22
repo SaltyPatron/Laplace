@@ -227,6 +227,12 @@ phase_install() {
       }' | sort -u)
   for lib in "${MKLROOT:-/opt/intel/oneapi/mkl/latest}"/lib/libmkl_{core,def,mc3,avx2,avx512,vml_def,vml_mc3,vml_avx2,vml_avx512,vml_cmpt,intel_thread,sequential,tbb_thread,intel_lp64,intel_ilp64}.so.[0-9]; do
     [[ -e "$lib" ]] && want[$lib]=1; done
+  # SDL opens this runtime dynamically, so it may have no DT_NEEDED edge for
+  # ldd to discover. Resolve it from the same compiler used for this release.
+  local openmp_runtime
+  openmp_runtime="$(icx -print-file-name=libiomp5.so)"
+  [[ "$openmp_runtime" == /* && -s "$openmp_runtime" ]] || fail "the selected Intel compiler cannot resolve libiomp5.so"
+  want[$openmp_runtime]=1
   for lib in "${!want[@]}"; do cp -fL "$lib" "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" && mv -f "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" "$LAPLACE_INSTALL_PREFIX/lib/$(basename "$lib")"; done
   echo "  native dependencies beside the libraries: ${#want[@]} files"
   local missing
