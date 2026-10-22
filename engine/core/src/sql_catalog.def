@@ -1558,6 +1558,13 @@ SQL_QUERY("maintenance.vacuum_plain_relation", "", "VACUUM {relation}")
 SQL_QUERY("maintenance.vacuum_analyze_relation", "", "VACUUM (ANALYZE) {relation}")
 SQL_QUERY("maintenance.vacuum_full_relation", "", "VACUUM (FULL, ANALYZE) {relation}")
 
+/* Installed operation names, argument names/types and overload choice come only
+ * from ops.api(). Values remain protocol parameters; these are rendering templates,
+ * not fixed prepared statements. */
+SQL_QUERY("operation.argument", "", "{name} => @{slot}::{type}")
+SQL_QUERY("operation.function", "", "SELECT * FROM {operation}({arguments}) LIMIT {rows}")
+SQL_QUERY("operation.procedure", "", "CALL {operation}({arguments})")
+
 SQL_QUERY("realize.register_canonicals", "text[]",
     "SELECT realize.register_canonicals($1)")
 
@@ -1650,3 +1657,9 @@ SQL_QUERY("chess.commentary_position_history", "bytea,bytea,int2,int4,int4,bool,
 
 SQL_QUERY("chess.commentary_position_continuations", "bytea,bytea,int2,int4",
     "WITH raw_lines AS MATERIALIZED (\n    SELECT DISTINCT p.entity_id AS line_id\n    FROM laplace.physicalities p\n    JOIN laplace.entities e ON e.id = p.entity_id\n    WHERE p.type = $3\n      AND e.type_id = $2\n      AND p.trajectory IS NOT NULL\n      AND public.laplace_trajectory_constituent_ids(p.trajectory)\n          @> ARRAY[$1]::bytea[]\n),\nsteps AS (\n    SELECT step.nxt\n    FROM raw_lines l\n    JOIN laplace.physicalities p\n      ON p.entity_id = l.line_id\n     AND p.type = $3\n    CROSS JOIN LATERAL (\n        SELECT ids[i + 1] AS nxt\n        FROM (\n            SELECT public.laplace_trajectory_constituent_ids(p.trajectory) AS ids\n        ) t\n        CROSS JOIN LATERAL generate_subscripts(t.ids, 1) AS s(i)\n        WHERE t.ids[s.i] = $1\n          AND s.i < cardinality(t.ids)\n        LIMIT 1\n    ) step\n    WHERE step.nxt IS NOT NULL\n)\nSELECT nxt, count(*)::bigint AS n\nFROM steps\nGROUP BY nxt\nORDER BY n DESC, nxt\nLIMIT $4")
+
+SQL_QUERY("measurement.ingest_snapshot", "",
+    "SELECT coalesce(string_agg(j.run_id::text || '|' || j.source_name || '|'   || j.input_units_done || '|' || j.input_units_total, E'\\n' ORDER BY j.run_id), '') FROM laplace.ingest_run_journal j WHERE j.status = 'running'")
+
+SQL_QUERY("measurement.active_ingest_backends", "",
+    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'   AND pid <> pg_backend_pid()   AND query ~* 'consensus\\.upsert|COPY laplace\\.|highway_mask_deposit|attestations_exist|physicalities_exist'")
