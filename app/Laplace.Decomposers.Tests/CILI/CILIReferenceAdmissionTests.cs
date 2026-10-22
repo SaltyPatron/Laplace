@@ -1,5 +1,4 @@
-using System.Text;
-using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
 using Xunit;
 
@@ -13,20 +12,12 @@ public sealed class CILIReferenceAdmissionTests
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
         string fixture = Path.Combine(Directory.GetParent(repository)!.FullName, "Laplace-Engine", "tests",
             "fixtures", "highway-identities", "cili", "ili.ttl");
-        using var output = new MemoryStream();
-        using var error = new MemoryStream();
-        int code = await NativeRecipeExecution.Configured().ExecuteAsync(
-            new NativeRecipeRequest(NativeRecipeMode.Claims, "cili", [fixture], Threads: 4), output, error);
-        string stdout = Encoding.UTF8.GetString(output.ToArray());
-        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + stdout);
-        string[] claims = stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
-            .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal)).ToArray();
+        string[] claims = await NativeCorpusAssertions.ClaimsAsync("cili", fixture);
         Assert.Equal(2, claims.Length);
         Assert.Contains(claims, claim => claim.Contains("\ti46360\ta\tConcept", StringComparison.Ordinal));
         Assert.Contains(claims, claim => claim.Contains("\ti46360\tskos:definition\t[", StringComparison.Ordinal)
             && claim.EndsWith(", language:eng]", StringComparison.Ordinal));
         Assert.All(claims, claim => Assert.StartsWith("claim\t0\t1\ti46360\t", claim, StringComparison.Ordinal));
-        Assert.DoesNotMatch(@"unresolved obligations: [1-9]", stdout);
     }
 
     [Fact]
