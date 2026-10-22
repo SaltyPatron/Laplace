@@ -95,6 +95,11 @@ public sealed class IngestRosterParityTests
             .ToList();
 
         Assert.Equal(sources, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
+        Assert.Equal(sources, IngestDispatchTable.CanonicalSourceKeys);
+        var directories = Directory.EnumerateDirectories(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot)
+            .Where(directory => File.Exists(Path.Combine(directory, "source")))
+            .Select(Path.GetFileName).OrderBy(static name => name, StringComparer.Ordinal).ToArray();
+        Assert.Equal(directories, IngestDispatchTable.CanonicalSourceKeys.OrderBy(static name => name, StringComparer.Ordinal));
 
         foreach (var source in sources)
         {
@@ -127,17 +132,24 @@ public sealed class IngestRosterParityTests
     }
 
     [Theory]
+    [InlineData("ucd", "unicode")]
     [InlineData("iso639", "iso-639")]
     [InlineData("OEWN", "open-english-wordnet")]
     [InlineData("omw", "open-multilingual-wordnet")]
     [InlineData("wordnet", "princeton-wordnet")]
     [InlineData("ud", "universal-dependencies")]
     [InlineData("atomic2020", "atomic-2020")]
+    [InlineData("atomic", "atomic-2020")]
+    [InlineData("sbf", "social-bias-frames")]
+    [InlineData("socialchem", "social-chemistry-101")]
+    [InlineData("mhs", "measuring-hate-speech")]
+    [InlineData("wiktextract", "wiktionary")]
+    [InlineData("predicatematrix", "predicate-matrix")]
     public void ExistingSourceAliasesSelectCanonicalNativeRecipes(string alias, string expected)
     {
         Assert.Equal(expected, IngestDispatchTable.CanonicalSourceName(alias));
         Assert.Contains(expected, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
-        Assert.Contains(alias, IngestDispatchTable.RegisteredKeys, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain(alias, IngestDispatchTable.RegisteredKeys, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string FindRepoRoot()

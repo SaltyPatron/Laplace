@@ -63,6 +63,24 @@ public static class EtlManifest
         return names.AsReadOnly();
     }
 
+    /// <summary>Normalize historical input spellings before selecting a Native source.</summary>
+    public static string CanonicalSourceName(string source) => source.ToLowerInvariant() switch
+    {
+        "ucd" => "unicode",
+        "iso639" => "iso-639",
+        "ud" => "universal-dependencies",
+        "oewn" => "open-english-wordnet",
+        "omw" => "open-multilingual-wordnet",
+        "wordnet" => "princeton-wordnet",
+        "atomic" or "atomic2020" => "atomic-2020",
+        "sbf" => "social-bias-frames",
+        "socialchem" => "social-chemistry-101",
+        "mhs" => "measuring-hate-speech",
+        "wiktextract" => "wiktionary",
+        "predicatematrix" => "predicate-matrix",
+        _ => source.ToLowerInvariant(),
+    };
+
     private static Hash128 Src(string name) => Hash128.Text($"substrate/source/{name}/v1");
 
     private static EtlSource Row(
@@ -93,11 +111,11 @@ public static class EtlManifest
     private static readonly Dictionary<string, EtlSource> _rows = Build();
 
     public static EtlSource Get(string cliName) =>
-        _rows.TryGetValue(cliName, out var r)
+        _rows.TryGetValue(CanonicalSourceName(cliName), out var r)
             ? r
             : throw new KeyNotFoundException($"no EtlManifest row for source '{cliName}'");
 
-    public static bool TryGet(string cliName, out EtlSource src) => _rows.TryGetValue(cliName, out src!);
+    public static bool TryGet(string cliName, out EtlSource src) => _rows.TryGetValue(CanonicalSourceName(cliName), out src!);
 
     public static IReadOnlyCollection<string> Names => _rows.Keys;
 
@@ -114,7 +132,7 @@ public static class EtlManifest
 
             ["unicode"] = Row("unicode", "Unicode", 0, "StandardsDerived",
                 "unicode", new EtlModality("ucd", GrammarReady: false)),
-            ["iso639"] = Row("iso639", "ISO639Decomposer", 1, "StandardsDerived",
+            ["iso-639"] = Row("iso-639", "ISO639Decomposer", 1, "StandardsDerived",
                 "iso639", new EtlModality("tsv", GrammarReady: false)),
 
 
@@ -134,7 +152,7 @@ public static class EtlManifest
                 bootstrapRelations: WiktionaryBootstrap, hasDedicatedDecomposer: true),
 
 
-            ["ud"] = Row("ud", "UD", 2, "AcademicCurated",
+            ["universal-dependencies"] = Row("universal-dependencies", "UD", 2, "AcademicCurated",
                 "ud", new EtlModality("conllu", Glob: "*.conllu", GrammarReady: false),
                 bootstrapRelations: UdBootstrap),
 
@@ -160,7 +178,7 @@ public static class EtlManifest
 
 
 
-            ["omw"] = Row("omw", "OMWDecomposer", 1, "AcademicCurated",
+            ["open-multilingual-wordnet"] = Row("open-multilingual-wordnet", "OMWDecomposer", 1, "AcademicCurated",
                 "omw", new EtlModality("tsv", Glob: "*.tab", RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset, acceptCommentRows: false,
                 bootstrapRelations: OmwBootstrap, requireIliMap: true, hasDedicatedDecomposer: true),
@@ -171,7 +189,7 @@ public static class EtlManifest
             // construction and each asserts it implicitly. CILI and MapNet are NOT scoped —
             // an ILI concept and a cross-resource mapping are language-neutral, and
             // stamping them English would attest something the source does not say.
-            ["wordnet"] = Row("wordnet", "WordNetDecomposer", 2, "AcademicCurated",
+            ["princeton-wordnet"] = Row("princeton-wordnet", "WordNetDecomposer", 2, "AcademicCurated",
                 "wordnet", new EtlModality("wndb", GrammarReady: false), anchor: AnchorResolver.IliSynset,
                 languageScope: "eng"),
 
@@ -204,9 +222,9 @@ public static class EtlManifest
             ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated",
                 "wordframenet", new EtlModality("text", GrammarReady: false),
                 anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
-            // predicatematrix has no route of its own: semlink ingests it (IngestCommands
-            // receipts it under SemLinkDecomposer), so its layer is semlink's.
-            ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated",
+            // Native corpus identity is predicate-matrix; metadata remains available
+            // to the provider adapters while their implementation is retired.
+            ["predicate-matrix"] = Row("predicate-matrix", "PredicateMatrixDecomposer", 3, "AcademicCurated",
                 "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),

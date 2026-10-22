@@ -19,6 +19,7 @@ else
     fi
 fi
 [[ -f "$RECIPE_ROOT/order" ]] || { echo "Native recipe estate has no order declaration: $RECIPE_ROOT" >&2; exit 2; }
+export LAPLACE_RECIPES="$RECIPE_ROOT"
 SOURCE_ORDER=()
 declare -A earlier_sources=()
 while IFS= read -r declaration || [[ -n "$declaration" ]]; do
@@ -299,8 +300,9 @@ case "$route" in
         if [[ -n "$path" ]]; then ingest chess-syzygy "$path"; else ingest chess-syzygy; fi
         ;;
     *)
-        echo "Unknown source: $source" >&2
-        usage_sources
-        exit 2
+        # The CLI owns historical input normalization and unknown-name errors;
+        # this wrapper declares no second alias table or corpus roster.
+        require_cli
+        if [[ -n "$path" ]]; then ingest "$source" "$path"; else ingest "$source"; fi
         ;;
 esac
