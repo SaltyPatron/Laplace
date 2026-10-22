@@ -19,14 +19,10 @@ if(WIN32)
     # The engine uses standard C functions (getenv/fopen/strncpy); MSVC CRT
     # deprecations are silenced as in extension/.
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
-    # /Qfma- overrides the FMA contraction /fp:precise would allow: identity and
-    # geometry arithmetic must round identically on every host. icx warns about
-    # that override, so only that diagnostic is silenced.
 elseif(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
 else()
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
-    # The same deterministic floating-point contract in GCC/Clang spelling.
 endif()
 
 # Emit CodeView debug info + a linker PDB for optimized Release native builds so a
@@ -50,28 +46,10 @@ endif()
 
 set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)")
 set_property(CACHE LAPLACE_TARGET_ISA PROPERTY STRINGS AVX2 AVX512)
-if(WIN32)
-    if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
-        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/arch:AVX2>")
-    elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/arch:AVX512>")
-    endif()
-    if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
-    else()
-        add_compile_definitions(LAPLACE_MKL_CBWR_AVX2=1)
-    endif()
+if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+    add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
 else()
-    if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
-        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-march=haswell>")
-    elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-march=sapphirerapids>")
-    endif()
-    if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
-    else()
-        add_compile_definitions(LAPLACE_MKL_CBWR_AVX2=1)
-    endif()
+    add_compile_definitions(LAPLACE_MKL_CBWR_AVX2=1)
 endif()
 
 if(NOT DEFINED LAPLACE_EXTERNAL OR LAPLACE_EXTERNAL STREQUAL "")
@@ -309,6 +287,19 @@ foreach(_laplace_engine_target IN ITEMS
         laplace_core_tests laplace_dynamics_tests laplace_synthesis_tests)
     if(TARGET ${_laplace_engine_target})
         target_compile_options(${_laplace_engine_target} PRIVATE ${LAPLACE_ENGINE_FP_FLAGS})
+        # The shared contract includes a portable baseline. Apply the explicitly
+        # selected engine ISA after it so intrinsic-based kernels retain their ISA.
+        if(WIN32)
+            if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+                target_compile_options(${_laplace_engine_target} PRIVATE /arch:AVX512)
+            else()
+                target_compile_options(${_laplace_engine_target} PRIVATE /arch:AVX2)
+            endif()
+        elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
+            target_compile_options(${_laplace_engine_target} PRIVATE -march=sapphirerapids)
+        else()
+            target_compile_options(${_laplace_engine_target} PRIVATE -march=haswell)
+        endif()
         get_target_property(_laplace_target_type ${_laplace_engine_target} TYPE)
         if(NOT _laplace_target_type STREQUAL "STATIC_LIBRARY")
             target_link_options(${_laplace_engine_target} PRIVATE ${LAPLACE_ENGINE_FP_LINK_FLAGS})
