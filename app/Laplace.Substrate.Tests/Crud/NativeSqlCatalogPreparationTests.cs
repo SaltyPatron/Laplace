@@ -102,7 +102,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 // StagedSourceWriter expands its identifier templates and runs their
                 // dependent DDL/COPY lifecycle in StagedSourceWriterTests. They are
                 // not executable fixed statements and cannot be prepared raw.
-                if (contract.Text.Contains('{'))
+                if (Regex.IsMatch(contract.Text, @"\{[a-z_][a-z0-9_]*\}", RegexOptions.IgnoreCase))
                 {
                     Assert.StartsWith("stage.", name);
                     templates.Add(name);

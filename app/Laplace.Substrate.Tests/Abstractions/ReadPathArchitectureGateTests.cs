@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Laplace.Engine.Core;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -74,6 +75,12 @@ public sealed class ReadPathArchitectureGateTests
                 || (LeadingSqlWith.IsMatch(value) && SqlSelect.IsMatch(value));
 
     internal static bool HasHandWrittenSql(string source)
+        => HasSql(source, includeCommandConstruction: true);
+
+    internal static bool HasInlineSql(string source)
+        => HasSql(source, includeCommandConstruction: false);
+
+    private static bool HasSql(string source, bool includeCommandConstruction)
     {
         // A file-wide regex crossed the closing quote of @"D:\Data\Laplace"
         // and treated a later "select distro" comment as SQL. Parse C# so each
@@ -82,15 +89,15 @@ public sealed class ReadPathArchitectureGateTests
         // This is a repository gate, not a build-platform gate: inspect code
         // behind inactive #if branches too, without treating comments as code.
         if (root.DescendantTrivia().Any(trivia => trivia.IsKind(SyntaxKind.DisabledTextTrivia)
-            && HasHandWrittenSql(trivia.ToString())))
+            && HasSql(trivia.ToString(), includeCommandConstruction)))
             return true;
-        if (root.DescendantTokens().Any(token => token.IsKind(SyntaxKind.IdentifierToken)
+        if (includeCommandConstruction && root.DescendantTokens().Any(token => token.IsKind(SyntaxKind.IdentifierToken)
             && token.ValueText.Equals("CommandText", StringComparison.OrdinalIgnoreCase)))
             return true;
 
         return root.DescendantNodes().Any(node => node switch
         {
-            InvocationExpressionSyntax call when call.ArgumentList.Arguments.Count > 0 =>
+            InvocationExpressionSyntax call when includeCommandConstruction && call.ArgumentList.Arguments.Count > 0 =>
                 (call.Expression switch
                 {
                     IdentifierNameSyntax name => name.Identifier.ValueText,
@@ -255,6 +262,18 @@ public sealed class ReadPathArchitectureGateTests
             + "app/Laplace.Substrate/Crud/Npgsql so every caller gets one implementation, "
             + "instead of here:");
 
+    [Fact]
+    public void SharedSubstrateReads_ContainNoInlineSql()
+    {
+        var folder = Path.Combine(TypeIdLawTests.FindRepoRootPublic(), "app", "Laplace.Substrate",
+            "Crud", "Npgsql");
+        var files = Directory.EnumerateFiles(folder, "NpgsqlSubstrateReads*.cs").ToArray();
+        Assert.NotEmpty(files);
+        var violations = files.Where(file => HasInlineSql(File.ReadAllText(file)))
+            .Select(Path.GetFileName).ToArray();
+        Assert.Empty(violations);
+    }
+
     /// <summary>
     /// A migrated file must delete its allowlist entry. Without this the lists fill with
     /// dead names and the ceilings stop meaning anything.
@@ -322,16 +341,9 @@ public sealed class ReadPathArchitectureGateTests
     [Fact]
     public void ConsensusWeb_LabelsSurvivorsInBoundedBatches()
     {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var reads = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate",
-            "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
-        var start = reads.IndexOf("LabelsFastAsync(", StringComparison.Ordinal);
-        var end = reads.IndexOf("public readonly record struct EdgesRawRow", start,
-            StringComparison.Ordinal);
-        Assert.True(start >= 0 && end > start, "LabelsFastAsync implementation was not found");
-        var labels = reads[start..end];
+        var labels = SqlCatalog.Get("realize.labels_fast").Text;
 
-        Assert.Contains("realize.resolve_name_batch(@ids::bytea[])", labels,
+        Assert.Contains("realize.resolve_name_batch($1::bytea[])", labels,
             StringComparison.Ordinal);
         Assert.Contains("realize.render_text_batch(s.ids, 3)", labels,
             StringComparison.Ordinal);
