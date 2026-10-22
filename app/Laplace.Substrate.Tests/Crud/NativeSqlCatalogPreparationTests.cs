@@ -104,7 +104,9 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 // not executable fixed statements and cannot be prepared raw.
                 if (Regex.IsMatch(contract.Text, @"\{[a-z_][a-z0-9_]*\}", RegexOptions.IgnoreCase))
                 {
-                    Assert.StartsWith("stage.", name);
+                    Assert.True(name.StartsWith("stage.", StringComparison.Ordinal)
+                        || name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal),
+                        $"No lifecycle verification owns template {name}.");
                     templates.Add(name);
                     continue;
                 }
@@ -126,6 +128,37 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.True(failures.Count == 0,
             $"{failures.Count} of {names.Length - templates.Count} fixed native SQL contracts failed preparation " +
             $"({templates.Count} staged templates require their lifecycle tests):\n" + string.Join("\n", failures));
+    }
+
+    [Fact]
+    public async Task CatalogVacuumExecutesEveryModeOnOneQuotedRelationOutsideATransaction()
+    {
+        var table = "catalog vacuum " + Guid.NewGuid().ToString("N");
+        using var identifiers = new NpgsqlCommandBuilder();
+        var relation = "public." + identifiers.QuoteIdentifier(table);
+        await using var connection = await _source.OpenConnectionAsync();
+        await using (var create = new NpgsqlCommand($"CREATE TABLE {relation}(n integer); INSERT INTO {relation} VALUES (1),(2)", connection))
+            await create.ExecuteNonQueryAsync();
+        try
+        {
+            foreach (var (full, analyze, expected) in new[]
+            {
+                (false, false, "VACUUM "),
+                (false, true, "VACUUM (ANALYZE) "),
+                (true, false, "VACUUM (FULL, ANALYZE) "),
+            })
+            {
+                string executed = await NpgsqlMaintenance.VacuumAsync(_source, relation, full, analyze, 30);
+                Assert.Equal(expected + relation, executed);
+                await using var count = new NpgsqlCommand($"SELECT count(*) FROM {relation}", connection);
+                Assert.Equal(2L, await count.ExecuteScalarAsync());
+            }
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP TABLE {relation}", connection);
+            await drop.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]

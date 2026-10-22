@@ -21,20 +21,9 @@ public static class NpgsqlMaintenance
     public static async Task<string?> ResolveSubstrateTableAsync(
         NpgsqlDataSource db, string table, CancellationToken ct = default)
     {
-        await using var cmd = db.CreateCommand(SubstrateTableSql);
-        cmd.Parameters.Add(new NpgsqlParameter { Value = table });
+        await using var cmd = NpgsqlCatalog.Command(db, "maintenance.resolve_substrate_table", table);
         return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
     }
-
-    private const string SubstrateTableSql = """
-        SELECT c.oid::regclass::text
-        FROM pg_class c
-        WHERE c.relname = $1
-          AND c.relkind IN ('r', 'p')
-          AND c.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
-                                 'consensus'::regnamespace, 'generation'::regnamespace)
-        LIMIT 1
-        """;
 
     /// <summary>
     /// Runs VACUUM, optionally on one table.
@@ -54,12 +43,9 @@ public static class NpgsqlMaintenance
         int timeoutSeconds,
         CancellationToken ct = default)
     {
-        var verb = full ? "VACUUM (FULL, ANALYZE)" : analyze ? "VACUUM (ANALYZE)" : "VACUUM";
-        var sql = qualifiedTable is null ? verb : $"{verb} {qualifiedTable}";
-
-        await using var cmd = db.CreateCommand(sql);
+        await using var cmd = NpgsqlCatalog.VacuumCommand(db, qualifiedTable, full, analyze);
         cmd.CommandTimeout = InstalledOpInvoker.RequestedCommandTimeout(timeoutSeconds);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        return sql;
+        return cmd.CommandText;
     }
 }
