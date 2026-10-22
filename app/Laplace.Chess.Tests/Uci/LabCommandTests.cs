@@ -109,7 +109,7 @@ public sealed class LabCommandTests : IDisposable
         File.WriteAllText(Path.Combine(_dir, "app", "laplace-api.env"),
             "LICHESS_API=secret\nLAPLACE_STOCKFISH_SOURCE=/old\nLAPLACE_STOCKFISH_SOURCE=\"/selected/source\"\n"
             + "LAPLACE_STOCKFISH=/installed/binary\nLAPLACE_STOCKFISH_EVAL_THREADS=4\nLAPLACE_CUTECHESS_GUI=/selected/cutechess\n"
-            + "LAPLACE_DATA=/selected/corpus\nLAPLACE_DATA_ROOT=/service-state\n");
+            + "LAPLACE_DATA=/selected/corpus\nLAPLACE_WORK=/service-state\n");
         File.WriteAllText(Path.Combine(_dir, "secrets", "chess-lab.env"),
             "LAPLACE_STOCKFISH_SOURCE=/stale-secret\nLAPLACE_STOCKFISH_EVAL_HASH_MB=64\n# LAPLACE_ORDO=/commented\n");
         var config = ChessLabConfig.Read(_dir, includeEnvironment: false, repoRoot: _dir);

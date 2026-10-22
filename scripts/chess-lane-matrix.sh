@@ -28,7 +28,7 @@ done
 
 export PGHOST="${PGHOST:-/var/run/postgresql}"
 export PGUSER="${PGUSER:-laplace_admin}"
-DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
+DATA_ROOT="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
 CHESS="$DATA_ROOT/Games/Chess"
 
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"

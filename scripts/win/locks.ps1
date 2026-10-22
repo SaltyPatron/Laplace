@@ -3,7 +3,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 . (Join-Path $PSScriptRoot 'laplace-paths.ps1')
 
 $root = Get-LaplaceRepoRoot
-$deployLib = if ($env:LAPLACE_DEPLOY) { Join-Path $env:LAPLACE_DEPLOY 'lib' } else { Join-Path (Get-LaplaceDataRoot) 'deploy\lib' }
+$deployLib = if ($env:LAPLACE_DEPLOY) { Join-Path $env:LAPLACE_DEPLOY 'lib' } else { Join-Path (Get-LaplaceWorkRoot) 'deploy\lib' }
 $buildTools = @('ninja', 'cmake', 'icx', 'icx-cc', 'clang', 'link')
 
 $holders = @()

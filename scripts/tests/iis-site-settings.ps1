@@ -1,14 +1,14 @@
 #Requires -Version 7
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path "$PSScriptRoot/../..").Path
-$names='LAPLACE_MACHINE_ENV','LAPLACE_PUBLIC_BASE_URL','LAPLACE_DATA_ROOT','LAPLACE_IIS_API','LAPLACE_IIS_SITE','LAPLACE_IIS_POOL'
+$names='LAPLACE_MACHINE_ENV','LAPLACE_PUBLIC_BASE_URL','LAPLACE_WORK','LAPLACE_IIS_API','LAPLACE_IIS_SITE','LAPLACE_IIS_POOL'
 $saved=@{}; foreach($name in $names) { $saved[$name]=[Environment]::GetEnvironmentVariable($name) }
 $work=Join-Path $(if($env:LAPLACE_WORK){$env:LAPLACE_WORK}else{Join-Path $env:LOCALAPPDATA 'Laplace/work'}) ('iis-settings-' + [Guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $work)
 try {
     $env:LAPLACE_MACHINE_ENV=Join-Path $work 'machine.env'
     $root=Join-Path $work 'alternate root'
-    "LAPLACE_DATA_ROOT=$root" | Set-Content -LiteralPath $env:LAPLACE_MACHINE_ENV
+    "LAPLACE_WORK=$root" | Set-Content -LiteralPath $env:LAPLACE_MACHINE_ENV
     foreach($name in $names | Where-Object { $_ -ne 'LAPLACE_MACHINE_ENV' }) { [Environment]::SetEnvironmentVariable($name,$null) }
     $env:LAPLACE_PUBLIC_BASE_URL='https://dev.example.test'
     $settings=(& pwsh -NoProfile -File "$repo/deploy/windows/Install-LaplaceSite.ps1" -Plan | ConvertFrom-Json)

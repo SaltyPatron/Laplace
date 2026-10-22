@@ -90,7 +90,7 @@ chess_openings_path() {
     printf '%s\n' "$LAPLACE_CHESS_OPENINGS"
     return
   fi
-  local chess_root="${LAPLACE_DATA_ROOT:-/vault/Data}/Games/Chess" candidate
+  local chess_root="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/Games/Chess" candidate
   for candidate in "$chess_root/lichess-openings" "$chess_root/openings"; do
     if [[ -d "$candidate" ]] && [[ -n "$(find -H "$candidate" -type f -name '*.tsv' -print -quit)" ]]; then
       printf '%s\n' "$candidate"
@@ -336,7 +336,7 @@ phase_build_web() {
 }
 
 configure_native_build_tree() {
-  local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+  local data_root="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
   local chess_openings chess_corpus_export
   chess_openings=$(chess_openings_path)

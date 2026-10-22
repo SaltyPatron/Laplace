@@ -5,7 +5,7 @@ param([switch]$ForCmd)
 $ErrorActionPreference='Stop'
 $site=if($env:LAPLACE_IIS_SITE){$env:LAPLACE_IIS_SITE}else{'Laplace'}
 $pool=if($env:LAPLACE_IIS_POOL){$env:LAPLACE_IIS_POOL}else{'LaplacePool'}
-$path=if($env:LAPLACE_IIS_API){$env:LAPLACE_IIS_API}else{Join-Path $env:LAPLACE_DATA_ROOT 'iis/laplace-api'}
+$path=if($env:LAPLACE_IIS_API){$env:LAPLACE_IIS_API}else{Join-Path $env:LAPLACE_WORK 'iis/laplace-api'}
 $base=$env:LAPLACE_PUBLIC_BASE_URL
 if (-not $base) { throw 'Declare LAPLACE_PUBLIC_BASE_URL in the installation machine.env before installing or publishing IIS.' }
 $origin=$null

@@ -285,7 +285,7 @@ def main():
     parser.add_argument("--mode", choices=("inventory", "measure"), required=True)
     parser.add_argument("--expected-source", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--chess-root", type=Path, default=Path(os.environ.get("LAPLACE_DATA_ROOT", "/vault/Data")) / "Games/Chess")
+    parser.add_argument("--chess-root", type=Path, default=Path(os.environ.get("LAPLACE_DATA", "/vault/Data")) / "Games/Chess")
     parser.add_argument("--pgn", type=Path)
     parser.add_argument("--family", choices=("otb-2025", "elite"), default="otb-2025")
     parser.add_argument("--games", type=int, default=75000)

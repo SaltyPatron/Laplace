@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${AUDIT_LOG:-/tmp/laplace-decomposer-audit.log}"
-DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
+DATA_ROOT="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
 PSQL=(psql -h /var/run/postgresql -U laplace_admin -d laplace -v ON_ERROR_STOP=1)
 TINYLLAMA="${LAPLACE_TINYLLAMA_DIR:-${TINYLLAMA_DIR:-}}"
 
@@ -59,7 +59,7 @@ run_just() {
 }
 
 vault_check() {
-  section "VAULT (LAPLACE_DATA_ROOT=$DATA_ROOT)"
+  section "VAULT (LAPLACE_DATA=$DATA_ROOT)"
   local ok=0
   for f in \
     "$DATA_ROOT/UCD/Public/UCD/latest/ucd/UnicodeData.txt" \

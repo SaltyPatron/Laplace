@@ -32,14 +32,20 @@ function Get-LaplaceRepoRoot {
 
 function Get-LaplaceDataRoot {
     Import-LaplaceEnv
-    if ($env:LAPLACE_DATA_ROOT) { return $env:LAPLACE_DATA_ROOT }
-    throw 'LAPLACE_DATA_ROOT is missing from the installation configuration'
+    if ($env:LAPLACE_DATA) { return $env:LAPLACE_DATA }
+    throw 'LAPLACE_DATA is missing from the installation configuration'
 }
 
 function Get-LaplaceBuildRoot {
     Import-LaplaceEnv
     if ($env:LAPLACE_BUILD_ROOT) { return $env:LAPLACE_BUILD_ROOT }
-    return Get-LaplaceDataRoot
+    throw 'LAPLACE_BUILD_ROOT is missing from the installation configuration'
+}
+
+function Get-LaplaceWorkRoot {
+    Import-LaplaceEnv
+    if ($env:LAPLACE_WORK) { return $env:LAPLACE_WORK }
+    throw 'LAPLACE_WORK is missing from the installation configuration'
 }
 
 function Resolve-LaplaceTreePath {
@@ -54,12 +60,12 @@ function Resolve-LaplaceTreePath {
     if ($fromEnv.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace($fromEnv[$Name])) {
         return $fromEnv[$Name]
     }
-    $dataRoot = Get-LaplaceDataRoot
+    $buildRoot = Get-LaplaceBuildRoot
     $defaults = @{
-        'build-win'         = Join-Path $dataRoot 'build-win'
-        'build-win-ext'     = Join-Path $dataRoot 'build-win-ext'
-        'build-win-asan'    = Join-Path $dataRoot 'build-win-asan'
-        'build-cutechess'   = Join-Path $dataRoot 'build-cutechess'
+        'build-win'         = Join-Path $buildRoot 'build-win'
+        'build-win-ext'     = Join-Path $buildRoot 'build-win-ext'
+        'build-win-asan'    = Join-Path $buildRoot 'build-win-asan'
+        'build-cutechess'   = Join-Path $buildRoot 'build-cutechess'
     }
     if ($defaults.ContainsKey($Name)) { return $defaults[$Name] }
     return Join-Path (Get-LaplaceRepoRoot) $Name
