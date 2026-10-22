@@ -397,20 +397,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                     layers[i] = _units[i].Layer;
                     digests[i] = _units[i].Digest?.ToBytes();
                 }
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText =
-                    "INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest) "
-                    + "SELECT * FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) "
-                    + "ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING";
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = witnesses, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = units, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = layers, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Integer });
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = digests, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
+                await using var command = NpgsqlCatalog.Command(connection, transaction,
+                    "ingest.complete_units", witnesses, units, layers, digests);
                 await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
             if (_layers.Length > 0)
@@ -422,16 +410,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                     witnesses[i] = _layers[i].WitnessId.ToBytes();
                     layers[i] = _layers[i].Layer;
                 }
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText =
-                    "INSERT INTO laplace.ingest_layer_completion (witness_id, layer) "
-                    + "SELECT * FROM unnest($1::bytea[], $2::int[]) "
-                    + "ON CONFLICT (witness_id, layer) DO NOTHING";
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = witnesses, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea });
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = layers, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Integer });
+                await using var command = NpgsqlCatalog.Command(connection, transaction,
+                    "ingest.complete_layers", witnesses, layers);
                 await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
         }

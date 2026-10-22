@@ -387,6 +387,27 @@ SQL_QUERY("write.commit_settings", "",
     "SELECT current_setting('synchronous_commit'), current_setting('fsync')::boolean, "
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
+SQL_QUERY("write.supports_epoch", "", "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL")
+SQL_QUERY("write.current_epoch", "", "SELECT last_value FROM laplace.apply_write_epoch")
+SQL_QUERY("consensus.supports_type_upsert", "",
+    "SELECT to_regprocedure('consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])') IS NOT NULL")
+SQL_QUERY("consensus.deposit_mask", "bytea[],bytea[]",
+    "SELECT consensus.highway_mask_deposit($1,$2)")
+SQL_QUERY("consensus.deposit_mask_epoch", "bytea[],bytea[]",
+    "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+    "SELECT consensus.highway_mask_deposit($1,$2) FROM epoch")
+SQL_QUERY("consensus.merge_evidence", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "SELECT consensus.merge_evidence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+SQL_QUERY("consensus.upsert_type", "bytea,bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "SELECT consensus.upsert_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+SQL_QUERY("consensus.upsert_type_epoch", "bytea,bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+    "SELECT consensus.upsert_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) FROM epoch")
+SQL_QUERY("consensus.upsert", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+SQL_QUERY("consensus.upsert_epoch", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+    "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) FROM epoch")
 SQL_QUERY("source.evict", "bytea,bytea[],bytea[]", "CALL ops.evict_source($1,$2,$3)")
 SQL_QUERY("source.evidence_count", "bytea", "SELECT ops.evidence_count(p_source => $1)")
 
@@ -1537,6 +1558,12 @@ SQL_QUERY("generation.foundry_vocab_crawl", "text[],int4,int4,int4",
 SQL_QUERY("foundry.source_id", "text",
     "SELECT laplace.source_id($1)")
 
+SQL_QUERY("foundry.initialize_scope", "bytea[]",
+    "CREATE TEMP TABLE IF NOT EXISTS consensus AS "
+    "SELECT * FROM consensus.scoped_consensus($1::bytea[])")
+SQL_QUERY("foundry.index_scope", "",
+    "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)")
+
 SQL_QUERY("realize.resolved_word_surfaces", "text[]",
     "SELECT realize.render_text(laplace.word_id(s))\nFROM unnest($1::text[]) AS s\nWHERE laplace.word_id(s) IS NOT NULL")
 
@@ -1642,6 +1669,15 @@ SQL_QUERY("consensus.pair_scores_ordered", "bytea[],bytea[],bytea",
 
 SQL_QUERY("ingest.completed_units", "bytea[],bytea[],int4[],bytea[]",
     "SELECT k.ord FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) WITH ORDINALITY AS k(witness_id, unit_id, layer, digest, ord) WHERE EXISTS (SELECT 1 FROM laplace.ingest_unit_completion c WHERE c.witness_id = k.witness_id AND c.unit_id = k.unit_id AND c.layer = k.layer AND c.digest IS NOT DISTINCT FROM k.digest)")
+
+SQL_QUERY("ingest.complete_units", "bytea[],bytea[],int4[],bytea[]",
+    "INSERT INTO laplace.ingest_unit_completion (witness_id, unit_id, layer, digest) "
+    "SELECT * FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) "
+    "ON CONFLICT ON CONSTRAINT ingest_unit_completion_key DO NOTHING")
+SQL_QUERY("ingest.complete_layers", "bytea[],int4[]",
+    "INSERT INTO laplace.ingest_layer_completion (witness_id, layer) "
+    "SELECT * FROM unnest($1::bytea[], $2::int[]) "
+    "ON CONFLICT (witness_id, layer) DO NOTHING")
 
 SQL_QUERY("ingest.entities_exist_bitmap", "bytea[]",
     "SELECT laplace.entities_exist_bitmap($1)")

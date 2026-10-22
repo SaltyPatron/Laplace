@@ -14,7 +14,6 @@ using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.OpenSubtitles;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Unicode;

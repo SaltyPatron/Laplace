@@ -66,8 +66,6 @@ public class GrammarSpineConformanceTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
         {
-            // Wiktionary composes natively parsed rows through ComposeDecomposer.
-            ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
         };
