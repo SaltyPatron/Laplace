@@ -109,7 +109,7 @@ public class BpeTokenizerRoundTripTests
         {
             string path = WriteTokenizer(dir, "BPE", withMerges: true);
             var records = LlamaTokenizerParser.Parse(path);
-            var source = Laplace.Engine.Core.Hash128.OfCanonical("test/model/tokenizer-admission");
+            var source = Laplace.Engine.Core.Hash128.Text("test/model/tokenizer-admission");
             var builder = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(
                 source, "tokenizer/vocab/test", entityCapacity: 64, physicalityCapacity: 64);
 
@@ -153,7 +153,7 @@ public class BpeTokenizerRoundTripTests
             var record = Assert.Single(LlamaTokenizerParser.Parse(path));
             Assert.Equal(new byte[] { 0xC3, 0x28 }, record.CanonicalBytes);
 
-            var source = Laplace.Engine.Core.Hash128.OfCanonical("test/model/opaque-byte-token");
+            var source = Laplace.Engine.Core.Hash128.Text("test/model/opaque-byte-token");
             var builder = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(source, "tokenizer/vocab/0");
             LlamaTokenizerParser.StageVocabToken(builder, record, source);
             var change = builder.Build();

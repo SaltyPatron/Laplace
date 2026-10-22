@@ -51,10 +51,10 @@ public sealed class ModelTokenEdgeETLTests
     [Fact]
     public void AnalyzerVersion_BindsContextAndOpaqueCalculationReceipt()
     {
-        Hash128 source = Hash128.OfCanonical("test/model/source/versioned");
+        Hash128 source = Hash128.Text("test/model/source/versioned");
         Hash128 type = ModelDecomposer.SimilarToTypeId;
-        Hash128 subject = Hash128.OfCanonical("test/model/subject");
-        Hash128 obj = Hash128.OfCanonical("test/model/object");
+        Hash128 subject = Hash128.Text("test/model/subject");
+        Hash128 obj = Hash128.Text("test/model/object");
         int current = ModelTokenEdgeETL.AnalyzerVersion;
 
         Hash128 context = ModelTokenEdgeETL.CircuitContextForVersion(
@@ -167,7 +167,7 @@ public sealed class ModelTokenEdgeETLTests
         try
         {
             IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = Enumerable.Range(0, n)
-                .Select(i => Token(i, "t" + i, Hash128.OfCanonical("test/token/sig/" + i)))
+                .Select(i => Token(i, "t" + i, Hash128.Text("test/token/sig/" + i)))
                 .ToArray();
             Hash128 source = SourceEntityIdConventions.ModelContentSourceId(dir)!.Value;
             var etl = new ModelTokenEdgeETL(
@@ -643,9 +643,9 @@ public sealed class ModelTokenEdgeETLTests
 
     private static IReadOnlyList<LlamaTokenizerParser.TokenRecord> FixtureTokens() =>
     [
-        Token(0, "a", Hash128.OfCanonical("test/token/a")),
-        Token(1, "b", Hash128.OfCanonical("test/token/b")),
-        Token(2, "c", Hash128.OfCanonical("test/token/c")),
+        Token(0, "a", Hash128.Text("test/token/a")),
+        Token(1, "b", Hash128.Text("test/token/b")),
+        Token(2, "c", Hash128.Text("test/token/c")),
     ];
 
     private static LlamaTokenizerParser.TokenRecord Token(int id, string raw, Hash128 entity) => new()

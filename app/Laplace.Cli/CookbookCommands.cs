@@ -60,7 +60,7 @@ internal static class CookbookCommands
 
     private static RecipeOptions ParseOptions(string[] args, int start, SemanticSourceRecipe recipe)
     {
-        Hash128 witness = Hash128.OfCanonical(recipe.Authority);
+        Hash128 witness = Hash128.Text(recipe.Authority);
         string sourceName = recipe.Authority;
         bool sourceSpecified = false;
         double trust = 1;

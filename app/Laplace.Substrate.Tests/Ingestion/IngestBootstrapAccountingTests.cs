@@ -163,9 +163,9 @@ public sealed class IngestBootstrapAccountingTests
     private sealed class BootstrapThenContentDecomposer(int workingSetMode = 0,
         bool failInitialization = false, bool failExtraction = false) : IDecomposer
     {
-        private static readonly Hash128 Source = Hash128.OfCanonical("test/bootstrap-accounting/source");
-        private static readonly Hash128 Governed = Hash128.OfCanonical("test/bootstrap-accounting/governed");
-        private static readonly Hash128 Content = Hash128.OfCanonical("test/bootstrap-accounting/content");
+        private static readonly Hash128 Source = Hash128.Text("test/bootstrap-accounting/source");
+        private static readonly Hash128 Governed = Hash128.Text("test/bootstrap-accounting/governed");
+        private static readonly Hash128 Content = Hash128.Text("test/bootstrap-accounting/content");
 
         public bool VerifiedInitialization { get; private set; }
         public Hash128 SourceId => Source;

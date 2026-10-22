@@ -17,12 +17,12 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         const int count = 4096;
         string tag = Guid.NewGuid().ToString("N");
         string relation = "fold_plan_" + tag;
-        byte[] type = Hash128.OfCanonical(relation).ToBytes();
+        byte[] type = Hash128.Text(relation).ToBytes();
         string typeLiteral = "'\\x" + Convert.ToHexString(type) + "'::bytea";
         byte[][] subjects = Enumerable.Range(0, count)
-            .Select(i => Hash128.OfCanonical($"{tag}/existing/{i}").ToBytes()).ToArray();
+            .Select(i => Hash128.Text($"{tag}/existing/{i}").ToBytes()).ToArray();
         byte[][] novelHalf = Enumerable.Range(0, count / 2)
-            .Select(i => Hash128.OfCanonical($"{tag}/novel/{i}").ToBytes()).ToArray();
+            .Select(i => Hash128.Text($"{tag}/novel/{i}").ToBytes()).ToArray();
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
 
@@ -169,12 +169,12 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         const int count = 4096;
         string tag = Guid.NewGuid().ToString("N");
         string relation = "fold_counter_" + tag;
-        byte[] type = Hash128.OfCanonical(relation).ToBytes();
+        byte[] type = Hash128.Text(relation).ToBytes();
         string typeLiteral = "'\\x" + Convert.ToHexString(type) + "'::bytea";
         byte[][] subjects = Enumerable.Range(0, count)
-            .Select(i => Hash128.OfCanonical($"{tag}/existing/{i}").ToBytes()).ToArray();
+            .Select(i => Hash128.Text($"{tag}/existing/{i}").ToBytes()).ToArray();
         byte[][] novelHalf = Enumerable.Range(0, count / 2)
-            .Select(i => Hash128.OfCanonical($"{tag}/novel/{i}").ToBytes()).ToArray();
+            .Select(i => Hash128.Text($"{tag}/novel/{i}").ToBytes()).ToArray();
 
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
@@ -294,9 +294,9 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         string tag = Guid.NewGuid().ToString("N");
         string relation = "fold_collision_" + tag;
         string blockerFunction = "fold_collision_block_" + tag;
-        byte[] type = Hash128.OfCanonical(relation).ToBytes();
-        byte[] collisionSubject = Hash128.OfCanonical($"{tag}/collision").ToBytes();
-        byte[] sequentialSubject = Hash128.OfCanonical($"{tag}/sequential").ToBytes();
+        byte[] type = Hash128.Text(relation).ToBytes();
+        byte[] collisionSubject = Hash128.Text($"{tag}/collision").ToBytes();
+        byte[] sequentialSubject = Hash128.Text($"{tag}/sequential").ToBytes();
         string typeLiteral = "'\\x" + Convert.ToHexString(type) + "'::bytea";
         string collisionLiteral = "'\\x" + Convert.ToHexString(collisionSubject) + "'::bytea";
         int lockClass = 1370;

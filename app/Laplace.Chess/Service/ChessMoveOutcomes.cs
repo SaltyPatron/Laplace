@@ -43,7 +43,7 @@ public static class ChessMoveOutcomes
     private const double OutcomeWeight = 0.9;
 
     public static Hash128 MarkerId(Hash128 lineId, int version)
-        => Hash128.OfCanonical($"chess/move-outcomes/{lineId}/{version}");
+        => Hash128.Text($"chess/move-outcomes/{lineId}/{version}");
 
     /// <summary>
     /// The RECORD-time deposit, shared by every path that witnesses a finished game:

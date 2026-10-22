@@ -15,9 +15,9 @@ public sealed class IngestUnitCompletionIdentityTests
     {
         CodepointPerfcache.LoadDefault();
         var source = SubstrateCanonicalIds.Source("UnitIdentityTest");
-        var marker = Hash128.OfCanonical("test/completed-unit");
+        var marker = Hash128.Text("test/completed-unit");
         var relation = RelationTypeRegistry.RelationTypeId("IS_A");
-        var obj = Hash128.OfCanonical("test/completed-unit-object");
+        var obj = Hash128.Text("test/completed-unit-object");
         SubstrateChange Build(bool complete, Hash128 owner)
         {
             using var builder = new SubstrateChangeBuilder(source, "same-actual-source-unit")
@@ -47,5 +47,5 @@ public sealed class IngestUnitCompletionIdentityTests
     [InlineData(256)]
     public void CompletionLayerCannotEscapeTheByteWideLayerRange(int layer)
         => Assert.Throws<ArgumentOutOfRangeException>(() => IngestUnitCompletion.Key(
-            Hash128.OfCanonical("test/unit"), Hash128.OfCanonical("test/owner"), layer));
+            Hash128.Text("test/unit"), Hash128.Text("test/owner"), layer));
 }

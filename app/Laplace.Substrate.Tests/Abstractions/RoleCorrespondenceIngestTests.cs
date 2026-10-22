@@ -10,7 +10,7 @@ public sealed class RoleCorrespondenceIngestTests
     [Fact]
     public void Mapping_LiftsBothParentsIntoRoleIdentity_AndLeavesContextEmpty()
     {
-        Hash128 source = Hash128.OfCanonical("fixture/source");
+        Hash128 source = Hash128.Text("fixture/source");
         var record = new RoleCorrespondenceRecord(
             "13.1-1", EntityTypeRegistry.VerbNetClass, "Agent",
             "Giving", EntityTypeRegistry.FrameNetFrame, "Donor");
@@ -43,7 +43,7 @@ public sealed class RoleCorrespondenceIngestTests
     [Fact]
     public void SameLabelsUnderDifferentClasses_DoNotShareConsensusIdentity()
     {
-        Hash128 source = Hash128.OfCanonical("fixture/source");
+        Hash128 source = Hash128.Text("fixture/source");
         var handler = new RoleCorrespondenceHandler(
             source, RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO"),
             SourceTrust.AcademicCurated);

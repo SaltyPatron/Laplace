@@ -92,7 +92,7 @@ public sealed class ChessLineIdentityTests
     {
         static ChessNode Node(string key, double[] coordinate)
         {
-            var id = Hash128.OfCanonical($"line-placement/{key}");
+            var id = Hash128.Text($"line-placement/{key}");
             return new ChessNode(id, coordinate, Hilbert128.Encode(coordinate), [],
                 PhysicalityId.Compute(id, PhysicalityType.Content), 0, ChessCompose.PositionTier);
         }

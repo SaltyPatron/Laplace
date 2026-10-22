@@ -13,7 +13,7 @@ public sealed class HighwayMaskRefreshConcurrencyTests(LocalPgFixture pg)
 {
     private const string A = "IS_A";
     private const string B = "HAS_PART";
-    private static Hash128 Id(string name) => Hash128.OfCanonical("test/highway-refresh-concurrency/" + name);
+    private static Hash128 Id(string name) => Hash128.Text("test/highway-refresh-concurrency/" + name);
 
     [Fact]
     public async Task RefreshReadsTheCommittedNewBitAfterWaitingForItsEntityLock()

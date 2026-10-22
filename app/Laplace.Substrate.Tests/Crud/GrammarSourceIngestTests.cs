@@ -61,7 +61,7 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
     {
         CodepointPerfcache.LoadDefault();
         Assert.NotNull(GrammarTags.TagsSource(modality));
-        Hash128 source = Hash128.OfCanonical("packaged-grammar-query-proof");
+        Hash128 source = Hash128.Text("packaged-grammar-query-proof");
         var handler = new GrammarComposeHandler(source, 1, null);
         using var unit = handler.CreateDeferredUnit(new GrammarComposeRecord(
             Encoding.UTF8.GetBytes(sourceText), modality));
@@ -91,7 +91,7 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
                 File.ReadAllBytes(Path.Combine(repo, "engine", "core", "src", name)), "c"))
             .ToList();
         var expectedBytes = records.Select(r => r.Utf8.LongLength).ToArray();
-        Hash128 source = Hash128.OfCanonical("native-compose-memory-admission");
+        Hash128 source = Hash128.Text("native-compose-memory-admission");
         var reader = new NpgsqlSubstrateReader(pg.DataSource);
         var handler = new GrammarComposeHandler(source, 1, reader);
         var config = new IngestBatchConfig
@@ -141,7 +141,7 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
         CodepointPerfcache.LoadDefault();
         const string sourceText = "def greet(name):\n    # Keep source layout.\n    return name\n";
         byte[] bytes = Encoding.UTF8.GetBytes(sourceText);
-        Hash128 source = Hash128.OfCanonical("whole-source-ingest-functional-test");
+        Hash128 source = Hash128.Text("whole-source-ingest-functional-test");
         var record = new GrammarComposeRecord(bytes, "python");
         var handler = new GrammarComposeHandler(source, 1, null);
         using var unit = handler.CreateDeferredUnit(record);
@@ -174,7 +174,7 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
         CodepointPerfcache.LoadDefault();
         const string prompt = "Do not sort x.\nKeep e\u0301 and all spaces.\n";
         byte[] code = "def keep(x):\n    return x\n"u8.ToArray();
-        Hash128 source = Hash128.OfCanonical("observed-code-pair-test");
+        Hash128 source = Hash128.Text("observed-code-pair-test");
         var handler = new GrammarComposeHandler(source, 1, null);
         var record = new GrammarComposeRecord(code, "python",
             ObservedPromptUtf8: Encoding.UTF8.GetBytes(prompt));

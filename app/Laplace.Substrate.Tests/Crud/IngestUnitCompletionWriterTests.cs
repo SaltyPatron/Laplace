@@ -52,10 +52,10 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
         var peer = SubstrateCanonicalIds.Source(sourceName + "-peer");
         var type = EntityTypeRegistry.SourceReference;
         var units = new[] { 0, 21, 255 }.Select(layer => new Unit(
-            Hash128.OfCanonical(sourceName + "/unit/" + layer), source, layer)).ToArray();
+            Hash128.Text(sourceName + "/unit/" + layer), source, layer)).ToArray();
         var relation = RelationTypeRegistry.RelationTypeId("IS_A");
-        var subject = Hash128.OfCanonical(sourceName + "/subject");
-        var obj = Hash128.OfCanonical(sourceName + "/object");
+        var subject = Hash128.Text(sourceName + "/subject");
+        var obj = Hash128.Text(sourceName + "/object");
         var ordinary = new NpgsqlSubstrateWriter(pg.DataSource,
             durability: PostgresWriteDurability.Synchronous);
         using var carriers = new SubstrateChangeBuilder(source, "partial-unit-carriers")
@@ -186,11 +186,11 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
         string sourceName = "InterruptedUnitReceipt-" + suffix;
         var source = SubstrateCanonicalIds.Source(sourceName);
         var peer = SubstrateCanonicalIds.Source(sourceName + "-peer");
-        var file = Hash128.OfCanonical("interrupted-file/" + suffix);
-        var unit = new Unit(Hash128.OfCanonical("interrupted-unit/" + suffix), source, 21);
+        var file = Hash128.Text("interrupted-file/" + suffix);
+        var unit = new Unit(Hash128.Text("interrupted-unit/" + suffix), source, 21);
         var relation = RelationTypeRegistry.RelationTypeId("IS_A");
         var secondRelation = RelationTypeRegistry.RelationTypeId("unit-eviction-second-" + suffix);
-        var obj = Hash128.OfCanonical("interrupted-object/" + suffix);
+        var obj = Hash128.Text("interrupted-object/" + suffix);
         var firstEvidence = NativeAttestation.CategoricalResolved(
             unit.TrunkRootId, relation, obj, source, null, 0.9);
         var secondEvidence = NativeAttestation.CategoricalResolved(

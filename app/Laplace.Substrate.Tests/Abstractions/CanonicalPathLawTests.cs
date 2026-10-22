@@ -25,7 +25,7 @@ public class CanonicalPathLawTests
         {
             var path = $"substrate/physicality_type/{seg}/v1";
             Assert.Contains("physicality_type", path);
-            _ = Hash128.OfCanonical(path);
+            _ = Hash128.Text(path);
         }
     }
 }

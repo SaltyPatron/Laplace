@@ -83,8 +83,8 @@ public sealed class TatoebaDecomposerTests
 
             // The row number is packaging: no entity carries a surrogate id and
             // HAS_EXTERNAL_ID is not in the source's relations.
-            Hash128 surrogate1 = Hash128.OfCanonical("tatoeba/sentence/1");
-            Hash128 surrogate2 = Hash128.OfCanonical("tatoeba/sentence/2");
+            Hash128 surrogate1 = Hash128.Text("tatoeba/sentence/1");
+            Hash128 surrogate2 = Hash128.Text("tatoeba/sentence/2");
             Assert.DoesNotContain(surrogate1, entities.Select(e => e.Id));
             Assert.DoesNotContain(surrogate2, entities.Select(e => e.Id));
             Assert.DoesNotContain("HAS_EXTERNAL_ID", TatoebaSource.Relations);
@@ -131,7 +131,7 @@ public sealed class TatoebaDecomposerTests
             // A link to an id with no sentence text asserts nothing; it is dropped rather
             // than attached to a synthetic entity.
             Assert.DoesNotContain(attestations, a => a.TypeId == translationType);
-            Assert.DoesNotContain(Hash128.OfCanonical("tatoeba/sentence/999"), entities.Select(e => e.Id));
+            Assert.DoesNotContain(Hash128.Text("tatoeba/sentence/999"), entities.Select(e => e.Id));
         }
         finally
         {

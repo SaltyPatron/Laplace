@@ -39,8 +39,8 @@ public sealed record ChessPlayerModelExport(
             throw new ArgumentException("a player-model export needs at least one member", nameof(members));
 
         string memberSurface = string.Join("/", ordered.Select(static id => Hex(id)));
-        Hash128 memberSetId = Hash128.OfCanonical($"chess/player-model/set/v{CurrentVersion}/{memberSurface}");
-        Hash128 id = Hash128.OfCanonical(
+        Hash128 memberSetId = Hash128.Text($"chess/player-model/set/v{CurrentVersion}/{memberSurface}");
+        Hash128 id = Hash128.Text(
             $"{Recipe}/{Hex(memberSetId)}/{evidenceBoundary.Trim()}");
         return new ChessPlayerModelExport(
             CurrentVersion, id, memberSetId, evidenceBoundary.Trim(), ordered);

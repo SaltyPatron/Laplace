@@ -746,7 +746,7 @@ internal static partial class IngestCommands
         // namespace. Register only names whose canonical identity is that witness.
         if (SubstrateCanonicalIds.Source(decomposer.SourceName) == decomposer.SourceId)
             names.Add($"substrate/source/{decomposer.SourceName}/v1");
-        else if (Hash128.OfCanonical(decomposer.SourceName) == decomposer.SourceId)
+        else if (Hash128.Text(decomposer.SourceName) == decomposer.SourceId)
             names.Add(decomposer.SourceName);
         if (names.Count == 0) return;
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names);

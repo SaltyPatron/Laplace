@@ -368,12 +368,12 @@ public class NpgsqlSubstrateWriterTests
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var scope = Guid.NewGuid().ToString("N");
-        var src = Hash128.OfCanonical($"source/test/native-stage-counts/{scope}");
+        var src = Hash128.Text($"source/test/native-stage-counts/{scope}");
         var typeId = await EnsureTestTypeAsync(src);
         var relationTypeId = await EnsureTestRelationTypeAsync(src, $"HAS_NATIVE_STAGE_{scope}");
-        var entityId = Hash128.OfCanonical($"entity/test/native-stage-counts/{scope}");
+        var entityId = Hash128.Text($"entity/test/native-stage-counts/{scope}");
         var physicalityId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
-        var attestationId = Hash128.OfCanonical($"attestation/test/native-stage-counts/{scope}");
+        var attestationId = Hash128.Text($"attestation/test/native-stage-counts/{scope}");
         using var stage = IntentStage.New(3);
         stage.AddEntity(entityId, 2, typeId);
         double[] coord = [0.1, 0.2, 0.3, 0.4];
@@ -403,9 +403,9 @@ public class NpgsqlSubstrateWriterTests
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var scope = Guid.NewGuid().ToString("N");
-        var src = Hash128.OfCanonical($"source/test/mixed-stage-counts/{scope}");
+        var src = Hash128.Text($"source/test/mixed-stage-counts/{scope}");
         var typeId = await EnsureTestTypeAsync(src);
-        var sharedId = Hash128.OfCanonical($"entity/test/mixed-stage-counts/{scope}");
+        var sharedId = Hash128.Text($"entity/test/mixed-stage-counts/{scope}");
         using var stage = IntentStage.New(1);
         stage.AddEntity(sharedId, 2, typeId);
 
@@ -421,7 +421,7 @@ public class NpgsqlSubstrateWriterTests
 
     private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)
     {
-        var typeId = Hash128.OfCanonical("TestFixture");
+        var typeId = Hash128.Text("TestFixture");
         await using var cmdType = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id) "
           + "VALUES ($1, 0::smallint, $1) ON CONFLICT (id) DO NOTHING");
@@ -439,8 +439,8 @@ public class NpgsqlSubstrateWriterTests
 
     private async Task<Hash128> EnsureTestRelationTypeAsync(Hash128 source, string name)
     {
-        var typeId = Hash128.OfCanonical($"substrate/type/{name}/v1");
-        var relTypeId = Hash128.OfCanonical("TestFixture");
+        var typeId = Hash128.Text($"substrate/type/{name}/v1");
+        var relTypeId = Hash128.Text("TestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id) "
           + "VALUES ($1, 0::smallint, $2) ON CONFLICT (id) DO NOTHING");

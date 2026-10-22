@@ -81,7 +81,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     }
 
     public static Hash128 LichessGameId(string lichessGameId)
-        => Hash128.OfCanonical($"chess/lichess/{lichessGameId}");
+        => Hash128.Text($"chess/lichess/{lichessGameId}");
 
     public Task OpenGameAsync(
         Hash128 eventId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,

@@ -89,8 +89,8 @@ public sealed class ChessLiveGameHostTests
     {
         var white = ChessVocabulary.PlayerId("A");
         var black = ChessVocabulary.PlayerId("B");
-        var line = Hash128.OfCanonical("line");
-        var expected = Hash128.OfCanonical(
+        var line = Hash128.Text("line");
+        var expected = Hash128.Text(
             $"chess/playing/live/{white}|{black}|ctx|{line}|1-0");
 
         Assert.Equal(expected, ChessVocabulary.LivePlayingId(white, black, "ctx", line, "1-0"));
@@ -102,7 +102,7 @@ public sealed class ChessLiveGameHostTests
     {
         var white = ChessVocabulary.PlayerId("A");
         var black = ChessVocabulary.PlayerId("B");
-        var line = Hash128.OfCanonical("same-line");
+        var line = Hash128.Text("same-line");
 
         var first = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:aaa");
         var second = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:bbb");
@@ -210,7 +210,7 @@ public sealed class ChessLiveGameHostTests
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/ply-fold", connString: cs);
-        var gameId = Hash128.OfCanonical("chess/test/ply-fold/game-1");
+        var gameId = Hash128.Text("chess/test/ply-fold/game-1");
         await host.OpenGameAsync(gameId, "chess/test/ply-fold");
 
         var m = new ChessModality();
@@ -235,7 +235,7 @@ public sealed class ChessLiveGameHostTests
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/complete", connString: cs);
-        var gameId = Hash128.OfCanonical("chess/test/complete/g1");
+        var gameId = Hash128.Text("chess/test/complete/g1");
         await host.OpenGameAsync(gameId, "chess/test/complete");
 
         var m = new ChessModality();

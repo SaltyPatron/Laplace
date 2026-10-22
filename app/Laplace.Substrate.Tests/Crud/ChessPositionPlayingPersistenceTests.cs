@@ -81,7 +81,7 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
     {
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ct = stop.Token;
-        var source = Hash128.OfCanonical("test/chess/playing-enumeration/" + Guid.NewGuid().ToString("N"));
+        var source = Hash128.Text("test/chess/playing-enumeration/" + Guid.NewGuid().ToString("N"));
         byte[][] ids = playingIds.Select(id => id.ToBytes()).ToArray();
         byte[][] sources = [source.ToBytes()];
         byte[] playingType = ChessVocabulary.PlayingType.ToBytes();

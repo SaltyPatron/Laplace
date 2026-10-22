@@ -87,7 +87,7 @@ public static class ChessVocabulary
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
     public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
-        => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
+        => Hash128.Text($"chess/analyzed/{playingId}/{version}");
     // A line's player is HAS_PLAYER; which side is the claim's side/{white,black} qualifier,
     // or the direct PGN tag relation ("White" / "Black").
     public static readonly Hash128 RelTypeHasPlayer =
@@ -119,7 +119,7 @@ public static class ChessVocabulary
     public static readonly Hash128 GameHasMotifType = RelationTypeRegistry.RelationTypeId("GAME_HAS_MOTIF");
     public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
     public static Hash128 BookLineMarkerId(Hash128 bookTitleContentId, Hash128 lineId)
-        => Hash128.OfCanonical($"chess/bookline-marker/{bookTitleContentId}/{lineId}");
+        => Hash128.Text($"chess/bookline-marker/{bookTitleContentId}/{lineId}");
     public static readonly Hash128 ExplainsType = RelationTypeRegistry.RelationTypeId("EXPLAINS");
     public static readonly Hash128 IsExampleOfType = RelationTypeRegistry.RelationTypeId("IS_EXAMPLE_OF");
     public static readonly Hash128 DefinesType = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
@@ -167,14 +167,14 @@ public static class ChessVocabulary
         string canonical =
             $"chess/playing/live/{whitePlayer}|{blackPlayer}|{learnContext}|{lineId}|{resultToken}";
         return string.IsNullOrWhiteSpace(occurrenceKey)
-            ? Hash128.OfCanonical(canonical)
-            : Hash128.OfCanonical($"{canonical}|occurrence:{occurrenceKey.Trim()}");
+            ? Hash128.Text(canonical)
+            : Hash128.Text($"{canonical}|occurrence:{occurrenceKey.Trim()}");
     }
 
     public static Hash128 PlaySessionHandle(Guid sessionGame)
-        => Hash128.OfCanonical($"chess/play/{sessionGame:N}");
+        => Hash128.Text($"chess/play/{sessionGame:N}");
 
-    public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
+    public static Hash128 PlayerId(string name) => Hash128.Text($"chess/player/{PlayerAlias.Canonical(name)}");
 
     public static readonly Hash128 LaplacePlayerId = PlayerId("Laplace");
 

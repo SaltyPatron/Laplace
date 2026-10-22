@@ -20,7 +20,7 @@ public class WorkingSetApplyTests
 
     public WorkingSetApplyTests(LocalPgFixture pg) => _pg = pg;
 
-    private static Hash128 H(string seed) => Hash128.OfCanonical($"ws-apply-test/{seed}");
+    private static Hash128 H(string seed) => Hash128.Text($"ws-apply-test/{seed}");
 
     private static EntityRow Entity(string seed) =>
         new(H(seed), 2, H("type/word"));

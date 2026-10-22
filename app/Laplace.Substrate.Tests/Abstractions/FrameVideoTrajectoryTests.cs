@@ -9,7 +9,7 @@ public sealed class FrameVideoTrajectoryTests
     [Fact]
     public async Task GenericPipeline_DrainsFramesBeforeTerminalVideoTrajectory()
     {
-        Hash128 source = Hash128.OfCanonical("test/video/pipeline-source");
+        Hash128 source = Hash128.Text("test/video/pipeline-source");
         var records = new VideoIngestRecord[]
         {
             new VideoIngestRecord.Frame(new VideoFrameIngestRecord(
@@ -58,12 +58,12 @@ public sealed class FrameVideoTrajectoryTests
     [Fact]
     public void VideoSequence_IsOneOrderedContentPhysicality_NotStructuralTestimony()
     {
-        Hash128 source = Hash128.OfCanonical("test/video/source");
+        Hash128 source = Hash128.Text("test/video/source");
         var roots = new[]
         {
-            Hash128.OfCanonical("frame/0"),
-            Hash128.OfCanonical("frame/1"),
-            Hash128.OfCanonical("frame/2"),
+            Hash128.Text("frame/0"),
+            Hash128.Text("frame/1"),
+            Hash128.Text("frame/2"),
         };
         var frames = new SortedDictionary<int, VideoFrameIngestHandler.FramePlacement>
         {
@@ -91,18 +91,18 @@ public sealed class FrameVideoTrajectoryTests
     [Fact]
     public void SingleFrameVideo_CollapsesToFrameContentIdentity()
     {
-        Hash128 frame = Hash128.OfCanonical("frame/single");
+        Hash128 frame = Hash128.Text("frame/single");
         Assert.Equal(frame, VideoFrameIngestHandler.HashVideoRoot([frame]));
     }
 
     [Fact]
     public void VideoSequence_RejectsMissingOrdinals()
     {
-        Hash128 source = Hash128.OfCanonical("test/video/source");
+        Hash128 source = Hash128.Text("test/video/source");
         var frames = new SortedDictionary<int, VideoFrameIngestHandler.FramePlacement>
         {
-            [0] = new(Hash128.OfCanonical("frame/0"), 1, 0, 0, 0, 0),
-            [2] = new(Hash128.OfCanonical("frame/2"), 0, 1, 0, 0, 0),
+            [0] = new(Hash128.Text("frame/0"), 1, 0, 0, 0, 0),
+            [2] = new(Hash128.Text("frame/2"), 0, 1, 0, 0, 0),
         };
 
         Assert.Throws<InvalidOperationException>(() =>
