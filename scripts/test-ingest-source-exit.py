@@ -173,7 +173,7 @@ fi
         manifest = json.loads((ROOT / "scripts/win/witness-manifest.json").read_text(encoding="utf-8"))
         ladder = [src["cli"] for stage in manifest["cadence"]
                   if stage["stage"] in ("floor", "relations", "usage") for src in stage["sources"]]
-        self.assertIn("uca", ladder)
+        self.assertNotIn("uca", ladder)  # collation tables are already read by unicode
         self.assertIn("verbnet-gl", ladder)
         for source in ladder:
             result = subprocess.run(["bash", str(self.root / "scripts/ingest-source.sh"), source],

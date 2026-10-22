@@ -13,7 +13,7 @@ set -euo pipefail
 # what a GitHub-hosted runner presents.
 for name in $(compgen -e); do
   case "$name" in
-    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_CI_ISO639_ARCHIVE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
+    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_CI_ISO639_ARCHIVE|LAPLACE_CI_UCD_FLAT_ARCHIVE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
     LAPLACE_*|PG*) unset "$name" ;;
   esac
 done
@@ -126,6 +126,24 @@ ucd_fetch() {
     curl -fsSL --retry 3 -o "$UCD/uca/allkeys.txt" "$base/uca/allkeys.txt"
   fi
   grep -Fq "for Version $v of the Unicode Standard." "$UCD/ReadMe.txt"
+  # The Native flag generator reads flat XML; the tier-0 generator reads the
+  # grouped archive. Both are required inputs of the same Unicode 17 build.
+  [[ "$v" == 17.0.0 ]] || { echo "Update the flat XML input pin for Unicode $v" >&2; return 1; }
+  local flat="$UCD/ucdxml/ucd.all.flat.zip"
+  local sum=2776dfabc354323c81e5092afb17bc717e6c9f6661d083d1564c05ae837b6d2d
+  mkdir -p "$UCD/ucdxml"
+  if ! echo "$sum  $flat" | sha256sum -c --status 2>/dev/null; then
+    if [[ -n "${LAPLACE_CI_UCD_FLAT_ARCHIVE:-}" && -f "$LAPLACE_CI_UCD_FLAT_ARCHIVE" ]]; then
+      echo "$sum  $LAPLACE_CI_UCD_FLAT_ARCHIVE" | sha256sum -c --status
+      cp "$LAPLACE_CI_UCD_FLAT_ARCHIVE" "$flat"
+    else
+      curl -fsSL --retry 3 -o "$flat" "$base/ucdxml/ucd.all.flat.zip"
+    fi
+    echo "$sum  $flat" | sha256sum -c --status
+  fi
+  if [[ ! -s "$UCD/ucdxml/ucd.all.flat.xml" || "$flat" -nt "$UCD/ucdxml/ucd.all.flat.xml" ]]; then
+    unzip -q -o "$flat" -d "$UCD/ucdxml"
+  fi
 }
 
 oneapi() {

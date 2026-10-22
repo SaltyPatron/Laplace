@@ -33,6 +33,7 @@ jobs:
       LAPLACE_CI_OPERATIONS_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_CI_ICU_DIR: /repos/deps/icu78
       LAPLACE_CI_ISO639_ARCHIVE: /vault/Data/ISO639/iso-639-3_Code_Tables_20260415.zip
+      LAPLACE_CI_UCD_FLAT_ARCHIVE: /vault/Data/UCD/Public/UCD/latest/ucdxml/ucd.all.flat.zip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -48,7 +49,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 5d904134b49a223343b7e3e8757532e28bf97cb7
+          ref: 3464c865779e5d58e0070ccdf4ec1cfc76ae6174
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract
