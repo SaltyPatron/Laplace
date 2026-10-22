@@ -609,7 +609,8 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
             int workers = options.MaxInputUnits > 0 ? 1
                 : Math.Min(ready.Length, Math.Max(1, IngestTopology.Current.FileWorkers));
             await foreach (SubstrateChange change in ParallelIngestWork.RunAsync(
-                               ready, workers, Execute, ct).ConfigureAwait(false))
+                               ready, workers, Execute, ct,
+                               releaseAbandoned: SubstrateApplyEnvelope.Discard).ConfigureAwait(false))
                 yield return change;
             foreach (ResolvedSourceArtifact binding in ready) pending.Remove(binding.ArtifactId);
         }
