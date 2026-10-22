@@ -487,21 +487,20 @@ TEST(PhysicalityDescriptorVocabulary, FloorIndexPreparationIsBoundedReportedAndR
         ~RestoreFloor() { EXPECT_EQ(codepoint_table_load_perfcache(LAPLACE_PERFCACHE_PATH_FOR_TESTS), 0); }
     } restore;
     ASSERT_EQ(codepoint_table_load_perfcache(LAPLACE_PERFCACHE_PATH_FOR_TESTS), 0);
-    ASSERT_FALSE(codepoint_table_id_index_ready());
+    ASSERT_TRUE(codepoint_table_id_index_ready());
     uint64_t floor_count = 0;
     ASSERT_EQ(codepoint_table_records(nullptr, &floor_count), 0);
-    const size_t index_bytes = static_cast<size_t>(floor_count) * sizeof(uint32_t);
-    ASSERT_GT(index_bytes, 0u);
+    ASSERT_EQ(floor_count, LAPLACE_SCALAR_COUNT);
     size_t added = 99;
-    EXPECT_EQ(codepoint_table_prepare_id_index(index_bytes - 1u, &added), -2);
+    EXPECT_EQ(codepoint_table_prepare_id_index(0, &added), 0);
     EXPECT_EQ(added, 0u);
-    EXPECT_FALSE(codepoint_table_id_index_ready());
+    EXPECT_TRUE(codepoint_table_id_index_ready());
     EXPECT_EQ(codepoint_table_id_index_bytes(), 0u);
     auto first = vocabulary();
     ASSERT_NE(first, nullptr);
     EXPECT_TRUE(codepoint_table_id_index_ready());
-    EXPECT_EQ(codepoint_table_id_index_bytes(), index_bytes);
-    EXPECT_EQ(physicality_descriptor_vocabulary_floor_index_added_bytes(first.get()), index_bytes);
+    EXPECT_EQ(codepoint_table_id_index_bytes(), 0u);
+    EXPECT_EQ(physicality_descriptor_vocabulary_floor_index_added_bytes(first.get()), 0u);
     EXPECT_LE(physicality_descriptor_vocabulary_peak_bytes(first.get()), kVocabularyBudget);
     auto second = vocabulary();
     ASSERT_NE(second, nullptr);
@@ -514,7 +513,7 @@ TEST(PhysicalityDescriptorVocabulary, FloorIndexPreparationIsBoundedReportedAndR
     first.reset();
     second.reset();
     EXPECT_TRUE(codepoint_table_id_index_ready());
-    EXPECT_EQ(codepoint_table_id_index_bytes(), index_bytes);
+    EXPECT_EQ(codepoint_table_id_index_bytes(), 0u);
     added = 99;
     EXPECT_EQ(codepoint_table_prepare_id_index(0, &added), 0);
     EXPECT_EQ(added, 0u);

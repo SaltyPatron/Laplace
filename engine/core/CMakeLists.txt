@@ -89,6 +89,7 @@ set(LAPLACE_CORE_SOURCES
     src/sql_catalog.c
     src/score.c
     src/codepoint_table.c
+    src/unicode_properties.c
     src/chess_position_table.c
     src/chess_rules.c
     src/modality_number_table.c
@@ -139,7 +140,7 @@ set(LAPLACE_CORE_SOURCES
     src/partition_route.c
 )
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")
-set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"
+set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/highway.bin"
     CACHE FILEPATH "Built highway perf-cache blob (consumed by tests + installed)" FORCE)
 
 find_program(LAPLACE_CODEGEN_PYTHON NAMES python python3 REQUIRED)
@@ -166,7 +167,6 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/qualifier_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/trust_class_law.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/generated/firmware_law.c
-    ${LAPLACE_HIGHWAY_BIN}
 )
 # The generated source/SQL files are also configure inputs. Making one of those
 # files the custom-command timestamp creates a Ninja regeneration cycle when
@@ -192,7 +192,6 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_laplace_codegen_root}/engine/manifest/firmware.toml")
 execute_process(
     COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${LAPLACE_CODEGEN_SCRIPT}"
-            "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
     RESULT_VARIABLE _laplace_codegen_result
     OUTPUT_VARIABLE _laplace_codegen_output
     ERROR_VARIABLE _laplace_codegen_error)
@@ -204,7 +203,6 @@ add_custom_command(
     OUTPUT  "${LAPLACE_CODEGEN_STAMP}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
     COMMAND ${LAPLACE_CODEGEN_PYTHON} ${LAPLACE_CODEGEN_SCRIPT}
-            "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E touch "${LAPLACE_CODEGEN_STAMP}"
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
             ${_laplace_codegen_root}/engine/manifest/relation_types.toml
@@ -217,7 +215,7 @@ add_custom_command(
             ${_laplace_codegen_root}/engine/manifest/qualifiers.toml
             ${_laplace_codegen_root}/engine/manifest/trust_classes.toml
             ${_laplace_codegen_root}/engine/manifest/firmware.toml
-    COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
+    COMMENT "Codegen attestation law and relation selectors from manifest TOML"
     VERBATIM
 )
 add_custom_target(laplace_attestation_codegen DEPENDS "${LAPLACE_CODEGEN_STAMP}")
@@ -229,8 +227,10 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
-set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c PROPERTIES
+set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c src/unicode_properties.c PROPERTIES
     INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
+set_source_files_properties(src/codepoint_table.c PROPERTIES
+    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src")
 
 find_package(ZLIB REQUIRED)
 find_package(LibXml2 REQUIRED)
@@ -259,43 +259,43 @@ target_link_libraries(laplace_core PRIVATE laplace_text tree_sitter_rt ${LAPLACE
 if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()
-set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.all.grouped.xml")
-set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.bin"
-    CACHE FILEPATH "Built T0 codepoint perf-cache blob (consumed by tests + installed)" FORCE)
+set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/tier0.bin"
+    CACHE FILEPATH "Canonical Native scalar cache for tests and installation" FORCE)
+add_executable(laplace_tier0 "${LAPLACE_NATIVE}/tools/tier0.c")
+set_target_properties(laplace_tier0 PROPERTIES OUTPUT_NAME laplace-tier0)
+target_link_libraries(laplace_tier0 PRIVATE laplace_static)
 
-add_custom_command(
-    OUTPUT ${LAPLACE_PERFCACHE_XML}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${LAPLACE_PERFCACHE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E tar xf "${LAPLACE_UCDXML_ZIP}"
-            WORKING_DIRECTORY ${LAPLACE_PERFCACHE_DIR}
-    DEPENDS "${LAPLACE_UCDXML_ZIP}"
-    COMMENT "Extracting UCDXML ${LAPLACE_UNICODE_VERSION} (${LAPLACE_UCDXML_ZIP})"
-    VERBATIM
-)
-
-# Source-hash gate in laplace_ucd_tables_emit makes re-runs a sub-second no-op
-# when UCD/DUCET/generator/scope are unchanged, so DEPENDS may include the tool.
-add_custom_command(
-    OUTPUT ${LAPLACE_PERFCACHE_BIN}
-    COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
-            --ucdxml      "${LAPLACE_PERFCACHE_XML}"
-            --ducet       "${LAPLACE_DUCET_FILE}"
-            --ucd-version "${LAPLACE_UNICODE_VERSION}"
-            --uca-version "${LAPLACE_UCA_VERSION}"
-            --scope       full
-            --output      ${LAPLACE_PERFCACHE_BIN}
-    DEPENDS ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
-            $<TARGET_FILE:laplace_ucd_tables_emit>
-    COMMENT "Emitting T0 perf-cache blob (UCD ${LAPLACE_UNICODE_VERSION} / UCA ${LAPLACE_UCA_VERSION})"
-    VERBATIM
-)
+if(EXISTS "${LAPLACE_TIER0}" AND NOT "${LAPLACE_TIER0}" STREQUAL "${LAPLACE_PERFCACHE_BIN}")
+    add_custom_command(OUTPUT "${LAPLACE_PERFCACHE_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LAPLACE_TIER0}" "${LAPLACE_PERFCACHE_BIN}"
+        DEPENDS "${LAPLACE_TIER0}"
+        COMMENT "Package the existing canonical Native tier0.bin"
+        VERBATIM)
+else()
+    add_custom_command(OUTPUT "${LAPLACE_PERFCACHE_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD}" "${LAPLACE_PERFCACHE_BIN}"
+        DEPENDS laplace_tier0
+        COMMENT "Generate canonical Native tier0.bin from the local Unicode estate"
+        VERBATIM)
+endif()
 
 # Perfcache emit is an explicit target, not part of the default build:
 #   ninja laplace_t0_perfcache laplace_highway_perfcache
-# then cmake --install. The blob is a derived map; Tier-0 rows in PostgreSQL are
-# admitted separately by the Unicode source.
+# then cmake --install. Tier-0 is a mapped Native floor, never database seed rows.
 add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
-add_custom_target(laplace_highway_perfcache  DEPENDS laplace_attestation_codegen)
+if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}")
+    add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$ENV{LAPLACE_HIGHWAY}" "${LAPLACE_HIGHWAY_BIN}"
+        DEPENDS "$ENV{LAPLACE_HIGHWAY}" VERBATIM)
+    add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
+else()
+    add_custom_target(laplace_highway_perfcache
+        COMMAND ${CMAKE_COMMAND} -E echo "Set LAPLACE_HIGHWAY to an existing Native LPHW cache built by Laplace-Engine"
+        COMMAND ${CMAKE_COMMAND} -E false)
+endif()
 
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
@@ -556,19 +556,11 @@ install(FILES ${LAPLACE_VOCABULARY_PERFCACHE_BIN}
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
-set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
+set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/tier0.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
-    COMMAND ${CMAKE_COMMAND} -E copy ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
-    COMMAND ${CMAKE_COMMAND} -E remove ${LAPLACE_PERFCACHE_BIN}
-    COMMAND $<TARGET_FILE:laplace_ucd_tables_emit>
-            --ucdxml      "${LAPLACE_PERFCACHE_XML}"
-            --ducet       "${LAPLACE_DUCET_FILE}"
-            --ucd-version "${LAPLACE_UNICODE_VERSION}"
-            --uca-version "${LAPLACE_UCA_VERSION}"
-            --scope       full
-            --output      ${LAPLACE_PERFCACHE_BIN}
+    COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD}" "${LAPLACE_PERFCACHE_REFERENCE_BIN}"
     COMMAND ${CMAKE_COMMAND} -E compare_files ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
-    DEPENDS laplace_t0_perfcache laplace_ucd_tables_emit ${LAPLACE_PERFCACHE_XML} "${LAPLACE_DUCET_FILE}"
+    DEPENDS laplace_t0_perfcache laplace_tier0
     COMMENT "Verify T0 perf-cache emit is byte-deterministic"
     VERBATIM
 )
@@ -640,12 +632,12 @@ endif()
 
 install(FILES ${LAPLACE_PERFCACHE_BIN}
     DESTINATION share/laplace
-    RENAME "laplace_t0_perfcache_${LAPLACE_UNICODE_VERSION}.bin"
+    RENAME "tier0.bin"
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
 install(FILES ${LAPLACE_HIGHWAY_BIN}
     DESTINATION share/laplace
-    RENAME "laplace_highway_perfcache.bin"
+    RENAME "highway.bin"
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

@@ -4,14 +4,21 @@
 #include <stddef.h>
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
-#include "laplace/core/perfcache_format.h"
 #include "laplace/core/ucd_property_values.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef laplace_perfcache_record_t codepoint_entry_t;
+/* The Native headerless scalar-cache ABI, in memcmp(hash) order. Codepoint
+ * ordinals are lookup keys, never offsets into this mapped array. */
+typedef struct {
+    hash128_t hash;
+    int64_t mantissa[4];
+    uint64_t native_hilbert;
+    uint32_t uca_order, pad;
+} codepoint_entry_t;
+#define LAPLACE_SCALAR_COUNT 1112064u
 
 int codepoint_table_load_perfcache(const char* path);
 
@@ -31,7 +38,10 @@ uint8_t codepoint_table_wb(uint32_t codepoint);
 uint8_t codepoint_table_sb(uint32_t codepoint);
 uint8_t codepoint_table_incb(uint32_t codepoint);
 uint8_t codepoint_table_ccc(uint32_t codepoint);
+uint32_t codepoint_table_flags(uint32_t codepoint);
 
+/* ICU raw canonical decomposition; the borrowed per-thread span lasts until
+ * the next decomposition query on that thread. */
 int codepoint_table_decompose(uint32_t cp, const uint32_t** out_seq, uint32_t* out_len);
 
 int codepoint_table_compose(uint32_t first, uint32_t second, uint32_t* out_composed);

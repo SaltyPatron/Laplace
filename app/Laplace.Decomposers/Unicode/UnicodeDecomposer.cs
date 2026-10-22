@@ -68,6 +68,7 @@ public sealed class UnicodeDecomposer
         SemanticSourceRecipe selectedRecipe = _cookbook.Resolve(
             _ucdXmlRecipe.Recipe.RecipeId);
 
+        CodepointPerfcache.LoadDefault();
         FloorRunState floor = PrepareFloor(
             xml[0], ducet[0], selectedRecipe, context);
         await foreach (SubstrateChange change in RunFloorDataAsync(
@@ -76,16 +77,10 @@ public sealed class UnicodeDecomposer
 
         if (!floor.Skipped)
             await foreach (SubstrateChange barrier in ApplyBarrierAsync(
-                               "unicode/tier0-floor-persisted", ct).ConfigureAwait(false))
+                               "unicode/encoding-content-persisted", ct).ConfigureAwait(false))
                 yield return barrier;
 
-        // Runtime text composition is permitted only after the database's Tier-0 floor
-        // is committed (or an existing completed floor was proven). The ROM accelerates
-        // downstream composition; it never supplies the Tier-0 database rows.
-        if (!CodepointPerfcache.IsLoaded)
-            CodepointPerfcache.LoadDefault();
-
-        if (!floor.Skipped && options.MaxInputUnits == 0)
+        if (!floor.Skipped)
         {
             UnicodeSeedSnapshot snapshot = floor.Snapshot
                 ?? throw new InvalidOperationException("Unicode source snapshot was not retained.");
@@ -242,7 +237,7 @@ public sealed class UnicodeDecomposer
             SourceName, floor.DucetLabel, IngestBatchPipeline.TryFileBytes(floor.Ducet.Path));
 
         floor.Snapshot = UnicodeSeed.OpenSnapshot(floor.Xml.Path, floor.Ducet.Path);
-        var phase = new UnicodeFloorPhase(floor.Snapshot, batch);
+        var phase = new UnicodeByteEncodingPhase(batch);
         await foreach (SubstrateChange original in base.RunPhaseAsync(
                            phase, context, options, ct).ConfigureAwait(false))
         {
@@ -1172,26 +1167,22 @@ public sealed class UnicodeDecomposer
 
     private readonly record struct UnicodeSeedRange(int First, int Count);
 
-    private sealed class UnicodeFloorPhase : UnicodeComposePhase<UnicodeSeedRange>
+    private sealed class UnicodeByteEncodingPhase : UnicodeComposePhase<UnicodeSeedRange>
     {
-        private readonly UnicodeSeedSnapshot _snapshot;
         private readonly int _rangeSize;
 
-        public UnicodeFloorPhase(UnicodeSeedSnapshot snapshot, int rangeSize)
+        public UnicodeByteEncodingPhase(int rangeSize)
             : base(Math.Max(1, rangeSize), attestationCapacity: 0)
         {
-            _snapshot = snapshot;
             _rangeSize = Math.Max(1, rangeSize);
         }
 
-        protected override string PhaseLabel => "unicode-floor";
+        protected override string PhaseLabel => "unicode-byte-encodings";
 
         protected override long UnitsPerRecord(UnicodeSeedRange range) => range.Count;
 
         protected override void Compose(UnicodeSeedRange range, SubstrateChangeBuilder builder)
         {
-            _snapshot.StageRange(builder.ContentStage, range.First, range.Count, Source);
-
             int end = checked(range.First + range.Count);
             if (range.First == 0) EmitByteCatalog(builder);
             int byteFirst = Math.Max(range.First, ByteAtoms.First);
@@ -1206,8 +1197,8 @@ public sealed class UnicodeDecomposer
             [EnumeratorCancellation] CancellationToken ct)
         {
             int remaining = options.MaxInputUnits > 0
-                ? checked((int)Math.Min(options.MaxInputUnits, _snapshot.Count))
-                : _snapshot.Count;
+                ? checked((int)Math.Min(options.MaxInputUnits, 256))
+                : 256;
             for (int first = 0; first < remaining;)
             {
                 ct.ThrowIfCancellationRequested();

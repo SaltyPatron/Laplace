@@ -1,224 +1,98 @@
+/* Native's self-contained highway mapping; relation selectors are manifest data. */
 #include "laplace/core/highway_table.h"
 #include "laplace/core/highway_manifest.h"
-#include "laplace/core/hash128.h"
-
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
+#include "laplace/core/relation_law.h"
+#include "laplace/highway.h"
+#include <stdatomic.h>
 #include <string.h>
 
-#ifdef _WIN32
-#  define WIN32_LEAN_AND_MEAN
-#  include <windows.h>
-#else
-#  include <fcntl.h>
-#  include <sys/mman.h>
-#  include <sys/stat.h>
-#  include <unistd.h>
-#endif
-
-typedef char _hw_header_size_check [(sizeof(laplace_highway_header_t)  == 128) ? 1 : -1];
-typedef char _hw_rec_size_check    [(sizeof(laplace_highway_rel_rec_t) ==  32) ? 1 : -1];
-typedef char _hw_mask_size_check   [(sizeof(laplace_mask256_t)         ==  32) ? 1 : -1];
-
-static struct {
-    const uint8_t*                   base;
-    size_t                           len;
-    const laplace_highway_header_t*  header;
-    const laplace_highway_rel_rec_t* records;
-    const laplace_mask256_t*         band_masks;
-    const char*                      strings;
-    hash128_t type_id_cache[LAPLACE_HIGHWAY_REL_COUNT];
-    int16_t   hash_bucket[HIGHWAY_BUCKET_SIZE];
-} g_hw;
-
-static int g_hw_loaded = 0;
-
-#ifdef _WIN32
-
-static int hw_map(const char* path, const uint8_t** out_base, size_t* out_len) {
-    HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (f == INVALID_HANDLE_VALUE) return -1;
-    LARGE_INTEGER sz;
-    if (!GetFileSizeEx(f, &sz) || sz.QuadPart < (LONGLONG)sizeof(laplace_highway_header_t)) {
-        CloseHandle(f); return -1;
-    }
-    HANDLE m = CreateFileMappingA(f, NULL, PAGE_READONLY, 0, 0, NULL);
-    CloseHandle(f);
-    if (m == NULL) return -1;
-    void* v = MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0);
-    CloseHandle(m);
-    if (v == NULL) return -1;
-    *out_base = (const uint8_t*)v;
-    *out_len  = (size_t)sz.QuadPart;
+static _Atomic(const lp_highway *) active_highway;
+static const lp_highway *current_highway(void) {
+    return atomic_load_explicit(&active_highway, memory_order_acquire);
+}
+int highway_table_load(const char *path) {
+    if (!path || !*path) return -1;
+    const lp_highway *mapped = lp_highway_map(path);
+    if (!mapped) return -2;
+    atomic_store_explicit(&active_highway, mapped, memory_order_release);
     return 0;
 }
-
-static void hw_unmap(const uint8_t* base, size_t len) {
-    (void)len;
-    UnmapViewOfFile((const void*)base);
-}
-
-#else
-
-static int hw_map(const char* path, const uint8_t** out_base, size_t* out_len) {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return -1;
-    struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(laplace_highway_header_t)) {
-        close(fd); return -1;
-    }
-    size_t l = (size_t)st.st_size;
-    void* m = mmap(NULL, l, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (m == MAP_FAILED) return -1;
-    *out_base = (const uint8_t*)m;
-    *out_len  = l;
-    return 0;
-}
-
-static void hw_unmap(const uint8_t* base, size_t len) {
-    munmap((void*)base, len);
-}
-
-#endif
-
-/* A governed relation's id is the content id of its canonical label. */
-static void type_id_for_canonical(const char* name, uint8_t name_len, hash128_t* out) {
-    if (hash128_label_content_id(name, (size_t)name_len, out) != 0)
-        hash128_zero(out);
-}
-
 void highway_table_unload(void) {
-    if (g_hw.base)
-        hw_unmap(g_hw.base, g_hw.len);
-    memset(&g_hw, 0, sizeof(g_hw));
-    g_hw_loaded = 0;
+    atomic_store_explicit(&active_highway, NULL, memory_order_release);
 }
-
-int highway_table_is_loaded(void) {
-    return g_hw_loaded;
-}
-
-int highway_table_load(const char* path) {
-    if (!path) return -1;
-
-    const uint8_t* base = NULL;
-    size_t len = 0;
-    if (hw_map(path, &base, &len) != 0) return -1;
-
-    const laplace_highway_header_t* h = (const laplace_highway_header_t*)base;
-
-    if (h->magic          != LAPLACE_HIGHWAY_MAGIC   ||
-        h->format_version != LAPLACE_HIGHWAY_VERSION) {
-        hw_unmap(base, len); return -2;
-    }
-    if (h->relation_count > LAPLACE_HIGHWAY_REL_COUNT ||
-        h->band_count     > LAPLACE_HIGHWAY_BAND_COUNT) {
-        hw_unmap(base, len); return -3;
-    }
-
-    uint64_t rel_end  = h->relations_offset    + h->relation_count * sizeof(laplace_highway_rel_rec_t);
-    uint64_t band_end = h->band_masks_offset   + h->band_count     * sizeof(laplace_mask256_t);
-    uint64_t str_end  = h->strings_offset      + h->strings_length;
-    if (rel_end > len || band_end > len || str_end > len) {
-        hw_unmap(base, len); return -3;
-    }
-
-    g_hw.base       = base;
-    g_hw.len        = len;
-    g_hw.header     = h;
-    g_hw.records    = (const laplace_highway_rel_rec_t*)(base + h->relations_offset);
-    g_hw.band_masks = (const laplace_mask256_t*)(base + h->band_masks_offset);
-    g_hw.strings    = (const char*)(base + h->strings_offset);
-
-    memset(g_hw.hash_bucket, 0xFF, sizeof(g_hw.hash_bucket));
-    for (uint64_t i = 0; i < h->relation_count; ++i) {
-        const laplace_highway_rel_rec_t* rec = &g_hw.records[i];
-        type_id_for_canonical(g_hw.strings + rec->name_off, rec->name_len,
-                              &g_hw.type_id_cache[i]);
-
-        size_t b = (size_t)(g_hw.type_id_cache[i].lo & HIGHWAY_BUCKET_MASK);
-        while (g_hw.hash_bucket[b] >= 0)
-            b = (b + 1) & HIGHWAY_BUCKET_MASK;
-        g_hw.hash_bucket[b] = (int16_t)i;
-    }
-
-    g_hw_loaded = 1;
+int highway_table_is_loaded(void) { return current_highway() != NULL; }
+int highway_table_records(const codepoint_entry_t **records, uint64_t *count) {
+    const lp_highway *h = current_highway();
+    if (!h) return -1;
+    if (records) *records = (const codepoint_entry_t *)h->rec;
+    if (count) *count = h->nrec;
     return 0;
 }
+const codepoint_entry_t *highway_table_find(const hash128_t *id) {
+    const lp_highway *h = current_highway();
+    return h && id ? (const codepoint_entry_t *)lp_highway_find(h, (const lp_id *)id) : NULL;
+}
+const codepoint_entry_t *highway_table_at(const char *list, uint32_t slot) {
+    const lp_highway *h = current_highway();
+    return h && list ? (const codepoint_entry_t *)lp_highway_at(h, lp_highway_list(h, list), slot) : NULL;
+}
+int64_t highway_table_key(const char *list, const char *key) {
+    const lp_highway *h = current_highway();
+    return h && list && key ? lp_highway_key(h, lp_highway_list(h, list), key) : -1;
+}
+int highway_table_fingerprint(uint8_t out[32]) {
+    const lp_highway *h = current_highway();
+    if (!h || !out) return -1;
+    lp_highway_fingerprint(h, out); return 0;
+}
+int highway_table_edge_span(const char *from, uint32_t slot, const char *to,
+                            const void **edges, uint64_t *count) {
+    const lp_highway *h = current_highway(); const lp_edge *pairs = NULL;
+    if (!h || !from || !to || !edges || !count) return -1;
+    *count = lp_highway_edges(h, from, slot, to, &pairs);
+    *edges = pairs; return 0;
+}
 
-int highway_table_relation_by_hash(const hash128_t* type_id,
-                                   uint8_t*         out_bit_pos,
-                                   float*           out_rank,
-                                   uint8_t*         out_band) {
-    if (!g_hw_loaded || !type_id) return -1;
-    size_t b = (size_t)(type_id->lo & HIGHWAY_BUCKET_MASK);
-    for (size_t probe = 0; probe < HIGHWAY_BUCKET_SIZE; ++probe) {
-        int16_t idx = g_hw.hash_bucket[b];
-        if (idx < 0) return -1;
-        if (hash128_equals(type_id, &g_hw.type_id_cache[idx])) {
-            const laplace_highway_rel_rec_t* rec = &g_hw.records[idx];
-            if (out_bit_pos) *out_bit_pos = rec->bit_pos;
-            if (out_rank)    *out_rank    = rec->rank;
-            if (out_band)    *out_band    = rec->rank_band;
-            return 0;
-        }
-        b = (b + 1) & HIGHWAY_BUCKET_MASK;
+/* The relation table and selector metadata share codegen's canonical order. */
+int highway_table_relation_by_hash(const hash128_t *id, uint8_t *bit, float *rank, uint8_t *band) {
+    const laplace_relation_def_t *definition = NULL;
+    if (!current_highway() || !id || laplace_relation_lookup(id, &definition) || !definition) return -1;
+    size_t index = (size_t)(definition - laplace_relation_table);
+    if (index >= sizeof highway_relation_selectors / sizeof *highway_relation_selectors) return -1;
+    if (bit) *bit = highway_relation_selectors[index].bit;
+    if (rank) *rank = (float)definition->rank;
+    if (band) *band = highway_relation_selectors[index].band;
+    return 0;
+}
+int highway_table_relation_by_bit(uint8_t bit, const char **name, float *rank, uint8_t *band) {
+    if (!current_highway()) return -1;
+    for (size_t index = 0; index < laplace_relation_table_count; index++) {
+        if (highway_relation_selectors[index].bit != bit) continue;
+        if (name) *name = laplace_relation_table[index].canonical;
+        if (rank) *rank = (float)laplace_relation_table[index].rank;
+        if (band) *band = highway_relation_selectors[index].band;
+        return 0;
     }
     return -1;
 }
-
-int highway_table_relation_by_bit(uint8_t      bit_pos,
-                                  const char** out_canonical,
-                                  float*       out_rank,
-                                  uint8_t*     out_band) {
-    if (!g_hw_loaded) return -1;
-    if ((uint64_t)bit_pos >= g_hw.header->relation_count) return -1;
-    const laplace_highway_rel_rec_t* rec = &g_hw.records[bit_pos];
-    if (out_canonical) *out_canonical = g_hw.strings + rec->name_off;
-    if (out_rank)      *out_rank      = rec->rank;
-    if (out_band)      *out_band      = rec->rank_band;
-    return 0;
+int highway_table_band_mask(uint8_t band, laplace_mask256_t *mask) {
+    if (!current_highway() || !mask || band >= LAPLACE_HIGHWAY_BAND_COUNT) return -1;
+    memcpy(mask, highway_relation_band_masks[band], sizeof *mask); return 0;
 }
-
-int highway_table_band_mask(uint8_t band, laplace_mask256_t* out_mask) {
-    if (!g_hw_loaded || !out_mask) return -1;
-    if ((uint64_t)band >= g_hw.header->band_count) return -1;
-    *out_mask = g_hw.band_masks[band];
-    return 0;
-}
-
 laplace_mask256_t highway_table_mask_or(laplace_mask256_t a, laplace_mask256_t b) {
-    laplace_mask256_t r;
-    r.w[0] = a.w[0] | b.w[0];
-    r.w[1] = a.w[1] | b.w[1];
-    r.w[2] = a.w[2] | b.w[2];
-    r.w[3] = a.w[3] | b.w[3];
-    return r;
+    for (size_t i = 0; i < 4; i++) a.w[i] |= b.w[i];
+    return a;
 }
-
 laplace_mask256_t highway_table_mask_and(laplace_mask256_t a, laplace_mask256_t b) {
-    laplace_mask256_t r;
-    r.w[0] = a.w[0] & b.w[0];
-    r.w[1] = a.w[1] & b.w[1];
-    r.w[2] = a.w[2] & b.w[2];
-    r.w[3] = a.w[3] & b.w[3];
-    return r;
+    for (size_t i = 0; i < 4; i++) a.w[i] &= b.w[i];
+    return a;
 }
-
-int highway_table_mask_test(const laplace_mask256_t* m, uint8_t bit) {
-    if (!m) return 0;
-    return (int)((m->w[bit / 64] >> (bit % 64)) & 1ULL);
+int highway_table_mask_test(const laplace_mask256_t *mask, uint8_t bit) {
+    return mask ? (int)((mask->w[bit / 64] >> (bit % 64)) & 1) : 0;
 }
-
-void highway_table_mask_set(laplace_mask256_t* m, uint8_t bit) {
-    if (!m) return;
-    m->w[bit / 64] |= 1ULL << (bit % 64);
+void highway_table_mask_set(laplace_mask256_t *mask, uint8_t bit) {
+    if (mask) mask->w[bit / 64] |= UINT64_C(1) << (bit % 64);
 }
-
-int highway_table_mask_any(const laplace_mask256_t* m) {
-    if (!m) return 0;
-    return (int)((m->w[0] | m->w[1] | m->w[2] | m->w[3]) != 0);
+int highway_table_mask_any(const laplace_mask256_t *mask) {
+    return mask && (mask->w[0] | mask->w[1] | mask->w[2] | mask->w[3]);
 }

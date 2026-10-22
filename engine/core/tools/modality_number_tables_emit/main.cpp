@@ -149,16 +149,7 @@ int main(int argc, char** argv) {
     }
 
     hash128_t t0_fp{};
-    {
-        std::ifstream tf(cli.t0, std::ios::binary);
-        laplace_perfcache_header_t th{};
-        tf.read((char*)&th, sizeof(th));
-        if (!tf || th.magic != LAPLACE_PERFCACHE_MAGIC) {
-            std::fprintf(stderr, "bad t0 header\n");
-            return 4;
-        }
-        t0_fp = th.ucd_hash;
-    }
+    if (codepoint_table_copy_receipt(&t0_fp) != 0) return 4;
 
     hash128_t source_hash;
     compute_source_hash(t0_fp, &source_hash);
