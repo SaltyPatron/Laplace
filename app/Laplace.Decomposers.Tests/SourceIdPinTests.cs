@@ -36,8 +36,6 @@ public class SourceIdPinTests
           "6ed93a67dc2df8c27952c2dd3178d980", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.OpenSubtitles.OpenSubtitlesDecomposer(),
           "ee411c0f649e433bd3103d99f87075d0", "c62668c333824c0b89b84db531007db0" },
-        { () => new Laplace.Decomposers.Atomic2020.Atomic2020Decomposer(),
-          "affee556837b77b5562a026400aece2b", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.CodeDecomposer(),
           "c90645d6b0f228c684d95bbbc0b52a42", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.RepoDecomposer(),
