@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -173,11 +174,11 @@ static const int64_t kDeterministicGenesisUs = 1577836800000000LL;
  * timestamp (>0) when LAPLACE_DETERMINISTIC_TIME is set, else 0 (use the wall clock).
  * Same env-var contract as the managed IngestClock: an integer value is taken as exact
  * microseconds since the Unix epoch; any other non-empty value maps to the genesis
- * sentinel. Cached after first read; the re-read race is benign (deterministic result,
- * aligned 64-bit load/store). Off entirely for live ingest (env unset). */
+ * sentinel. Readers may first arrive on independent native recipe workers;
+ * publish the cached value atomically. Off for live ingest (env unset). */
 static int64_t laplace_deterministic_time_us(void) {
-    static int64_t cached = -1; /* -1 = unread, 0 = none, >0 = pinned */
-    int64_t c = cached;
+    static _Atomic int64_t cached = -1; /* -1 = unread, 0 = none, >0 = pinned */
+    int64_t c = atomic_load_explicit(&cached, memory_order_relaxed);
     if (c != -1) return c;
 
     int64_t v = 0;
@@ -188,8 +189,10 @@ static int64_t laplace_deterministic_time_us(void) {
         if (end && *end == '\0' && parsed > 0) v = (int64_t)parsed;
         else v = kDeterministicGenesisUs;
     }
-    cached = v;
-    return v;
+    int64_t unread = -1;
+    if (atomic_compare_exchange_strong_explicit(&cached, &unread, v,
+            memory_order_relaxed, memory_order_relaxed)) return v;
+    return unread;
 }
 
 static int64_t unix_us_now(void) {

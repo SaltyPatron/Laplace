@@ -9,6 +9,7 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public sealed class NativeRecipeStream : SafeHandle
 {
+    private readonly object _gate = new();
     private NativeRecipeStream(IntPtr pointer) : base(IntPtr.Zero, ownsHandle: true) => SetHandle(pointer);
     public override bool IsInvalid => handle == IntPtr.Zero;
 
@@ -20,14 +21,20 @@ public sealed class NativeRecipeStream : SafeHandle
         lock (LaplaceCoreGate.Native)
         fixed (byte* bytes = program)
         {
+            // Parsing belongs to this stream. Keep the immutable shared floor
+            // mapped for its lifetime instead of locking unrelated streams on
+            // every feed and drain.
+            CodepointPerfcache.RetainRecipeStream();
             IntPtr pointer = IntPtr.Zero;
-            int result = NativeInterop.RecipeStreamNew(bytes, (nuint)program.Length, &witness, trust, &pointer);
+            bool transferred = false;
             try
             {
+                int result = NativeInterop.RecipeStreamNew(bytes, (nuint)program.Length, &witness, trust, &pointer);
                 if (result == 0 && pointer != IntPtr.Zero)
                 {
                     var stream = new NativeRecipeStream(pointer);
                     pointer = IntPtr.Zero;
+                    transferred = true;
                     return stream;
                 }
                 throw new InvalidDataException(Error(pointer, result));
@@ -35,13 +42,14 @@ public sealed class NativeRecipeStream : SafeHandle
             finally
             {
                 if (pointer != IntPtr.Zero) NativeInterop.RecipeStreamFree(pointer);
+                if (!transferred) CodepointPerfcache.ReleaseRecipeStream();
             }
         }
     }
 
     public unsafe void Feed(ReadOnlySpan<byte> bytes, bool final)
     {
-        lock (LaplaceCoreGate.Native)
+        lock (_gate)
         {
             ObjectDisposedException.ThrowIf(IsClosed, this);
             fixed (byte* input = bytes)
@@ -59,7 +67,7 @@ public sealed class NativeRecipeStream : SafeHandle
     {
         get
         {
-            lock (LaplaceCoreGate.Native)
+            lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(IsClosed, this);
                 bool required = NativeInterop.RecipeStreamRequiresPrescan(handle) == 1;
@@ -71,7 +79,7 @@ public sealed class NativeRecipeStream : SafeHandle
 
     public unsafe void Prescan(ReadOnlySpan<byte> bytes, bool final)
     {
-        lock (LaplaceCoreGate.Native)
+        lock (_gate)
         {
             ObjectDisposedException.ThrowIf(IsClosed, this);
             fixed (byte* input = bytes)
@@ -93,7 +101,7 @@ public sealed class NativeRecipeStream : SafeHandle
             Id = head.Id, Coord0 = head.CoordX, Coord1 = head.CoordY, Coord2 = head.CoordZ,
             Coord3 = head.CoordM, Atom = head.Atom, Tier = head.Tier, HasAtom = head.HasAtom ? (byte)1 : (byte)0,
         };
-        lock (LaplaceCoreGate.Native)
+        lock (_gate)
         {
             ObjectDisposedException.ThrowIf(IsClosed, this);
             int result = NativeInterop.RecipeStreamSetFile(handle, &native);
@@ -107,7 +115,7 @@ public sealed class NativeRecipeStream : SafeHandle
     {
         get
         {
-            lock (LaplaceCoreGate.Native)
+            lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(IsClosed, this);
                 NativeInterop.OrderedCompositionComponentNative root = default;
@@ -125,7 +133,7 @@ public sealed class NativeRecipeStream : SafeHandle
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumRows);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
-        lock (LaplaceCoreGate.Native)
+        lock (_gate)
         {
             ObjectDisposedException.ThrowIf(IsClosed, this);
             IntPtr stage = IntPtr.Zero;
@@ -145,7 +153,8 @@ public sealed class NativeRecipeStream : SafeHandle
 
     protected override bool ReleaseHandle()
     {
-        lock (LaplaceCoreGate.Native) NativeInterop.RecipeStreamFree(handle);
+        lock (_gate) NativeInterop.RecipeStreamFree(handle);
+        CodepointPerfcache.ReleaseRecipeStream();
         return true;
     }
 
