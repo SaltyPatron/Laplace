@@ -101,7 +101,6 @@ run_ci_contract_checks() {
   ci_contract_check python3 scripts/test-managed-db-scheduling.py
   ci_contract_check python3 scripts/test-codegen-configure.py
   ci_contract_check python3 scripts/test-cmake-release.py
-  ci_contract_check python3 scripts/test-perfcache-source-fingerprint.py
   ci_contract_check python3 scripts/test-web-artifact.py
   ci_contract_check python3 scripts/test-atomic-directory-exchange.py
   ci_contract_check python3 scripts/test-web-publication.py

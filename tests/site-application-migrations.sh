@@ -81,7 +81,8 @@ echo 'PASS substrate selection preserves the distinct application identity'
 
 sed -n '/^api_env() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
 mkdir -p "$work/runtime" "$work/prefix/share/laplace"
-touch "$work/runtime/laplace-api.env" "$work/prefix/share/laplace/laplace_t0_perfcache_17.bin"
+touch "$work/runtime/laplace-api.env"
+printf fixture > "$work/prefix/share/laplace/tier0.bin"
 export LAPLACE_APP_DIR="$work/runtime" LAPLACE_INSTALL_PREFIX="$work/prefix" LAPLACE_API_URL=http://127.0.0.1:5187 LAPLACE_EXTERNAL="$work/external"
 export LAPLACE_DB='Host=substrate;Username=substrate_runtime;Database=substrate'
 export LAPLACE_APP_DB='Host=application;Username=schema_owner;Database=app'

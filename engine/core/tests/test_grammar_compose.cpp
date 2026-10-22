@@ -676,8 +676,12 @@ TEST(GrammarCompose, ConvergenceBattery) {
                                      "\xE6\x9D\xB1\xE4\xBA\xAC"));               
     EXPECT_TRUE(json_value_converges("{\"k\":\"caf\xC3\xA9\"}", "caf\xC3\xA9")); 
     
-    EXPECT_TRUE(json_value_converges("{\"k\":\"cafe\xCC\x81\"}", "caf\xC3\xA9"))
-        << "NFD cafe+U+0301 in JSON did not converge to the NFC café content id";
+    EXPECT_TRUE(json_value_converges("{\"k\":\"cafe\xCC\x81\"}", "cafe\xCC\x81"))
+        << "NFD text must use Native's own codepoint composition without an extra normalizer";
+    hash128_t nfc, nfd;
+    ASSERT_EQ(0, laplace_content_root_id(reinterpret_cast<const uint8_t*>("caf\xC3\xA9"), 5, &nfc));
+    ASSERT_EQ(0, laplace_content_root_id(reinterpret_cast<const uint8_t*>("cafe\xCC\x81"), 6, &nfd));
+    EXPECT_FALSE(hash128_equals(&nfc, &nfd));
 }
 
 TEST(GrammarDecomposer, DeeplyNestedInputDoesNotOverflowStack) {

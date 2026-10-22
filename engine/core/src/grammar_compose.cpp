@@ -205,12 +205,33 @@ static int emit_grapheme_floor_entities(
 
 /* +1 means syntax/empty content with no constituent; negative results are real
  * decoding/allocation failures and must abort composition, not drop a value. */
+static int native_leaf_root(const uint8_t* bytes, size_t length,
+                            laplace_compose_result_t* result,
+                            hash128_t* id, uint8_t* tier, double* coord) {
+    tier_tree_t* tree = NULL;
+    int rc = content_witness_tree_build(bytes, length, &tree);
+    if (rc != 0) return rc;
+    tier_node_view_t root;
+    rc = content_witness_tree_root_node(tree, &root);
+    if (rc == 0 && result) {
+        rc = laplace_compose_reserve_rows(result, 0, 0, result->source_tree_count + 1);
+        if (rc == 0) result->source_trees[result->source_tree_count++] = tree;
+    }
+    if (rc == 0) {
+        if (id) *id = root.id;
+        if (tier) *tier = root.tier;
+        if (coord) memcpy(coord, root.coord, 4 * sizeof(double));
+    }
+    if (rc != 0 || !result) tier_tree_free(tree);
+    return rc;
+}
+
 static int json_leaf_fill_grapheme_children(
     const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
     laplace_compose_result_t* r,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap,
     hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m,
-    hash128_t* out_root_id, uint8_t* out_root_tier = NULL) {
+    hash128_t* out_root_id, uint8_t* out_root_tier = NULL, double* out_root_coord = NULL) {
     *out_ids = NULL;
     *out_coords = NULL;
     *out_flags = NULL;
@@ -248,15 +269,9 @@ static int json_leaf_fill_grapheme_children(
     }
 
     if (out_root_id || out_root_tier) {
-        tier_tree_t* content_tree = NULL;
-        int root_rc = content_witness_tree_build(content_span, content_len, &content_tree);
+        int root_rc = native_leaf_root(content_span, content_len, r,
+                                      out_root_id, out_root_tier, out_root_coord);
         if (root_rc != 0) { free(decoded_owned); return root_rc; }
-        tier_node_view_t root;
-        root_rc = content_witness_tree_root_node(content_tree, &root);
-        tier_tree_free(content_tree);
-        if (root_rc != 0) { free(decoded_owned); return root_rc; }
-        if (out_root_id) *out_root_id = root.id;
-        if (out_root_tier) *out_root_tier = root.tier;
     }
 
     tier_tree_t* local_tree = NULL;
@@ -392,6 +407,7 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         uint8_t     tier         = 0;
         hash128_t   leaf_root_id;
         uint8_t     leaf_root_tier = 0;
+        double      leaf_root_coord[4] = {0};
         hash128_zero(&leaf_root_id);
 
         if (kid_n > 0 && !json_string) {
@@ -429,7 +445,7 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                     utf8, len, ast, idx, json_fragment ? NULL : r,
                     emitted_entity, emitted_entity_n, emitted_entity_cap,
                     &child_ids, &child_coords, &child_flags, &m,
-                    &leaf_root_id, &leaf_root_tier);
+                    &leaf_root_id, &leaf_root_tier, leaf_root_coord);
             if (leaf_rc < 0) { rc = leaf_rc; goto done; }
             if (leaf_rc > 0) continue;
             /* A plain JSON string with a lexical child sits at tier 3, one floor above
@@ -461,6 +477,13 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             }
             m = filled;
             tier = 2;
+            if (m) {
+                /* Native owns text segmentation, repeat factoring, identity and
+                 * placement. A grammar leaf must use that same content tree. */
+                rc = native_leaf_root(utf8 + node.start_byte, node.end_byte - node.start_byte,
+                                      r, &leaf_root_id, &leaf_root_tier, leaf_root_coord);
+                if (rc != 0) { free(child_ids); free(child_coords); free(child_flags); goto done; }
+            }
         }
 
         if (m == 0) {
@@ -472,10 +495,18 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
 
         double out_coord[4];
         hilbert128_t hb;
-        hash_composer_compose_node(tier, child_ids, child_coords, m,
-                                   &st->comp_id[idx], out_coord, &hb);
-        if (leaf_root_id.hi != 0 || leaf_root_id.lo != 0)
+        rc = hash_composer_compose_node(tier, child_ids, child_coords, m,
+                                       &st->comp_id[idx], out_coord, &hb);
+        if (rc != 0) {
+            free(child_ids);
+            free(child_coords);
+            free(child_flags);
+            goto done;
+        }
+        if (leaf_root_id.hi != 0 || leaf_root_id.lo != 0) {
             st->comp_id[idx] = leaf_root_id;
+            memcpy(out_coord, leaf_root_coord, sizeof out_coord);
+        }
         memcpy(st->comp_coord + idx * 4, out_coord, 4 * sizeof(double));
         st->comp_tier[idx]  = tier;
         /* AST depth belongs to navigation/parent composition; an existing
@@ -1414,16 +1445,22 @@ int laplace_compose_drain_into_stage(
     size_t                          bitmap_bits) {
     if (!r || !stage || !source_id) return -1;
 
-    if (r->source_mode) {
+    compose_emit_filter_t filter = make_emit_filter(r, existing_bitmap, bitmap_bits);
+    const owner_novelty owner_novel(r, &filter);
+    {
         for (size_t i = 0; i < r->source_tree_count; ++i) {
-            hash128_t ignored;
+            hash128_t ignored; tier_node_view_t root;
+            if (content_witness_tree_root_node(r->source_trees[i], &root) != 0) {
+                free_emit_filter(&filter); return -1;
+            }
+            if (!filter.emit_all && !owner_novel(&root.id)) continue;
             if (content_witness_emit_tree(stage, r->source_trees[i], source_id,
-                                          NULL, 0, &ignored) != 0)
+                                          NULL, 0, &ignored) != 0) {
+                free_emit_filter(&filter);
                 return -1;
+            }
         }
     }
-
-    compose_emit_filter_t filter = make_emit_filter(r, existing_bitmap, bitmap_bits);
 
     for (size_t i = 0; i < r->entity_count; ++i) {
         const laplace_compose_entity_t* e = &r->entities[i];
@@ -1451,7 +1488,6 @@ int laplace_compose_drain_into_stage(
 
     /* A physicality realizes its entity: a covered entity already has it, so only
      * physicalities of novel entities are staged. */
-    const owner_novelty owner_novel(r, &filter);
     for (size_t i = 0; i < r->phys_count; ++i) {
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
         if (!filter.emit_all && !owner_novel(&ph->entity_id)) continue;

@@ -121,7 +121,7 @@ class ManagedDbSchedulingTests(unittest.TestCase):
         self.assertEqual({row["project"] for row in rows},
                          {"First", "Second", "Third"})
         self.assertTrue(all(not row["overlap"] for row in rows), rows)
-        self.assertTrue(all(row["filter"] == "Tier=db" for row in rows), rows)
+        self.assertTrue(all(row["filter"] == "Category=RequiresDatabase&Category!=RequiresQualification&Category!=RequiresNetwork" for row in rows), rows)
         self.assertTrue(all(row["configuration"] == "Release" for row in rows), rows)
         ordered = sorted(rows, key=lambda row: row["start"])
         self.assertTrue(all(a["finish"] <= b["start"]
