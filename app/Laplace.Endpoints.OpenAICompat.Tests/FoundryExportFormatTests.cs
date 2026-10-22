@@ -14,16 +14,15 @@ public sealed class FoundryExportFormatTests
 {
     [Fact]
     public void OnlyFormatsWithAnIntegratedExportPathAreWritable()
-        => Assert.Equal(new[] { "gguf" }, CliFoundryExportService.WritableFormats.Order(StringComparer.Ordinal));
+        => Assert.Equal(new[] { "gguf", "safetensors" }, NativeFoundryExportService.WritableFormats.Order(StringComparer.Ordinal));
 
     [Theory]
-    [InlineData("safetensors")]
     [InlineData("safetensor")]
     [InlineData("onnx")]
     [InlineData("pt")]
     public async Task UnwritableFormat_IsRefused_NotSilentlyMislabelled(string format)
     {
-        var svc = new CliFoundryExportService();
+        var svc = new NativeFoundryExportService();
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => svc.ExportAsync(
             recipeJson: null, recipeIdPrefix: "deadbeef", tokenizerDir: null,
             format: format, filename: null, ct: default));

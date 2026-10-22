@@ -133,7 +133,7 @@ internal static class AppComposition
         if (OperatingSystem.IsWindows()) services.AddSingleton<IServiceControl, WindowsServiceControl>();
         else services.AddSingleton<IServiceControl, ServiceControl>();
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
-        services.AddSingleton<IFoundryExportService, CliFoundryExportService>();
+        services.AddSingleton<IFoundryExportService, NativeFoundryExportService>();
         Laplace.Decomposers.Composition.SeedIngestComposition.AddLaplaceSeedIngest(services);
 
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();

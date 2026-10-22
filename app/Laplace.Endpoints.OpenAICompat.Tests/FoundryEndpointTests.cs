@@ -32,8 +32,8 @@ public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
           "lm_head": { "op": "trajectory" },
           "compile": "continuation",
           "layers": [
-            { "kv_heads": 2, "heads": [ {"op":"context"} ], "ffn": {"op":"unary"} },
-            { "kv_heads": 2, "heads": [ {"op":"context"} ], "ffn": {"op":"unary"} }
+            { "kv_heads": 1, "heads": [ {"op":"context"} ], "ffn": {"op":"unary"} },
+            { "kv_heads": 1, "heads": [ {"op":"context"} ], "ffn": {"op":"unary"} }
           ]
         }
         """;

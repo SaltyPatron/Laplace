@@ -20,8 +20,14 @@ public static partial class SqlCatalog
     {
         try
         {
-            var text = Marshal.PtrToStringUTF8(TextPointer(name))
-                ?? throw new ArgumentException($"Unknown native SQL query '{name}'.", nameof(name));
+            var text = Marshal.PtrToStringUTF8(TextPointer(name));
+            // A managed-only build carries the same catalog owner as a resource.
+            // New statements can use that declared contract with the unchanged
+            // installed native ABI; unknown names still fail explicitly.
+            if (text is null) {
+                if (EmbeddedFallback.Value.TryGetValue(name,out var embedded)) return embedded;
+                throw new ArgumentException($"Unknown native SQL query '{name}'.", nameof(name));
+            }
             var parameters = Marshal.PtrToStringUTF8(ParametersPointer(name))
                 ?? throw new InvalidOperationException($"Missing native SQL parameter contract for '{name}'.");
             return new(name, text, parameters.Length == 0 ? [] : parameters.Split(','));

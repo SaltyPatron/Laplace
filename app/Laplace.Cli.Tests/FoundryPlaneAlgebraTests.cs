@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Model;
 using Laplace.Cli;
 using Xunit;
 
