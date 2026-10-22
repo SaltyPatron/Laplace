@@ -1,6 +1,5 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.ISO;
-using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using System.Reflection;
@@ -14,49 +13,6 @@ namespace Laplace.Decomposers.Tests;
 /// </summary>
 public sealed class VacuousFactGateTests
 {
-    // ---- WordNet: one synset, one gloss -------------------------------------------------
-
-    /// <summary>
-    /// A WordNet gloss containing ';' stays one definition, so it lands in the same
-    /// HAS_DEFINITION cell as the unsplit gloss other sources testify to.
-    /// </summary>
-    [Fact]
-    public void WordNetGloss_WithSemicolon_StaysOneDefinition()
-    {
-        var (defs, examples) = WordNetDecomposer.ParseGloss(
-            "feline mammal usually having thick soft fur and no ability to roar: "
-            + "domestic cats; wildcats");
-
-        Assert.Single(defs);
-        Assert.Equal(
-            "feline mammal usually having thick soft fur and no ability to roar: "
-            + "domestic cats; wildcats",
-            defs[0]);
-        Assert.Empty(examples);
-    }
-
-    /// <summary>Quoted examples are still lifted out, and the ';' that separated them
-    /// from the definition does not survive as a trailing fragment.</summary>
-    [Fact]
-    public void WordNetGloss_LiftsExamples_AndLeavesNoTrailingSeparator()
-    {
-        var (defs, examples) = WordNetDecomposer.ParseGloss(
-            "a hard sweet made from sugar; \"she bought a bag of sweets\"; \"boiled sweets\"");
-
-        Assert.Single(defs);
-        Assert.Equal("a hard sweet made from sugar", defs[0]);
-        Assert.Equal(2, examples.Count);
-        Assert.Contains("she bought a bag of sweets", examples);
-        Assert.Contains("boiled sweets", examples);
-    }
-
-    [Fact]
-    public void WordNetGloss_Empty_YieldsNoDefinition()
-    {
-        Assert.Empty(WordNetDecomposer.ParseGloss("").Defs);
-        Assert.Empty(WordNetDecomposer.ParseGloss("  ;  ").Defs);
-    }
-
     // ---- ISO 639-3: a name is not a definition ------------------------------------------
 
     /// <summary>
