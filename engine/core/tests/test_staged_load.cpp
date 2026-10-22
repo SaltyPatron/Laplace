@@ -167,12 +167,11 @@ TEST(StagedLoad, ScoreFoldsOnePeriodOverAllEvidenceFromNeutral) {
                                              LAPLACE_GLICKO2_DEFAULT_TAU, 0));
     auto p = rows_of(standing);
     ASSERT_EQ(1u, p.size());
-    uint8_t key[48];
-    std::memset(key, 0x11, 16);
-    std::memset(key + 16, 0x20, 16);
-    std::memset(key + 32, 0, 16);
+    hash128_t vertices[2];
+    std::memset(&vertices[0], 0x11, 16);
+    std::memset(&vertices[1], 0x20, 16);
     hash128_t cell;
-    hash128_blake3(key, sizeof(key), &cell);
+    hash128_merkle(0, vertices, 2, &cell);
     EXPECT_EQ(0, std::memcmp(p[0][0].data(), &cell, 16));
     EXPECT_EQ(b.rating, be64(p[0][4]));
     EXPECT_EQ(3, be64(p[0][7]));
