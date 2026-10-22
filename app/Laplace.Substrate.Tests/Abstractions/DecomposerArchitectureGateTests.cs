@@ -14,13 +14,12 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class DecomposerArchitectureGateTests
 {
     [Fact]
-    public void ManifestDecomposer_RetainsCompleteSourceMemoryProfile()
+    public void ComposePipelineRetainsDeclaredSourceMemoryProfile()
     {
-        IDecomposer source = new Laplace.Decomposers.CILI.CILIDecomposer();
-        Assert.Same(IngestSourceProfile.Cili, source.SizingProfile);
-        var profile = source.SizingProfile;
+        var profile = IngestSourceProfile.Cili;
         var config = IngestPipelineDefaults.Compose(
-            source.SourceId, "profile-propagation", DecomposerOptions.Default, null, profile);
+            Laplace.Decomposers.CILI.CILISource.SourceId,
+            "profile-propagation", DecomposerOptions.Default, null, profile);
         Assert.Same(profile, config.WorkingSetProfile);
         Assert.Equal(IngestSourceProfile.Cili.ResidentBytesPerComposeUnit,
             config.WorkingSetProfile!.ResidentBytesPerComposeUnit);
@@ -61,7 +60,6 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         GenericDecomposer,
-        "Laplace.Decomposers/CILI/CILIDecomposer.cs",
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
@@ -69,7 +67,6 @@ public sealed class DecomposerArchitectureGateTests
         // sentences.csv, so sentences precede links.
         "Laplace.Decomposers/Tatoeba/TatoebaDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
-        "Laplace.Decomposers/WordNet/WordNetDecomposer.cs",
     };
 
     /// <summary>*Decomposer.cs files permitted to call IngestBatchPipeline directly.</summary>
