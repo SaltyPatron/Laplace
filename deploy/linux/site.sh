@@ -214,15 +214,21 @@ phase_install() {
   done < <(find "$stage$LAPLACE_INSTALL_PREFIX" \( -type f -o -type l \) -print0)
   rm -rf "$stage"
   echo "  $n files"
-  # the oneAPI runtime: every library the installed objects resolve from oneAPI, and every MKL kernel library
+  # ldd resolves the transitive native dependencies too. Carry every dependency
+  # except the host's C/C++ platform runtime; the receiving host has no build
+  # prefixes from which to load ICU, libxml2, or another declared dependency.
+  # MKL's dynamically selected kernels are added explicitly below.
   local lib; local -A want=()
   while IFS= read -r lib; do want[$lib]=1; done < <(
     find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec ldd {} + 2>/dev/null |
-      awk '$3 ~ "^/opt/intel/oneapi/" {print $3}' | sort -u)
+      awk '$2 == "=>" && $3 ~ "^/" {
+        name=$3; sub(/^.*\//, "", name)
+        if (name !~ /^(lib(c|m|dl|pthread|rt|gcc_s|stdc\+\+|resolv|util|anl)|ld-linux)[-.]/) print $3
+      }' | sort -u)
   for lib in "${MKLROOT:-/opt/intel/oneapi/mkl/latest}"/lib/libmkl_{core,def,mc3,avx2,avx512,vml_def,vml_mc3,vml_avx2,vml_avx512,vml_cmpt,intel_thread,sequential,tbb_thread,intel_lp64,intel_ilp64}.so.[0-9]; do
     [[ -e "$lib" ]] && want[$lib]=1; done
   for lib in "${!want[@]}"; do cp -fL "$lib" "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" && mv -f "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" "$LAPLACE_INSTALL_PREFIX/lib/$(basename "$lib")"; done
-  echo "  oneAPI runtime beside the libraries: ${#want[@]} files"
+  echo "  native dependencies beside the libraries: ${#want[@]} files"
   local missing
   missing="$(find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec env LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" ldd {} + 2>/dev/null | grep 'not found' | sort -u || true)"
   [[ -z "$missing" ]] || fail "unresolved libraries under $LAPLACE_INSTALL_PREFIX/lib: $missing"
@@ -333,13 +339,13 @@ phase_app() {
   [[ -f "$ROOT/web/dist/index.html" ]] || fail "the web build wrote no dist/index.html"
   mkdir -p "$stage/app/wwwroot"; cp -a "$ROOT/web/dist/." "$stage/app/wwwroot/"
   git -C "$ROOT" rev-parse HEAD | tee "$stage/app/.laplace-source-revision" > "$stage/app/wwwroot/.laplace-web-source-revision"
-  # the native closure beside what loads it: the engine libraries and the oneAPI runtime from the prefix
-  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$LAPLACE_INSTALL_PREFIX"/lib/libmkl_*.so* "$stage/app/"
+  # The install phase collected the complete non-platform native closure. Keep
+  # it together in every API, CLI, MCP and chess payload sent to another host.
+  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/*.so* "$stage/app/"
   local f
   for f in core dynamics synthesis syzygy; do
     [[ -f "$stage/app/liblaplace_$f.so" ]] || fail "native runtime not staged: liblaplace_$f.so"
   done
-  for f in "$LAPLACE_INSTALL_PREFIX"/lib/lib{iomp5,tbb,tbbmalloc,svml,imf,intlc,irng,sycl}*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/"; done
   local zstd_library
   zstd_library=$(python3 "$ROOT/scripts/install-zstd.py" --build-dir "$SITE_BUILD/zstd")
   cp -fL "$zstd_library" "$stage/app/libzstd.so.1"
@@ -591,6 +597,7 @@ verify_cli_package() {
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
   (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+    LD_LIBRARY_PATH="$cli" \
     "$cli/Laplace.Cli" decompose Laplace)
 }
 
