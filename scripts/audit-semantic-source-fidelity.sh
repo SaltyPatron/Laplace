@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
+DATA_ROOT="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
 
 section() {
   echo

@@ -52,7 +52,9 @@ if defined SINGLE_SOURCE (
   exit /b 0
 )
 
-for /f "usebackq delims=" %%L in (`python -c "import json; o=json.load(open(r'!ROOT!\scripts\decomposer-gates.json'))['manifest_order']; print(' '.join(o))"`) do set "ORDER=%%L"
+set "ORDER="
+for /f "usebackq delims=" %%L in (`python "!ROOT!\scripts\decomposer-isolate-plan.py" --list-sources`) do set "ORDER=!ORDER! %%L"
+if not defined ORDER exit /b 2
 
 set "SKIP=0"
 if defined FROM_SOURCE set "SKIP=1"

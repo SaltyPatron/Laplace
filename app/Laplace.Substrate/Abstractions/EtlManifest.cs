@@ -5,6 +5,51 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class EtlManifest
 {
+    /// <summary>The same recipe estate used by the native Engine.</summary>
+    public static string RecipesRoot
+    {
+        get
+        {
+            var configured = Environment.GetEnvironmentVariable("LAPLACE_RECIPES");
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                var workspace = Environment.GetEnvironmentVariable("LAPLACE_SRC");
+                if (!string.IsNullOrWhiteSpace(workspace))
+                    configured = Path.Combine(workspace, "Laplace-Engine", "recipes");
+                else if (LaplaceInstall.TryRepoRoot(out var repository))
+                    configured = Path.Combine(Path.GetDirectoryName(repository)!, "Laplace-Engine", "recipes");
+                else
+                    configured = Path.Combine(AppContext.BaseDirectory, "recipes");
+            }
+            var root = Path.GetFullPath(configured);
+            if (!File.Exists(Path.Combine(root, "order")))
+                throw new InvalidOperationException($"Native recipe estate has no order declaration: {root}. Declare LAPLACE_RECIPES.");
+            return root;
+        }
+    }
+
+    public static IReadOnlyList<string> SourceOrder
+    {
+        get
+        {
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var root = RecipesRoot;
+            foreach (var line in File.ReadLines(Path.Combine(root, "order")))
+            {
+                var name = line.Split('#', 2)[0].Trim();
+                if (name.Length == 0) continue;
+                if (name.Any(c => !char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c) && c != '-') || !seen.Add(name))
+                    throw new InvalidDataException($"Invalid or duplicate source in recipes/order: {name}");
+                if (!File.Exists(Path.Combine(root, name, "source")))
+                    throw new InvalidDataException($"recipes/order source has no declaration: {name}");
+                names.Add(name);
+            }
+            if (names.Count == 0) throw new InvalidDataException("recipes/order is empty.");
+            return names.AsReadOnly();
+        }
+    }
+
     private static Hash128 Src(string name) => Hash128.OfCanonical($"substrate/source/{name}/v1");
 
     private static EtlSource Row(

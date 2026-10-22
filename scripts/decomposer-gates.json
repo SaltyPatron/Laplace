@@ -7,31 +7,6 @@
     "isolated_pattern": "{prefix}_{source}",
     "law": "laplace = cumulative canonical DB (promote-only re-ingest). laplace_d_<source> = throwaway isolated proof DB (fresh db-isolate + prerequisite ingests + target). No pg clone between isolated DBs."
   },
-  "manifest_order": [
-    "unicode",
-    "uca",
-    "iso639",
-    "operational",
-    "cili",
-    "document",
-    "project-gutenberg",
-    "wordnet",
-    "oewn",
-    "omw",
-    "verbnet",
-    "verbnet-gl",
-    "propbank",
-    "framenet",
-    "mapnet",
-    "wordframenet",
-    "semlink",
-    "conceptnet",
-    "atomic2020",
-    "ud",
-    "wiktionary",
-    "tatoeba",
-    "opensubtitles"
-  ],
   "sources": {
     "unicode": {
       "decomposer": "Unicode",
