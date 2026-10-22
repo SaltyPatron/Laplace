@@ -246,7 +246,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
     // One diagnostic log scope per apply phase, only when Information logging is
     // enabled. Disposal logs an interrupted window as well as a completed one; these
     // are diagnostics, not durable receipts.
-    private ApplyDiagnosticPhase? MeasureApplyPhase(string phase, string? table = null,
+    internal ApplyDiagnosticPhase? MeasureApplyPhase(string phase, string? table = null,
         int? lane = null, int? chunkStart = null, int? rows = null)
     {
         // A diagnostic failure never rejects the apply. Lane and chunk ordinals stay
@@ -259,10 +259,26 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                     table, lane, chunkStart, rows)
                 : null;
         }
-        catch { return null; }
+        catch (Exception failure)
+        {
+            ReportApplyDiagnosticFailure(phase, "enabled-check", failure);
+            return null;
+        }
     }
 
-    private sealed class ApplyDiagnosticPhase : IDisposable
+    private static void ReportApplyDiagnosticFailure(string phase, string boundary, Exception failure)
+    {
+        try { Trace.TraceError("APPLY_DIAGNOSTIC_FAILED phase={0} boundary={1}: {2}", phase, boundary, failure); }
+        catch (Exception traceFailure)
+        {
+            // Keep the acknowledgement/original database failure intact even if
+            // an independently installed Trace listener also throws.
+            try { Console.Error.WriteLine($"APPLY_DIAGNOSTIC_FAILED phase={phase} boundary={boundary}: {failure}; trace_failure={traceFailure}"); }
+            catch (Exception) { /* Both diagnostic channels are unavailable; never replace a returned COMMIT. */ }
+        }
+    }
+
+    internal sealed class ApplyDiagnosticPhase : IDisposable
     {
         private readonly ILogger _log;
         private readonly string _phase;
@@ -290,7 +306,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                 else
                     _log.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", _phase, "entered");
             }
-            catch { /* A diagnostic sink cannot reject the operation it observes. */ }
+            catch (Exception failure) { ReportApplyDiagnosticFailure(_phase, "entered", failure); }
         }
         public void Complete()
         {
@@ -313,10 +329,11 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter, IPhysicali
                         "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
                         _phase, "exited", _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
-            catch
+            catch (Exception failure)
             {
                 // Never mask the original failure during finally disposal or
                 // turn a returned COMMIT into a failed acknowledgement.
+                ReportApplyDiagnosticFailure(_phase, "exited", failure);
             }
         }
     }
