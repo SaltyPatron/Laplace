@@ -33,24 +33,20 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> RelationPlaneAsync(
         NpgsqlDataSource ds, string family, string name, int? arg, byte[][]? vocab,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.relation_plane(@family, @name, @arg, @vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.relation_plane"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
                 p.AddWithValue("family", family);
                 p.AddWithValue("name", name);
-                p.AddWithValue("arg", (object?)arg ?? DBNull.Value);
+                p.Add("arg", NpgsqlDbType.Integer).Value = (object?)arg ?? DBNull.Value;
                 p.Add(ByteaArray("vocab", (object?)vocab ?? DBNull.Value));
             }, timeoutSeconds: 600, ct: ct, label: "relation_plane");
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> EntityRelationPlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, string[] relNames, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.entity_relation_plane(@vocab, @rels, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.entity_relation_plane"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -67,10 +63,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<LayerEdgeRow>> ConsensusLayerPlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, double rankLo, double rankHi, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w, layer_rank
-            FROM generation.consensus_layer_plane(@vocab, @lo, @hi, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.consensus_layer_plane"),
             static r => new LayerEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2), r.GetDouble(3)),
             p =>
             {
@@ -83,10 +76,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<LayerEdgeRow>> ConsensusLayerPlaneMaskedAsync(
         NpgsqlDataSource ds, byte[][] vocab, byte[] bandMask, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w, layer_rank
-            FROM generation.consensus_layer_plane_masked(@vocab, @mask, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.consensus_layer_plane_masked"),
             static r => new LayerEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2), r.GetDouble(3)),
             p =>
             {
@@ -98,10 +88,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<TypePlaneEdgeRow>> ConsensusTypePlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, int degreeCap, byte[][]? typeIds,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w, type_id, layer_rank
-            FROM generation.consensus_type_plane(@vocab, @cap, @types)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.consensus_type_plane"),
             static r => new TypePlaneEdgeRow(
                 (byte[])r[0], (byte[])r[1], r.GetDouble(2), (byte[])r[3], r.GetDouble(4)),
             p =>
@@ -113,9 +100,7 @@ public static class NpgsqlFoundryReads
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> ConsensusAdjacencyAsync(
         NpgsqlDataSource ds, byte[][] vocab, int degreeCap, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.consensus_adjacency(@vocab, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.consensus_adjacency"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -126,9 +111,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> MetricEdgesAsync(
         NpgsqlDataSource ds, byte[][] vocab, string metric, int k, int probe,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.metric_edges(@vocab, @metric, @k, @probe)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.metric_edges"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -140,9 +123,7 @@ public static class NpgsqlFoundryReads
 
     public static Task<IReadOnlyList<CoordRow>> EntityPhysicalityCoordsAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, x, y, z, m FROM ops.entity_physicality_coords(@vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("ops.entity_physicality_coords"),
             static r => new CoordRow(
                 (byte[])r[0], r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4)),
             p => p.Add(ByteaArray("vocab", vocab)),
@@ -150,9 +131,7 @@ public static class NpgsqlFoundryReads
 
     public static Task<IReadOnlyList<EntityHilbertKey>> EntityHilbertKeysAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, hilbert_index FROM generation.entity_hilbert_keys(@vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.entity_hilbert_keys"),
             static r => new EntityHilbertKey(
                 (byte[])r[0], Hilbert128.FromBytes((byte[])r[1])),
             p => p.Add(ByteaArray("vocab", vocab)),
@@ -161,9 +140,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<GapEdgeRow>> EntityTrajectoryPlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, int gap, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane(@vocab, @gap, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("laplace.entity_trajectory_plane"),
             static r => new GapEdgeRow(r.GetInt32(0), (byte[])r[1], (byte[])r[2], r.GetDouble(3)),
             p =>
             {
@@ -174,9 +151,7 @@ public static class NpgsqlFoundryReads
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> GraphemeOrderAsync(
         NpgsqlDataSource ds, byte[][] vocab, int limit, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.grapheme_order(@vocab, 50000, @limit)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.grapheme_order"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -187,9 +162,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> WordOrderAsync(
         NpgsqlDataSource ds, byte[][] vocab, int trajs, int gap,
         CancellationToken ct = default, int timeoutSeconds = 0) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.word_order(@vocab, @trajs, @gap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.word_order"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -203,10 +176,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<ConditionalEdgeRow>> ContinuationConditionalPlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, int trajs, double smoothK, int cap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w
-            FROM generation.continuation_conditional_plane(@vocab, @trajs, @smooth, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.continuation_conditional_plane"),
             static r => new ConditionalEdgeRow(
                 (byte[])r[0], r.IsDBNull(1) ? null : (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -219,39 +189,31 @@ public static class NpgsqlFoundryReads
 
     public static Task<object?> WarmRelationTypeIdAsync(
         NpgsqlConnection conn, string canonical, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteScalarAsync<object>(conn, "SELECT laplace.relation_type_id(@c)",
+        NpgsqlRead.ExecuteScalarAsync<object>(conn, SqlCatalog.Get("foundry.warm_relation_type_id"),
             p => p.AddWithValue("c", canonical), ct: ct, label: "warm_relation_type_id");
 
     public static Task<object?> HighwayMaskRefreshAsync(
         NpgsqlConnection conn, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT consensus.highway_mask_refresh(@vocab)
-            """,
+        NpgsqlRead.ExecuteScalarAsync<object>(conn, SqlCatalog.Get("foundry.highway_mask_refresh"),
             p => p.Add(ByteaArray("vocab", vocab)), ct: ct, label: "highway_mask_refresh");
 
     public static Task<IReadOnlyList<PosRow>> VocabDominantPosAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT word_id, pos_id FROM generation.vocab_dominant_pos(@vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.vocab_dominant_pos"),
             static r => new PosRow((byte[])r[0], (byte[])r[1]),
             p => p.Add(ByteaArray("vocab", vocab)),
             timeoutSeconds: 600, ct: ct, label: "vocab_dominant_pos");
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> PosClassTransitionsAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.pos_class_transitions(@vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.pos_class_transitions"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p => p.Add(ByteaArray("vocab", vocab)),
             timeoutSeconds: 600, ct: ct, label: "pos_class_transitions");
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> SentenceOrderWordBridgeAsync(
         NpgsqlDataSource ds, byte[][] vocab, int degreeCap, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM generation.sentence_order_word_bridge(@vocab, @cap)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.sentence_order_word_bridge"),
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
@@ -261,27 +223,21 @@ public static class NpgsqlFoundryReads
 
     public static Task<IReadOnlyList<HighwayMaskRow>> EntityHighwayMasksAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, highway_mask FROM generation.entity_highway_masks(@vocab)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.entity_highway_masks"),
             static r => new HighwayMaskRow((byte[])r[0], (byte[])r[1]),
             p => p.Add(ByteaArray("vocab", vocab)),
             timeoutSeconds: 600, ct: ct, label: "entity_highway_masks");
 
     public static Task<IReadOnlyList<SurfaceWeightRow>> GraphemeFloorVocabAsync(
         NpgsqlDataSource ds, int vocabN, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface, weight FROM generation.grapheme_floor_vocab(@n)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.grapheme_floor_vocab"),
             static r => new SurfaceWeightRow(r.GetString(0), r.GetInt64(1)),
             p => p.AddWithValue("n", vocabN),
             timeoutSeconds: 0, ct: ct, label: "grapheme_floor_vocab");
 
     public static Task<IReadOnlyList<string>> CorpusWordVocabAsync(
         NpgsqlDataSource ds, int seedN, int wordTrajs, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface FROM generation.corpus_word_vocab(@n, @trajs)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.corpus_word_vocab"),
             static r => r.GetString(0),
             p =>
             {
@@ -292,9 +248,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<SurfaceWeightRow>> FoundryVocabCrawlAsync(
         NpgsqlDataSource ds, string[] seeds, int vocabN, int hops, int fanout,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface, weight FROM generation.foundry_vocab_crawl(@seeds, @n, @hops, @fanout)
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.foundry_vocab_crawl"),
             static r => new SurfaceWeightRow(r.GetString(0), r.GetInt64(1)),
             p =>
             {
@@ -311,7 +265,7 @@ public static class NpgsqlFoundryReads
 
     public static Task<byte[]?> SourceIdAsync(
         NpgsqlDataSource ds, string source, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteScalarAsync<byte[]>(ds, "SELECT laplace.source_id(@s)",
+        NpgsqlRead.ExecuteScalarAsync<byte[]>(ds, SqlCatalog.Get("foundry.source_id"),
             p => p.AddWithValue("s", source), ct: ct, label: "source_id");
 
     /// <summary>
@@ -320,11 +274,7 @@ public static class NpgsqlFoundryReads
     /// </summary>
     public static Task<IReadOnlyList<string>> RenderResolvedWordSurfacesAsync(
         NpgsqlDataSource ds, string[] surfaces, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT realize.render_text(laplace.word_id(s))
-            FROM unnest(@surfaces::text[]) AS s
-            WHERE laplace.word_id(s) IS NOT NULL
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("realize.resolved_word_surfaces"),
             static r => r.GetString(0),
             p =>
             {
@@ -390,35 +340,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<AttributeOutRow>> AttributeOutboundAsync(
         NpgsqlDataSource ds, string relationType, byte[][] vocab, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, """
-            -- ONE PLAN, NOT ONE PER VOCAB ENTRY. consensus.edges_raw is LANGUAGE sql with
-            -- UNION ALL + ORDER BY + LIMIT, so it does not inline: under CROSS JOIN LATERAL
-            -- it re-plans against a 216-leaf partitioned table once per subject, and a
-            -- foundry vocab is thousands of subjects inside the 180 s command timeout.
-            -- Inlined here because both partition keys must reach the predicate: type_id is
-            -- a folded IMMUTABLE literal (LIST level) and subject_id is a ScalarArrayOp
-            -- (HASH level). Handing either one to a per-row variable loses the pruning.
-            -- Equivalence to the edges_raw call it replaces, at THIS call site only:
-            -- p_direction 'out' keeps the outbound arm; p_refuted true disables the refuted
-            -- filter; a one-element p_types is an equality; the window reproduces
-            -- ORDER BY eff_mu::float8/1e9 DESC, neighbour_id LIMIT p_limit per subject.
-            WITH ranked AS (
-                SELECT c.subject_id,
-                       c.object_id AS neighbour_id,
-                       GREATEST(consensus.walk_edge_weight(c.rating, c.rd), 0) AS w,
-                       row_number() OVER (
-                           PARTITION BY c.subject_id
-                           ORDER BY (consensus.eff_mu(c.rating, c.rd))::float8 / 1e9 DESC,
-                                    c.object_id
-                       ) AS rn
-                FROM laplace.consensus c
-                WHERE c.subject_id = ANY (@vocab)
-                  AND c.type_id = laplace.relation_type_id(@rel)
-            )
-            SELECT subject_id, neighbour_id, w
-            FROM ranked
-            WHERE rn <= @cap
-            """,
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("foundry.attribute_outbound"),
             static r => new AttributeOutRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {

@@ -9,8 +9,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// natively, assembles the UTF-8 bytes and verifies they re-hash to the requested id; this
 /// class binds the id and optional modality and returns the bytes.
 ///
-/// Plain-text content returns canonical normalized UTF-8; content composed under a declared
-/// source grammar returns its source-preserving UTF-8. A null result (absent, incomplete,
+/// Text is reconstructed from its retained content forms; content composed under a declared
+/// source grammar retains that source representation. A null result (absent, incomplete,
 /// cyclic, non-text or identity mismatch) throws.
 /// </summary>
 public static class NpgsqlContentReconstructor
@@ -29,7 +29,7 @@ public static class NpgsqlContentReconstructor
     {
         byte[]? reconstructed = await NpgsqlRead.ExecuteScalarAsync<byte[]>(
             dataSource,
-            "SELECT realize.reconstruct_content(@id, @modality)",
+            SqlCatalog.Get("content.reconstruct"),
             p =>
             {
                 p.Add("id", NpgsqlDbType.Bytea).Value = contentId.ToBytes();
