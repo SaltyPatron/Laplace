@@ -166,11 +166,12 @@ phase_build() {
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
   LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
     bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
-  cmake -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" \
     -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING="${LAPLACE_SITE_BUILD_TESTING:-OFF}" \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+    -DICU_ROOT="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
     -DLAPLACE_NATIVE="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}" \
     -DLAPLACE_RECIPE_ENGINE_SOURCE="$recipe_engine" \

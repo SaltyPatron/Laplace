@@ -234,7 +234,10 @@ set_source_files_properties(src/codepoint_table.c PROPERTIES
 
 find_package(ZLIB REQUIRED)
 find_package(LibXml2 REQUIRED)
-find_package(ICU COMPONENTS uc REQUIRED)
+if(NOT ICU_ROOT)
+    set(ICU_ROOT "${LAPLACE_ICU_DIR}")
+endif()
+find_package(ICU 78 COMPONENTS uc REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 add_dependencies(laplace_core laplace_attestation_codegen)
