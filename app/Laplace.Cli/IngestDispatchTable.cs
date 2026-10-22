@@ -1,24 +1,10 @@
-using System.Linq;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Atomic2020;
-using Laplace.Decomposers.CILI;
-using Laplace.Decomposers.Code;
-using Laplace.Decomposers.ConceptNet;
-using Laplace.Decomposers.ISO;
-using Laplace.Decomposers.OMW;
-using Laplace.Decomposers.OpenSubtitles;
-using Laplace.Decomposers.SemLink;
-using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.Wiktionary;
-using Laplace.Decomposers.WordNet;
 
 namespace Laplace.Cli;
 
 /// <summary>
-/// Table-driven ingest dispatch. A selected source-generation recipe for the key is routed
-/// first; otherwise the keyed routes below name a decomposer. Every route admits through
-/// the same IngestRunner recipe.
+/// Canonical corpus names and aliases execute the Native recipe engine.
+/// Explicit operator and derivation commands are dispatched separately.
 /// </summary>
 internal static class IngestDispatchTable
 {
@@ -28,25 +14,7 @@ internal static class IngestDispatchTable
     /// Sources whose dispatch is determined by their key alone: resolve the decomposer
     /// and the data path, and hand both to the runner with the layer-order precondition.
     /// </summary>
-    private static readonly string[] StandardSources =
-    [
-        "atomic2020",
-        "cili",
-        "conceptnet",
-        "framenet",
-        "mapnet",
-        "omw",
-        "operational",
-        "opensubtitles",
-        "propbank",
-        "semlink",
-        "tatoeba",
-        "ud",
-        "verbnet",
-        "wiktionary",
-        "wordframenet",
-        "wordnet",
-    ];
+    private static readonly string[] StandardSources = ["operational"];
 
     /// <summary>
     /// Same shape without the layer-order precondition: these sources resume per file
@@ -79,7 +47,6 @@ internal static class IngestDispatchTable
         ("tabular",  cli => IngestCommands.IngestTabularAsync(cli)),
         ("parquet",  cli => IngestCommands.IngestParquetAsync(cli)),
         ("document", cli => IngestCommands.IngestDocumentAsync(cli)),
-        ("project-gutenberg", cli => IngestCommands.IngestProjectGutenbergAsync(cli)),
         ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
         ("agents",   cli => IngestCommands.IngestAgentsAsync(cli)),
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
@@ -157,10 +124,6 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessOpeningMatchDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
-        ("openings", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
-            skipLayerCheck: true, cli)),
-
         // The book decomposer records and derives per record in one Compose over the
         // in-memory parse, stamping ANALYZED_AT itself.
         ("chess-books", cli => IngestCommands.IngestViaRunnerAsync(
@@ -195,24 +158,15 @@ internal static class IngestDispatchTable
 
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {
-        var originalKey = sourceKey;
-        sourceKey = NormalizeLegacySourceAlias(sourceKey);
-        if (string.IsNullOrWhiteSpace(cli.Path)
-            && !string.Equals(originalKey, sourceKey, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(originalKey, "workspace-code", StringComparison.OrdinalIgnoreCase))
+        string canonical = CanonicalSourceName(sourceKey);
+        if (EtlManifest.SourceOrder.Contains(canonical, StringComparer.Ordinal))
         {
-            cli = cli with { Path = IngestDataPaths.Resolve(originalKey) };
+            task = IngestCommands.IngestNativeRecipeAsync(canonical, cli);
+            return true;
         }
-        if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
+        if (cli.NativeMode != NativeRecipeMode.Ingest)
         {
-            Laplace.Decomposers.Composition.SeedDecomposerResolver.RequireGenerationRoot(sourceKey, sourceRoot);
-            // A selected generation resumes per file and owns its layer: once every
-            // admitted artifact commits, the runner records layer completion for the
-            // source so the next layer's precondition can see it. A scoped run commits
-            // only its files and leaves the layer to a run over the whole generation.
-            bool scoped = configured is Laplace.Decomposers.Structured.Decomposer<Laplace.Decomposers.Structured.SourceGenerationRecipe> { IsScoped: true };
-            task = IngestCommands.IngestViaRunnerAsync(configured, sourceRoot,
-                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: scoped);
+            task = Task.FromResult(CliRuntime.Fail("Recipe preview requires a canonical source from recipes/order."));
             return true;
         }
         if (Routes.TryGetValue(sourceKey, out var handler))
@@ -229,24 +183,26 @@ internal static class IngestDispatchTable
         return false;
     }
 
-    internal static string NormalizeLegacySourceAlias(string sourceKey) =>
-        sourceKey.ToLowerInvariant() switch
+    private static readonly IReadOnlyDictionary<string, string> SourceAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            "princeton-wordnet" => "wordnet",
-            "atomic-2020" => "atomic2020",
-            _ => sourceKey,
+            ["iso639"] = "iso-639", ["oewn"] = "open-english-wordnet",
+            ["omw"] = "open-multilingual-wordnet", ["wordnet"] = "princeton-wordnet",
+            ["ud"] = "universal-dependencies", ["atomic2020"] = "atomic-2020",
         };
+
+    internal static string CanonicalSourceName(string sourceKey) =>
+        SourceAliases.TryGetValue(sourceKey, out var canonical) ? canonical : sourceKey.ToLowerInvariant();
 
     /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
     private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
 
     /// <summary>
-    /// Every key <see cref="TryDispatch"/> routes: selected source generations, keyed
-    /// routes, and model aliases. Help and unknown-source errors read this.
+    /// Every canonical source, accepted alias, and operator command.
+    /// Help and unknown-source errors read the same dispatch inventory.
     /// </summary>
     internal static IReadOnlyCollection<string> RegisteredKeys =>
-        Routes.Keys
-            .Concat(CliRuntime.Decomposers.SelectedGenerationKeys)
+        EtlManifest.SourceOrder.Concat(SourceAliases.Keys).Concat(Routes.Keys)
               .Concat(ModelAliases)
               .Distinct(StringComparer.OrdinalIgnoreCase)
               .ToArray();

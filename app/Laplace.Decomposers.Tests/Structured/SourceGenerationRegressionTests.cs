@@ -186,30 +186,13 @@ public sealed class SourceGenerationRegressionTests
         finally { Directory.Delete(root, true); }
     }
 
-    [Theory]
-    [InlineData("recipes/unicode/UCD/17.0.0/unicode.source.json")]
-    [InlineData("recipes/iso639/20260415/iso639.source.json")]
-    [InlineData("recipes/cili/a895d7e/cili.source.json")]
-    [InlineData("recipes/oewn/2025-plus/oewn.source.json")]
-    [InlineData("recipes/omw/2.0/omw.source.json")]
-    [InlineData("recipes/verbnet/3.4/verbnet.source.json")]
-    [InlineData("recipes/verbnet/3.4/verbnet-gl.source.json")]
-    [InlineData("recipes/propbank/3.4/propbank.source.json")]
-    [InlineData("recipes/ud/2.18/ud.source.json")]
-    public void Live_estate_corpus_root_exists_and_resolves_parent_to_declared_root(string manifest)
+    [Fact]
+    public void HostCompositionListsCanonicalNativeSourcesWithoutLoadingJsonGenerations()
     {
-        CodepointPerfcache.LoadDefault();
-        var recipe = SourceGenerationRecipe.Load(RepositoryFile(manifest));
-        if (string.IsNullOrWhiteSpace(recipe.Root) || !Directory.Exists(recipe.Root))
-            return;
-
-        string? parentDir = Path.GetDirectoryName(recipe.Root);
-        Assert.NotNull(parentDir);
         var resolver = new Composition.SeedDecomposerResolver(new NullServiceProvider(), []);
-        string key = recipe.Aliases.Count > 0 ? recipe.Aliases[0] : recipe.Authority;
-        Assert.True(resolver.TryResolveGeneration(
-            key, parentDir, out _, out var resolvedRoot));
-        Assert.Equal(Path.GetFullPath(recipe.Root), Path.GetFullPath(resolvedRoot));
+        Assert.Equal(EtlManifest.SourceOrder, resolver.SelectedGenerationKeys);
+        Assert.Contains("open-multilingual-wordnet", resolver.SelectedGenerationKeys);
+        Assert.Contains("universal-dependencies", resolver.SelectedGenerationKeys);
     }
 
     private sealed class NullServiceProvider : IServiceProvider

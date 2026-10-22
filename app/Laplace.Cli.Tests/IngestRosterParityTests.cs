@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Laplace.Cli;
 using Xunit;
@@ -33,7 +32,6 @@ public sealed class IngestRosterParityTests
             "model",
             "model-corroborate",
             "omw-probe",
-            "openings",
             "parquet",
             "recipe",
             "rgba-image",
@@ -51,24 +49,19 @@ public sealed class IngestRosterParityTests
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
     {
-        // Selected source generations are routes too; they come from the CLI's services.
-        CliRuntime.InitializeServices();
-        var manifestRoutes = ReadManifestRoutes();
+        var manifestRoutes = Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder
+            .ToHashSet(StringComparer.Ordinal);
         var runtimeRoutes = IngestDispatchTable.RegisteredKeys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        // A source generation answers to its source name and each alias: one route.
-        var generations = new Laplace.Decomposers.Composition.SourceGenerationCatalog();
-        bool SameGenerationAsLadderRoute(string key) =>
-            generations.TryGet(key, out var recipe)
-            && recipe.Aliases.Append(recipe.SourceName).Any(manifestRoutes.Contains);
+        var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase).ToList();
+        // These existing path/operator commands were previously mixed into the
+        // cadence JSON. They do not declare corpus order or another recipe estate.
+        string[] pathCommands = ["document", "repo", "stack", "tiny-codes", "operational", "safetensors"];
         var unclassified = runtimeRoutes
             .Except(manifestRoutes, StringComparer.OrdinalIgnoreCase)
             .Except(OperationalOnlyRoutes, StringComparer.OrdinalIgnoreCase)
-            .Where(key => !SameGenerationAsLadderRoute(key))
+            .Except(pathCommands, StringComparer.OrdinalIgnoreCase)
+            .Where(key => !manifestRoutes.Contains(IngestDispatchTable.CanonicalSourceName(key)))
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var stale = OperationalOnlyRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)
@@ -133,21 +126,18 @@ public sealed class IngestRosterParityTests
         Assert.Contains("dotnet \"$DLL\" ingest \"${ingest_args[@]}\"", script, StringComparison.Ordinal);
     }
 
-    private static HashSet<string> ReadManifestRoutes()
+    [Theory]
+    [InlineData("iso639", "iso-639")]
+    [InlineData("OEWN", "open-english-wordnet")]
+    [InlineData("omw", "open-multilingual-wordnet")]
+    [InlineData("wordnet", "princeton-wordnet")]
+    [InlineData("ud", "universal-dependencies")]
+    [InlineData("atomic2020", "atomic-2020")]
+    public void ExistingSourceAliasesSelectCanonicalNativeRecipes(string alias, string expected)
     {
-        var path = Path.Combine(
-            FindRepoRoot(), "scripts", "win", "witness-manifest.json");
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
-        var routes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var stage in document.RootElement.GetProperty("cadence").EnumerateArray())
-        {
-            foreach (var source in stage.GetProperty("sources").EnumerateArray())
-            {
-                routes.Add(source.GetProperty("cli").GetString()
-                    ?? throw new InvalidDataException("manifest source has null cli"));
-            }
-        }
-        return routes;
+        Assert.Equal(expected, IngestDispatchTable.CanonicalSourceName(alias));
+        Assert.Contains(expected, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
+        Assert.Contains(alias, IngestDispatchTable.RegisteredKeys, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string FindRepoRoot()
@@ -156,7 +146,7 @@ public sealed class IngestRosterParityTests
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
         if (stamped is not null && File.Exists(
-                Path.Combine(stamped, "scripts", "win", "witness-manifest.json")))
+                Path.Combine(stamped, "scripts", "ingest-source.sh")))
             return stamped;
         throw new InvalidOperationException("Repository root metadata is missing");
     }

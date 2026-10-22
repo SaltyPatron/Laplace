@@ -255,6 +255,38 @@ endif()
 
 
 add_subdirectory(grammars)
+
+# The managed host executes the canonical recipe compiler/ingester in its own
+# process. Reuse that source and the Native targets already in this build graph;
+# no second .format/.recipe parser or private recipe instruction language is built.
+if(NOT DEFINED LAPLACE_RECIPE_ENGINE_SOURCE)
+    get_filename_component(_laplace_native_checkout "${LAPLACE_NATIVE}" REALPATH)
+    get_filename_component(_laplace_workspace "${_laplace_native_checkout}" DIRECTORY)
+    set(LAPLACE_RECIPE_ENGINE_SOURCE "${_laplace_workspace}/Laplace-Engine"
+        CACHE PATH "Canonical Laplace-Engine checkout for recipe execution")
+endif()
+if(NOT EXISTS "${LAPLACE_RECIPE_ENGINE_SOURCE}/src/record_stream.c"
+   OR NOT EXISTS "${LAPLACE_RECIPE_ENGINE_SOURCE}/CMakeLists.txt")
+    message(FATAL_ERROR "The canonical Laplace-Engine checkout is required at ${LAPLACE_RECIPE_ENGINE_SOURCE}. Set LAPLACE_RECIPE_ENGINE_SOURCE to its existing local checkout.")
+endif()
+add_subdirectory("${LAPLACE_RECIPE_ENGINE_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine")
+set(LAPLACE_RECIPE_RUNTIME "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine/runtime")
+file(GLOB_RECURSE _recipe_runtime_sources CONFIGURE_DEPENDS
+    "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*.recipe"
+    "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*.format"
+    "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*/source")
+file(GLOB _recipe_runtime_grammars CONFIGURE_DEPENDS
+    "${LAPLACE_GRAMMARS}/libtree-sitter-*${CMAKE_SHARED_LIBRARY_SUFFIX}")
+add_custom_command(OUTPUT "${LAPLACE_RECIPE_RUNTIME}/.complete"
+    COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
+            --component LaplaceRecipeRuntime --prefix "${LAPLACE_RECIPE_RUNTIME}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${LAPLACE_RECIPE_RUNTIME}/.complete"
+    DEPENDS laplace_engine ${_recipe_runtime_sources} ${_recipe_runtime_grammars}
+            "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/order"
+            "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine/cmake_install.cmake"
+    COMMENT "Package canonical Native recipe runtime" VERBATIM)
+add_custom_target(laplace_recipe_runtime DEPENDS "${LAPLACE_RECIPE_RUNTIME}/.complete")
+add_dependencies(laplace_core laplace_recipe_runtime)
 target_link_libraries(laplace_core PRIVATE laplace_text tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
