@@ -300,7 +300,7 @@ public static class SourceEntityIdConventions
     public static Hash128 ContentHashSourceId(string domain, IReadOnlyList<string> files)
     {
         ArgumentNullException.ThrowIfNull(files);
-        var children = new List<Hash128>(files.Count + 1) { Hash128.OfCanonical(domain) };
+        var children = new List<Hash128>(files.Count + 1) { Hash128.Text(domain) };
         foreach (var path in files.OrderBy(p => p, StringComparer.Ordinal))
             children.Add(HashFileChunked(path));
         return Hash128.Merkle(0, CollectionsMarshal.AsSpan(children));
@@ -309,12 +309,12 @@ public static class SourceEntityIdConventions
     public static Hash128 NormalizedTextSourceId(string domain, IReadOnlyList<string> files)
     {
         ArgumentNullException.ThrowIfNull(files);
-        var children = new List<Hash128>(files.Count + 1) { Hash128.OfCanonical(domain) };
+        var children = new List<Hash128>(files.Count + 1) { Hash128.Text(domain) };
         foreach (var path in files.OrderBy(p => p, StringComparer.Ordinal))
         {
             string norm = File.ReadAllText(path)
                               .Replace("\r\n", "\n").Replace('\r', '\n');
-            children.Add(Hash128.OfCanonical(norm));
+            children.Add(Hash128.Text(norm));
         }
         return Hash128.Merkle(0, CollectionsMarshal.AsSpan(children));
     }

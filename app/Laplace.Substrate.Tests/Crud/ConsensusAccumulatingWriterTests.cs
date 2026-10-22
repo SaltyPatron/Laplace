@@ -12,14 +12,14 @@ public class ConsensusAccumulatingWriterTests
     private readonly LocalPgFixture _pg;
     public ConsensusAccumulatingWriterTests(LocalPgFixture pg) => _pg = pg;
 
-    private static Hash128 H(ulong n) => Hash128.OfCanonical($"substrate/test/consensus-accumulation/{n}");
+    private static Hash128 H(ulong n) => Hash128.Text($"substrate/test/consensus-accumulation/{n}");
 
     private const long PhiTrust = 30_000_000_000L;
     private const long PhiCrank = 300_000_000_000L;
 
     private async Task<Hash128> EnsureScaffoldAsync(params Hash128[] ids)
     {
-        var typeId = Hash128.OfCanonical("FoldingTestFixture");
+        var typeId = Hash128.Text("FoldingTestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id) "
           + "VALUES ($1, 0::smallint, $1) ON CONFLICT (id) DO NOTHING");
@@ -54,7 +54,7 @@ public class ConsensusAccumulatingWriterTests
         new(ImmutableArray<EntityRow>.Empty,
             ImmutableArray<PhysicalityRow>.Empty,
             rows.ToImmutableArray(),
-            new SubstrateChangeMetadata(Hash128.OfCanonical($"intent/{unit}"), src, unit,
+            new SubstrateChangeMetadata(Hash128.Text($"intent/{unit}"), src, unit,
                                         DateTimeOffset.UnixEpoch, null));
 
     private async Task<(long rating, long rd, long vol, long wc)?> ConsensusRowAsync(

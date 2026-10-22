@@ -24,7 +24,7 @@ public static class ChessTransitions
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
 
     public static Hash128 MarkerId(Hash128 playingId) =>
-        Hash128.OfCanonical($"chess/transitions/{playingId}/{Version}");
+        Hash128.Text($"chess/transitions/{playingId}/{Version}");
 
     internal static void DepositFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
     {

@@ -10,12 +10,12 @@ public sealed class ChessVocabularyBatchTests
 {
     private static readonly ChessVocabulary.BootstrapSource[] Sources =
     [
-        new(Hash128.OfCanonical("test/chess/source/a"), "ChessA",
-            Hash128.OfCanonical("test/chess/trust/a")),
-        new(Hash128.OfCanonical("test/chess/source/b"), "ChessB",
-            Hash128.OfCanonical("test/chess/trust/b")),
-        new(Hash128.OfCanonical("test/chess/source/c"), "ChessC",
-            Hash128.OfCanonical("test/chess/trust/c")),
+        new(Hash128.Text("test/chess/source/a"), "ChessA",
+            Hash128.Text("test/chess/trust/a")),
+        new(Hash128.Text("test/chess/source/b"), "ChessB",
+            Hash128.Text("test/chess/trust/b")),
+        new(Hash128.Text("test/chess/source/c"), "ChessC",
+            Hash128.Text("test/chess/trust/c")),
     ];
 
     [Fact]

@@ -52,6 +52,8 @@ uint32_t tier_tree_add_node(
     uint32_t     text_range_len);
 
 int tier_tree_finalize(tier_tree_t* tree);
+void tier_tree_mark_native_text(tier_tree_t* tree);
+int tier_tree_is_native_text(const tier_tree_t* tree);
 
 int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* out);
 

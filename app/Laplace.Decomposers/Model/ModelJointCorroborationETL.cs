@@ -292,7 +292,7 @@ public sealed class ModelJointCorroborationETL
         Hash128 source, Hash128 targetType, IReadOnlyList<Hash128> contexts)
     {
         string members = string.Join('|', contexts);
-        return Hash128.OfCanonical(
+        return Hash128.Text(
             $"{Family}/v{ModelTokenEdgeETL.AnalyzerVersion}/aggregate-context" +
             $"/source={source}/type={targetType}/circuits={members}");
     }
@@ -306,7 +306,7 @@ public sealed class ModelJointCorroborationETL
     {
         string basis = string.Join('|', proposal.BasisTypeIds
             .OrderBy(static id => id, Hash128BytewiseComparer.Instance));
-        return Hash128.OfCanonical(
+        return Hash128.Text(
             $"{Family}/v{ModelTokenEdgeETL.AnalyzerVersion}/calculation/source={source}" +
             $"/context={context}/type={targetType}/subject={proposal.Subject}" +
             $"/object={proposal.Object}/basis={basis}/orchestration={orchestration}");
@@ -323,7 +323,7 @@ public sealed class ModelJointCorroborationETL
             $"{proposal.Subject}>{proposal.Object}:" +
             string.Join(',', proposal.BasisTypeIds
                 .OrderBy(static id => id, Hash128BytewiseComparer.Instance))));
-        return Hash128.OfCanonical(
+        return Hash128.Text(
             $"{Family}/v{ModelTokenEdgeETL.AnalyzerVersion}/sources={first}|{second}" +
             $"/type={targetType}/pairs={pairs}");
     }

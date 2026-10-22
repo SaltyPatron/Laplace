@@ -428,7 +428,7 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void A_character_property_value_is_the_composition_of_property_and_value()
     {
-        Hash128 source = Hash128.OfCanonical("test/unicode/source");
+        Hash128 source = Hash128.Text("test/unicode/source");
         using var builder = new SubstrateChangeBuilder(source, "test/unicode/property-value");
         Hash128? pair = ContentEmitter.StagePropertyValue(
             builder, "General_Category", "Space_Separator", source);
@@ -446,7 +446,7 @@ public sealed class UnicodeDecomposerTests
     // The [property, value] composition, with the same identity the emitter stages.
     private static Hash128 PropertyValue(string property, string value)
     {
-        Hash128 source = Hash128.OfCanonical("test/unicode/pair");
+        Hash128 source = Hash128.Text("test/unicode/pair");
         using var builder = new SubstrateChangeBuilder(source, "test/unicode/pair");
         return ContentEmitter.StagePropertyValue(builder, property, value, source)!.Value;
     }
@@ -685,9 +685,9 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Binary_property_negative_is_refuting_testimony_on_the_same_typed_cell()
     {
-        Hash128 source = Hash128.OfCanonical("test/unicode/source");
+        Hash128 source = Hash128.Text("test/unicode/source");
         Hash128 relation = RelationTypeRegistry.RelationTypeId("HAS_CHARACTER_PROPERTY");
-        Hash128 whiteSpace = Hash128.OfCanonical("test/unicode/[White_Space, Yes]");
+        Hash128 whiteSpace = Hash128.Text("test/unicode/[White_Space, Yes]");
         using var builder = new SubstrateChangeBuilder(
             source, "test/unicode/binary-refute", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1);

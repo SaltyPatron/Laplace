@@ -11,8 +11,8 @@ public sealed class FeedbackObservationTests(LocalPgFixture pg)
     [Fact]
     public async Task CorrectionsChangeTheWalk_TransportReplayPreservesBothWitnesses()
     {
-        var subject = Hash128.OfCanonical("test/feedback-occurrence/subject");
-        var obj = Hash128.OfCanonical("test/feedback-occurrence/object");
+        var subject = Hash128.Text("test/feedback-occurrence/subject");
+        var obj = Hash128.Text("test/feedback-occurrence/object");
         var relation = RelationTypeRegistry.RelationTypeId("RELATED_TO");
         await new Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateWriter(pg.DataSource).ApplyAsync(
             new SubstrateChangeBuilder(FeedbackContent.Source, "test/feedback-occurrence/entities")

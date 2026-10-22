@@ -35,7 +35,7 @@ public sealed class ChessTenantContractTests
     {
         var owner = new OperationPrincipal("tenant-a", "alice", "browser", "google");
         var session = new PlaySession(
-            Hash128.OfCanonical("test/chess/play/tenant-binding"),
+            Hash128.Text("test/chess/play/tenant-binding"),
             "test/chess/play", recordToSubstrate: false,
             tenantId: "tenant-a", userId: "alice", requester: owner);
         var owns = ChessEndpointsType.GetMethod(

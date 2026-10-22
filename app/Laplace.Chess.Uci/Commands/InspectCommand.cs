@@ -357,7 +357,7 @@ public static class InspectCommand
             if (string.IsNullOrWhiteSpace(name) || name == "?") continue;
             string folded = PlayerAlias.Canonical(name);
             string pre = "chess/player/" + folded;
-            players.Add(new PlayerView(side, name, folded, Hex(ChessVocabulary.PlayerId(name)), pre, Hash128.OfCanonical(pre) == ChessVocabulary.PlayerId(name)));
+            players.Add(new PlayerView(side, name, folded, Hex(ChessVocabulary.PlayerId(name)), pre, Hash128.Text(pre) == ChessVocabulary.PlayerId(name)));
         }
         var line = LineView(record.PositionIds[0], record.MoveIds, record.LineId);
 
@@ -407,7 +407,7 @@ public static class InspectCommand
 
         var findings = new List<string>
         {
-            $"#46.1 PLAYING is minted: OfCanonical(\"{Clip(playingPre, 200)}\"); EVENT likewise; players are OfCanonical(\"chess/player/\" + folded name)"
+            $"#46.1 PLAYING is minted: Text(\"{Clip(playingPre, 200)}\"); EVENT likewise; players are Text(\"chess/player/\" + folded name)"
                 + (players.Any(static p => p.Folded != p.NameAsWritten) ? $" ({string.Join(", ", players.Where(static p => p.Folded != p.NameAsWritten).Select(static p => $"\"{p.NameAsWritten}\" -> \"{p.Folded}\""))})" : "")
                 + ". The law: a name is content as written; the occurrence is composed from content.",
             "#46.1 the PLAYING preimage interpolates the LINE id with C#'s record formatting (\"Hash128 { Hi = …, Lo = … }\"), not its hex: the identity depends on a .NET ToString.",
@@ -557,7 +557,7 @@ public static class InspectCommand
                 if (id.Note is not null) sb.AppendLine($"      {id.Note}");
             }
             foreach (var p in g.Players)
-                sb.AppendLine($"   PLAYER {p.Side}: {p.Id}  \"{p.NameAsWritten}\" -> OfCanonical(\"{p.Preimage}\")" + (p.Verified ? "" : "  (recomputed: DIFFERS)"));
+                sb.AppendLine($"   PLAYER {p.Side}: {p.Id}  \"{p.NameAsWritten}\" -> Text(\"{p.Preimage}\")" + (p.Verified ? "" : "  (recomputed: DIFFERS)"));
             if (g.Entities.Count > 0)
             {
                 sb.AppendLine("-- entity rows (key ids)");

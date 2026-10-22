@@ -1,6 +1,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/trajectory.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/text_identity.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -126,16 +127,5 @@ void hash128_zero(hash128_t* out) {
 }
 
 int hash128_label_content_id(const char* label, size_t len, hash128_t* out) {
-    hash128_t children[256];
-    if (!label || !out || len == 0 || len > sizeof(children) / sizeof(children[0])) return -1;
-    for (size_t i = 0; i < len; ++i) {
-        const unsigned char c = (unsigned char)label[i];
-        const int word_char = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                              (c >= '0' && c <= '9') || c == '_';
-        if (!word_char) return -1;
-        hash128_blake3(&c, 1, &children[i]);
-    }
-    if (len == 1) { *out = children[0]; return 0; }
-    hash128_merkle(0, children, len, out);
-    return 0;
+    return hash128_text((const uint8_t *)label, len, out);
 }

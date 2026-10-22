@@ -30,7 +30,7 @@ public sealed class ChessConceptTests
     public void EachChessSense_IsOneConceptAcrossLexicalOpeningBookAndBoard(string surface)
     {
         Assert.True(ChessConcepts.TryResolve(surface, chessDomain: true, out var concept));
-        Assert.Equal(Hash128.OfCanonical("chess/concept/" + concept.Key), concept.Id);
+        Assert.Equal(Hash128.Text("chess/concept/" + concept.Key), concept.Id);
         Assert.NotEqual(concept.Member(ChessConcepts.Domain.Lexical), concept.Member(ChessConcepts.Domain.Opening));
         Assert.NotEqual(concept.Member(ChessConcepts.Domain.Book), concept.Member(ChessConcepts.Domain.Board));
         Assert.False(string.IsNullOrWhiteSpace(concept.LexicalSense));

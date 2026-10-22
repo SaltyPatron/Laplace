@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class TypeIdLawTests
 {
     private static readonly Regex ForbiddenMint = new(
-        @"Hash128\.OfCanonical\s*\(\s*""substrate/type/",
+        @"Hash128\.Text\s*\(\s*""substrate/type/",
         RegexOptions.Compiled);
 
 
@@ -41,7 +41,7 @@ public class TypeIdLawTests
         }
 
         Assert.True(violations.Count == 0,
-            "Hash128.OfCanonical(\"substrate/type/...\") outside allowed registries:\n"
+            "Hash128.Text(\"substrate/type/...\") outside allowed registries:\n"
             + string.Join("\n", violations));
     }
 

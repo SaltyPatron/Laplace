@@ -13,7 +13,7 @@ public sealed class ProvenanceFailureTests
     [InlineData("{\"model_type\":42}")]
     public void CorruptRecipeCannotBecomeCompletedProvenance(string json)
     {
-        var recipe = Hash128.OfCanonical("provenance/recipe-fixture");
+        var recipe = Hash128.Text("provenance/recipe-fixture");
         var failure = Assert.Throws<InvalidDataException>(() =>
             ProvenanceExtractor.RecipeModelLabel(json, "fallback", recipe));
         Assert.NotNull(failure.InnerException);
@@ -25,7 +25,7 @@ public sealed class ProvenanceFailureTests
     [InlineData("{\"model_type\":\"llama\"}", "llama")]
     public void ValidRecipeMetadataRetainsItsLabelContract(string json, string expected)
         => Assert.Equal(expected, ProvenanceExtractor.RecipeModelLabel(
-            json, "fallback", Hash128.OfCanonical("provenance/recipe-fixture")));
+            json, "fallback", Hash128.Text("provenance/recipe-fixture")));
 
     [Theory]
     [InlineData(false)]
@@ -53,7 +53,7 @@ public sealed class ProvenanceFailureTests
         using var lifetime = new CancellationTokenSource();
         if (cancelled) lifetime.Cancel();
         var failure = await Record.ExceptionAsync(() => ProvenanceExtractor.CountByTypesAsync(
-            data, [Hash128.OfCanonical("provenance/count-fixture")], lifetime.Token));
+            data, [Hash128.Text("provenance/count-fixture")], lifetime.Token));
         Assert.NotNull(failure);
         if (cancelled) Assert.IsAssignableFrom<OperationCanceledException>(failure);
         else Assert.IsAssignableFrom<NpgsqlException>(failure);

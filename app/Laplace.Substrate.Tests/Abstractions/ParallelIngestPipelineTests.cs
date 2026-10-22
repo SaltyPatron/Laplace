@@ -103,7 +103,7 @@ public sealed class ParallelIngestPipelineTests
         }
     }
 
-    private static Hash128 EntityIdFor(int i) => Hash128.OfCanonical($"parallel/rec/{i}");
+    private static Hash128 EntityIdFor(int i) => Hash128.Text($"parallel/rec/{i}");
 
     private static async Task<HashSet<Hash128>> ComposeIdsAsync(int n, int workers, int batchSize)
     {

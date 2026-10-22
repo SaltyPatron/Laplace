@@ -25,13 +25,13 @@ public static class ChessStockfishEval
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
 
     public static Hash128 MarkerId(Hash128 lineId, int version)
-        => Hash128.OfCanonical($"chess/stockfish-eval/{lineId}/{version}");
+        => Hash128.Text($"chess/stockfish-eval/{lineId}/{version}");
 
     internal static string MarkerKey(Hash128 lineId, StockfishEvaluationRecipe recipe)
         => recipe.MarkerKey(lineId.ToString());
 
     public static Hash128 MarkerId(Hash128 lineId, StockfishEvaluationRecipe recipe)
-        => Hash128.OfCanonical(MarkerKey(lineId, recipe));
+        => Hash128.Text(MarkerKey(lineId, recipe));
 
     internal static string InputKey(string fen, StockfishEvaluationRecipe recipe)
         => recipe.InputKey(fen);
@@ -103,7 +103,7 @@ public static class ChessStockfishEval
             if (m.Terminal(cur) is null)
             {
                 string fen = cur.Board.ToFen();
-                var evaluationInput = Hash128.OfCanonical(InputKey(fen, recipe));
+                var evaluationInput = Hash128.Text(InputKey(fen, recipe));
                 var verdict = EvaluatePosition(
                     evaluationInput, fen,
                     eval,

@@ -14,8 +14,8 @@ namespace Laplace.Engine.Core.Tests;
 [Collection("Perfcache")]
 public sealed class ChessTransitionFloorTests
 {
-    private static Hash128 K(string s) => Hash128.OfCanonical("k:" + s);
-    private static Hash128 V(string s) => Hash128.OfCanonical("v:" + s);
+    private static Hash128 K(string s) => Hash128.Text("k:" + s);
+    private static Hash128 V(string s) => Hash128.Text("v:" + s);
 
     /// <summary>WriteBlob requires sorted-unique input in the bytewise order the binary
     /// search uses; the fixture sorts with that comparer.</summary>

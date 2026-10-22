@@ -53,7 +53,7 @@ public sealed class SubstrateApplyEnvelopeTests
         var queued = new TrackedLifetime();
         var barrier = new IngestApplyBarrier();
         SubstrateChange boundary = new SubstrateChangeBuilder(
-            Hash128.OfCanonical("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
+            Hash128.Text("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
         var decomposer = new OwnedChangesDecomposer(
             [OwnedChange(first, 0), boundary, OwnedChange(queued, 1)], cancelFailure);
         var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task),
@@ -68,7 +68,7 @@ public sealed class SubstrateApplyEnvelopeTests
     }
 
     private static SubstrateChange OwnedChange(TrackedLifetime lifetime, int index) =>
-        new SubstrateChangeBuilder(Hash128.OfCanonical("test/cleanup/source"), $"cleanup-{index}").Build()
+        new SubstrateChangeBuilder(Hash128.Text("test/cleanup/source"), $"cleanup-{index}").Build()
             with { ApplyEnvelope = SubstrateApplyEnvelope.Own(lifetime, _ => ValueTask.CompletedTask) };
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class SubstrateApplyEnvelopeTests
         var queued = new TrackedLifetime();
         var barrier = new IngestApplyBarrier();
         var boundary = new SubstrateChangeBuilder(
-            Hash128.OfCanonical("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
+            Hash128.Text("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
         var decomposer = new OwnedChangesDecomposer(
             [OwnedChange(first, 0), boundary, OwnedChange(queued, 1)], terminalFailure: producerFailure);
         var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task),
@@ -115,7 +115,7 @@ public sealed class SubstrateApplyEnvelopeTests
         Exception? terminalFailure = null) : IDecomposer
     {
         internal TaskCompletionSource Enumerated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Hash128 SourceId => Hash128.OfCanonical("test/cleanup/source");
+        public Hash128 SourceId => Hash128.Text("test/cleanup/source");
         public string SourceName => "CleanupOwnership";
         public int LayerOrder => 0;
         public Hash128 TrustClassId => TrustClassRegistry.Id("SubstrateMandate");
@@ -238,7 +238,7 @@ public sealed class SubstrateApplyEnvelopeTests
         TrackedLifetime lifetime,
         TaskCompletionSource enumerated) : IDecomposer
     {
-        public Hash128 SourceId { get; } = Hash128.OfCanonical("test/apply-envelope/source");
+        public Hash128 SourceId { get; } = Hash128.Text("test/apply-envelope/source");
         public string SourceName => "ApplyEnvelope";
         public int LayerOrder => 0;
         public Hash128 TrustClassId =>

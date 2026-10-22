@@ -10,12 +10,10 @@ public class TextDecomposerTests
 
 
     [Fact]
-    public void EmptyString_ProducesRootOnly()
+    public void EmptyString_DoesNotMintAnEntity()
     {
         using var t = TextDecomposer.Run("");
-        Assert.Equal(1, t.NodeCount);
-        var root = t.GetNode(0);
-        Assert.Equal(4, root.Tier);
+        Assert.Equal(0, t.NodeCount);
     }
 
     [Fact]
@@ -35,24 +33,16 @@ public class TextDecomposerTests
     public void HelloWorld_HasReasonableTopology()
     {
         using var t = TextDecomposer.Run("Hello world.");
-        int leaves = 0, graphemes = 0, words = 0, sentences = 0, docs = 0;
+        int leaves = 0;
         for (uint i = 0; i < (uint)t.NodeCount; i++)
         {
             var v = t.GetNode(i);
-            switch (v.Tier)
-            {
-                case 0: leaves++; break;
-                case 1: graphemes++; break;
-                case 2: words++; break;
-                case 3: sentences++; break;
-                case 4: docs++; break;
-            }
+            if (v.Tier == 0) leaves++;
         }
         Assert.Equal(12, leaves);
-        Assert.Equal(12, graphemes);
-        Assert.True(words >= 1);
-        Assert.True(sentences >= 1);
-        Assert.Equal(1, docs);
+        var root = t.GetNode(t.NaturalUnitIndex());
+        Assert.True(root.ChildCount >= 2);
+        Assert.Equal(Hash128.Text("Hello world."), root.Id);
     }
 
     [Fact]
@@ -75,7 +65,7 @@ public class TextDecomposerTests
     }
 
     [Fact]
-    public void NormalizationForms_ConvergeUnderNfc()
+    public void UnicodeRepresentationsRemainDistinctUntilExplicitNormalization()
     {
 
 
@@ -84,9 +74,10 @@ public class TextDecomposerTests
 
         using var pre = TextDecomposer.Run(new byte[] { 0xC3, 0xA9 });
         using var dec = TextDecomposer.Run(new byte[] { 0x65, 0xCC, 0x81 });
-        Assert.Equal(pre.NodeCount, dec.NodeCount);
         Assert.Equal(0x00E9u, pre.GetNode(0).Atom);
-        Assert.Equal(0x00E9u, dec.GetNode(0).Atom);
+        Assert.Equal(0x0065u, dec.GetNode(0).Atom);
+        Assert.Equal(0x0301u, dec.GetNode(1).Atom);
+        Assert.NotEqual(pre.GetNode(pre.NaturalUnitIndex()).Id, dec.GetNode(dec.NaturalUnitIndex()).Id);
     }
 
     [Fact]
@@ -96,7 +87,7 @@ public class TextDecomposerTests
         byte[] precomposed = [0xC3, 0xA9];
         byte[] decomposed = [0x65, 0xCC, 0x81];
 
-        Assert.Equal(
+        Assert.NotEqual(
             TextDecomposer.ContentRootId(precomposed),
             TextDecomposer.ContentRootId(decomposed));
         Assert.NotEqual(

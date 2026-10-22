@@ -18,7 +18,7 @@ public sealed class WorkingSetAtomicReplayTests
 
     public WorkingSetAtomicReplayTests(LocalPgFixture pg) => _pg = pg;
 
-    private static Hash128 H(string seed) => Hash128.OfCanonical($"ws-atomic-replay/{seed}");
+    private static Hash128 H(string seed) => Hash128.Text($"ws-atomic-replay/{seed}");
 
     private static AttestationRow Att(string seed, long games, long unixUs) => new(
         H($"att/{seed}"), H($"subject/{seed}"), H("relation"), null, H("source"), null,

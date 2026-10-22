@@ -6,7 +6,7 @@ namespace Laplace.Substrate.Tests.Crud;
 
 public sealed class PhysicalityContentIdentityTests
 {
-    private static readonly Hash128 Source = Hash128.OfCanonical("test/content-identity/source");
+    private static readonly Hash128 Source = Hash128.Text("test/content-identity/source");
     private static readonly double[] Coord = [1, 0, 0, 0];
 
     private static PhysicalityRow Row(
@@ -21,7 +21,7 @@ public sealed class PhysicalityContentIdentityTests
     public void MultiChildContentMustEqualExactOrderedMerkle()
     {
         Hash128[] children =
-        [Hash128.OfCanonical("child/a"), Hash128.OfCanonical("child/b")];
+        [Hash128.Text("child/a"), Hash128.Text("child/b")];
         Hash128 parent = Hash128.Merkle(9, children);
         var row = Row(parent, PhysicalityType.Content, Trajectory.Build(children), children.Length);
         Assert.Equal(parent, row.EntityId);
@@ -30,7 +30,7 @@ public sealed class PhysicalityContentIdentityTests
     [Fact]
     public void OneChildContentCollapsesToChildIdentity()
     {
-        Hash128 child = Hash128.OfCanonical("child/only");
+        Hash128 child = Hash128.Text("child/only");
         var row = Row(child, PhysicalityType.Content, Trajectory.Build([child]), 1);
         Assert.Equal(child, row.EntityId);
     }
@@ -39,8 +39,8 @@ public sealed class PhysicalityContentIdentityTests
     public void ArbitraryParentCannotMasqueradeAsContentTrajectory()
     {
         Hash128[] children =
-        [Hash128.OfCanonical("child/a"), Hash128.OfCanonical("child/b")];
-        Hash128 falseParent = Hash128.OfCanonical("source-specific/handle");
+        [Hash128.Text("child/a"), Hash128.Text("child/b")];
+        Hash128 falseParent = Hash128.Text("source-specific/handle");
         Assert.Throws<InvalidOperationException>(() =>
             Row(falseParent, PhysicalityType.Content, Trajectory.Build(children), children.Length));
     }
@@ -48,7 +48,7 @@ public sealed class PhysicalityContentIdentityTests
     [Fact]
     public void ContentDeclaredCountMustMatchExpandedRleManifest()
     {
-        Hash128 child = Hash128.OfCanonical("child/repeated");
+        Hash128 child = Hash128.Text("child/repeated");
         Hash128[] children = [child, child, child];
         Hash128 parent = Hash128.Merkle(0, children);
         double[] rle = Trajectory.Build(children);
@@ -60,9 +60,9 @@ public sealed class PhysicalityContentIdentityTests
     [Fact]
     public void StructuralTrajectoryMayProjectGovernedIdentity()
     {
-        Hash128 handle = Hash128.OfCanonical("governed/record");
+        Hash128 handle = Hash128.Text("governed/record");
         Hash128[] members =
-        [Hash128.OfCanonical("schema"), Hash128.OfCanonical("offset")];
+        [Hash128.Text("schema"), Hash128.Text("offset")];
         var row = Row(handle, PhysicalityType.ParseStructure, Trajectory.Build(members), members.Length);
         Assert.Equal(handle, row.EntityId);
         Assert.Equal(PhysicalityType.ParseStructure, row.Type);
@@ -71,7 +71,7 @@ public sealed class PhysicalityContentIdentityTests
     [Fact]
     public void PhysicalityIdMustMatchEntityAndType()
     {
-        Hash128 entity = Hash128.OfCanonical("entity");
+        Hash128 entity = Hash128.Text("entity");
         Hash128 wrong = PhysicalityId.Compute(entity, PhysicalityType.Content);
         Assert.Throws<InvalidOperationException>(() =>
             Row(entity, PhysicalityType.Projection, null, 0, wrong));

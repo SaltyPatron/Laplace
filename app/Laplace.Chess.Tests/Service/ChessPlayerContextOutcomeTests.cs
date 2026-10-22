@@ -16,9 +16,9 @@ public sealed class ChessPlayerContextOutcomeTests
         CodepointPerfcache.LoadDefault();
         var white = ChessVocabulary.PlayerId("Context White");
         var black = ChessVocabulary.PlayerId("Context Black");
-        var playing = Hash128.OfCanonical("test/chess/player-context/playing");
+        var playing = Hash128.Text("test/chess/player-context/playing");
         var game = new ChessWitnessedGame(
-            LineId: Hash128.OfCanonical("test/chess/player-context/line"),
+            LineId: Hash128.Text("test/chess/player-context/line"),
             PlayingId: playing,
             Moves: ["e4", "e5", "Nf3", "Nc6"],
             Result: GameOutcome.WonBy(0),
