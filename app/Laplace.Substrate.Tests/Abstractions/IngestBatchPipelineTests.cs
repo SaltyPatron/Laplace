@@ -39,7 +39,7 @@ public sealed class IngestBatchPipelineTests
     [Fact]
     public void FileCompletionBoundary_PreservesTheJournalLabel()
     {
-        var fileRoot = Hash128.OfCanonical("file/root");
+        var fileRoot = Hash128.Text("file/root");
         var boundary = IngestBatchPipeline.BuildFileCompletion(
             TestSource, "ud/en_ewt-ud-train", fileRoot, layerOrder: 2);
 

@@ -8,6 +8,7 @@
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/text_identity.h"
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/intent_stage.h"
 #include "laplace/core/merkle_dedup.h"
@@ -42,13 +43,6 @@ hash128_t laplace_content_tier_type_id(uint8_t tier) {
     return cache[slot];
 }
 
-static int codepoint_resolver(uint32_t atom, void* ctx,
-                              hash128_t* out_id, double out_coord[4],
-                              hilbert128_t* out_hb) {
-    (void)ctx;
-    return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
-}
-
 /* Placement address of E for one physicality type. Immutable physicality bodies
  * have their own ordinary descriptor content; several such forms can refer to one
  * unchanged E under this same key. Descriptor fields do not redefine E or certify
@@ -70,11 +64,10 @@ int content_witness_emit_floor_atom(
     intent_stage_t* stage, uint32_t atom, const hash128_t* expected_id,
     int64_t observed_at_unix_us) {
     if (!stage || !expected_id) return -1;
-    if (!codepoint_table_is_loaded()) return -3;
     hash128_t entity, placement;
     double coord[4];
     hilbert128_t hilbert;
-    if (codepoint_table_resolve_atom(atom, &entity, coord, &hilbert) != 0
+    if (text_identity_atom(atom, &entity, coord, &hilbert) != 0
         || !hash128_equals(&entity, expected_id)) return -2;
     laplace_physicality_id_compute(entity, 1, &placement);
     /* The atom's physicality is staged once per stage like any content's. */
@@ -145,16 +138,11 @@ static int content_tree_build_mode_workers(const uint8_t* utf8, size_t len,
                                            tier_tree_t** out_tree) {
     if (len == 0) return -4;                          /* empty input */
     if (worker_count == 0) return -1;
-    if (!codepoint_table_is_loaded()) return -3;       /* perfcache not loaded */
 
     tier_tree_t* tree = NULL;
     if ((source_representation
             ? laplace_text_decomposer_run_source(utf8, len, &tree)
             : laplace_text_decomposer_run(utf8, len, &tree)) != 0 || !tree) return -5;
-    if (hash_composer_run_workers(tree, codepoint_resolver, NULL, worker_count) != 0) {
-        tier_tree_free(tree);
-        return -6;                                     /* hash-composer failure */
-    }
     if (tier_tree_node_count(tree) == 0) {
         tier_tree_free(tree);
         return -7;                                     /* decomposer produced a zero-node tree */
@@ -191,30 +179,15 @@ int laplace_content_root_id(
     hash128_t*     out_root_id) {
     if (!utf8 || !out_root_id) return -1;
 
-    tier_tree_t* tree = NULL;
-    int rc = content_tree_build(utf8, len, &tree);
-    if (rc != 0) return rc;
-
-    tier_node_view_t root;
-    tier_tree_get_node(tree, natural_unit_index(tree), &root);
-    *out_root_id = root.id;
-    tier_tree_free(tree);
-    return 0;
+    if (!len) return -4;
+    return hash128_text(utf8, len, out_root_id);
 }
 
 int laplace_content_source_root_id(
     const uint8_t* utf8,
     size_t         len,
     hash128_t*     out_root_id) {
-    if (!utf8 || !out_root_id) return -1;
-    tier_tree_t* tree = NULL;
-    int rc = content_tree_build_mode(utf8, len, 1, &tree);
-    if (rc != 0) return rc;
-    tier_node_view_t root;
-    tier_tree_get_node(tree, natural_unit_index(tree), &root);
-    *out_root_id = root.id;
-    tier_tree_free(tree);
-    return 0;
+    return laplace_content_root_id(utf8, len, out_root_id);
 }
 
 static int expand_underscores(const uint8_t* in, size_t len, uint8_t** out_buf) {
@@ -437,7 +410,10 @@ static int emit_node(
     }
 
     if (emit_entity && !entity_staged) {
-        hash128_t type_id = laplace_content_tier_type_id(node.tier);
+        /* Recursive height does not say whether content is a grapheme, word or
+         * sentence. Native text nodes remain Text; recipes attest those roles. */
+        hash128_t type_id;
+        if (laplace_entity_type_id("Text", &type_id) != 0) return -2;
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0
             || intent_stage_witness_record(stage, &node.id) != 0)
             return -2;

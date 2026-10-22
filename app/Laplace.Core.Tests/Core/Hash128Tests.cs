@@ -50,12 +50,10 @@ public class Hash128Tests
     }
 
     [Fact]
-    public void OfCanonical_MatchesBlake3OfUtf8Bytes()
+    public void TextUsesTheStructuredNativeIdentity()
     {
-        const string canonical = "substrate/source/UnicodeDecomposer/v1";
-        var fromString = Hash128.OfCanonical(canonical);
-        var fromBytes = Hash128.Blake3(Encoding.UTF8.GetBytes(canonical));
-        Assert.Equal(fromBytes, fromString);
+        Assert.Equal("2d25f2d444594c0115ab1bdab872167b", Hash128.Text("abandon.01").ToHex());
+        Assert.NotEqual(Hash128.Blake3(Encoding.UTF8.GetBytes("abandon.01")), Hash128.Text("abandon.01"));
     }
 
     [Fact]

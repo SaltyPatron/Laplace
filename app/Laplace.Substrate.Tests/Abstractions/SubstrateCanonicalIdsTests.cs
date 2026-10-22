@@ -11,20 +11,19 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// </summary>
 public sealed class SubstrateCanonicalIdsTests
 {
-    // The id SQL's source_id('WordNetDecomposer') and
-    // realize.canonical_id('substrate/source/WordNetDecomposer/v1') resolve to; the C#
-    // builder must produce the same bytes.
-    private const string WordNetSourceIdHex = "4b1ee33be3034910df7629b2948cde35";
+    // Independently read from Engine `laplace text` over canonical tier0.bin.
+    // SQL text-identity convergence is tracked by the extension/schema unit.
+    private const string WordNetSourceIdHex = "430bbbeb18ed4b5321b2e4110b5740c7";
 
     private static string Hex(Hash128 h) => Convert.ToHexStringLower(h.ToBytes());
 
     [Fact]
-    public void SourceKeyMatchesTheSqlSurface()
+    public void SourceMetadataKeyMatchesNativeText()
     {
         Assert.Equal("substrate/source/WordNetDecomposer/v1",
             SubstrateCanonicalKeys.Source("WordNetDecomposer"));
         Assert.Equal(WordNetSourceIdHex, Hex(SubstrateCanonicalIds.Source("WordNetDecomposer")));
-        Assert.Equal(Hash128.OfCanonical("substrate/source/WordNetDecomposer/v1"),
+        Assert.Equal(Hash128.Text("substrate/source/WordNetDecomposer/v1"),
             SubstrateCanonicalIds.Source("WordNetDecomposer"));
     }
 
@@ -68,7 +67,7 @@ public sealed class SubstrateCanonicalIdsTests
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var appDir = Path.Combine(repoRoot, "app");
-        var literal = new Regex("OfCanonical\\s*\\(\\s*\"substrate/", RegexOptions.Compiled);
+        var literal = new Regex("Text\\s*\\(\\s*\"substrate/", RegexOptions.Compiled);
         var offenders = new List<string>();
 
         foreach (var file in Directory.EnumerateFiles(appDir, "*.cs", SearchOption.AllDirectories))

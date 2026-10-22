@@ -18,7 +18,7 @@ public sealed class ChessTrajectoryDecomposer
     public const int TrajectoryVersion = 1;
 
     public static Hash128 MarkerId(Hash128 lineId)
-        => Hash128.OfCanonical($"chess/trajectory/{lineId}/{TrajectoryVersion}");
+        => Hash128.Text($"chess/trajectory/{lineId}/{TrajectoryVersion}");
 
     public override Hash128 SourceId => ChessVocabulary.TrajectorySourceId;
     public override string SourceName => "ChessTrajectory";

@@ -103,13 +103,13 @@ public static class ChessSyzygy
 
     /// <summary>Versioned per-POSITION marker — each board state is probed/deposited once.</summary>
     public static Hash128 MarkerId(Hash128 positionId, int version)
-        => Hash128.OfCanonical($"chess/syzygy/{positionId}/{version}");
+        => Hash128.Text($"chess/syzygy/{positionId}/{version}");
 
     public static Hash128 MaterialId(string material) =>
-        Hash128.OfCanonical($"chess/syzygy/material/{material}/{MaterialGraphVersion}");
+        Hash128.Text($"chess/syzygy/material/{material}/{MaterialGraphVersion}");
 
     public static Hash128 EndgameLineId(Hash128 lineId) =>
-        Hash128.OfCanonical($"chess/syzygy/endgame/{lineId}/{MaterialGraphVersion}");
+        Hash128.Text($"chess/syzygy/endgame/{lineId}/{MaterialGraphVersion}");
 
     /// <summary>Five-valued WDL content token, side-to-move POV (Fathom order 0..4).</summary>
     public static string WdlToken(int wdl) => wdl switch
@@ -234,7 +234,7 @@ public static class ChessSyzygy
         {
             if (!TryTransition(product, out var from, out var move, out var to))
                 throw InvalidTransition(product);
-            facts.Add(Hash128.OfCanonical(
+            facts.Add(Hash128.Text(
                 $"chess/syzygy/transition/{from.Position.Id}/{move.Move.Id}/{to.Position.Id}/{product.Wdl}/{product.Dtz}"));
             ids.Add(from.Position.Id); ids.Add(move.Move.Id); ids.Add(to.Position.Id);
             coords.AddRange(from.Position.Coord);

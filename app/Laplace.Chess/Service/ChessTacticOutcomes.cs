@@ -32,7 +32,7 @@ public static class ChessTacticOutcomes
     private static IReadOnlyList<(Hash128 Id, ChessTacticPattern Pattern)>? _patternUniverse;
 
     public static Hash128 MarkerId(Hash128 playingId)
-        => Hash128.OfCanonical($"chess/tactic-outcomes/{playingId}/{Version}");
+        => Hash128.Text($"chess/tactic-outcomes/{playingId}/{Version}");
 
     public static string Surface(ChessTacticPattern pattern)
         => $"chess/tactic/{pattern}";

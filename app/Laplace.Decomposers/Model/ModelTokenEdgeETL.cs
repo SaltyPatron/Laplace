@@ -311,7 +311,7 @@ public sealed class ModelTokenEdgeETL
         int analyzerVersion, Hash128 source,
         string plane, int layer, int head,
         IReadOnlyList<string> tensorNames) =>
-        Hash128.OfCanonical(
+        Hash128.Text(
             $"{DerivationFamily}/v{analyzerVersion}/context/source={source}/plane={plane}/layer={layer}/head={head}/tensors={string.Join('|', tensorNames)}");
 
     private Hash128 CalculationReceipt(
@@ -324,6 +324,6 @@ public sealed class ModelTokenEdgeETL
     internal static Hash128 CalculationReceiptForVersion(
         int analyzerVersion, Hash128 source, Hash128 context,
         Hash128 typeId, Hash128 subject, Hash128 obj) =>
-        Hash128.OfCanonical(
+        Hash128.Text(
             $"{DerivationFamily}/v{analyzerVersion}/calculation/source={source}/context={context}/type={typeId}/subject={subject}/object={obj}");
 }

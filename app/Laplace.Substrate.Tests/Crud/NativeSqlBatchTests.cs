@@ -15,7 +15,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
     public async Task WitnessScopesExcludeCrossProductsButRetainConflictingObjects()
     {
         var prefix = "witness-scope/" + Guid.NewGuid().ToString("N");
-        Hash128 Id(string name) => Hash128.OfCanonical(prefix + "/" + name);
+        Hash128 Id(string name) => Hash128.Text(prefix + "/" + name);
         var source = Id("source"); var otherSource = Id("other-source");
         var playing = Id("playing"); var line = Id("line"); var context = Id("context");
         var hasEvent = Id("has-event"); var hasResult = Id("has-result");
@@ -61,11 +61,11 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
     public async Task ConversationWriterResumesProjectionWithoutForgingContent(bool batchPrefix)
     {
         var tag = $"catalog-conversation/{batchPrefix}/{Guid.NewGuid():N}";
-        var source = Hash128.OfCanonical($"{tag}/source");
-        var session = Hash128.OfCanonical($"{tag}/session");
-        var atoms = new[] { Hash128.OfCanonical($"{tag}/a"), Hash128.OfCanonical($"{tag}/b") };
+        var source = Hash128.Text($"{tag}/source");
+        var session = Hash128.Text($"{tag}/session");
+        var atoms = new[] { Hash128.Text($"{tag}/a"), Hash128.Text($"{tag}/b") };
         var turn = Hash128.Merkle(4, atoms);
-        var type = Hash128.OfCanonical("catalog-conversation/type");
+        var type = Hash128.Text("catalog-conversation/type");
         var builder = new SubstrateChangeBuilder(source, tag)
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(new EntityRow(session, 4, type))
@@ -81,8 +81,8 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
                 AlignmentResidual: null, SourceDim: null,
                 ObservedAtUnixUs: IntentStage.PgEpochUnixUs))
             .AddAttestation(new AttestationRow(
-                Hash128.OfCanonical($"{tag}/evidence"), turn,
-                Hash128.OfCanonical("catalog-conversation/relation"), null, source, null,
+                Hash128.Text($"{tag}/evidence"), turn,
+                Hash128.Text("catalog-conversation/relation"), null, source, null,
                 AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
                 1_000_000_000L, 30_000_000_000L));
         foreach (var atom in atoms)
@@ -167,7 +167,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
     {
         // A historical defect cannot be staged through the current writer.
         // Seed one legacy row directly in this disposable database fixture.
-        var session = Hash128.OfCanonical($"legacy-session/{Guid.NewGuid():N}");
+        var session = Hash128.Text($"legacy-session/{Guid.NewGuid():N}");
         var contentId = PhysicalityId.Compute(session, PhysicalityType.Content);
         try
         {
@@ -249,8 +249,8 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
     {
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var transaction = await conn.BeginTransactionAsync();
-        byte[] first = Hash128.OfCanonical("catalog-batch/first").ToBytes();
-        byte[] second = Hash128.OfCanonical("catalog-batch/second").ToBytes();
+        byte[] first = Hash128.Text("catalog-batch/first").ToBytes();
+        byte[] second = Hash128.Text("catalog-batch/second").ToBytes();
         await using (var setup = conn.CreateCommand())
         {
             setup.CommandText = """

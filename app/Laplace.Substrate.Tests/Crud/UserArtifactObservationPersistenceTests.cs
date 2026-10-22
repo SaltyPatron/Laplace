@@ -126,8 +126,8 @@ public sealed class UserArtifactObservationPersistenceTests : IAsyncLifetime
         const string observedLabel = "observed.txt";
         const string unknownLabel = "unknown.txt";
         DateTimeOffset modifiedAt = new(2025, 3, 4, 5, 6, 7, TimeSpan.Zero);
-        Hash128 observedId = Hash128.OfCanonical($"test/file/{sourceName}/observed");
-        Hash128 unknownId = Hash128.OfCanonical($"test/file/{sourceName}/unknown");
+        Hash128 observedId = Hash128.Text($"test/file/{sourceName}/observed");
+        Hash128 unknownId = Hash128.Text($"test/file/{sourceName}/unknown");
         var observability = new NpgsqlIngestObservability(_pg.DataSource);
 
         observability.OnRunStart(sourceName, layerOrder: 0, inventory: null);
@@ -140,7 +140,7 @@ public sealed class UserArtifactObservationPersistenceTests : IAsyncLifetime
         observability.OnRunFinished(
             sourceName,
             new IngestRunResult(
-                SourceId: Hash128.OfCanonical($"test/source/{sourceName}"),
+                SourceId: Hash128.Text($"test/source/{sourceName}"),
                 SourceName: sourceName,
                 UnitsAttempted: 2,
                 UnitsApplied: 2,
@@ -204,7 +204,7 @@ public sealed class UserArtifactObservationPersistenceTests : IAsyncLifetime
             observability.OnRunStart(sourceName, layerOrder: 2, inventory, graph);
             foreach (IngestArtifact artifact in graph.Selected)
             {
-                Hash128 fileId = Hash128.OfCanonical($"test/inventory/{sourceName}/{artifact.RelativePath}");
+                Hash128 fileId = Hash128.Text($"test/inventory/{sourceName}/{artifact.RelativePath}");
                 // The shared multi-file pipeline uses the compatibility callback. Its
                 // lifecycle transition must retain the mtime captured by the inventory snapshot.
                 observability.OnFileStarted(sourceName, artifact.FileLabel, artifact.Bytes ?? 0);
@@ -214,7 +214,7 @@ public sealed class UserArtifactObservationPersistenceTests : IAsyncLifetime
             observability.OnRunFinished(
                 sourceName,
                 new IngestRunResult(
-                    SourceId: Hash128.OfCanonical($"test/source/{sourceName}"),
+                    SourceId: Hash128.Text($"test/source/{sourceName}"),
                     SourceName: sourceName,
                     UnitsAttempted: 1,
                     UnitsApplied: 1,

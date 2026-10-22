@@ -102,7 +102,7 @@ public sealed class DecomposerMultiPhaseBudgetTests
 
     private sealed class SyntheticMultiPhase(params SyntheticPhase[] phases) : DecomposerMultiPhase
     {
-        public override Hash128 SourceId { get; } = Hash128.OfCanonical("test/multiphase");
+        public override Hash128 SourceId { get; } = Hash128.Text("test/multiphase");
         public override string SourceName => "test-multiphase";
         public override int LayerOrder => 1;
         public override Hash128 TrustClassId => default;
@@ -129,7 +129,7 @@ public sealed class DecomposerMultiPhaseBudgetTests
     {
         public int Count => count;
         public long ReceivedCap { get; private set; }
-        public Hash128 SourceId { get; } = Hash128.OfCanonical($"test/phase/{count}");
+        public Hash128 SourceId { get; } = Hash128.Text($"test/phase/{count}");
         public string SourceName => "test-phase";
         public int LayerOrder => 1;
         public Hash128 TrustClassId => default;
@@ -165,7 +165,7 @@ public sealed class DecomposerMultiPhaseBudgetTests
 
     private sealed class FileBackedMultiPhase(string path, bool repeat = false) : DecomposerMultiPhase
     {
-        public override Hash128 SourceId { get; } = Hash128.OfCanonical("test/file-backed-multiphase");
+        public override Hash128 SourceId { get; } = Hash128.Text("test/file-backed-multiphase");
         public override string SourceName => "test-file-backed-multiphase";
         public override int LayerOrder => 1;
         public override Hash128 TrustClassId => default;

@@ -148,7 +148,7 @@ public sealed class WorkingSetPipelineTests
             {
                 for (int row = 0; row < 6; ++row)
                 {
-                    Hash128 id = Hash128.OfCanonical($"expanded/{record}/{row}");
+                    Hash128 id = Hash128.Text($"expanded/{record}/{row}");
                     builder.ContentStage.AddEntity(id, EntityTier.Word, TestSource);
                 }
             },

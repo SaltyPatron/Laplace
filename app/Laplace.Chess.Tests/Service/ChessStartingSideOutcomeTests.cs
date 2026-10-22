@@ -92,9 +92,9 @@ public sealed class ChessStartingSideOutcomeTests
             foreach (var change in changes)
             {
                 Assert.Contains(change.Entities, e => e.Id ==
-                    Hash128.OfCanonical($"chess/transitions/{game.PlayingId}/1"));
+                    Hash128.Text($"chess/transitions/{game.PlayingId}/1"));
                 Assert.Contains(change.Entities, e => e.Id ==
-                    Hash128.OfCanonical($"chess/move-outcomes/{game.LineId}/1"));
+                    Hash128.Text($"chess/move-outcomes/{game.LineId}/1"));
             }
             if (repeatedMoves)
                 Assert.True(game.MoveIds.Distinct().Count() < game.MoveIds.Length);

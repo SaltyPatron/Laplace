@@ -79,7 +79,7 @@ public sealed class SelfPlayEngineTests
     private static ModalityEngine<ChessState, ChessMove> NewEngine(out ChessModality modality, out FakeSubstrate sub)
     {
         modality = new ChessModality();
-        var moveType = Hash128.OfCanonical("MOVE");
+        var moveType = Hash128.Text("MOVE");
         var addr = new FnvAddresser();
         sub = new FakeSubstrate(addr, moveType);
         return new ModalityEngine<ChessState, ChessMove>(modality, moveType, addr, sub);

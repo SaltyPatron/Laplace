@@ -240,7 +240,7 @@ public sealed class ModelSimilarityCorroborationETL
     {
         string basis = string.Join('|', proposal.BasisTypeIds
             .OrderBy(static id => id, Hash128BytewiseComparer.Instance));
-        return Hash128.OfCanonical(
+        return Hash128.Text(
             $"{Family}/v{ModelTokenEdgeETL.AnalyzerVersion}/calculation/source={source}" +
             $"/context={circuitContext}/type={typeId}/subject={proposal.Subject}" +
             $"/object={proposal.Object}/basis={basis}/orchestration={orchestrationId}");
@@ -255,7 +255,7 @@ public sealed class ModelSimilarityCorroborationETL
             $"{proposal.Subject}>{proposal.Object}:" +
             string.Join(',', proposal.BasisTypeIds
                 .OrderBy(static id => id, Hash128BytewiseComparer.Instance))));
-        return Hash128.OfCanonical(
+        return Hash128.Text(
             $"{Family}/v{ModelTokenEdgeETL.AnalyzerVersion}/sources={first}|{second}" +
             $"/type={typeId}/pairs={pairs}");
     }

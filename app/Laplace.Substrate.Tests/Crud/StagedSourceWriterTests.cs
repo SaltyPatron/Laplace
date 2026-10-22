@@ -18,11 +18,11 @@ public class StagedSourceWriterTests
     private readonly LocalPgFixture _pg;
     public StagedSourceWriterTests(LocalPgFixture pg) => _pg = pg;
 
-    private static Hash128 H(ulong n) => Hash128.OfCanonical($"substrate/test/source-reduced/{n}");
+    private static Hash128 H(ulong n) => Hash128.Text($"substrate/test/source-reduced/{n}");
 
     // The claim identity is the five-tuple; its exact hash does not matter to these tests.
     private static Hash128 ClaimId(Hash128 subject, Hash128 type, Hash128 obj, Hash128 source, Hash128? context) =>
-        Hash128.OfCanonical($"substrate/test/source-reduced/claim/{subject}/{type}/{obj}/{source}/{context}");
+        Hash128.Text($"substrate/test/source-reduced/claim/{subject}/{type}/{obj}/{source}/{context}");
 
     private static AttestationRow Claim(Hash128 subject, Hash128 type, Hash128 obj, Hash128 source,
         long score, long games = 1, Hash128? context = null, Mask256 qualifiers = default)
@@ -38,7 +38,7 @@ public class StagedSourceWriterTests
 
     private static SubstrateChange Change(Hash128 source, string unit, params AttestationRow[] rows) =>
         new(ImmutableArray<EntityRow>.Empty, ImmutableArray<PhysicalityRow>.Empty, rows.ToImmutableArray(),
-            new SubstrateChangeMetadata(Hash128.OfCanonical($"intent/source-reduced/{unit}"), source, unit,
+            new SubstrateChangeMetadata(Hash128.Text($"intent/source-reduced/{unit}"), source, unit,
                 DateTimeOffset.UnixEpoch, null));
 
     private StagedSourceWriter Staged(ConsensusAccumulatingWriter inner) =>

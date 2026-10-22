@@ -72,7 +72,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
             Encoding.UTF8.GetString(admitted).Normalize(NormalizationForm.FormC));
         Assert.NotEqual(admitted, canonical);
 
-        Hash128 source = Hash128.OfCanonical(
+        Hash128 source = Hash128.Text(
             $"substrate/test/reconstruct/source/{Guid.NewGuid():N}");
         var builder = new SubstrateChangeBuilder(source, "test/reconstruct/canonical")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);
@@ -94,7 +94,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     public async Task ReconstructUtf8Async_PreservesUnicodeNul(string content)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(content);
-        Hash128 source = Hash128.OfCanonical($"reconstruct-nul/source/{Guid.NewGuid():N}");
+        Hash128 source = Hash128.Text($"reconstruct-nul/source/{Guid.NewGuid():N}");
         var builder = new SubstrateChangeBuilder(source, "test/reconstruct/nul")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Assert.True(builder.ContentStage.TryAddContentWitness(bytes, source, out Hash128 id));
@@ -120,11 +120,11 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     [Fact]
     public async Task ReconstructUtf8Async_RejectsAnIncompleteContentIdentity()
     {
-        Hash128 source = Hash128.OfCanonical(
+        Hash128 source = Hash128.Text(
             $"substrate/test/reconstruct/source/{Guid.NewGuid():N}");
-        Hash128 incomplete = Hash128.OfCanonical(
+        Hash128 incomplete = Hash128.Text(
             $"substrate/test/reconstruct/incomplete/{Guid.NewGuid():N}");
-        Hash128 type = Hash128.OfCanonical("TestFixture");
+        Hash128 type = Hash128.Text("TestFixture");
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         await writer.ApplyAsync(new SubstrateChangeBuilder(source, "test/reconstruct/incomplete")
             .AddEntity(incomplete, EntityTier.Document, type)
@@ -138,11 +138,11 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     [Fact]
     public async Task ReconstructUtf8Async_RejectsACyclicComposition()
     {
-        Hash128 source = Hash128.OfCanonical(
+        Hash128 source = Hash128.Text(
             $"substrate/test/reconstruct/source/{Guid.NewGuid():N}");
-        Hash128 type = Hash128.OfCanonical("TestFixture");
-        Hash128 a = Hash128.OfCanonical($"substrate/test/reconstruct/cycle-a/{Guid.NewGuid():N}");
-        Hash128 b = Hash128.OfCanonical($"substrate/test/reconstruct/cycle-b/{Guid.NewGuid():N}");
+        Hash128 type = Hash128.Text("TestFixture");
+        Hash128 a = Hash128.Text($"substrate/test/reconstruct/cycle-a/{Guid.NewGuid():N}");
+        Hash128 b = Hash128.Text($"substrate/test/reconstruct/cycle-b/{Guid.NewGuid():N}");
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         await writer.ApplyAsync(new SubstrateChangeBuilder(source, "test/reconstruct/cycle-entities")
             .AddEntity(a, EntityTier.Document, type)
@@ -194,8 +194,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     public async Task BoundedRendering_MatchesScalarResultsRegardlessOfBatchOrder()
     {
         CodepointPerfcache.LoadDefault();
-        Hash128 source = Hash128.OfCanonical($"render-depth/source/{Guid.NewGuid():N}");
-        Hash128 type = Hash128.OfCanonical("TestFixture");
+        Hash128 source = Hash128.Text($"render-depth/source/{Guid.NewGuid():N}");
+        Hash128 type = Hash128.Text("TestFixture");
         var builder = new SubstrateChangeBuilder(source, "test/render/depth")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Assert.True(builder.ContentStage.TryAddContentWitness(
@@ -238,10 +238,10 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     {
         CodepointPerfcache.LoadDefault();
         string nonce = Guid.NewGuid().ToString("N");
-        Hash128 source = Hash128.OfCanonical($"model-recipes/source/{nonce}");
-        Hash128 otherSource = Hash128.OfCanonical($"model-recipes/other-source/{nonce}");
+        Hash128 source = Hash128.Text($"model-recipes/source/{nonce}");
+        Hash128 otherSource = Hash128.Text($"model-recipes/other-source/{nonce}");
         Hash128[] recipes = Enumerable.Range(0, 5)
-            .Select(i => Hash128.OfCanonical($"model-recipes/{nonce}/{i}")).ToArray();
+            .Select(i => Hash128.Text($"model-recipes/{nonce}/{i}")).ToArray();
         string[] json = ["{\"name\":\"alpha-" + nonce + "\"}", "{\"name\":\"beta-" + nonce + "\"}"];
         using var builder = new SubstrateChangeBuilder(source, "test/model-recipes/aligned")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
@@ -338,8 +338,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         CodepointPerfcache.LoadDefault();
         string nonce = Guid.NewGuid().ToString("N");
         string json = "{\"name\":\"deep-" + nonce + "\"}";
-        Hash128 source = Hash128.OfCanonical($"model-recipes/deep-source/{nonce}");
-        Hash128 recipe = Hash128.OfCanonical($"model-recipes/deep/{nonce}");
+        Hash128 source = Hash128.Text($"model-recipes/deep-source/{nonce}");
+        Hash128 recipe = Hash128.Text($"model-recipes/deep/{nonce}");
         using var builder = new SubstrateChangeBuilder(source, "test/model-recipes/deep")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Hilbert128 hilbert = Hilbert128.Encode([1, 0, 0, 0]);

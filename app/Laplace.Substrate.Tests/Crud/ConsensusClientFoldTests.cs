@@ -18,11 +18,11 @@ public class ConsensusClientFoldTests
 
     public ConsensusClientFoldTests(LocalPgFixture pg) => _pg = pg;
 
-    private static Hash128 H(string seed) => Hash128.OfCanonical($"client-fold-test/{seed}");
+    private static Hash128 H(string seed) => Hash128.Text($"client-fold-test/{seed}");
 
     private static AttestationRow Att(
         string subj, string obj, long games, long scoreFp, long phiFp, long unixUs) => new(
-        Hash128.OfCanonical($"client-fold-test/att/{subj}/{obj}/{unixUs}"),
+        Hash128.Text($"client-fold-test/att/{subj}/{obj}/{unixUs}"),
         H(subj), H("rel"), H(obj), H("source"), null,
         AttestationOutcome.Confirm, unixUs, games, scoreFp, phiFp);
 

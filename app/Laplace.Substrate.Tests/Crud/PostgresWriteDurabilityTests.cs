@@ -17,7 +17,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
         PostgresWriteDurability mode, string expected)
     {
         string scope = Guid.NewGuid().ToString("N");
-        Hash128 H(string part) => Hash128.OfCanonical("durability/" + scope + "/" + part);
+        Hash128 H(string part) => Hash128.Text("durability/" + scope + "/" + part);
         var source = H("source");
         var type = H("type");
         var first = H("entity/0");
@@ -126,7 +126,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
     public async Task SynchronousParticipantFailureDoesNotAcknowledgeEvidenceOrJournal()
     {
         string scope = Guid.NewGuid().ToString("N");
-        Hash128 H(string part) => Hash128.OfCanonical("durability-failure/" + scope + "/" + part);
+        Hash128 H(string part) => Hash128.Text("durability-failure/" + scope + "/" + part);
         var source = H("source");
         var attestation = new AttestationRow(H("att"), H("subject"), H("relation"), null,
             source, null, AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,

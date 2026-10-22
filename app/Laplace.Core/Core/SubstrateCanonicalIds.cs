@@ -61,18 +61,18 @@ public static class SubstrateCanonicalKeys
 
 /// <summary>
 /// Resolved ids for the keys above. Every id still goes through the native BLAKE3 in
-/// <see cref="Hash128.OfCanonical"/> — this type composes the KEY, never the hash.
+/// <see cref="Hash128.Text"/> — this type composes the KEY, never the hash.
 /// </summary>
 public static class SubstrateCanonicalIds
 {
-    public static Hash128 Source(string name) => Hash128.OfCanonical(SubstrateCanonicalKeys.Source(name));
+    public static Hash128 Source(string name) => Hash128.Text(SubstrateCanonicalKeys.Source(name));
 
     public static Hash128 ConversationSession(string tenant, string sessionKey) =>
-        Hash128.OfCanonical(SubstrateCanonicalKeys.ConversationSession(tenant, sessionKey));
+        Hash128.Text(SubstrateCanonicalKeys.ConversationSession(tenant, sessionKey));
 
     public static Hash128 Of(params string[] segments) =>
-        Hash128.OfCanonical(SubstrateCanonicalKeys.Of(segments));
+        Hash128.Text(SubstrateCanonicalKeys.Of(segments));
 
     public static Hash128 OfVersioned(params string[] segments) =>
-        Hash128.OfCanonical(SubstrateCanonicalKeys.OfVersioned(segments));
+        Hash128.Text(SubstrateCanonicalKeys.OfVersioned(segments));
 }

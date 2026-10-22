@@ -29,7 +29,7 @@ public static class ChessPlayerContextOutcomes
     private const double WitnessWeight = 0.8;
 
     public static Hash128 MarkerId(Hash128 playingId)
-        => Hash128.OfCanonical($"chess/player-context-outcomes/{playingId}/{Version}");
+        => Hash128.Text($"chess/player-context-outcomes/{playingId}/{Version}");
 
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {

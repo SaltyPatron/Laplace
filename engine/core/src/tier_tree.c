@@ -6,6 +6,7 @@
 struct tier_tree {
     size_t count;
     size_t capacity;
+    int native_text;
 
     uint8_t*      tier;
     uint32_t*     parent_idx;
@@ -117,6 +118,7 @@ void tier_tree_free(tier_tree_t* tree) {
 int tier_tree_set_text(tier_tree_t* tree, uint8_t* text_owned, size_t len) {
     if (!tree) return -1;
     if (!text_owned && len > 0) return -1;
+    tree->native_text = 0;
     free(tree->text);
     tree->text     = text_owned;
     tree->text_len = len;
@@ -151,6 +153,7 @@ static uint32_t tier_tree_append(
         }
     }
     const uint32_t idx = (uint32_t)tree->count;
+    tree->native_text = 0;
     tree->tier[idx]            = tier;
     tree->parent_idx[idx]      = TIER_TREE_INVALID;
     tree->first_child_idx[idx] = first_child_idx;
@@ -229,6 +232,7 @@ int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* 
 
 int tier_tree_set_id(tier_tree_t* tree, uint32_t idx, const hash128_t* id) {
     if (!tree || !id || idx >= tree->count) return -1;
+    tree->native_text = 0;
     tree->id[idx] = *id;
     return 0;
 }
@@ -236,12 +240,14 @@ int tier_tree_set_id(tier_tree_t* tree, uint32_t idx, const hash128_t* id) {
 int tier_tree_set_parent(tier_tree_t* tree, uint32_t idx, uint32_t parent_idx) {
     if (!tree || idx >= tree->count) return -1;
     if (parent_idx != TIER_TREE_INVALID && parent_idx >= tree->count) return -1;
+    tree->native_text = 0;
     tree->parent_idx[idx] = parent_idx;
     return 0;
 }
 
 int tier_tree_set_coord(tier_tree_t* tree, uint32_t idx, const double coord[4]) {
     if (!tree || !coord || idx >= tree->count) return -1;
+    tree->native_text = 0;
     tree->coord[idx * 4 + 0] = coord[0];
     tree->coord[idx * 4 + 1] = coord[1];
     tree->coord[idx * 4 + 2] = coord[2];
@@ -251,9 +257,13 @@ int tier_tree_set_coord(tier_tree_t* tree, uint32_t idx, const double coord[4]) 
 
 int tier_tree_set_hilbert(tier_tree_t* tree, uint32_t idx, const hilbert128_t* hilbert) {
     if (!tree || !hilbert || idx >= tree->count) return -1;
+    tree->native_text = 0;
     tree->hilbert[idx] = *hilbert;
     return 0;
 }
+
+void tier_tree_mark_native_text(tier_tree_t* tree) { if (tree) tree->native_text = 1; }
+int tier_tree_is_native_text(const tier_tree_t* tree) { return tree && tree->native_text; }
 
 const uint8_t*      tier_tree_tier_array(const tier_tree_t* tree)            { return tree ? tree->tier            : NULL; }
 const uint32_t*     tier_tree_first_child_idx_array(const tier_tree_t* tree) { return tree ? tree->first_child_idx : NULL; }
@@ -263,8 +273,8 @@ const uint32_t*     tier_tree_atom_array(const tier_tree_t* tree)            { r
 const uint32_t*     tier_tree_text_off_array(const tier_tree_t* tree)        { return tree ? tree->text_range_off  : NULL; }
 const uint32_t*     tier_tree_text_len_array(const tier_tree_t* tree)        { return tree ? tree->text_range_len  : NULL; }
 const hash128_t*    tier_tree_id_array(const tier_tree_t* tree)              { return tree ? tree->id              : NULL; }
-hash128_t*          tier_tree_id_array_mut(tier_tree_t* tree)                { return tree ? tree->id              : NULL; }
+hash128_t*          tier_tree_id_array_mut(tier_tree_t* tree)                { if (tree) tree->native_text = 0; return tree ? tree->id : NULL; }
 const double*       tier_tree_coord_array(const tier_tree_t* tree)           { return tree ? tree->coord           : NULL; }
-double*             tier_tree_coord_array_mut(tier_tree_t* tree)             { return tree ? tree->coord           : NULL; }
+double*             tier_tree_coord_array_mut(tier_tree_t* tree)             { if (tree) tree->native_text = 0; return tree ? tree->coord : NULL; }
 const hilbert128_t* tier_tree_hilbert_array(const tier_tree_t* tree)         { return tree ? tree->hilbert         : NULL; }
-hilbert128_t*       tier_tree_hilbert_array_mut(tier_tree_t* tree)           { return tree ? tree->hilbert         : NULL; }
+hilbert128_t*       tier_tree_hilbert_array_mut(tier_tree_t* tree)           { if (tree) tree->native_text = 0; return tree ? tree->hilbert : NULL; }

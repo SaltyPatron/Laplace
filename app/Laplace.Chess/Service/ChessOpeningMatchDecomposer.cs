@@ -48,7 +48,7 @@ public sealed class ChessOpeningMatchDecomposer
     public const int MatchVersion = 1;
 
     public static Hash128 MarkerId(Hash128 lineId)
-        => Hash128.OfCanonical($"chess/opening-match/{lineId}/{MatchVersion}");
+        => Hash128.Text($"chess/opening-match/{lineId}/{MatchVersion}");
 
     public override Hash128 SourceId => ChessVocabulary.OpeningMatchSourceId;
     public override string SourceName => "ChessOpeningMatch";

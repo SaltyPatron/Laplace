@@ -19,7 +19,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     {
         string name = DeriveModelName(modelDir);
         Hash128 id = SourceEntityIdConventions.ModelContentSourceId(modelDir)
-                     ?? Hash128.OfCanonical($"substrate/source/{name}/v1");
+                     ?? Hash128.Text($"substrate/source/{name}/v1");
         return (id, name);
     }
 
@@ -69,7 +69,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     // structure. Numeric values remain transient input to native contraction.
 
     public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
-        => Hash128.OfCanonical(
+        => Hash128.Text(
             $"model/analyzed/{modelSource}/{planesMode}/v{ModelTokenEdgeETL.AnalyzerVersion}");
 
     private readonly string _modelDir;
