@@ -237,9 +237,8 @@ static int compose_components(source_node_t* target, hash128_t* ids, double* coo
     target->has_atom = 0;
     target->atom = 0;
     hilbert128_t ignored_hilbert;
-    hash_composer_compose_node(target->tier, ids, coords, used,
+    return hash_composer_compose_node(target->tier, ids, coords, used,
                                &target->id, target->coord, &ignored_hilbert);
-    return 0;
 }
 
 static int add_span(laplace_compose_result_t* r, size_t span_capacity,

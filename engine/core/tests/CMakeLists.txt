@@ -91,7 +91,7 @@ add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number
     laplace_vocabulary_perfcache)
 
 target_link_libraries(laplace_core_tests
-    PRIVATE laplace_core GTest::gtest_main
+    PRIVATE laplace_core laplace_static GTest::gtest_main
 )
 
 # Probe-kernel tests link laplace_syzygy, which is ingest-side tooling: never part

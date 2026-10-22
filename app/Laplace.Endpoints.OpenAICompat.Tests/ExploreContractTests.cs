@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Laplace.Api.Contracts;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -104,16 +105,20 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
     }
 
 
-    [Fact]
-    public async Task ExploreStorageProof_ExposesExactCarrierAndPlacement()
+    [Theory]
+    [InlineData("aa")]
+    [InlineData("Laplace deployment validation.")]
+    [InlineData("Ω𐀀")]
+    public async Task ExploreStorageProof_ExposesExactCarrierAndPlacement(string text)
     {
         using var response = await _client.PostAsJsonAsync(
-            "/v1/explore/storage-proof", new DecomposeRequest("aa"));
+            "/v1/explore/storage-proof", new DecomposeRequest(text));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<StorageProofResponse>();
         Assert.NotNull(body);
-        Assert.Equal(0x110000, body!.AtomWindow);
+        Assert.Equal(1_112_064, body!.AtomWindow);
+        Assert.All(body.Invariants, invariant => Assert.True(invariant.Passed, invariant.ToString()));
         Assert.NotEmpty(body.Nodes);
         Assert.Contains(body.Nodes, n => n.IdHex == body.RootIdHex);
         Assert.Null(body.DatabasePerfcacheReceiptHex);
@@ -132,6 +137,31 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
             Assert.NotNull(atom.DucetRank);
             Assert.InRange(atom.DucetRank!.Value, 0u, (uint)body.AtomWindow - 1);
             Assert.InRange(atom.Radius, 0.999999999999, 1.000000000001);
+            var expected = CodepointPerfcache.LookupScalar(atom.Atom!.Value);
+            Assert.Equal(Convert.ToHexStringLower(expected.Hash.ToBytes()), atom.IdHex);
+            Assert.Equal(expected.CoordX, atom.X);
+            Assert.Equal(expected.CoordY, atom.Y);
+            Assert.Equal(expected.CoordZ, atom.Z);
+            Assert.Equal(expected.CoordM, atom.M);
         }
+    }
+
+    [Theory]
+    [InlineData(0x41)]
+    [InlineData(0x3A9)]
+    [InlineData(0x10000)]
+    public async Task ExploreUnicodePoint_UsesScalarLookup(int scalar)
+    {
+        using var response = await _client.GetAsync($"/v1/explore/unicode/{scalar}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<UnicodePointResponse>();
+        Assert.NotNull(body);
+        var expected = CodepointPerfcache.LookupScalar((uint)scalar);
+        Assert.Equal((uint)scalar, body.Codepoint);
+        Assert.Equal(Convert.ToHexStringLower(expected.Hash.ToBytes()), body.IdHex);
+        Assert.Equal(expected.CoordX, body.X);
+        Assert.Equal(expected.CoordY, body.Y);
+        Assert.Equal(expected.CoordZ, body.Z);
+        Assert.Equal(expected.CoordM, body.M);
     }
 }

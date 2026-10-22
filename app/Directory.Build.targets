@@ -21,7 +21,7 @@
        still does NOT cover a no-build `dotnet run` (which skips the Build target and
        therefore this copy entirely); the durable fix for that is loading the native lib
        from a single canonical path instead of fan-copying, tracked separately. -->
-  <Target Name="LaplaceCopyNativeLibs" AfterTargets="Build"
+  <Target Name="LaplaceCopyNativeLibs" AfterTargets="Build" BeforeTargets="GenerateOpenApiDocuments"
           Condition="Exists('$(LaplaceBuildWin)\core\laplace_core.dll')">
     <Copy SourceFiles="$(LaplaceBuildWin)\core\laplace_core.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="false" />

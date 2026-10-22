@@ -83,8 +83,10 @@ public static unsafe class HashComposer
         fixed (double* ccoords = childCoords)
         fixed (double* oc = outCoord)
         {
-            NativeInterop.HashComposerComposeNode(
+            int status = NativeInterop.HashComposerComposeNode(
                 tier, cids, ccoords, (nuint)childIds.Length, &id, oc, &hb);
+            if (status != 0)
+                throw new ArgumentException("Child coordinates must be finite and within the Native coordinate domain.", nameof(childCoords));
         }
         return (id, hb);
     }
