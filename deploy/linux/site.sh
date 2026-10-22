@@ -162,6 +162,9 @@ phase_build() {
   oneapi
   local ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA_ROOT/UCD/Public/UCD/latest}"
   local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}"
+  local recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
+  local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
+  bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
   cmake -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" \
     -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING="${LAPLACE_SITE_BUILD_TESTING:-OFF}" \
@@ -169,7 +172,8 @@ phase_build() {
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
     -DLAPLACE_NATIVE="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}" \
-    -DLAPLACE_RECIPE_ENGINE_SOURCE="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}" \
+    -DLAPLACE_RECIPE_ENGINE_SOURCE="$recipe_engine" \
+    -DLAPLACE_GRAMMARS="$grammars" \
     -DLAPLACE_EIGEN_DIR="$LAPLACE_EXTERNAL/eigen" \
     -DLAPLACE_SPECTRA_DIR="$LAPLACE_EXTERNAL/spectra" \
     -DLAPLACE_DEPS_PREFIX="$SITE_WORK/deps" \
