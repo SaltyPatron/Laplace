@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The dev test profile (native ctest without the regress label, every managed test project's Tier!=db/live/perf tests,
+# The dev test profile (native ctest without the regress label, every managed project's canonical dev-category tests,
 # the UCI handshake, the browser suites) on a CI runner. Everything it needs is public and pinned here or in
 # scripts/ci/tree-sitter-grammars.tsv: the dependency sources at the build host's revisions, the UCD release the build
 # pins, and the oneAPI compiler/MKL/TBB versions hart-server builds with. The perf caches are build products of those
@@ -28,7 +28,7 @@ export LAPLACE_BUILD_ROOT="$WORK/managed" LAPLACE_WORK_ROOT="$WORK/work"
 # and the lichess openings revision the estate acquires (LichessOpenings/lichess-openings-<rev>.tar.gz),
 # the CILI checkout and the ISO 639-3 code tables, each at the revision hart-server's /vault/Data holds.
 DATA="$WORK/data"
-export LAPLACE_DATA="$DATA"
+export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models" LAPLACE_SRC="$(dirname "$ROOT")"
 # Tests keep their scratch under the declared permanent work root (scripts/lib/storage.sh), never /tmp.
 export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 # A hosted runner has no laplace-runner group; the work roots belong to the runner's own group (scripts/lib/storage.sh).
@@ -38,6 +38,7 @@ export LAPLACE_ENGINE_BUILD="$BUILD"
 export LAPLACE_BUILD="$WORK/build"
 export LAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_CI_ENGINE_SOURCE"
 export LAPLACE_RECIPES="$LAPLACE_RECIPE_ENGINE_SOURCE/recipes"
+export LAPLACE_COOKBOOK_PATH="$ROOT/recipes"
 export LAPLACE_OPERATIONS="$LAPLACE_CI_OPERATIONS_SOURCE"
 export LAPLACE_ICU_DIR="$LAPLACE_CI_ICU_DIR"
 export LAPLACE_TREESITTER="$EXT/tree-sitter"
@@ -45,10 +46,11 @@ export LAPLACE_GRAMMARS="$WORK/grammars"
 export LAPLACE_TIER0="$BUILD/core/perfcache/tier0.bin"
 export LAPLACE_FLAGS="$BUILD/core/perfcache/tier0.flags"
 export LAPLACE_HIGHWAY="$BUILD/core/perfcache/highway.bin"
+export LAPLACE_NATIVE_TEST_LIBRARY="$BUILD/native/liblaplace.so"
 # An empty machine declaration: the readers (scripts/machine-env.py, LaplaceInstall) take an
 # explicitly named file as the whole declaration, so this host's own declaration is never read.
 export LAPLACE_MACHINE_ENV="$WORK/machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
-mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess"
+mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess" "$LAPLACE_MODELS"
 : > "$LAPLACE_MACHINE_ENV"
 
 say() { echo "::group::$*"; }
@@ -165,6 +167,7 @@ native() {
     -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR" \
     -DLAPLACE_CHESS_OPENINGS="$DATA/Games/Chess/lichess-openings"
   cmake --build "$BUILD" -j "$(nproc)"
+  cmake --build "$BUILD" --target laplace laplace_highway_perfcache -j "$(nproc)"
   python3 scripts/ingest_catalog.py --check-engine "$BUILD/core/recipe_engine/laplace"
   test -s "$LAPLACE_TIER0" || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
   "$BUILD/core/recipe_engine/laplace" flags -u "$UCD" -o "$LAPLACE_FLAGS"
@@ -179,12 +182,12 @@ managed() {
   say "managed: build"
   dotnet build app/Laplace.slnx -c Release --nologo -v minimal
   end
-  say "managed: dev tier (Tier!=db&Tier!=live&Tier!=perf) on the candidate native build"
+  say "managed: canonical dev tier on the candidate native build"
   export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
-  bash scripts/sync-managed-native-artifacts.sh
+  export LAPLACE_CANDIDATE_ENGINE_BUILD="$BUILD"
+  test -s "$LAPLACE_HIGHWAY" && test -s "$LAPLACE_NATIVE_TEST_LIBRARY"
   rm -rf "$WORK/managed-results"
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo -v minimal \
-    --filter 'Tier!=db&Tier!=live&Tier!=perf' --logger 'trx' --results-directory "$WORK/managed-results"
+  bash scripts/test-suites/managed-dev.sh --logger trx --results-directory "$WORK/managed-results"
   python3 "$ROOT/scripts/ci/trx-summary.py" "$WORK/managed-results"
   end
 }

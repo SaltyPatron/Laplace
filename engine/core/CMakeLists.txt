@@ -320,7 +320,8 @@ endif()
 #   ninja laplace_t0_perfcache laplace_highway_perfcache
 # then cmake --install. Tier-0 is a mapped Native floor, never database seed rows.
 add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
-if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}")
+if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}"
+   AND NOT "$ENV{LAPLACE_HIGHWAY}" STREQUAL "${LAPLACE_HIGHWAY_BIN}")
     add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$ENV{LAPLACE_HIGHWAY}" "${LAPLACE_HIGHWAY_BIN}"

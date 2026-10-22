@@ -1,7 +1,7 @@
 name: Policy — dev tests
 
 # The dev test profile (scripts/test-parallel.sh dev): native ctest without the regress label, every managed test
-# project's Tier!=db/live/perf tests on the candidate native build and its perf caches, the UCI handshake, and the
+# project's canonical dev-category tests on the candidate native build and its perf caches, the UCI handshake, and the
 # browser suites. It runs on hart-server's runner because the build pins MKL's CNR branch to its ISA
 # (engine/CMakeLists.txt: LAPLACE_TARGET_ISA AVX2 -> LAPLACE_MKL_CBWR_AVX2; engine/dynamics/src/init.cpp:
 # mkl_cbwr_set(MKL_CBWR_AVX2)), a branch MKL offers only on Intel CPUs, and the GitHub-hosted ubuntu-24.04 runners are

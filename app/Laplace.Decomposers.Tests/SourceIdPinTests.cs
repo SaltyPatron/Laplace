@@ -6,7 +6,9 @@ namespace Laplace.Decomposers.Tests;
 
 // Pins the remaining managed providers' SourceId and TrustClassId. Canonical
 // sources retired to Native use content-dependent source trunks, not these fixed
-// managed provider IDs. A trust class id is the content id of
+// managed provider IDs. Source key pins were verified independently with the Native
+// CLI's text command over substrate/source/NAME/v1, using its UAX #29 composition.
+// A trust class id is the content id of
 // its label (engine/manifest/trust_classes.toml): Laplace-Native's lp_id_codepoints_utf8 of
 // the label, BLAKE3-128 of its codepoints' IDs with no domain byte (Laplace#1896). A failure
 // here means a content-addressed source or trust-class identity changed.
@@ -15,29 +17,29 @@ public class SourceIdPinTests
     public static readonly TheoryData<Func<IDecomposer>, string, string> Pins = new()
     {
         { () => new Laplace.Decomposers.Unicode.UnicodeDecomposer(),
-          "5f36a4c5fb03a7d845c2ad1981b18587", "9ed6235c81cafe911167a95e1a4587ed" },
+          "876b5fddd2c2cb59e6fb8a6c76a0b159", "9ed6235c81cafe911167a95e1a4587ed" },
         { () => new Laplace.Decomposers.ISO.ISODecomposer(),
-          "2e0404bdd15c7e19517f1f26d57e240b", "9ed6235c81cafe911167a95e1a4587ed" },
+          "8f28fea0586c5723d2d90ca514257d4d", "9ed6235c81cafe911167a95e1a4587ed" },
         { () => new Laplace.Decomposers.OMW.OMWDecomposer(),
-          "2d8df8e310d8c0bb26bb08837baf3756", "d37a0d1e87aae7aaf5aaaad8b119955f" },
+          "5f3324f6febf41d9451b840a9d8d7cc4", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.SemLink.MapNetDecomposer(),
-          "74809dc2edd48bc97e10fee9ba466fca", "d37a0d1e87aae7aaf5aaaad8b119955f" },
+          "2be2a58181854c20b9ba8c0ec1a56534", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.SemLink.WordFrameNetDecomposer(),
-          "6e012044174c4f0ac189bbf4cae40e74", "d37a0d1e87aae7aaf5aaaad8b119955f" },
+          "83f23c6a65f35e74b3dc3fd108447036", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.Wiktionary.WiktionaryDecomposer(),
-          "65226439241a9e4a7645c2fdf91c60b1", "f1482bb3d9c6b430a7612abb1c238561" },
+          "b3884be2aa8c7526c9e0bfa8fe872fd5", "f1482bb3d9c6b430a7612abb1c238561" },
         { () => new Laplace.Decomposers.Code.CodeDecomposer(),
-          "c90645d6b0f228c684d95bbbc0b52a42", "c62668c333824c0b89b84db531007db0" },
+          "a4be3d948f1f6c1a491f4edf47cff57e", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.RepoDecomposer(),
-          "d393ad78a7ccbee830504361f4dde050", "c62668c333824c0b89b84db531007db0" },
+          "a5ae53148e15cc55cfd155bdb7f6121f", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.StackDecomposer(),
-          "6af57547662bbb37f4e13db9acfe3eed", "c62668c333824c0b89b84db531007db0" },
+          "a1449c0c48319c66803daf4539bb0b4e", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.TinyCodesDecomposer(),
-          "584ccc3cce1291ad4ac04ce4f8b33a8c", "c62668c333824c0b89b84db531007db0" },
+          "7239f8ee5ff1e8639c6f89a18a0029e3", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.TabularDecomposer(),
-          "3f0876af5782433a4991d2d02e93b982", "c62668c333824c0b89b84db531007db0" },
+          "7f0ef45a6d0d0f5cf910b7fa30017537", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.AgentTrace.AgentTraceDecomposer(),
-          "2695dfdb6ee5e398ac86cea7a87d1695", "f0a63ecf6b2b1db8f57f136d2c945483" },
+          "36e39ec7b00e7dcd6f474fa8a483c6a6", "f0a63ecf6b2b1db8f57f136d2c945483" },
     };
 
     [Theory]
