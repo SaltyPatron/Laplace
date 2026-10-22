@@ -65,7 +65,6 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
         // links.csv resolves row ids through the id → content-root map built from
         // sentences.csv, so sentences precede links.
-        "Laplace.Decomposers/Tatoeba/TatoebaDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
     };
 
@@ -229,7 +228,6 @@ public sealed class DecomposerArchitectureGateTests
             "app/Laplace.Decomposers/Wiktionary/WiktionaryEntry.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryGrammarWitness.cs",
             "app/Laplace.Decomposers/Wiktionary/WiktionaryJsonFilter.cs",
-            "app/Laplace.Decomposers/ConceptNet/ConceptNetUri.cs",
             "app/Laplace.Decomposers/ISO/LanguageGraph.cs",
             "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
             "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",

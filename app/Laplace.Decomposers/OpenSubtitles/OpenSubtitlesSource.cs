@@ -21,7 +21,7 @@ public readonly struct OpenSubtitlesSource : ISeedSource
     public static SourceLicense License => SourceLicense.Unknown;
 
     private static readonly IngestSourceProfile AlignedBlockProfile =
-        new(1_048_576, OpenSubtitlesZipIngest.BlockPairs * 2,
+        new(1_048_576, 1_024,
             ResidentBytesPerComposeUnit: 8_192);
 
     public static IngestSourceProfile Profile => AlignedBlockProfile;
