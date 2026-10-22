@@ -151,8 +151,15 @@ public static class ParallelIngestWork
         IReadOnlyList<TWork> work,
         int maxConcurrency,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
-        CancellationToken ct = default,
-        Action<TResult>? releaseAbandoned = null)
+        CancellationToken ct = default)
+        => RunAsync(work, maxConcurrency, execute, ct, releaseAbandoned: null);
+
+    public static IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+        IReadOnlyList<TWork> work,
+        int maxConcurrency,
+        Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
+        CancellationToken ct,
+        Action<TResult>? releaseAbandoned)
     {
         ArgumentNullException.ThrowIfNull(work);
         return RunAsync(Enumerate(work), maxConcurrency, execute, ct, releaseAbandoned);
@@ -164,12 +171,19 @@ public static class ParallelIngestWork
     /// When supplied, releaseAbandoned owns results rejected by the channel or left queued
     /// after consumption stops. Results already yielded belong to the consumer.
     /// </summary>
+    public static IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+        IAsyncEnumerable<TWork> work,
+        int maxConcurrency,
+        Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
+        CancellationToken ct = default)
+        => RunAsync(work, maxConcurrency, execute, ct, releaseAbandoned: null);
+
     public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IAsyncEnumerable<TWork> work,
         int maxConcurrency,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
-        [EnumeratorCancellation] CancellationToken ct = default,
-        Action<TResult>? releaseAbandoned = null)
+        [EnumeratorCancellation] CancellationToken ct,
+        Action<TResult>? releaseAbandoned)
     {
         ArgumentNullException.ThrowIfNull(work);
         ArgumentNullException.ThrowIfNull(execute);

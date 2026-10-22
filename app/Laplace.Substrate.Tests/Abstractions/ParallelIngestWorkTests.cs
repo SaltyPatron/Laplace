@@ -76,7 +76,7 @@ public sealed class ParallelIngestWorkTests
         async Task ConsumeFirstAsync()
         {
             await foreach (var change in ParallelIngestWork.RunAsync(new[] { 0 }, 1, Execute,
-                               releaseAbandoned: SubstrateApplyEnvelope.Discard))
+                               ct: default, releaseAbandoned: SubstrateApplyEnvelope.Discard))
             {
                 SubstrateApplyEnvelope.Discard(change);
                 await blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
