@@ -176,13 +176,15 @@ phase_build() {
     -DLAPLACE_DEPS_LWGEOM_PREFIX="$SITE_WORK/deps/pgsql-18" \
     -DLAPLACE_INSTALL_STAGED=ON \
     -DLAPLACE_UCD_PATH="$ucd" \
+    -DLAPLACE_TIER0="$SITE_BUILD/engine/core/perfcache/tier0.bin" \
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
     -DLAPLACE_CHESS_OPENINGS="$openings" 8>&-
   LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
     cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
-  find -H "$SITE_BUILD" -name 'laplace_t0_perfcache*.bin' -print -quit | grep -q . || fail "tier-0 perf-cache not produced"
+  [[ -s "$SITE_BUILD/engine/core/perfcache/tier0.bin" ]] || fail "tier-0 perf-cache not produced"
+  [[ -s "$SITE_BUILD/engine/core/perfcache/highway.bin" ]] || fail "highway perf-cache not produced"
 }
 
 # ------------------------------------------------------------------------------------------------ install
@@ -248,10 +250,10 @@ phase_database() {
   # so the substrate is loaded first in every session of this database. The monorepo's own hosts put it in the
   # cluster's shared_preload_libraries; here the cluster is Operations' and the setting stays this database's.
   local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f
-  for g in perfcache_path:laplace_t0_perfcache highway_perfcache_path:laplace_highway_perfcache \
+  for g in perfcache_path:tier0 highway_perfcache_path:highway \
            vocabulary_perfcache_path:laplace_vocabulary_perfcache chess_position_perfcache_path:laplace_chess_position_perfcache; do
-    f="$(find "$dir" -name "${g#*:}*.bin" 2>/dev/null | sort -V | tail -1)"
-    [[ -n "$f" ]] || { echo "  laplace_substrate.${g%%:*}: no ${g#*:} installed"; continue; }
+    f="$dir/${g#*:}.bin"
+    [[ -s "$f" ]] || fail "laplace_substrate.${g%%:*}: missing installed cache $f"
     q="$(sql -d postgres -c "SELECT setting FROM pg_file_settings WHERE name = 'laplace_substrate.${g%%:*}' AND applied ORDER BY seqno DESC LIMIT 1")"
     [[ "$q" == "$f" ]] || sql -d postgres -c "ALTER SYSTEM SET laplace_substrate.${g%%:*} = '$f'" >/dev/null
     echo "  laplace_substrate.${g%%:*} = $f"
@@ -358,7 +360,7 @@ phase_app() {
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
   mkdir -p "$stage/app/cli/share/laplace" "$stage/app/cli/third-party-licenses"
-  for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+  for cache in tier0 highway laplace_chess_position_perfcache; do
     cp "$SITE_BUILD/engine/core/perfcache/$cache.bin" "$stage/app/cli/share/laplace/"
   done
   cp -a "$stage/app/third-party-licenses/zstd" "$stage/app/cli/third-party-licenses/"
@@ -375,7 +377,8 @@ api_env() {
   local runtime_substrate_db="${LAPLACE_DATABASE_RUNTIME_DB:-$LAPLACE_DB}"
   [[ -z "${LAPLACE_APP_RUNTIME_DB:-}" || -n "${LAPLACE_APP_DB:-}" ]] || fail "application runtime selection requires the migration database declaration"
   [[ -f "$env_file" ]] || install -m 0664 "$ROOT/deploy/linux/laplace-api.env.example" "$env_file"
-  t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
+  t0="$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.bin"
+  [[ -s "$t0" ]] || fail "installed canonical Tier-0 cache is missing: $t0"
   while IFS='=' read -r key val; do
     [[ -n "$key" ]] || continue
     if grep -q "^$key=" "$env_file"; then sed -i "s|^$key=.*|$key=$val|" "$env_file"; else printf '%s=%s\n' "$key" "$val" >> "$env_file"; fi
@@ -404,7 +407,8 @@ EOF
 # origin. Its token is the host's ($LAPLACE_INSTALL_PREFIX/secrets/mcp.env, made by site-host.sh), never written here.
 mcp_env() {
   local env_file="$LAPLACE_APP_DIR/laplace-mcp.env" t0
-  t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
+  t0="$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.bin"
+  [[ -s "$t0" ]] || fail "installed canonical Tier-0 cache is missing: $t0"
   cat > "$env_file.new" <<EOF
 LAPLACE_DB=${LAPLACE_MCP_RUNTIME_DB:-$LAPLACE_DB}
 LAPLACE_PGPORT=$PGPORT
@@ -577,7 +581,7 @@ phase_bundle() {
 
 verify_cli_package() {
   local cli="$1" cache
-  for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+  for cache in tier0 highway laplace_chess_position_perfcache; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
   (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
@@ -711,7 +715,8 @@ phase_seed() {
 phase_serve() {
   say "serve the staged API on $LAPLACE_API_URL"
   local app="$SITE_WORK/stage/app" t0
-  t0="$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)"
+  t0="$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.bin"
+  [[ -s "$t0" ]] || fail "installed canonical Tier-0 cache is missing: $t0"
   cd "$app"
   exec 8>&- # The foreground runtime is not a deployment transaction.
   LD_LIBRARY_PATH="$app:$LAPLACE_INSTALL_PREFIX/lib" ASPNETCORE_URLS="$LAPLACE_API_URL" ASPNETCORE_ENVIRONMENT=Production \
