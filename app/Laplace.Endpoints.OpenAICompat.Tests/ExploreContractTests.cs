@@ -117,7 +117,8 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
 
         var body = await response.Content.ReadFromJsonAsync<StorageProofResponse>();
         Assert.NotNull(body);
-        Assert.Equal(0x110000, body!.AtomWindow);
+        Assert.Equal(1_112_064, body!.AtomWindow);
+        Assert.All(body.Invariants, invariant => Assert.True(invariant.Passed, invariant.ToString()));
         Assert.NotEmpty(body.Nodes);
         Assert.Contains(body.Nodes, n => n.IdHex == body.RootIdHex);
         Assert.Null(body.DatabasePerfcacheReceiptHex);

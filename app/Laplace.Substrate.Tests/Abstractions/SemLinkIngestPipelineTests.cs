@@ -1,110 +1,65 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.SemLink;
-using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
-using static Laplace.Decomposers.Abstractions.Tests.IngestPipelineTestHelpers;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 [Collection("GrammarPerfcache")]
 public sealed class SemLinkIngestPipelineTests
 {
-    private const string PbVnJson =
-        """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}, "abdicate.01": {"10.11-2": {}}}""";
+    private const string Mapping =
+        """{"abandon.01":{"51.2":{"ARG0":"theme"}},"abandon.02":{"51.2":{"ARG0":"theme"}}}""";
+
+    private static readonly string[] Expected =
+    [
+        "claim\t0\t1\tabandon.01\tvnclass:leave-51.2",
+        "claim\t0\t1\t[abandon.01, vnclass:leave-51.2]\tARG0\ttheme",
+        "claim\t0\t1\tabandon.02\tvnclass:leave-51.2",
+        "claim\t0\t1\t[abandon.02, vnclass:leave-51.2]\tARG0\ttheme",
+    ];
 
     [Fact]
-    public void SemLinkConfig_UsesSharedSizingAndPreservesExplicitBatch()
+    public async Task NativePlanSelectsTheDeclaredMappingRecipe()
     {
-        var automatic = SemLinkIngestSupport.PipelineConfig(
-            default, "semlink/automatic", DecomposerOptions.Default, reader: null);
-        var explicitOptions = DecomposerOptions.Default with { BatchSize = 777 };
-        var explicitConfig = SemLinkIngestSupport.PipelineConfig(
-            default, "semlink/explicit", explicitOptions, reader: null);
-
-        Assert.Equal(
-            IngestPipelineDefaults.ResolveBatch(
-                Laplace.Engine.Core.IngestSourceProfile.Wiktionary,
-                DecomposerOptions.Default),
-            automatic.BatchSize);
-        Assert.NotEqual(1, automatic.BatchSize);
-        Assert.Equal(777, explicitConfig.BatchSize);
+        await WithInput(async path =>
+        {
+            string output = await Execute(NativeRecipeMode.Plan, path, 1);
+            Assert.Contains("semlink-pb-vn", output, StringComparison.Ordinal);
+            Assert.Contains("1 files", output, StringComparison.Ordinal);
+        });
     }
 
-    [Fact]
-    public async Task SemLinkJsonPipeline_DoesNotProbeOrComposeJsonPackaging()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task NativeMappingPreservesRolesetClassAndRoleBindings(int workers)
     {
-        string path = Path.Combine(Path.GetTempPath(), $"laplace-semlink-{Guid.NewGuid():N}.json");
-        try
+        await WithInput(async path =>
         {
-            await File.WriteAllTextAsync(path, PbVnJson, Encoding.UTF8);
-            var reader = new ProbeTrackingReader(present: false);
-            const int pairCount = 2;
-            var phase = new SemLinkJsonDocumentPhase(path, SemLinkDocumentKind.PbVn, "semlink/test");
-            var ctx = new SemLinkTestContext(reader);
-            var options = DecomposerOptions.Default with { BatchSize = pairCount };
-
-            var changes = new List<SubstrateChange>();
-            await foreach (var change in phase.DecomposeAsync(ctx, options))
-                changes.Add(change);
-
-            // No descent into the JSON packaging; roles and rolesets are content and are
-            // admitted through the ordinary existence probe.
-            Assert.Equal(0, reader.LegacyContentDescentCalls);
-            // The JSON document is packaging and gets no physicality; the rolesets, verb
-            // classes and roles it carries are the composed structures.
-            AssertNoPackagingPhysicality(changes);
-            Assert.True(AttestationCount(changes) > 0);
-        }
-        finally
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
+            string output = await Execute(NativeRecipeMode.Claims, path, workers);
+            Assert.Contains("unresolved obligations: 0", output, StringComparison.Ordinal);
+            string[] claims = output.Split('\n').Select(line => line.TrimEnd('\r'))
+                .Where(line => line.StartsWith("claim\t", StringComparison.Ordinal)).ToArray();
+            Assert.Equal(Expected.Order(StringComparer.Ordinal), claims.Order(StringComparer.Ordinal));
+        });
     }
 
-    [Fact]
-    public async Task SemLinkJsonPipeline_PresentReader_StillEmitsSemanticRows()
+    private static async Task<string> Execute(NativeRecipeMode mode, string path, int workers)
     {
-        string path = Path.Combine(Path.GetTempPath(), $"laplace-semlink-present-{Guid.NewGuid():N}.json");
-        try
-        {
-            await File.WriteAllTextAsync(path, PbVnJson, Encoding.UTF8);
-            var reader = new ProbeTrackingReader(present: true);
-            var phase = new SemLinkJsonDocumentPhase(path, SemLinkDocumentKind.PbVn, "semlink/present");
-            var ctx = new SemLinkTestContext(reader);
-            var options = DecomposerOptions.Default with { BatchSize = 2 };
-
-            var changes = new List<SubstrateChange>();
-            await foreach (var change in phase.DecomposeAsync(ctx, options))
-                changes.Add(change);
-
-            Assert.Equal(0, reader.LegacyContentDescentCalls);
-            AssertNoPackagingPhysicality(changes);
-            Assert.True(AttestationCount(changes) > 0,
-                "SemLink witness edges must not depend on a packaging-root probe");
-            Assert.Equal(2, changes.Sum(c => c.Metadata.InputUnitsConsumed));
-        }
-        finally
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await NativeRecipeExecution.Configured().ExecuteAsync(
+            new NativeRecipeRequest(mode, "semlink", [path], Threads: workers), output, error);
+        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + Encoding.UTF8.GetString(output.ToArray()));
+        return Encoding.UTF8.GetString(output.ToArray());
     }
 
-    private sealed class SemLinkTestContext(ISubstrateReader reader) : IDecomposerContext
+    private static async Task WithInput(Func<string, Task> check)
     {
-        public string EcosystemPath => "";
-        public ISubstrateWriter Writer => throw new NotSupportedException();
-        public ISubstrateReader Reader => reader;
-        public Microsoft.Extensions.Logging.ILogger Logger => NullLogger.Instance;
-        public string SubstrateVersion => "test";
-    }
-
-    private static void AssertNoPackagingPhysicality(IEnumerable<SubstrateChange> changes)
-    {
-        Hash128? document = ContentTierSpine.ResolveRoot(PbVnJson);
-        Assert.NotNull(document);
-        Assert.DoesNotContain(changes.SelectMany(c => c.Physicalities), p => p.EntityId == document!.Value);
+        string directory = Path.Combine(Path.GetTempPath(), "semlink-native-pipeline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "pb-vn2.json");
+        try { await File.WriteAllTextAsync(path, Mapping); await check(path); }
+        finally { File.Delete(path); Directory.Delete(directory); }
     }
 }

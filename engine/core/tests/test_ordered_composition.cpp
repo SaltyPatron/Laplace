@@ -35,10 +35,10 @@ laplace_ordered_component_t component(const char* text, uint8_t tier, double x) 
     laplace_ordered_component_t result{};
     result.id = hash(text);
     result.tier = tier;
-    result.coord[0] = x;
-    result.coord[1] = x + 1.0;
-    result.coord[2] = x + 2.0;
-    result.coord[3] = x + 3.0;
+    result.coord[0] = x / 32.0;
+    result.coord[1] = (x + 1.0) / 32.0;
+    result.coord[2] = (x + 2.0) / 32.0;
+    result.coord[3] = (x + 3.0) / 32.0;
     return result;
 }
 
@@ -246,15 +246,17 @@ TEST(OrderedCompositionStage, UnequalChildFloorsDeriveParentAndStageOnce) {
     ASSERT_EQ(0, laplace_ordered_composition_compose_batch(&r, 1, &resolved));
     EXPECT_EQ(6, resolved.tier);
     EXPECT_DOUBLE_EQ(0.0, resolved.coord[0]);
-    EXPECT_DOUBLE_EQ(1.0, resolved.coord[1]);
-    EXPECT_DOUBLE_EQ(2.0, resolved.coord[2]);
-    EXPECT_DOUBLE_EQ(3.0, resolved.coord[3]);
+    EXPECT_DOUBLE_EQ(1.0 / 32.0, resolved.coord[1]);
+    EXPECT_DOUBLE_EQ(2.0 / 32.0, resolved.coord[2]);
+    EXPECT_DOUBLE_EQ(3.0 / 32.0, resolved.coord[3]);
     EXPECT_EQ(resolved.first_physicality_row, 0u);
     EXPECT_EQ(resolved.emitted_physicality_rows, 0u);
 
     hash128_t expected;
     hash128_t child_ids[] = {children[0].id, children[1].id};
-    double child_coords[8] = {-1.0, 0.0, 1.0, 2.0, 1.0, 2.0, 3.0, 4.0};
+    double child_coords[8];
+    std::memcpy(child_coords, children[0].coord, 4 * sizeof(double));
+    std::memcpy(child_coords + 4, children[1].coord, 4 * sizeof(double));
     double parent_coord[4];
     hilbert128_t parent_hilbert;
     hash_composer_compose_node(6, child_ids, child_coords, 2,
@@ -565,6 +567,26 @@ TEST(OrderedCompositionStage, InvalidBatchDoesNotPartiallyStage) {
     EXPECT_EQ(0u, intent_stage_entity_count(stage));
     EXPECT_EQ(0u, intent_stage_physicality_count(stage));
     intent_stage_free(stage);
+}
+
+TEST(OrderedCompositionStage, OutsideCoordinateDomainRejectsTheWholeBatchBeforeStaging) {
+    for (const std::array<double, 4> invalid : {
+             std::array<double, 4>{1.01, 0, 0, 0},
+             std::array<double, 4>{0.8, 0.8, 0, 0}}) {
+        laplace_ordered_component_t children[] = {
+            component("left", 1, 0), component("right", 2, 1)};
+        auto invalid_child = children[0];
+        std::memcpy(invalid_child.coord, invalid.data(), sizeof(invalid_child.coord));
+        laplace_ordered_composition_request_t requests[] = {
+            request(children, 2), request(&invalid_child, 1)};
+        laplace_ordered_composition_result_t results[2]{};
+        Stage stage(intent_stage_new(4), intent_stage_free);
+        ASSERT_NE(nullptr, stage);
+        EXPECT_NE(0, laplace_ordered_composition_compose_batch(requests, 2, results));
+        EXPECT_NE(0, laplace_ordered_composition_stage_batch(stage.get(), requests, 2, results));
+        EXPECT_EQ(0u, intent_stage_entity_count(stage.get()));
+        EXPECT_EQ(0u, intent_stage_physicality_count(stage.get()));
+    }
 }
 
 TEST(OrderedCompositionStage, WitnessBudgetFailureCannotReportSuccessfulObservation) {

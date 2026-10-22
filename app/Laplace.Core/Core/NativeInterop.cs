@@ -429,7 +429,7 @@ public static unsafe partial class NativeInterop
 
 
     [LibraryImport(Library, EntryPoint = "hash_composer_compose_node")]
-    internal static partial void HashComposerComposeNode(
+    internal static partial int HashComposerComposeNode(
         byte tier, Hash128* childIds, double* childCoords, nuint n,
         Hash128* outId, double* outCoord, Hilbert128* outHb);
 

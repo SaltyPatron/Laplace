@@ -10,6 +10,7 @@
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/laplace.h"
 
 static int validate_requests(
     const laplace_ordered_composition_request_t* requests,
@@ -25,7 +26,10 @@ static int validate_requests(
             const laplace_ordered_component_t* child = &r->components[j];
             if ((child->tier == 0) != (child->has_atom != 0)) return -1;
             for (size_t k = 0; k < 4; ++k)
-                if (!isfinite(child->coord[k])) return -1;
+                if (!(child->coord[k] >= -1.0 && child->coord[k] <= 1.0)) return -1;
+            lp_coord point;
+            lp_coord_trunc(child->coord, &point);
+            if (!lp_coord_inside(&point)) return -1;
         }
         if (r->component_count > 1) {
             uint8_t max_tier = 0;
@@ -120,9 +124,10 @@ static int compose_batch_validated(
         }
 
         const uint8_t parent_tier = (uint8_t)(max_tier + 1);
-        hash_composer_compose_node(
+        int rc = hash_composer_compose_node(
             parent_tier, scratch->ids, scratch->coords, n,
             &result->id, result->coord, &result->hilbert);
+        if (rc != 0) return rc;
         result->tier = parent_tier;
     }
     return 0;

@@ -175,9 +175,9 @@ static int compose_image_tree(tier_tree_t* tree) {
             continue;
         }
 
-        hash_composer_compose_node(tiers[i], &ids[first],
+        if (hash_composer_compose_node(tiers[i], &ids[first],
                                    &coords[(size_t)first * 4], (size_t)cnt,
-                                   &ids[i], &coords[i * 4], &hbs[i]);
+                                   &ids[i], &coords[i * 4], &hbs[i]) != 0) return -6;
     }
     return 0;
 }
@@ -258,9 +258,9 @@ static int compose_audio_tree(tier_tree_t* tree) {
             continue;
         }
 
-        hash_composer_compose_node(tiers[i], &ids[first],
+        if (hash_composer_compose_node(tiers[i], &ids[first],
                                    &coords[(size_t)first * 4], (size_t)cnt,
-                                   &ids[i], &coords[i * 4], &hbs[i]);
+                                   &ids[i], &coords[i * 4], &hbs[i]) != 0) return -6;
     }
     return 0;
 }

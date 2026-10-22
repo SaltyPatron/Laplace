@@ -38,7 +38,7 @@ public readonly struct SemLinkSource : ISeedSource
     public static IngestSourceProfile Profile => IngestSourceProfile.Default;
 }
 
-/// <summary>PredicateMatrix source identity, a distinct witness registered when SemLink initializes.</summary>
+/// <summary>Legacy catalog metadata; Native admits Predicate Matrix as its own source trunk.</summary>
 public readonly struct PredicateMatrixSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =

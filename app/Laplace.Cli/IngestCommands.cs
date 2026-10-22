@@ -852,21 +852,6 @@ internal static partial class IngestCommands
                 + $"relation={relation} evidence={evidence}");
         }
 
-        // Predicate Matrix is a distinct witness admitted by the SemLink seed operation;
-        // its relations are receipted under its own source id.
-        if (srcKey == "SemLinkDecomposer")
-        {
-            foreach (string relation in PredicateMatrixSource.Relations.Distinct(StringComparer.Ordinal))
-            {
-                long evidence = await RelationEvidenceForSourceId(
-                    relation, PredicateMatrixSource.SourceId);
-                Console.WriteLine(
-                    $"SEED_CONTENT_RECEIPT source=PredicateMatrixDecomposer "
-                    + $"parent=SemLinkDecomposer source_id={PredicateMatrixSource.SourceId} "
-                    + $"relation={relation} evidence={evidence}");
-            }
-        }
-
         if (decomposer.LayerOrder == 10)
         {
             // A model's source id is the content hash of its snapshot; its evidence is

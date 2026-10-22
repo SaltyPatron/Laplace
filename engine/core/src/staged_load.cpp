@@ -116,7 +116,7 @@ struct period_group {
 
 struct cell {
     cell_key key;
-    key16 id;          // consensus_id: blake3(subject || type || object-or-zero)
+    key16 id;          // Native Merkle composition of the claim's actual vertices
     int64_t games = 0;
     int64_t ts_pg_us = INT64_MIN;
     std::vector<period_group> groups;
@@ -404,13 +404,12 @@ void score_feed(laplace_staged_score* s, const uint8_t* p, size_t n, int final) 
             score_flush(s);
             s->current = cell{};
             s->current.key = k;
-            uint8_t buf[48];
-            std::memcpy(buf, k.subject.b, 16);
-            std::memcpy(buf + 16, k.type.b, 16);
-            if (k.has_object) std::memcpy(buf + 32, k.object.b, 16);
-            else std::memset(buf + 32, 0, 16);
+            hash128_t vertices[3];
+            std::memcpy(&vertices[0], k.subject.b, 16);
+            std::memcpy(&vertices[1], k.type.b, 16);
+            if (k.has_object) std::memcpy(&vertices[2], k.object.b, 16);
             hash128_t h;
-            hash128_blake3(buf, sizeof(buf), &h);
+            hash128_merkle(0, vertices, k.has_object ? 3 : 2, &h);
             std::memcpy(s->current.id.b, &h, 16);
             s->has_prior = len[9] != -1;
             if (s->has_prior) {

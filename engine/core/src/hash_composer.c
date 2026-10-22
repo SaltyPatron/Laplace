@@ -12,6 +12,7 @@
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/math4d.h"
 #include "laplace/core/tier_tree.h"
+#include "laplace/laplace.h"
 
 static void compose_identity_and_hilbert(uint8_t tier, const hash128_t* child_ids,
     size_t n, const double coord[4], hash128_t* out_id, hilbert128_t* out_hb) {
@@ -28,7 +29,7 @@ static void compose_identity_and_hilbert(uint8_t tier, const hash128_t* child_id
     hilbert4d_encode(coord, out_hb);
 }
 
-void hash_composer_compose_node(
+int hash_composer_compose_node(
     uint8_t          tier,
     const hash128_t* child_ids,
     const double*    child_coords,
@@ -36,8 +37,29 @@ void hash_composer_compose_node(
     hash128_t*       out_id,
     double           out_coord[4],
     hilbert128_t*    out_hb) {
-    math4d_centroid(child_coords, n, out_coord);
-    compose_identity_and_hilbert(tier, child_ids, n, out_coord, out_id, out_hb);
+    if (!out_id || !out_coord || !out_hb || n > SIZE_MAX / (4u * sizeof(double)) ||
+        (n && (!child_ids || !child_coords))) return -1;
+    lp_coord_sum sum = { { 0, 0, 0, 0 }, 0 };
+    for (size_t i = 0; i < n; i++) {
+        const double *point = child_coords + i * 4u;
+        for (size_t axis = 0; axis < 4u; axis++)
+            if (!(point[axis] >= -1.0 && point[axis] <= 1.0)) return -1;
+        lp_coord child;
+        lp_coord_trunc(point, &child);
+        if (!lp_coord_inside(&child)) return -1;
+        lp_coord_add(&sum, child.m);
+    }
+    lp_coord centroid;
+    lp_coord_mean(&sum, &centroid);
+    double coordinate[4];
+    lp_coord_xyzm(&centroid, coordinate);
+    hash128_t id;
+    hilbert128_t hilbert;
+    compose_identity_and_hilbert(tier, child_ids, n, coordinate, &id, &hilbert);
+    *out_id = id;
+    for (size_t axis = 0; axis < 4u; axis++) out_coord[axis] = coordinate[axis];
+    *out_hb = hilbert;
+    return 0;
 }
 
 int hash_composer_compose_node_with_workspace(
@@ -46,16 +68,10 @@ int hash_composer_compose_node_with_workspace(
     hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb) {
     if (out_id == NULL || out_coord == NULL || out_hb == NULL ||
         (n != 0u && (child_ids == NULL || child_coords == NULL))) return -1;
-    double coord[4];
-    if (math4d_centroid_with_workspace(child_coords, n, workspace, workspace_bytes, coord) != 0)
-        return -1;
-    hash128_t id;
-    hilbert128_t hilbert;
-    compose_identity_and_hilbert(tier, child_ids, n, coord, &id, &hilbert);
-    *out_id = id;
-    for (size_t axis = 0; axis < 4u; ++axis) out_coord[axis] = coord[axis];
-    *out_hb = hilbert;
-    return 0;
+    size_t required;
+    if (math4d_centroid_workspace_size(n, &required) != 0 || workspace_bytes < required ||
+        (n && !workspace)) return -1;
+    return hash_composer_compose_node(tier, child_ids, child_coords, n, out_id, out_coord, out_hb);
 }
 
 typedef struct hash_composer_arrays {
@@ -123,10 +139,9 @@ static int hash_composer_process_node(const hash_composer_arrays_t* a, size_t i)
         (size_t) first + (size_t) count > a->count)
         return -1;
 
-    hash_composer_compose_node(a->tiers[i], &a->ids[first],
+    return hash_composer_compose_node(a->tiers[i], &a->ids[first],
                                &a->coords[(size_t) first * 4], (size_t) count,
                                &a->ids[i], &a->coords[i * 4], &a->hilberts[i]);
-    return 0;
 }
 
 int hash_composer_run(
