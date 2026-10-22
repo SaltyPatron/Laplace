@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 
@@ -51,20 +50,9 @@ public sealed partial class ConsensusAccumulatingWriter
                     connection, ct).ConfigureAwait(false);
                 await using var transaction =
                     await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
+                await using var command = NpgsqlCatalog.Command(connection, transaction,
+                    epoch ? "consensus.deposit_mask_epoch" : "consensus.deposit_mask", entities, types);
                 command.CommandTimeout = 0;
-                const string maskSql =
-                    "SELECT consensus.highway_mask_deposit($1,$2)";
-                command.CommandText = epoch
-                    ? "WITH epoch AS MATERIALIZED "
-                        + "(SELECT nextval('laplace.apply_write_epoch')) "
-                        + maskSql + " FROM epoch"
-                    : maskSql;
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = entities, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                command.Parameters.Add(new NpgsqlParameter
-                { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                 updated += (long)(
                     await command.ExecuteScalarAsync(ct).ConfigureAwait(false)
                     ?? 0L);

@@ -287,22 +287,6 @@ public static class NpgsqlFoundryReads
             }, timeoutSeconds: 120, ct: ct, label: "render_resolved_word_surfaces");
 
     /// <summary>
-    /// Init SQL that shadows <c>laplace.consensus</c> with a pg_temp table holding
-    /// consensus re-folded from only the given sources' testimony.
-    /// </summary>
-    public static string ScopedConsensusTempInitSql(IReadOnlyList<byte[]> sourceIds)
-    {
-        if (sourceIds.Count == 0)
-            throw new ArgumentException("scoped synthesis needs at least one source_id", nameof(sourceIds));
-        string arr = string.Join(",", sourceIds.Select(id =>
-            $"decode('{Convert.ToHexString(id)}','hex')"));
-        return
-            "CREATE TEMP TABLE IF NOT EXISTS consensus AS " +
-            $"SELECT * FROM consensus.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
-            "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
-    }
-
-    /// <summary>
     /// Ingest datasource; when <paramref name="scopeSourceIds"/> is set, every physical
     /// connection installs the source-scoped consensus temp table. NoResetOnClose keeps the
     /// pool reset from dropping it, which would silently unscope later readers.
@@ -312,22 +296,33 @@ public static class NpgsqlFoundryReads
     {
         if (scopeSourceIds is null || scopeSourceIds.Count == 0)
             return LaplaceDataSource.Create(SubstrateAccess.Ingest, connString);
-        string initSql = ScopedConsensusTempInitSql(scopeSourceIds);
+        // The datasource retains a fixed scope for every physical connection.
+        // Snapshot the caller's buffers before the initializer captures them.
+        var sources = new byte[scopeSourceIds.Count][];
+        for (int i = 0; i < sources.Length; i++)
+        {
+            var id = scopeSourceIds[i];
+            if (id is null || id.Length != 16)
+                throw new ArgumentException("Source IDs must contain exactly 16 bytes.", nameof(scopeSourceIds));
+            sources[i] = (byte[])id.Clone();
+        }
         return LaplaceDataSource.Create(SubstrateAccess.Ingest, dsb =>
         {
             dsb.ConnectionStringBuilder.NoResetOnClose = true;
             dsb.UsePhysicalConnectionInitializer(
                 conn =>
                 {
-                    using var c = conn.CreateCommand();
-                    c.CommandText = initSql;
+                    using var c = NpgsqlCatalog.Command(conn, null, "foundry.initialize_scope", sources);
                     c.ExecuteNonQuery();
+                    using var index = NpgsqlCatalog.Command(conn, null, "foundry.index_scope");
+                    index.ExecuteNonQuery();
                 },
                 async conn =>
                 {
-                    await using var c = conn.CreateCommand();
-                    c.CommandText = initSql;
+                    await using var c = NpgsqlCatalog.Command(conn, null, "foundry.initialize_scope", sources);
                     await c.ExecuteNonQueryAsync();
+                    await using var index = NpgsqlCatalog.Command(conn, null, "foundry.index_scope");
+                    await index.ExecuteNonQueryAsync();
                 });
         }, connString);
     }

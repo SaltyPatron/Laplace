@@ -39,10 +39,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         int known = Volatile.Read(ref _directConsensusRoute);
         if (known >= 0) return known == 1;
 
-        await using var probe = connection.CreateCommand();
-        probe.CommandText = "SELECT to_regprocedure("
-            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])') "
-            + "IS NOT NULL";
+        await using var probe = NpgsqlCatalog.Command(connection, null, "consensus.supports_type_upsert");
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(ref _directConsensusRoute, supported ? 1 : 0, -1);
         return Volatile.Read(ref _directConsensusRoute) == 1;
@@ -60,8 +57,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         int known = Volatile.Read(ref _applyWriteEpochRoute);
         if (known >= 0) return known == 1;
 
-        await using var probe = connection.CreateCommand();
-        probe.CommandText = "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL";
+        await using var probe = NpgsqlCatalog.Command(connection, null, "write.supports_epoch");
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(ref _applyWriteEpochRoute, supported ? 1 : 0, -1);
         return Volatile.Read(ref _applyWriteEpochRoute) == 1;
@@ -204,18 +200,11 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                     precommitVerifier: null, ct,
                     async (connection, transaction, token) =>
                     {
-                        await using var command = new NpgsqlCommand(
-                            SqlCatalog.Get("conversation.append_turns").Text,
-                            connection, transaction);
-                        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, sessionId.ToBytes());
-                        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-                        command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
-                            change.Metadata.BuiltAt.ToUniversalTime());
-                        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, change.Metadata.IntentId.ToBytes());
                         long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
-                        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
-                        command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
-                        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
+                        await using var command = NpgsqlCatalog.Command(connection, transaction,
+                            "conversation.append_turns", sessionId.ToBytes(), ids,
+                            change.Metadata.BuiltAt.ToUniversalTime(), change.Metadata.IntentId.ToBytes(),
+                            physicalityBudget, 512, physicalityBudget / MemoryTopology.Hash128Bytes);
                         void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
                         {
                             const string prefix = "session descriptor view unavailable; transaction pending: ";
@@ -834,26 +823,12 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             }
             periodOffsets[count] = periodAt;
 
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandTimeout = 0;
             // One call folds the whole mixed-type chunk; native code groups it by
             // type partition, locks and folds each type run.
-            command.CommandText =
-                "SELECT consensus.merge_evidence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, subjects);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, types);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, phis);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, games);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, sums);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.TimestampTz, timestamps);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, opponents);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOffsets);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOpponents);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodPhis);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodGames);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodSums);
+            await using var command = NpgsqlCatalog.Command(connection, transaction, "consensus.merge_evidence",
+                subjects, types, objects, phis, games, sums, timestamps, opponents, periodOffsets,
+                periodOpponents, periodPhis, periodGames, periodSums);
+            command.CommandTimeout = 0;
             folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             foldCalls++;
         }
@@ -885,12 +860,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                 entities[i] = orderedPairs[off + i].Entity.ToBytes();
                 maskTypes[i] = orderedPairs[off + i].Type.ToBytes();
             }
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
+            await using var command = NpgsqlCatalog.Command(connection, transaction,
+                "consensus.deposit_mask", entities, maskTypes);
             command.CommandTimeout = 0;
-            command.CommandText = "SELECT consensus.highway_mask_deposit($1,$2)";
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entities);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, maskTypes);
             masks += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             maskCalls++;
         }
@@ -1086,38 +1058,34 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                 bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
                 bool epochBump = await SupportsApplyWriteEpochAsync(conn, token);
                 await using var tx = await conn.BeginTransactionAsync(token);
-                await using var up = conn.CreateCommand();
-                up.Transaction = tx;
-                up.CommandTimeout = 0;
-                string foldSql = directRoute
-                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
-                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
-                // The epoch bump and the fold are one server statement. MATERIALIZED
-                // makes nextval execute before the write function while keeping one
-                // preparable statement with positional parameters.
-                up.CommandText = epochBump
-                    ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
-                        + foldSql + " FROM epoch"
-                    : foldSql;
-                up.Parameters.Add(new NpgsqlParameter
+                string foldQuery = directRoute
+                    ? (epochBump ? "consensus.upsert_type_epoch" : "consensus.upsert_type")
+                    : (epochBump ? "consensus.upsert_epoch" : "consensus.upsert");
+                // Each catalog contract preserves its exact first parameter type
+                // and keeps the epoch bump and fold in one preparable statement.
+                await using var up = NpgsqlCatalog.Command(conn, tx, SqlCatalog.Get(foldQuery), parameters =>
                 {
-                    Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
-                    NpgsqlDbType = directRoute
-                        ? NpgsqlDbType.Bytea
-                        : NpgsqlDbType.Array | NpgsqlDbType.Bytea
+                    parameters.Add(new NpgsqlParameter
+                    {
+                        Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
+                        NpgsqlDbType = directRoute
+                            ? NpgsqlDbType.Bytea
+                            : NpgsqlDbType.Array | NpgsqlDbType.Bytea
                 });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                });
+                up.CommandTimeout = 0;
                 await up.PrepareAsync(token);
                 long segFolded = 0;
                 for (int off = seg.Off; off < seg.Off + seg.Len; off += FoldSizing.ChunkCells)
@@ -1261,17 +1229,9 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                     await using var conn = await _ds.OpenConnectionAsync(ct);
                     bool epochBump = await SupportsApplyWriteEpochAsync(conn, ct);
                     await using var tx = await conn.BeginTransactionAsync(ct);
-                    await using var mask = conn.CreateCommand();
-                    mask.Transaction = tx;
+                    await using var mask = NpgsqlCatalog.Command(conn, tx,
+                        epochBump ? "consensus.deposit_mask_epoch" : "consensus.deposit_mask", pairEnts, pairTypes);
                     mask.CommandTimeout = 0;
-                    const string depositSql =
-                        "SELECT consensus.highway_mask_deposit($1, $2)";
-                    mask.CommandText = epochBump
-                        ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
-                            + depositSql + " FROM epoch"
-                        : depositSql;
-                    mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     await mask.PrepareAsync(ct);
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                     await tx.CommitAsync(ct);
