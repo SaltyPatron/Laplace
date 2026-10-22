@@ -130,32 +130,23 @@ public static class InstalledOpInvoker
             return new OpResult([], null,
                 $"'{name}' has unnamed parameters and cannot be called by name: {name}({candidates[0].Row.Args})");
 
-        var bound = new List<(string Slot, object? Value)>();
-        var call = new List<string>();
+        var bound = new List<(string Name, string Type, NpgsqlParameter Parameter)>();
         foreach (var p in chosen.Where(p => keys.Contains(p.Name)))
         {
             var slot = $"a{bound.Count}";
-            call.Add($"{QuoteIdent(p.Name)} => @{slot}::{p.Type}");
-            bound.Add((slot, CoerceForDeclaredType(OpValue(args![p.Name]), p.Type)));
+            bound.Add((p.Name, p.Type,
+                BindArg(slot, CoerceForDeclaredType(OpValue(args![p.Name]), p.Type))));
         }
 
         var isProcedure = string.Equals(candidates[0].Row.Kind, "procedure", StringComparison.Ordinal);
-        var argText = string.Join(", ", call);
-
         // A procedure is CALLed and returns no result set; SELECT ... FROM it is a
         // parse error. LIMIT rowCap + 1 on the function path so truncation is observable.
-        var sql = isProcedure
-            ? $"CALL {QualifiedCatalogName(name)}({argText})"
-            : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowsToFetch}";
-
-        await using var cmd = db.CreateCommand(sql);
+        await using var cmd = NpgsqlCatalog.InstalledOperationCommand(
+            db, isProcedure, QualifiedCatalogName(name), bound, rowsToFetch);
         // Positive values are exact caller policy. Zero means run until completion
         // or cancellation — required for maintenance procedures whose duration is
         // a property of live relation size, not a constant in this client.
         cmd.CommandTimeout = RequestedCommandTimeout(commandTimeoutSeconds);
-        foreach (var (slot, value) in bound)
-            cmd.Parameters.Add(BindArg(slot, value));
-
         if (isProcedure)
         {
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

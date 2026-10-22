@@ -13,6 +13,28 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlCatalog
 {
+    internal static NpgsqlCommand InstalledOperationCommand(
+        NpgsqlDataSource source, bool procedure, string qualifiedName,
+        IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments, long rowsToFetch)
+    {
+        var argumentTemplate = SqlCatalog.Get("operation.argument").Text;
+        using var identifiers = new NpgsqlCommandBuilder();
+        var slots = new string[arguments.Count];
+        for (int i = 0; i < arguments.Count; i++)
+            slots[i] = argumentTemplate
+                .Replace("{name}", identifiers.QuoteIdentifier(arguments[i].Name), StringComparison.Ordinal)
+                .Replace("{slot}", arguments[i].Parameter.ParameterName, StringComparison.Ordinal)
+                .Replace("{type}", arguments[i].Type, StringComparison.Ordinal);
+        var query = SqlCatalog.Get(procedure ? "operation.procedure" : "operation.function");
+        var text = query.Text
+            .Replace("{operation}", qualifiedName, StringComparison.Ordinal)
+            .Replace("{arguments}", string.Join(", ", slots), StringComparison.Ordinal)
+            .Replace("{rows}", rowsToFetch.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        var command = source.CreateCommand(text);
+        foreach (var argument in arguments) command.Parameters.Add(argument.Parameter);
+        return command;
+    }
+
     private static readonly Regex QualifiedRelation = new(
         "^(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*)(?:\\.(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*))?\\z",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

@@ -48,15 +48,9 @@ public static class MeasurementLane
     private static async Task RefuseIfIngestRunningAsync(NpgsqlConnection conn, CancellationToken ct)
     {
         const int SettleMs = 1500;
-        string Snapshot() =>
-            "SELECT coalesce(string_agg(j.run_id::text || '|' || j.source_name || '|' "
-            + "  || j.input_units_done || '|' || j.input_units_total, E'\\n' ORDER BY j.run_id), '') "
-            + "FROM laplace.ingest_run_journal j WHERE j.status = 'running'";
-
         async Task<Dictionary<string, (string src, long done, long total)>> ReadAsync()
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = Snapshot();
+            await using var cmd = NpgsqlCatalog.Command(conn, null, "measurement.ingest_snapshot");
             var raw = (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) as string ?? string.Empty;
             var map = new Dictionary<string, (string, long, long)>();
             foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -74,14 +68,8 @@ public static class MeasurementLane
             a = await ReadAsync().ConfigureAwait(false);
             if (a.Count == 0) return;
 
-            await using (var busy = conn.CreateCommand())
+            await using (var busy = NpgsqlCatalog.Command(conn, null, "measurement.active_ingest_backends"))
             {
-                busy.CommandText =
-                    "SELECT count(*) FROM pg_stat_activity "
-                    + "WHERE datname = current_database() AND state = 'active' "
-                    + "  AND pid <> pg_backend_pid() "
-                    + "  AND query ~* 'consensus\\.upsert|COPY laplace\\.|highway_mask_deposit"
-                    + "|attestations_exist|physicalities_exist'";
                 var n = Convert.ToInt64(await busy.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
                 if (n > 0)
                     throw new InvalidOperationException(
