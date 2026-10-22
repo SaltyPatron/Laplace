@@ -72,6 +72,30 @@ public sealed class SubstrateApplyEnvelopeTests
             with { ApplyEnvelope = SubstrateApplyEnvelope.Own(lifetime, _ => ValueTask.CompletedTask) };
 
     [Fact]
+    public async Task ProducerAndApplyFailuresBothSurviveWhileQueuedSourceLeasesClose()
+    {
+        var applyFailure = new InvalidDataException("apply refused the source");
+        var producerFailure = new IOException("source enumeration failed");
+        var first = new TrackedLifetime();
+        var queued = new TrackedLifetime();
+        var barrier = new IngestApplyBarrier();
+        var boundary = new SubstrateChangeBuilder(
+            Hash128.OfCanonical("test/cleanup/source"), "barrier").Build() with { ApplyBarrier = barrier };
+        var decomposer = new OwnedChangesDecomposer(
+            [OwnedChange(first, 0), boundary, OwnedChange(queued, 1)], terminalFailure: producerFailure);
+        var runner = new IngestRunner(new FailedWriter(applyFailure, decomposer.Enumerated.Task),
+            new EmptyReader(), NullLoggerFactory.Instance);
+
+        var error = await Assert.ThrowsAsync<AggregateException>(() => runner.RunAsync(decomposer,
+            IngestRunOptions.Default with { SkipLayerOrderingCheck = true, SkipSourceCompletion = true }));
+        Assert.Contains(applyFailure, error.Flatten().InnerExceptions);
+        Assert.Contains(producerFailure, error.Flatten().InnerExceptions);
+        Assert.Equal(1, first.DisposeCount);
+        Assert.Equal(1, queued.DisposeCount);
+        Assert.Same(applyFailure, await Assert.ThrowsAsync<InvalidDataException>(() => barrier.WaitAsync()));
+    }
+
+    [Fact]
     public async Task ApplyAndAbortFailuresAreBothRetained()
     {
         var applyFailure = new InvalidDataException("apply refused the source");
@@ -87,7 +111,8 @@ public sealed class SubstrateApplyEnvelopeTests
         Assert.Equal(1, source.DisposeCount);
     }
 
-    private sealed class OwnedChangesDecomposer(SubstrateChange[] changes, Exception? cancelFailure = null) : IDecomposer
+    private sealed class OwnedChangesDecomposer(SubstrateChange[] changes, Exception? cancelFailure = null,
+        Exception? terminalFailure = null) : IDecomposer
     {
         internal TaskCompletionSource Enumerated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Hash128 SourceId => Hash128.OfCanonical("test/cleanup/source");
@@ -100,7 +125,11 @@ public sealed class SubstrateApplyEnvelopeTests
             DecomposerOptions options, [EnumeratorCancellation] CancellationToken ct = default)
         {
             if (cancelFailure is not null) ct.Register(() => throw cancelFailure);
-            try { foreach (var change in changes) { ct.ThrowIfCancellationRequested(); yield return change; await Task.Yield(); } }
+            try
+            {
+                foreach (var change in changes) { ct.ThrowIfCancellationRequested(); yield return change; await Task.Yield(); }
+                if (terminalFailure is not null) throw terminalFailure;
+            }
             finally { Enumerated.TrySetResult(); }
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
