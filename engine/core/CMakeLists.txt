@@ -307,7 +307,7 @@ if(EXISTS "${LAPLACE_TIER0}" AND NOT "${LAPLACE_TIER0}" STREQUAL "${LAPLACE_PERF
 else()
     add_custom_command(OUTPUT "${LAPLACE_PERFCACHE_BIN}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
-        COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD}" "${LAPLACE_PERFCACHE_BIN}"
+        COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD_PATH}" "${LAPLACE_PERFCACHE_BIN}"
         DEPENDS laplace_tier0
         COMMENT "Generate canonical Native tier0.bin from the local Unicode estate"
         VERBATIM)
@@ -324,9 +324,19 @@ if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}")
         DEPENDS "$ENV{LAPLACE_HIGHWAY}" VERBATIM)
     add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
 else()
-    add_custom_target(laplace_highway_perfcache
-        COMMAND ${CMAKE_COMMAND} -E echo "Set LAPLACE_HIGHWAY to an existing Native LPHW cache built by Laplace-Engine"
-        COMMAND ${CMAKE_COMMAND} -E false)
+    file(GLOB_RECURSE _native_highway_manifests CONFIGURE_DEPENDS
+        "${LAPLACE_NATIVE}/manifest/*.tsv")
+    add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env
+                "LAPLACE_TIER0=${LAPLACE_PERFCACHE_BIN}"
+                "LAPLACE_HIGHWAY=${LAPLACE_HIGHWAY_BIN}"
+                "LAPLACE_MANIFEST=${LAPLACE_NATIVE}/manifest"
+                $<TARGET_FILE:laplace_engine> highway -o "${LAPLACE_HIGHWAY_BIN}"
+        DEPENDS laplace_engine laplace_t0_perfcache ${_native_highway_manifests}
+        COMMENT "Generate canonical Native highway from frozen identifier manifests"
+        VERBATIM)
+    add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
 endif()
 
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
@@ -590,7 +600,7 @@ install(FILES ${LAPLACE_VOCABULARY_PERFCACHE_BIN}
 
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/tier0.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
-    COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD}" "${LAPLACE_PERFCACHE_REFERENCE_BIN}"
+    COMMAND $<TARGET_FILE:laplace_tier0> "${LAPLACE_UCD_PATH}" "${LAPLACE_PERFCACHE_REFERENCE_BIN}"
     COMMAND ${CMAKE_COMMAND} -E compare_files ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
     DEPENDS laplace_t0_perfcache laplace_tier0
     COMMENT "Verify T0 perf-cache emit is byte-deterministic"
