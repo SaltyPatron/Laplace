@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 [Collection("substrate-pg")]
 public sealed class IngestThroughputObservabilityTests

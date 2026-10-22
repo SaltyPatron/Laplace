@@ -20,6 +20,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// </summary>
 // Tier=live: deposits and folds durable cells in the seeded substrate; it is not a
 // database-health gate.
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class ConverseLoopLiveTests
 {

@@ -6,9 +6,10 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class MatchRunnerFrozenEvidenceTests
 {
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task LiveMatch_DoesNotCompleteAnyGameUntilMeasurementCloses()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit disposable DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/frozen-match", connString: cs);

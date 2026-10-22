@@ -32,6 +32,7 @@ public sealed class UnicodeDecomposerTests
 
 
     [Fact]
+    [Trait("Category", "RequiresQualification")]
     [Trait("Tier", "perf")]
     [Trait("Scope", "full-corpus")]
     public async Task Emits_All_Codepoints_As_T0_Entities_With_Content_Physicalities()
@@ -362,6 +363,7 @@ public sealed class UnicodeDecomposerTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     [Trait("Tier", "perf")]
     [Trait("Scope", "full-corpus")]
     public async Task Ucdxml_recipe_accounts_for_the_complete_selected_provider_schema()
@@ -388,6 +390,7 @@ public sealed class UnicodeDecomposerTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     [Trait("Tier", "perf")]
     [Trait("Scope", "full-corpus")]
     public async Task Unicode_snapshot_replays_the_exact_inflated_xml_bytes()

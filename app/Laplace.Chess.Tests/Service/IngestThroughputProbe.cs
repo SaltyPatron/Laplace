@@ -9,6 +9,7 @@ namespace Laplace.Chess.Service.Tests;
 
 // Attribution probe for chess COMPOSE throughput. Not a gate — it prints, it does not assert
 // wall-clock (a timing assertion on a shared box is a flaky test, not a measurement).
+[Trait("Category", "RequiresQualification")]
 [Trait("Tier", "perf")]
 public sealed class IngestThroughputProbe(ITestOutputHelper o)
 {

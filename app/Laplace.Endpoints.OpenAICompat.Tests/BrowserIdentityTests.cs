@@ -109,6 +109,7 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     [Trait("Tier", "db")]
     public async Task BrowserWorkspaceChecksAndAccountRoutesUseApplicationDatabase()
     {
@@ -164,6 +165,7 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     [Trait("Tier", "db")]
     public async Task PostgresIdentityStorePersistsAccountSessionAndConversation()
     {

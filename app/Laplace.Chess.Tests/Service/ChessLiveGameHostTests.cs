@@ -9,23 +9,20 @@ namespace Laplace.Chess.Service.Tests;
 // DB-coupled tests in this file are INTEGRATION tests: ChessLiveGameHost is a per-ply substrate
 // WRITER, and its default connection resolves to the installed (production) database. They run
 // only when LAPLACE_TEST_DB names an explicit, disposable test database (the chess-platform-seed
-// convention: laplace_chess_test) and are no-ops otherwise. Tests must never write into the
+// convention: laplace_chess_test). Missing configuration fails the database tier. Tests never write into the
 // production substrate as a side effect of running the gate.
 internal static class TestDb
 {
     // LAPLACE_TEST_DB is a database NAME, not a connection string. The runner .env used to
     // set LAPLACE_TEST_DB=laplace; treating that as a conn string blows up Npgsql at index 0.
-    public static string? ConnString
+    public static string RequireConnectionString()
     {
-        get
-        {
-            var name = Environment.GetEnvironmentVariable("LAPLACE_TEST_DB");
-            if (string.IsNullOrWhiteSpace(name)) return null;
-            // Refuse the canonical substrate name — these tests write consensus rows.
-            if (string.Equals(name, "laplace", StringComparison.OrdinalIgnoreCase))
-                return null;
-            return LaplaceInstall.PostgresConnectionString(name.Trim());
-        }
+        var name = Environment.GetEnvironmentVariable("LAPLACE_TEST_DB")?.Trim();
+        if (string.IsNullOrWhiteSpace(name)
+            || new[] { "laplace", "laplace-mono", "laplace-app", "laplace-desktop-app" }
+                .Contains(name, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("LAPLACE_TEST_DB must name an explicit disposable test database.");
+        return LaplaceInstall.PostgresConnectionString(name);
     }
 }
 
@@ -51,9 +48,10 @@ public sealed class ChessMoveCommentaryTests
     [Theory]
     [InlineData(150, 4, false)]
     [InlineData(29_500, 8, true)]
+    [Trait("Category", "RequiresDatabase")]
     public async Task BuildAsync_IncludesEvalLine(int scoreCp, int depth, bool mating)
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/commentary", connString: cs);
@@ -204,9 +202,10 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task RecordPly_ReusesPositionEntity_ForRepeatedSurface()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/ply-fold", connString: cs);
@@ -229,9 +228,10 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task CompleteGame_IncrementsGamesCompleted()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/complete", connString: cs);
@@ -249,9 +249,10 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task MatchRunner_LiveHost_RecordsResolvedMoveTokens()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(
             defaultLearnContext: "chess/test/match-runner", connString: cs);
@@ -272,9 +273,10 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task BuildSearch_SubstrateOff_HasNoBias()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
 
         await using var host = await ChessLiveGameHost.CreateAsync(connString: cs);
         var classical = host.BuildSearch(substrate: false);

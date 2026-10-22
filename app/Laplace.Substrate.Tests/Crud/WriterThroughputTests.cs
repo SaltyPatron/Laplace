@@ -28,6 +28,7 @@ file sealed class WsApplyCaptureLog : ILogger<NpgsqlSubstrateWriter>
     }
 }
 
+[Trait("Category", "RequiresQualification")]
 [Trait("Tier", "perf")]
 [Collection("substrate-pg-writer-throughput")]
 public sealed class EntityWriterThroughputTests
@@ -72,6 +73,7 @@ public sealed class EntityWriterThroughputTests
     }
 }
 
+[Trait("Category", "RequiresQualification")]
 [Trait("Tier", "perf")]
 [Collection("substrate-pg-writer-throughput")]
 public sealed class WriterThroughputTests

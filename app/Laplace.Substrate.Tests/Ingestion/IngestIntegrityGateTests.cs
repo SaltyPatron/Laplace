@@ -13,6 +13,7 @@ namespace Laplace.Ingestion.Tests;
 /// <summary>
 /// I2/I5: operator integrity gates — no stub decomposers, empty ingest must fail closed.
 /// </summary>
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 [Collection("GrammarPerfcache")]
 public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IAsyncLifetime

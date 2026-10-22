@@ -12,6 +12,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// already established.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public class StagedSourceWriterTests
 {

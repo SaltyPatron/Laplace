@@ -13,6 +13,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// callable with their expected shapes.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public class SqlConsolidationTests
 {

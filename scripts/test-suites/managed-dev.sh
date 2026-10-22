@@ -13,7 +13,7 @@ run_managed_dev() (
   set_dev_perfcache
   sync_managed_native
   run_managed_dotnet_tests "${LAPLACE_MANAGED_TEST_PROJECTS:-all}" managed-dev \
-    'Tier!=db&Tier!=live&Tier!=perf'
+    'Category!=RequiresDatabase&Category!=RequiresNetwork&Category!=RequiresQualification'
 )
 
 run_managed_dev

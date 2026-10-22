@@ -3,6 +3,7 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>Exercise the real roster-to-profile adapter against committed game evidence.</summary>
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class ChessProfileLiveTests
 {

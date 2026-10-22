@@ -26,6 +26,7 @@ public sealed class ChessLineGeometryGateTests
     private static readonly string[] QgdTransposedSans = ["c4", "e6", "d4", "d5"];
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     [Trait("Tier", "db")]
     public void ComposeTime_Transposition_FrechetSeparates_HilbertIsNotIdentity()
     {
@@ -62,6 +63,7 @@ public sealed class ChessLineGeometryGateTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresNetwork")]
     [Trait("Tier", "live")]
     public void LiveDb_PositionCoordsMatchCompose_AndEntityCurveWhenPresent()
     {

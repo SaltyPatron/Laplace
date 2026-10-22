@@ -37,9 +37,10 @@ public sealed class ChessPlayIdentityTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresDatabase")]
     public async Task StartPlaySession_ThreadsIdentity_AndRejectsInvalid()
     {
-        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+        var cs = TestDb.RequireConnectionString();
         await using var host = await ChessLiveGameHost.CreateAsync(connString: cs);
 
         var id = host.StartPlaySession(recordToSubstrate: false, tenantId: "acme", userId: "alice");

@@ -133,10 +133,10 @@ public sealed class GrammarCompositionTests
         var (codeEnts, _, _, _) = Compose("filter\n", "python");
 
         byte[] prose = Encoding.UTF8.GetBytes("filter");
-        Assert.True(TextEntityBuilder.TryBuildRows(prose, Src, out var proseEnts, out _, out _, out _));
-        var proseWord = proseEnts.First(e => e.TypeId == TextEntityBuilder.WordTypeId);
+        Assert.True(TextEntityBuilder.TryBuildRows(prose, Src, out _, out _, out var proseWord, out _));
 
-        Assert.Contains(proseWord.Id, codeEnts);
+        Assert.Equal(Hash128.Text("filter"), proseWord);
+        Assert.Contains(proseWord, codeEnts);
     }
 
     [Fact]

@@ -39,6 +39,7 @@ public sealed class AnalyzeSkipFailureTests
 }
 
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class AnalyzeOrThrowDbTests(LocalPgFixture pg)
 {

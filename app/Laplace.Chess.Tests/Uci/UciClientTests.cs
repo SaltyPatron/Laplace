@@ -217,6 +217,7 @@ public sealed class UciClientTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public void Lc0_RealBinary_OnTheGpu_WithASmallNodeBudget()
     {
         string? exe = Laplace.Engine.Core.LaplaceInstall.TryReadConfig("LAPLACE_LC0", "chess-lab.env");

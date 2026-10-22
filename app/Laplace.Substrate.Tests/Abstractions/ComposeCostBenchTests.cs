@@ -15,6 +15,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// cache hit hides the cost.
 /// </summary>
 [Collection("GrammarPerfcache")]
+[Trait("Category", "RequiresQualification")]
 [Trait("Tier", "perf")]
 public sealed class ComposeCostBenchTests
 {
