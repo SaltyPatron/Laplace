@@ -24,8 +24,6 @@ public class SourceIdPinTests
           "74809dc2edd48bc97e10fee9ba466fca", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.SemLink.WordFrameNetDecomposer(),
           "6e012044174c4f0ac189bbf4cae40e74", "d37a0d1e87aae7aaf5aaaad8b119955f" },
-        { () => new Laplace.Decomposers.Wiktionary.WiktionaryDecomposer(),
-          "65226439241a9e4a7645c2fdf91c60b1", "f1482bb3d9c6b430a7612abb1c238561" },
         { () => new Laplace.Decomposers.Code.CodeDecomposer(),
           "c90645d6b0f228c684d95bbbc0b52a42", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.RepoDecomposer(),

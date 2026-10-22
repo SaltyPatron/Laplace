@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using Laplace.Decomposers.Wiktionary;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -19,6 +18,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 [Trait("Tier", "perf")]
 public sealed class ComposeCostBenchTests
 {
+    private static readonly Hash128 BenchmarkSource = Hash128.Text("Text composition benchmark");
     private readonly ITestOutputHelper _out;
 
     public ComposeCostBenchTests(ITestOutputHelper output) => _out = output;
@@ -46,11 +46,11 @@ public sealed class ComposeCostBenchTests
         for (int i = 0; i < 10; i++)
         {
             var wb = new SubstrateChangeBuilder(
-                WiktionaryDecomposer.Source, $"bench/warm/{bytes}/{i}", null,
+                BenchmarkSource, $"bench/warm/{bytes}/{i}", null,
                 entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
             Assert.True(ContentTierSpine.TryStageIntoBuilder(
                 wb, Encoding.UTF8.GetBytes(MakeSurface(bytes, 1_000_000 + i)),
-                WiktionaryDecomposer.Source, out _));
+                BenchmarkSource, out _));
         }
 
         var sw = Stopwatch.StartNew();
@@ -58,11 +58,11 @@ public sealed class ComposeCostBenchTests
         for (int i = 0; i < iters; i++)
         {
             var b = new SubstrateChangeBuilder(
-                WiktionaryDecomposer.Source, $"bench/{bytes}/{i}", null,
+                BenchmarkSource, $"bench/{bytes}/{i}", null,
                 entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
             Assert.True(ContentTierSpine.TryStageIntoBuilder(
                 b, Encoding.UTF8.GetBytes(MakeSurface(bytes, i)),
-                WiktionaryDecomposer.Source, out var root));
+                BenchmarkSource, out var root));
             Assert.NotEqual(default, root);
             emitted++;
         }
@@ -86,11 +86,11 @@ public sealed class ComposeCostBenchTests
         CodepointPerfcache.LoadDefault();
 
         var wb = new SubstrateChangeBuilder(
-            WiktionaryDecomposer.Source, "bench/pwarm", null,
+            BenchmarkSource, "bench/pwarm", null,
             entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             wb, Encoding.UTF8.GetBytes(MakeSurface(bytes, 9_999_999)),
-            WiktionaryDecomposer.Source, out _));
+            BenchmarkSource, out _));
 
         var sw = Stopwatch.StartNew();
         var tasks = new List<Task>();
@@ -102,11 +102,11 @@ public sealed class ComposeCostBenchTests
                 for (int i = 0; i < itersPerThread; i++)
                 {
                     var b = new SubstrateChangeBuilder(
-                        WiktionaryDecomposer.Source, $"bench/p/{tid}/{i}", null,
+                        BenchmarkSource, $"bench/p/{tid}/{i}", null,
                         entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
                     Assert.True(ContentTierSpine.TryStageIntoBuilder(
                         b, Encoding.UTF8.GetBytes(MakeSurface(bytes, tid * 1_000_000 + i)),
-                        WiktionaryDecomposer.Source, out _));
+                        BenchmarkSource, out _));
                 }
             }));
         }
