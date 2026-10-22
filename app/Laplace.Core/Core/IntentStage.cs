@@ -23,20 +23,18 @@ public sealed partial class IntentStage : SafeHandle
 
     protected override bool ReleaseHandle()
     {
-        lock (LaplaceCoreGate.Native)
-            NativeInterop.IntentStageFree(handle);
+        // A stage owns its buffers and has one caller. Freeing it touches no
+        // shared native cache and must not block independent recipe streams.
+        NativeInterop.IntentStageFree(handle);
         return true;
     }
 
     public static IntentStage New(int rowCapacityHint)
     {
         if (rowCapacityHint < 0) throw new ArgumentOutOfRangeException(nameof(rowCapacityHint));
-        lock (LaplaceCoreGate.Native)
-        {
-            IntPtr h = NativeInterop.IntentStageNew((nuint)rowCapacityHint);
-            if (h == IntPtr.Zero) throw new OutOfMemoryException("intent_stage_new returned NULL");
-            return new IntentStage(h);
-        }
+        IntPtr h = NativeInterop.IntentStageNew((nuint)rowCapacityHint);
+        if (h == IntPtr.Zero) throw new OutOfMemoryException("intent_stage_new returned NULL");
+        return new IntentStage(h);
     }
 
     public int EntityCount
@@ -71,24 +69,30 @@ public sealed partial class IntentStage : SafeHandle
     public static unsafe Hash128 SemanticDigestBatch(IReadOnlyList<IntentStage> stages)
     {
         ArgumentNullException.ThrowIfNull(stages);
-        lock (LaplaceCoreGate.Native)
+        var handles = new IntPtr[stages.Count];
+        var owners = new (IntentStage Stage, bool Retained)[stages.Count];
+        try
         {
-            var handles = new IntPtr[stages.Count];
             for (int i = 0; i < handles.Length; i++)
             {
                 IntentStage stage = stages[i]
                     ?? throw new ArgumentException("stage must not be null", nameof(stages));
-                stage.ThrowIfDisposed();
+                owners[i].Stage = stage;
+                stage.DangerousAddRef(ref owners[i].Retained);
                 handles[i] = stage.handle;
             }
             Hash128 result = default;
             fixed (IntPtr* pointers = handles)
             {
                 int rc = NativeInterop.IntentStageSemanticDigestBatch(pointers, (nuint)handles.Length, &result);
-                GC.KeepAlive(stages);
                 if (rc != 0) throw new InvalidOperationException("native intent semantic digest failed");
             }
             return result;
+        }
+        finally
+        {
+            foreach (var owner in owners)
+                if (owner.Retained) owner.Stage.DangerousRelease();
         }
     }
 
@@ -548,9 +552,11 @@ public sealed partial class IntentStage : SafeHandle
         if (partCount == 1) return new[] { this };
 
         var raw = new IntPtr[partCount];
-        unsafe
+        bool retained = false;
+        try
         {
-            lock (LaplaceCoreGate.Native)
+            DangerousAddRef(ref retained);
+            unsafe
             {
                 fixed (IntPtr* p = raw)
                 {
@@ -559,6 +565,7 @@ public sealed partial class IntentStage : SafeHandle
                 }
             }
         }
+        finally { if (retained) DangerousRelease(); }
         var parts = new IntentStage[partCount];
         for (int i = 0; i < partCount; i++)
         {

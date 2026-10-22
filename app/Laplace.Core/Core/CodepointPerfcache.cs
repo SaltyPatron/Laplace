@@ -6,6 +6,7 @@ public static unsafe class CodepointPerfcache
     private static volatile bool _ready;
     private static CodepointRecord* _recs;
     private static int _count;
+    private static int _recipeStreams;
 
     public static void Load(string path)
     {
@@ -51,10 +52,33 @@ public static unsafe class CodepointPerfcache
     {
         lock (LaplaceCoreGate.Native)
         {
+            if (_recipeStreams != 0)
+                throw new InvalidOperationException(
+                    $"Cannot unload the codepoint perf-cache while {_recipeStreams} native recipe stream(s) hold it.");
             NativeInterop.CodepointTableUnload();
             _recs = null;
             _count = 0;
             _ready = false;
+        }
+    }
+
+    // Creation and final release are the only shared synchronization boundaries
+    // for native recipe streams. Their parser/tuple state has one local owner.
+    internal static void RetainRecipeStream()
+    {
+        lock (LaplaceCoreGate.Native)
+        {
+            LoadDefault();
+            _recipeStreams = checked(_recipeStreams + 1);
+        }
+    }
+
+    internal static void ReleaseRecipeStream()
+    {
+        lock (LaplaceCoreGate.Native)
+        {
+            System.Diagnostics.Debug.Assert(_recipeStreams > 0);
+            --_recipeStreams;
         }
     }
 
