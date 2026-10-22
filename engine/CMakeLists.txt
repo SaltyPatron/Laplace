@@ -291,9 +291,9 @@ foreach(_laplace_engine_target IN ITEMS
         # selected engine ISA after it so intrinsic-based kernels retain their ISA.
         if(WIN32)
             if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-                target_compile_options(${_laplace_engine_target} PRIVATE /arch:AVX512)
+                target_compile_options(${_laplace_engine_target} PRIVATE /clang:-march=sapphirerapids)
             else()
-                target_compile_options(${_laplace_engine_target} PRIVATE /arch:AVX2)
+                target_compile_options(${_laplace_engine_target} PRIVATE /clang:-march=haswell)
             endif()
         elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
             target_compile_options(${_laplace_engine_target} PRIVATE -march=sapphirerapids)
