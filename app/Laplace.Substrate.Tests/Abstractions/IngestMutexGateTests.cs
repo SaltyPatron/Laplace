@@ -96,7 +96,6 @@ public sealed class IngestMutexGateTests
         // deploys can tell a live run from a corpse (lock gone = holder died).
         // Different lock family, keyed per run, never contends with
         // AdvisoryTxLock's apply mutex and never blocks ingest.
-        "app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestObservability.cs",
     };
 
     /// <summary>
@@ -128,7 +127,7 @@ public sealed class IngestMutexGateTests
     // so reconcilers/deploys can tell a live run from a corpse. Different
     // lock family, never contends with the apply mutex. Visible raise; a
     // fourth database-level lock is still a named failure.
-    private const int DatabaseMutexCeiling = 3;
+    private const int DatabaseMutexCeiling = 1;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
     private const int EvidenceVerifyCeiling = 0;
@@ -324,7 +323,9 @@ public sealed class IngestMutexGateTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var home = Path.Combine(repoRoot, DatabaseMutexSanctionedHome.Replace('/', Path.DirectorySeparatorChar));
         Assert.True(File.Exists(home), $"{DatabaseMutexSanctionedHome} is the shared named-lock owner; it is missing.");
-        Assert.Matches(DatabaseAdvisoryLock, Strip(Path.GetFileName(home), File.ReadAllText(home)));
+        Assert.Contains("\"advisory.named_transaction\"", File.ReadAllText(home), StringComparison.Ordinal);
+        Assert.Matches(DatabaseAdvisoryLock, SqlCatalog.Get("advisory.named_transaction").Text);
+        Assert.Equal("SELECT pg_advisory_lock($1,hashtext($2))", SqlCatalog.Get("journal.liveness_lock").Text);
     }
 
     [Fact]
@@ -440,13 +441,14 @@ public sealed class IngestMutexGateTests
         Assert.True(named > apply, "named-lock acquisition must follow the nonlocking apply route");
         var body = source[apply..named];
         Assert.Contains("conn.BeginTransactionAsync(ct)", body);
-        Assert.Contains("guc.Transaction = tx;", body);
-        Assert.Contains("SET LOCAL lock_timeout = 0", body);
+        Assert.Contains("ConfigureAsync(tx, \"0\")", body);
+        Assert.Contains("set_config('lock_timeout',$2,true)", SqlCatalog.Get("write.begin_settings").Text, StringComparison.Ordinal);
         Assert.Contains("return tx;", body);
         // Rollback/disposal failure behavior is exercised against PostgreSQL in
         // NativeSqlCatalogPreparationTests; this gate owns only lock placement.
         Assert.DoesNotMatch(DatabaseAdvisoryLock, body);
         Assert.DoesNotContain("HoldMeasurementLaneAsync(", body);
-        Assert.Matches(DatabaseAdvisoryLock, source[named..]);
+        Assert.Contains("\"advisory.named_transaction\"", source[named..], StringComparison.Ordinal);
+        Assert.Matches(DatabaseAdvisoryLock, SqlCatalog.Get("advisory.named_transaction").Text);
     }
 }

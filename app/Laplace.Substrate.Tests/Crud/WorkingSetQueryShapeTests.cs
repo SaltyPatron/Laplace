@@ -46,10 +46,10 @@ public sealed class WorkingSetQueryShapeTests
             "SELECT t FROM unnest($1::smallint[]) AS t",
             text,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "SELECT 1 FROM laplace.entities e WHERE e.tier = t.tier LIMIT t.need",
-            text,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("InvertEntityTiersBySmallerSideAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("e.tier = ANY($1)", text, StringComparison.Ordinal);
+        Assert.Contains("\"write.entities_stored_bitmap\"", text, StringComparison.Ordinal);
+        Assert.Equal("SELECT laplace.entities_stored_bitmap($1)", SqlCatalog.Get("write.entities_stored_bitmap").Text);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class WorkingSetQueryShapeTests
         Assert.Equal("connection", arguments[0].Expression.ToString());
         Assert.Equal("laplace_apply_batch",
             Assert.IsType<LiteralExpressionSyntax>(arguments[1].Expression).Token.ValueText);
-        Assert.Equal("TransactionGucs(Durability)", arguments[2].Expression.ToString());
+        Assert.Equal("Durability", arguments[2].Expression.ToString());
 
         var applyPrepared = Assert.Single(calls, call =>
             call.Expression.ToString() == "ApplyPreparedStagesCoreAsync");

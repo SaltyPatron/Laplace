@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.SubstrateCRUD;
 using Npgsql;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -21,8 +22,12 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await using var connection = await _source.OpenConnectionAsync();
         var log = new CleanupLog();
         var failure = await Assert.ThrowsAnyAsync<NpgsqlException>(() => AdvisoryTxLock.BeginWithLockAsync(
-            connection, "laplace_apply_batch", "SELECT pg_terminate_backend(pg_backend_pid());", log,
-            CancellationToken.None));
+            connection, "laplace_apply_batch", PostgresWriteDurability.Synchronous, log,
+            CancellationToken.None, async (transaction, _, token) =>
+            {
+                await using var command = new NpgsqlCommand("SELECT pg_terminate_backend(pg_backend_pid())", connection, transaction);
+                await command.ExecuteNonQueryAsync(token);
+            }));
         Assert.NotNull(failure);
         Assert.Contains(log.Errors, x => x.Exception is not null
             && x.Message.Contains("rollback failed", StringComparison.Ordinal));
@@ -34,8 +39,12 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await using var connection = await _source.OpenConnectionAsync();
         var log = new CleanupLog();
         var failure = await Assert.ThrowsAsync<PostgresException>(() => AdvisoryTxLock.BeginWithLockAsync(
-            connection, "laplace_apply_batch", "SET LOCAL work_mem='invalid-setting';", log,
-            CancellationToken.None));
+            connection, "laplace_apply_batch", PostgresWriteDurability.Synchronous, log,
+            CancellationToken.None, async (transaction, _, token) =>
+            {
+                await using var command = new NpgsqlCommand("SET LOCAL work_mem='invalid-setting'", connection, transaction);
+                await command.ExecuteNonQueryAsync(token);
+            }));
         Assert.Equal(PostgresErrorCodes.InvalidParameterValue, failure.SqlState);
         Assert.Empty(log.Errors);
         await using var probe = connection.CreateCommand();

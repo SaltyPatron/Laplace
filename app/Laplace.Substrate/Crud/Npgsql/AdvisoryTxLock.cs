@@ -25,28 +25,24 @@ internal static class AdvisoryTxLock
     internal static async Task HoldMeasurementLaneAsync(
         NpgsqlConnection conn, bool exclusive, Action<string>? onWaiting, CancellationToken ct)
     {
-        var fn = exclusive ? "pg_advisory_lock" : "pg_advisory_lock_shared";
+        var operation = exclusive ? "advisory.lane_exclusive" : "advisory.lane_shared";
         for (int attempt = 1; ; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                await using (var win = conn.CreateCommand())
+                await using (var win = NpgsqlCatalog.Command(conn, null, "advisory.timeout_session", LockTimeoutWindow))
                 {
-                    win.CommandText = $"SET lock_timeout = '{LockTimeoutWindow}'";
                     await win.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
-                await using (var take = conn.CreateCommand())
+                await using (var take = NpgsqlCatalog.Command(conn, null, operation,
+                    MeasurementLaneLockClass, MeasurementLaneLockKey))
                 {
                     take.CommandTimeout = 0;
-                    take.CommandText = $"SELECT {fn}($1, $2)";
-                    take.Parameters.AddWithValue(MeasurementLaneLockClass);
-                    take.Parameters.AddWithValue(MeasurementLaneLockKey);
                     await take.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
-                await using (var clear = conn.CreateCommand())
+                await using (var clear = NpgsqlCatalog.Command(conn, null, "advisory.timeout_session", "0"))
                 {
-                    clear.CommandText = "SET lock_timeout = 0";
                     await clear.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
                 return;
@@ -64,15 +60,8 @@ internal static class AdvisoryTxLock
         var head = $"measurement lane still held after ~{WindowSeconds * attempt}s (attempt {attempt})";
         try
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "SELECT l.pid, l.mode, coalesce(a.state,'?'), left(coalesce(a.query,''),120) "
-                + "FROM pg_locks l LEFT JOIN pg_stat_activity a USING (pid) "
-                + "WHERE l.locktype = 'advisory' AND l.granted "
-                + "  AND l.database = (SELECT d.oid FROM pg_database d WHERE d.datname = current_database()) "
-                + $"  AND l.classid = {MeasurementLaneLockClass}::oid "
-                + $"  AND l.objid = {MeasurementLaneLockKey}::oid AND l.objsubid = 2 "
-                + "ORDER BY l.pid";
+            await using var cmd = NpgsqlCatalog.Command(conn, null, "advisory.lane_holders",
+                MeasurementLaneLockClass, MeasurementLaneLockKey);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             var parts = new List<string>();
             while (await r.ReadAsync(ct).ConfigureAwait(false))
@@ -93,17 +82,31 @@ internal static class AdvisoryTxLock
     /// working sets persist in parallel.
     /// </summary>
     internal static async Task<NpgsqlTransaction> BeginWithLockAsync(
-        NpgsqlConnection conn, string lockName, string setLocalGucs, ILogger log, CancellationToken ct)
+        NpgsqlConnection conn, string lockName, PostgresWriteDurability durability, ILogger log, CancellationToken ct,
+        Func<NpgsqlTransaction, string, CancellationToken, Task>? configure = null)
     {
+        string commitMode = durability switch
+        {
+            PostgresWriteDurability.Asynchronous => "off",
+            PostgresWriteDurability.Synchronous => "on",
+            _ => throw new ArgumentOutOfRangeException(nameof(durability)),
+        };
+        async Task ConfigureAsync(NpgsqlTransaction transaction, string timeout)
+        {
+            if (configure is not null)
+            {
+                await configure(transaction, timeout, ct).ConfigureAwait(false);
+                return;
+            }
+            await using var command = NpgsqlCatalog.Command(conn, transaction, "write.begin_settings", commitMode, timeout);
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
         if (string.Equals(lockName, "laplace_apply_batch", StringComparison.Ordinal))
         {
             var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                await using var guc = conn.CreateCommand();
-                guc.Transaction = tx;
-                guc.CommandText = $"{setLocalGucs}SET LOCAL lock_timeout = 0";
-                await guc.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                await ConfigureAsync(tx, "0").ConfigureAwait(false);
                 return tx;
             }
             catch
@@ -118,24 +121,14 @@ internal static class AdvisoryTxLock
             var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                await using (var guc = conn.CreateCommand())
+                await ConfigureAsync(tx, LockTimeoutWindow).ConfigureAwait(false);
+                await using (var take = NpgsqlCatalog.Command(conn, tx, "advisory.named_transaction", lockName))
                 {
-                    guc.Transaction = tx;
-                    guc.CommandText = $"{setLocalGucs}SET LOCAL lock_timeout = '{LockTimeoutWindow}'";
-                    await guc.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-                await using (var take = conn.CreateCommand())
-                {
-                    take.Transaction = tx;
                     take.CommandTimeout = 0;
-                    take.CommandText = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
-                    take.Parameters.AddWithValue(lockName);
                     await take.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
-                await using (var clear = conn.CreateCommand())
+                await using (var clear = NpgsqlCatalog.Command(conn, tx, "advisory.timeout_local", "0"))
                 {
-                    clear.Transaction = tx;
-                    clear.CommandText = "SET LOCAL lock_timeout = 0";
                     await clear.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
                 return tx;
@@ -173,18 +166,7 @@ internal static class AdvisoryTxLock
     {
         try
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "WITH k AS (SELECT hashtextextended($1, 0) AS key) "
-                + "SELECT a.pid, coalesce(a.state, '?'), coalesce(now() - a.query_start, interval '0'), "
-                + "       left(coalesce(a.query, ''), 200) "
-                + "FROM pg_locks l "
-                + "JOIN k ON l.locktype = 'advisory' AND l.granted AND l.objsubid = 1 "
-                + "      AND l.classid = ((k.key >> 32) & 4294967295)::oid "
-                + "      AND l.objid   = (k.key & 4294967295)::oid "
-                + "JOIN pg_stat_activity a USING (pid) "
-                + "WHERE a.pid <> pg_backend_pid()";
-            cmd.Parameters.AddWithValue(lockName);
+            await using var cmd = NpgsqlCatalog.Command(conn, null, "advisory.named_holders", lockName);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             bool any = false;
             while (await r.ReadAsync(ct).ConfigureAwait(false))
