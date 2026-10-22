@@ -43,4 +43,36 @@ public sealed class NativeRecipeExecutionTests
             Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
         }
     }
+    [Theory]
+    [InlineData("line-pairs", true)]
+    [InlineData("line-pairs-incomplete", false)]
+    public async Task NativeMultilineGrammarPreservesFragmentsAndRejectsUnpairedInput(string fixture, bool valid)
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out var repository));
+        string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
+            fixture, "LinkFormattingTest.txt");
+        var execution = NativeRecipeExecution.Configured();
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await execution.ExecuteAsync(new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path],
+            ConnectionInfo: "host=127.0.0.1 port=1 dbname=unavailable connect_timeout=1", Threads: 2), output, error);
+        string stdout = Encoding.UTF8.GetString(output.ToArray());
+        string stderr = Encoding.UTF8.GetString(error.ToArray());
+        if (!valid)
+        {
+            Assert.NotEqual(0, code);
+            Assert.Contains("does not parse completely", stderr, StringComparison.Ordinal);
+            return;
+        }
+        Assert.True(code == 0, stderr + stdout);
+        var claims = stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
+            .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(new[]
+        {
+            "claim\t0\t1\thttps://example.com/%CE%B1\tnormalizes to\thttps://example.com/α",
+            "claim\t0\t1\thttps://example.com#%CE%B1\tnormalizes to\thttps://example.com#α",
+        }, claims);
+        Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
+    }
+
 }
