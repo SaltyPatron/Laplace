@@ -160,10 +160,10 @@ public sealed class ChessAnalyzerTests
     {
         CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/think");
-        var transition = Hash128.OfCanonical("test/transition");
-        var line = Hash128.OfCanonical("test/line");
-        var player = Hash128.OfCanonical("test/player");
-        var playing = Hash128.OfCanonical("test/playing");
+        var transition = Hash128.Text("test/transition");
+        var line = Hash128.Text("test/line");
+        var player = Hash128.Text("test/player");
+        var playing = Hash128.Text("test/playing");
         ChessGraph.AppendThinkPace(
             b, transition, line, player, playing, "rushed", 0.7, ChessVocabulary.AnalysisSourceId);
         var change = b.Build();

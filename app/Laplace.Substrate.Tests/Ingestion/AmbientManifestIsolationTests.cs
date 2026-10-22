@@ -109,7 +109,7 @@ public sealed class AmbientManifestIsolationTests
 
     private class ManifestAwareDecomposer : IDecomposer, IIngestInventoryProvider
     {
-        private static readonly Hash128 Source = Hash128.OfCanonical("test/ambient-manifest/source");
+        private static readonly Hash128 Source = Hash128.Text("test/ambient-manifest/source");
 
         public Hash128 SourceId => Source;
         public string SourceName => "AmbientManifestTest";
@@ -128,7 +128,7 @@ public sealed class AmbientManifestIsolationTests
             {
                 ct.ThrowIfCancellationRequested();
                 string name = Path.GetFileName(path);
-                Hash128 id = Hash128.OfCanonical($"test/ambient-manifest/{name}");
+                Hash128 id = Hash128.Text($"test/ambient-manifest/{name}");
                 yield return new SubstrateChangeBuilder(Source, $"ambient/{name}")
                     .AddEntity(id, EntityTier.Word, EntityTypeRegistry.SourceReference)
                     .SetInputUnitsConsumed(1)

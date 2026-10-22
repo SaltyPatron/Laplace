@@ -96,7 +96,7 @@ public class RealModelManifestTests
         var records = LlamaTokenizerParser.Parse(Path.Combine(dir, "tokenizer.json"));
         Assert.Equal(32_000, records.Count);
 
-        Hash128 source = Hash128.OfCanonical("test/model/tinyllama-tokenizer-admission");
+        Hash128 source = Hash128.Text("test/model/tinyllama-tokenizer-admission");
         var builder = new SubstrateChangeBuilder(
             source, "tokenizer/vocab/tinyllama", entityCapacity: 200_000,
             physicalityCapacity: 200_000);
@@ -127,7 +127,7 @@ public class RealModelManifestTests
             CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
 
         var records = LlamaTokenizerParser.Parse(Path.Combine(dir, "tokenizer.json"));
-        Hash128 witness = Hash128.OfCanonical("test/model/tinyllama-vocabulary");
+        Hash128 witness = Hash128.Text("test/model/tinyllama-vocabulary");
         var builder = new SubstrateChangeBuilder(witness, "tokenizer/vocabulary/tinyllama");
         Hash128 vocabulary = LlamaTokenizerParser.StageVocabulary(builder, records, witness)
             ?? throw new InvalidOperationException("TinyLlama ids are dense");

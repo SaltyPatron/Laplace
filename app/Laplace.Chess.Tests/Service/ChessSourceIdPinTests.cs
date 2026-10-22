@@ -4,21 +4,20 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Tests.Service;
 
-// Golden-id pins for the chess source ids, minted from the DB side (realize.canonical_id(),
-// the native blake3 the extension binds). Refactors of vocabulary bootstrap / id minting must
-// never change these — a failure here means substrate identity drifted, not a stale test.
+// Source metadata-label IDs verified independently with Engine `laplace text`
+// over canonical tier0.bin. Actual corpus witness trunks are a separate contract.
 public class ChessSourceIdPinTests
 {
     [Theory]
-    [InlineData("a25f8494fbd60682946b94277cd4714b", nameof(ChessVocabulary.SourceId))]
-    [InlineData("28b6b80ba59c0e67c750d7eaee070504", nameof(ChessVocabulary.PgnSourceId))]
-    [InlineData("3fcfc3337aa4ae3ff95d3ba97b8c6301", nameof(ChessVocabulary.EvalPgnSourceId))]
-    [InlineData("fe7d0936a34159bfa73ed41dea73eaf5", nameof(ChessVocabulary.ReviewSourceId))]
-    [InlineData("097292469424727720ebca0623036381", nameof(ChessVocabulary.UserPromptSourceId))]
-    [InlineData("460f51c7ca893d734470df6e941f9bf7", nameof(ChessVocabulary.OpeningsSourceId))]
-    [InlineData("2b41e81a3b5132072ad4b5c14bb3b9b4", nameof(ChessVocabulary.BookSourceId))]
-    [InlineData("ae0ca709668a12ae36e9a3183da265fd", nameof(ChessVocabulary.AnalysisSourceId))]
-    public void ChessSourceIds_Match_SubstrateGolden(string hex, string fieldName)
+    [InlineData("4e664966bc368ac667b9cf4f1f1c1507", nameof(ChessVocabulary.SourceId))]
+    [InlineData("e1d0736ea122d2b06be32a8e08d02825", nameof(ChessVocabulary.PgnSourceId))]
+    [InlineData("ef687a7357d809531a9315ab26711a4c", nameof(ChessVocabulary.EvalPgnSourceId))]
+    [InlineData("49498a084de4e845ec64a328f43e1559", nameof(ChessVocabulary.ReviewSourceId))]
+    [InlineData("eb9427ca70b647946d70cf866bab3f80", nameof(ChessVocabulary.UserPromptSourceId))]
+    [InlineData("2bf6e8539cbeb7c281ae2a44d2222695", nameof(ChessVocabulary.OpeningsSourceId))]
+    [InlineData("edfbd3ff22c93aa141dbbf819e6bc0c1", nameof(ChessVocabulary.BookSourceId))]
+    [InlineData("75c44b4f7ebbc07f4a2d7f0732981670", nameof(ChessVocabulary.AnalysisSourceId))]
+    public void ChessSourceIds_Match_NativeText(string hex, string fieldName)
     {
         var field = typeof(ChessVocabulary).GetField(fieldName)
             ?? throw new InvalidOperationException($"{fieldName} not found on ChessVocabulary");

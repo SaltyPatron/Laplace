@@ -18,8 +18,8 @@ public sealed class ForwardRealizationDbTests(LocalPgFixture pg)
         string nonce = Guid.NewGuid().ToString("N");
         string unit = $"forward-realize/{nonce}";
         string surfaceText = $"forward-realize-surface-{nonce}";
-        Hash128 source = Hash128.OfCanonical($"{unit}/source");
-        Hash128 concept = Hash128.OfCanonical($"{unit}/frame");
+        Hash128 source = Hash128.Text($"{unit}/source");
+        Hash128 concept = Hash128.Text($"{unit}/frame");
 
         using var builder = new SubstrateChangeBuilder(source, unit)
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);

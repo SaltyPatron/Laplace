@@ -12,8 +12,8 @@ public sealed class RoleAnchorTests
     [Fact]
     public void Identity_IsParentScoped_ContentExact_AndDomainSeparated()
     {
-        Hash128 parentA = Hash128.OfCanonical("fixture/parent/a");
-        Hash128 parentB = Hash128.OfCanonical("fixture/parent/b");
+        Hash128 parentA = Hash128.Text("fixture/parent/a");
+        Hash128 parentB = Hash128.Text("fixture/parent/b");
 
         Hash128 agentA = RoleAnchor.Id(RoleIdentityKind.VerbNet, parentA, "Agent")!.Value;
         Hash128 agentASpaced = RoleAnchor.Id(RoleIdentityKind.VerbNet, parentA, " Agent ")!.Value;
@@ -30,8 +30,8 @@ public sealed class RoleAnchorTests
     [Fact]
     public void Emit_DeclaresOneGovernedRole_WithStructuralPhysicality()
     {
-        Hash128 source = Hash128.OfCanonical("fixture/source");
-        Hash128 parent = Hash128.OfCanonical("fixture/roleset");
+        Hash128 source = Hash128.Text("fixture/source");
+        Hash128 parent = Hash128.Text("fixture/roleset");
         var builder = new SubstrateChangeBuilder(source, "fixture", null);
 
         Hash128 role = RoleAnchor.Emit(

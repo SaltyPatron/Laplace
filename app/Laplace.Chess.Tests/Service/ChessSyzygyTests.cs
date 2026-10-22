@@ -356,8 +356,8 @@ public sealed class ChessSyzygyTests
     {
         var chunks = new[]
         {
-            new SyzygyChunkRef(Hash128.OfCanonical("chunk/a"), [1d, 0d, 0d, 0d]),
-            new SyzygyChunkRef(Hash128.OfCanonical("chunk/b"), [0d, 1d, 0d, 0d]),
+            new SyzygyChunkRef(Hash128.Text("chunk/a"), [1d, 0d, 0d, 0d]),
+            new SyzygyChunkRef(Hash128.Text("chunk/b"), [0d, 1d, 0d, 0d]),
         };
         var b = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/syzygy-root");
         ChessSyzygy.DeriveMaterialRoot(b, chunks, ChessSyzygy.MaterialId("KQvK"));
@@ -429,14 +429,12 @@ public sealed class ChessSyzygyTests
     {
         var priorEnv = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
         var priorRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA");
-        var priorData = Environment.GetEnvironmentVariable("LAPLACE_DATA");
         var priorPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
         string root = Path.Combine(Path.GetTempPath(), $"syzygy-root-{Guid.NewGuid():N}");
         string tables = Path.Combine(root, "Games", "Chess", "syzygy", "3-4-5");
         Directory.CreateDirectory(tables);
         Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", null);
         Environment.SetEnvironmentVariable("LAPLACE_DATA", root);
-        Environment.SetEnvironmentVariable("LAPLACE_DATA", null);
         Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
         try
         {
@@ -452,7 +450,6 @@ public sealed class ChessSyzygyTests
         {
             Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", priorEnv);
             Environment.SetEnvironmentVariable("LAPLACE_DATA", priorRoot);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA", priorData);
             Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", priorPrefix);
             try { Directory.Delete(root, recursive: true); } catch (IOException) { }
         }

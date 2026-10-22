@@ -10,12 +10,12 @@ namespace Laplace.Substrate.Tests.Crud;
 /// </summary>
 public class StageCollectionTests
 {
-    private static readonly Hash128 Src = Hash128.OfCanonical("StageCollectionTests");
-    private static readonly Hash128 Type = Hash128.OfCanonical("Collection");
+    private static readonly Hash128 Src = Hash128.Text("StageCollectionTests");
+    private static readonly Hash128 Type = Hash128.Text("Collection");
 
     private static SubstrateChangeBuilder NewBuilder() => new(Src, "test-unit");
 
-    private static Hash128 Member(string s) => Hash128.OfCanonical(s);
+    private static Hash128 Member(string s) => Hash128.Text(s);
 
     // Distinct, non-origin placements. The values do not matter; that they are per-member and
     // never zero does — the origin is not a placement and would forge a centroid.

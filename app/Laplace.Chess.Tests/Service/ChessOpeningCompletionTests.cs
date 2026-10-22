@@ -8,7 +8,7 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessOpeningCompletionTests
 {
-    private static Hash128 Id(string name) => Hash128.OfCanonical("test/opening-generation/" + name);
+    private static Hash128 Id(string name) => Hash128.Text("test/opening-generation/" + name);
 
     [Fact]
     public void CatalogGenerationBindsSelectedMapAndOwnsItsSnapshot()

@@ -34,13 +34,13 @@ internal static class WiktionarySenseAnchor
     }
 
     private static readonly Hash128 Schema =
-        Hash128.OfCanonical("wiktionary/sense/structure/v2");
+        Hash128.Text("wiktionary/sense/structure/v2");
     private static readonly Hash128 SourceIdMode =
-        Hash128.OfCanonical("wiktionary/sense/mode/source-id/v1");
+        Hash128.Text("wiktionary/sense/mode/source-id/v1");
     private static readonly Hash128 PayloadMode =
-        Hash128.OfCanonical("wiktionary/sense/mode/field-payload/v1");
+        Hash128.Text("wiktionary/sense/mode/field-payload/v1");
     private static readonly Hash128 None =
-        Hash128.OfCanonical("wiktionary/sense/none/v1");
+        Hash128.Text("wiktionary/sense/none/v1");
 
     public static Hash128? Id(
         Hash128 wordId, Hash128? languageId, Hash128? posId, WiktionaryEntry.Sense sense)
@@ -286,7 +286,7 @@ internal static class WiktionarySenseAnchor
     }
 
     private static Hash128 Marker(MemberKind kind) =>
-        Hash128.OfCanonical($"wiktionary/sense/member-kind/{(ushort)kind}/v1");
+        Hash128.Text($"wiktionary/sense/member-kind/{(ushort)kind}/v1");
 
     private static string? Normalize(string? raw)
     {

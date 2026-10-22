@@ -117,7 +117,7 @@ internal static class ProvenanceExtractor
                 continue;
             sources.Add(new SourceProvenance
             {
-                SourceId = Hex(Hash128.OfCanonical(domain)),
+                SourceId = Hex(Hash128.Text(domain)),
                 Domain = domain,
                 Kind = "lexical-resource",
                 Label = label,
@@ -238,7 +238,7 @@ internal static class ProvenanceExtractor
             descs.Add(($"substrate/entity/{modelName}/circuit/L{l}.COMPLETES_TO/v1", l, null, "COMPLETES_TO"));
         }
 
-        var ids = descs.Select(d => Hash128.OfCanonical(d.Canonical)).ToArray();
+        var ids = descs.Select(d => Hash128.Text(d.Canonical)).ToArray();
         var idBytes = ids.Select(h => h.ToBytes()).ToArray();
 
 

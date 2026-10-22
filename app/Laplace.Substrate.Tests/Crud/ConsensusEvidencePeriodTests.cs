@@ -15,7 +15,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
 {
     private const long Scale = 1_000_000_000;
-    private static Hash128 Id(string value) => Hash128.OfCanonical("test/evidence-period/" + value);
+    private static Hash128 Id(string value) => Hash128.Text("test/evidence-period/" + value);
     private sealed record Witness(int Index, long Games, long Score, long Opponent = 1_756_000_000_000,
         long Rd = 62_000_000_000, bool Replayable = true);
     private sealed record Cell(Hash128 Subject, Hash128 Type, Hash128? Object, Hash128 Source);

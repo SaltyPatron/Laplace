@@ -31,8 +31,8 @@ public sealed class ContentAddressingLawTests
     [Fact]
     public unsafe void SameChildren_ComposeToTheSameId_AtEveryTier()
     {
-        Hash128 a = Hash128.OfCanonical("law/content-addressing/a");
-        Hash128 b = Hash128.OfCanonical("law/content-addressing/b");
+        Hash128 a = Hash128.Text("law/content-addressing/a");
+        Hash128 b = Hash128.Text("law/content-addressing/b");
 
         Hash128 atWord = Compose(2, a, b);
         Hash128 atSentence = Compose(3, a, b);
@@ -46,9 +46,9 @@ public sealed class ContentAddressingLawTests
     public unsafe void DifferentChildren_ComposeToDifferentIds()
     {
         // Different children give different ids, so a constant composer cannot pass.
-        Hash128 a = Hash128.OfCanonical("law/content-addressing/a");
-        Hash128 b = Hash128.OfCanonical("law/content-addressing/b");
-        Hash128 c = Hash128.OfCanonical("law/content-addressing/c");
+        Hash128 a = Hash128.Text("law/content-addressing/a");
+        Hash128 b = Hash128.Text("law/content-addressing/b");
+        Hash128 c = Hash128.Text("law/content-addressing/c");
 
         Assert.NotEqual(Compose(3, a, b), Compose(3, a, c));
 

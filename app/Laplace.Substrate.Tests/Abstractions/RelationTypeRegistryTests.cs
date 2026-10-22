@@ -116,8 +116,8 @@ public class RelationTypeRegistryTests
     [Fact]
     public void Flip_AppliedToEndpoints_OnAttest()
     {
-        Hash128 animal = Hash128.OfCanonical("e/animal"), dog = Hash128.OfCanonical("e/dog");
-        var flipped = NativeAttestation.Categorical(animal, "HAS_HYPONYM", dog, Hash128.OfCanonical("src"), null, 1.0);
+        Hash128 animal = Hash128.Text("e/animal"), dog = Hash128.Text("e/dog");
+        var flipped = NativeAttestation.Categorical(animal, "HAS_HYPONYM", dog, Hash128.Text("src"), null, 1.0);
         Assert.Equal(animal, flipped.SubjectId);
         Assert.Equal(dog, flipped.ObjectId);
         Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_HYPONYM"), flipped.TypeId);
@@ -126,8 +126,8 @@ public class RelationTypeRegistryTests
     [Fact]
     public void Symmetric_EndpointOrderCanonicalized_OneRow()
     {
-        Hash128 a = Hash128.OfCanonical("e/alpha"), b = Hash128.OfCanonical("e/beta");
-        Hash128 src = Hash128.OfCanonical("src");
+        Hash128 a = Hash128.Text("e/alpha"), b = Hash128.Text("e/beta");
+        Hash128 src = Hash128.Text("src");
         var ab = NativeAttestation.Categorical(a, "IS_SYNONYM_OF", b, src, null, 1.0);
         var ba = NativeAttestation.Categorical(b, "IS_SYNONYM_OF", a, src, null, 1.0);
         Assert.Equal(ab.Id, ba.Id);
@@ -138,8 +138,8 @@ public class RelationTypeRegistryTests
     [Fact]
     public void Asymmetric_OrderPreserved()
     {
-        Hash128 dog = Hash128.OfCanonical("e/dog"), animal = Hash128.OfCanonical("e/animal");
-        Hash128 src = Hash128.OfCanonical("src");
+        Hash128 dog = Hash128.Text("e/dog"), animal = Hash128.Text("e/animal");
+        Hash128 src = Hash128.Text("src");
         var fwd = NativeAttestation.Categorical(dog, "IS_A", animal, src, null, 1.0);
         var rev = NativeAttestation.Categorical(animal, "IS_A", dog, src, null, 1.0);
         Assert.NotEqual(fwd.Id, rev.Id);

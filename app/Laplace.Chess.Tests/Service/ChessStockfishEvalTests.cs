@@ -451,8 +451,8 @@ public sealed class ChessStockfishEvalTests
     // This handler consumes already witnessed moves; PGN parsing and deposition have
     // their own tests. Keep the acquisition controls at that actual input boundary.
     private static ChessWitnessedGame WitnessedEvalFixture(IReadOnlyList<string> moves)
-        => new(Hash128.OfCanonical("test/evaluator/line/" + string.Join(' ', moves)),
-            Hash128.OfCanonical("test/evaluator/playing/" + string.Join(' ', moves)),
+        => new(Hash128.Text("test/evaluator/line/" + string.Join(' ', moves)),
+            Hash128.Text("test/evaluator/playing/" + string.Join(' ', moves)),
             moves, GameOutcome.WonBy(0), null, null, null, null, null, null);
 
     private sealed class TrackedEvaluator(Func<string, int?> evaluate) : IPositionEvaluator, IDisposable
@@ -488,7 +488,7 @@ public sealed class ChessStockfishEvalTests
             if (missingPosition.HasValue)
             {
                 MissingFen = seed.Fens[missingPosition.Value];
-                Assert.True(memo.TryRemove(Hash128.OfCanonical(Recipe.InputKey(MissingFen)), out _));
+                Assert.True(memo.TryRemove(Hash128.Text(Recipe.InputKey(MissingFen)), out _));
             }
             StockfishEvalCache.Save(_path, Recipe, memo);
             Decomposer = new(evaluatorFactory: factory, evalCachePath: _path, evaluatorRecipe: Recipe);
@@ -499,7 +499,7 @@ public sealed class ChessStockfishEvalTests
             var memo = StockfishEvalCache.Load(_path, Recipe);
             Assert.Equal(7, memo.Count);
             if (MissingFen is not null)
-                Assert.Equal(23, memo[Hash128.OfCanonical(Recipe.InputKey(MissingFen))]);
+                Assert.Equal(23, memo[Hash128.Text(Recipe.InputKey(MissingFen))]);
         }
 
         public async ValueTask DisposeAsync()
@@ -514,9 +514,9 @@ public sealed class ChessStockfishEvalTests
     public void EvalCache_RoundTrips_AndRejectsBudgetMismatch()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lpsf-test-{Guid.NewGuid():N}.bin");
-        var p1 = Hash128.OfCanonical("p1");
-        var p2 = Hash128.OfCanonical("p2");
-        var failed = Hash128.OfCanonical("failed");
+        var p1 = Hash128.Text("p1");
+        var p2 = Hash128.Text("p2");
+        var failed = Hash128.Text("failed");
         try
         {
             var memo = new ConcurrentDictionary<Hash128, int?>();
@@ -547,9 +547,9 @@ public sealed class ChessStockfishEvalTests
     {
         string path = Path.Combine(Path.GetTempPath(), $"lpsf-journal-{Guid.NewGuid():N}.bin");
         string journal = path + ".journal";
-        var p1 = Hash128.OfCanonical("journal/p1");
-        var p2 = Hash128.OfCanonical("journal/p2");
-        var failed = Hash128.OfCanonical("journal/failed");
+        var p1 = Hash128.Text("journal/p1");
+        var p2 = Hash128.Text("journal/p2");
+        var failed = Hash128.Text("journal/failed");
         try
         {
             StockfishEvalCache.Append(path, 1, 10, 0,
@@ -615,10 +615,10 @@ public sealed class ChessStockfishEvalTests
         string path = Path.Combine(Path.GetTempPath(), $"lpsf-tail-{Guid.NewGuid():N}.bin");
         string selected = recipeScoped ? StockfishEvalCache.RecipePath(path, Recipe) : path;
         string journal = selected + ".journal";
-        var snapshotId = Hash128.OfCanonical("tail/snapshot");
-        var firstId = Hash128.OfCanonical("tail/first-complete");
-        var nextId = Hash128.OfCanonical("tail/after-restart");
-        var laterId = Hash128.OfCanonical("tail/later-append");
+        var snapshotId = Hash128.Text("tail/snapshot");
+        var firstId = Hash128.Text("tail/first-complete");
+        var nextId = Hash128.Text("tail/after-restart");
+        var laterId = Hash128.Text("tail/later-append");
         void Save(ConcurrentDictionary<Hash128, int?> memo)
         {
             if (recipeScoped) StockfishEvalCache.Save(path, Recipe, memo);

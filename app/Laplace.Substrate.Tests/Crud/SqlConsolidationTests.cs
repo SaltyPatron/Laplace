@@ -77,11 +77,11 @@ public class SqlConsolidationTests
     //  which runs after the tables exist. Nothing to assert at CREATE EXTENSION time.)
 
     // ---- the inline fold preserves the consensus table's OID-bound dependents ----------
-    private static Hash128 H(string seed) => Hash128.OfCanonical($"sql-consolidation-test/{seed}");
+    private static Hash128 H(string seed) => Hash128.Text($"sql-consolidation-test/{seed}");
 
     private static AttestationRow Att(string subj, string obj, long games, long scoreFp, long phiFp, long unixUs)
         => new(
-            Hash128.OfCanonical($"sql-consolidation-test/att/{subj}/{obj}/{unixUs}"),
+            Hash128.Text($"sql-consolidation-test/att/{subj}/{obj}/{unixUs}"),
             H(subj), H("rel"), H(obj), H("source"), null,
             AttestationOutcome.Confirm, unixUs, games, scoreFp, phiFp);
 

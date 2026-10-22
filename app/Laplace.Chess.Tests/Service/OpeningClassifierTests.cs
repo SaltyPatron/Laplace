@@ -97,7 +97,7 @@ public sealed class OpeningClassifierTests : IDisposable
         var match = new OpeningClassifier.OpeningMatch("Queen's Gambit Declined: Semi-Slav", "D30");
         using var builder = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/opening-identity")
             .DeclareSourcePrior(Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus);
-        var subject = Hash128.OfCanonical("test/opening-line");
+        var subject = Hash128.Text("test/opening-line");
         OpeningClassifier.Attest(builder, subject, match, 0.7, ChessVocabulary.AnalysisSourceId);
         var change = builder.Build();
         try

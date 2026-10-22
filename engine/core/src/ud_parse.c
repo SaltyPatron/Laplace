@@ -10,8 +10,7 @@
 
 void laplace_ud_markers_init(laplace_ud_markers_t *out) {
     if (!out) return;
-    /* Hash128.OfCanonical hashes these exact UTF-8 bytes with BLAKE3-128.
-     * It does not apply identity-key normalization or compose a text tree. */
+    /* Private wire-protocol sentinels, not persisted entity identities. */
     hash128_blake3_str("ud/parse/schema/v1", &out->schema_v1);
     hash128_blake3_str("ud/parse/none/v1", &out->none);
     hash128_blake3_str("ud/parse/root/v1", &out->root);

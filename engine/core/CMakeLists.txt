@@ -2,6 +2,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/version.h
     include/laplace/core/math4d.h
     include/laplace/core/hash128.h
+    include/laplace/core/text_identity.h
     include/laplace/core/ud_parse.h
     include/laplace/core/ud_witness.h
     include/laplace/core/task_shape.h
@@ -68,6 +69,8 @@ set(LAPLACE_CORE_SOURCES
     src/version.c
     src/math4d.c
     src/hash128.c
+    src/text_identity.c
+    src/native_text_tree.c
     src/ud_parse.c
     src/ud_witness.c
     src/task_shape.c
@@ -226,13 +229,8 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
-# Identity is Laplace-Native's (engine/CMakeLists.txt, LAPLACE_NATIVE): its identity.c and the UTF-8 it needs, compiled
-# here with Native's own headers, which only these files and hash128.c see.
-set(LAPLACE_NATIVE_IDENTITY_SOURCES "${LAPLACE_NATIVE}/src/identity.c" "${LAPLACE_NATIVE}/src/utf8.c")
-list(APPEND LAPLACE_CORE_SOURCES ${LAPLACE_NATIVE_IDENTITY_SOURCES})
-set_source_files_properties(${LAPLACE_NATIVE_IDENTITY_SOURCES} PROPERTIES
-    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src")
-set_source_files_properties(src/hash128.c PROPERTIES INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
+set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c PROPERTIES
+    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
 
 find_package(ZLIB REQUIRED)
 find_package(LibXml2 REQUIRED)
@@ -252,12 +250,12 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
+        PRIVATE laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
 endif()
 
 
 add_subdirectory(grammars)
-target_link_libraries(laplace_core PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
+target_link_libraries(laplace_core PRIVATE laplace_text tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()

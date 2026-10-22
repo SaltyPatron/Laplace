@@ -121,7 +121,7 @@ public sealed class OpenSubtitlesDecomposerTests
             // Each alignment is the ordered pair of [language, sentence] utterances.
             // The zip name, line numbers and 512-record execution batch are packaging.
             Hash128 sequenceSchema =
-                Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
+                Hash128.Text("opensubtitles/sequence-block512/schema/v1");
             Assert.DoesNotContain(sequenceSchema, entities.Keys);
             Assert.Equal(2, entities.Values.Count(e => e.TypeId == EntityTypeRegistry.OpenSubtitlesAlignment));
             foreach (var (left, right) in new[] { (helloId!.Value, holaId!.Value), (whatId!.Value, comoId!.Value) })

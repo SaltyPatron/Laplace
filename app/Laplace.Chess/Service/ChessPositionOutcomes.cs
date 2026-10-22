@@ -29,7 +29,7 @@ public static class ChessPositionOutcomes
     private const double OutcomeWeight = 0.9;
 
     public static Hash128 MarkerId(Hash128 playingId) =>
-        Hash128.OfCanonical($"chess/position-outcomes/{playingId}/{Version}");
+        Hash128.Text($"chess/position-outcomes/{playingId}/{Version}");
 
     internal static void DepositFromParsed(SubstrateChangeBuilder b, ChessGameRecord game)
     {

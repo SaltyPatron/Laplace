@@ -133,6 +133,7 @@ int hash_composer_run(
     tier_tree_t*                   tree,
     hash_composer_atom_resolver_fn resolver,
     void*                          resolver_user_data) {
+    if (tier_tree_is_native_text(tree)) return 0;
     hash_composer_arrays_t arrays;
     if (hash_composer_arrays_init(tree, resolver, resolver_user_data, &arrays) != 0)
         return -1;
@@ -176,6 +177,7 @@ int hash_composer_run_workers(
     void*                          resolver_user_data,
     size_t                         worker_count) {
     if (worker_count == 0) return -1;
+    if (tier_tree_is_native_text(tree)) return 0;
     if (worker_count == 1) return hash_composer_run(tree, resolver, resolver_user_data);
 
 #ifdef _WIN32

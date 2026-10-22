@@ -7,19 +7,19 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// The shared text content path of the ingest recipe. Compose: UTF-8 → UAX #29 tier tree
-/// (native TextDecomposer + perfcache-backed HashComposer). Converge: trunk-to-leaf batch
-/// existence, at most <see cref="MaxContentTier"/> + 1 round trips per probe batch (tiers
-/// 4 down to 0; tier 0 answers from the perfcache before PostgreSQL). Stage: Merkle-DAG
+/// The shared text content path of the ingest recipe. Native composes UTF-8 through
+/// its UAX tree over the canonical scalar cache. Converge: trunk-to-leaf batch
+/// existence over actual recursive heights; tier 0 answers from the perf-cache.
+/// Stage: Merkle-DAG
 /// emit via <c>merkle_dedup_trunk_shortcircuit</c>. Providers hand records in; every
 /// source's text reaches the same identities through this path.
 /// </summary>
 public static class ContentTierSpine
 {
-    /// <summary>Highest document tier in the text ladder (0=codepoint … 4=document).</summary>
-    public const int MaxContentTier = 4;
+    /// <summary>Native tiers are recursive DAG height, represented by one byte.</summary>
+    public const int MaxContentTier = byte.MaxValue;
 
-    /// <summary>Maximum tier-scoped existence rounds per probe batch (inclusive 0..4).</summary>
+    /// <summary>Representable height bound; descent uses the actual tree's frontier.</summary>
     public const int MaxExistenceRounds = MaxContentTier + 1;
 
     private static readonly int RootMemoCapacity = IngestSizing.ResolveApplyIo(
@@ -37,9 +37,8 @@ public static class ContentTierSpine
     }
 
     /// <summary>
-    /// Leaf-to-trunk compose of authored source bytes. The tier law is the same; only
-    /// Unicode normalization is off, so the source round-trips byte-exactly. Parser or
-    /// grammar structure is separate evidence over this trajectory.
+    /// Leaf-to-trunk compose of authored source bytes through the shared Native tree.
+    /// Parser or grammar structure is separate evidence over this trajectory.
     /// </summary>
     public static TierTree? BuildSourceTree(ReadOnlySpan<byte> sourceUtf8)
     {
@@ -57,10 +56,10 @@ public static class ContentTierSpine
         return TextDecomposer.SourceRootId(sourceUtf8);
     }
 
-    /// <summary>Root id without building a full tree when the native fast path applies.</summary>
+    /// <summary>Root ID from the shared Native context without materializing the tree ABI.</summary>
     /// <remarks>
-    /// Returns null, never throws, for content the native path rejects (malformed
-    /// encoding, rc&lt;0), so a caller can skip one bad file without failing the batch.
+    /// Invalid scalar content returns null. Missing Native cache/runtime dependencies fail
+    /// explicitly instead of admitting a different identity through a fallback.
     /// </remarks>
     public static Hash128? ResolveRoot(ReadOnlySpan<byte> canonicalUtf8)
     {
@@ -68,25 +67,7 @@ public static class ContentTierSpine
         CodepointPerfcache.LoadDefault();
         var key = Hash128.Blake3(canonicalUtf8);
         if (RootMemo.TryGetValue(key, out var cached)) return cached;
-        Hash128? cheap;
-        try
-        {
-            cheap = TextDecomposer.ContentRootId(canonicalUtf8);
-        }
-        catch (InvalidOperationException)
-        {
-            // Native rc=-5 (decomposer failure) and kin — not a cacheable root.
-            cheap = null;
-        }
-        if (cheap is not null)
-        {
-            TryMemoize(key, cheap);
-            return cheap;
-        }
-        byte[] owned = canonicalUtf8.ToArray();
-        Hash128? result = TextEntityBuilder.TryDecomposeRoot(
-                owned, out var rootId, out _, out _, out _, out _, out _)
-            ? rootId : null;
+        Hash128? result = TextDecomposer.ContentRootId(canonicalUtf8);
         TryMemoize(key, result);
         return result;
     }

@@ -23,10 +23,10 @@ public static class ChessConcepts
         string BoardTag,
         string LexicalSense)
     {
-        public Hash128 Id => Hash128.OfCanonical("chess/concept/" + Key);
+        public Hash128 Id => Hash128.Text("chess/concept/" + Key);
 
         public Hash128 Member(Domain domain) =>
-            Hash128.OfCanonical("chess/concept/" + Key + "/" + domain.ToString().ToLowerInvariant());
+            Hash128.Text("chess/concept/" + Key + "/" + domain.ToString().ToLowerInvariant());
 
         public bool MatchesOpening(string? openingName) =>
             openingName is not null

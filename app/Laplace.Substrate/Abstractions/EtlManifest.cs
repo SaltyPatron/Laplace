@@ -50,7 +50,7 @@ public static class EtlManifest
         }
     }
 
-    private static Hash128 Src(string name) => Hash128.OfCanonical($"substrate/source/{name}/v1");
+    private static Hash128 Src(string name) => Hash128.Text($"substrate/source/{name}/v1");
 
     private static EtlSource Row(
         string name, string decomposerName, int layer, string trustClass,

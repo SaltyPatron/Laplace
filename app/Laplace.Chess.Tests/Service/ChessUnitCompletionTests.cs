@@ -145,7 +145,7 @@ public sealed class ChessUnitCompletionTests
 
     private sealed class EmptyOpeningIndex : ChessOpeningIndexView
     {
-        public Hash128? GenerationId => Hash128.OfCanonical("test/unit/empty-opening-catalog/v1");
+        public Hash128? GenerationId => Hash128.Text("test/unit/empty-opening-catalog/v1");
         public (Hash128 NameId, Hash128? EcoId, int Ply)? DeepestMatch(IReadOnlyList<Hash128> positions) => null;
     }
 }

@@ -13,7 +13,7 @@ public class NativeAttestationParityTests
 
 {
 
-    private static Hash128 H(string s) => Hash128.OfCanonical(s);
+    private static Hash128 H(string s) => Hash128.Text(s);
 
     [Fact]
     public void Corroboration_AdmitsAgreementInBothDirectionsWithoutDraws()

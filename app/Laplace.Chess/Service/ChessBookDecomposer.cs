@@ -678,7 +678,7 @@ public sealed record ChessBookRecord(
     internal string? StartFen { get; init; }
     // One root can be quoted with different commentary, so the completion key also binds
     // both text inputs; playing, line, paragraph and testimony identities are unchanged.
-    internal Hash128 CompletionContextId => Hash128.OfCanonical(
+    internal Hash128 CompletionContextId => Hash128.Text(
         $"chess/book-completion-input/v1/{RootId}/{ContentEmitter.RootId(Context)}/{ContentEmitter.RootId(GameText ?? string.Empty)}");
     internal IngestUnitCompletionKey CompletionKey => IngestUnitCompletion.Key(
         RootId, ChessVocabulary.BookSourceId, 20, CompletionContextId);
