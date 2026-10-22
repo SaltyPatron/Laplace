@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
@@ -21,70 +20,84 @@ public static class NpgsqlRead
     public static NpgsqlCommand CreateCommand(
         NpgsqlDataSource source, NativeSqlQuery query,
         Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0)
+        => NpgsqlCatalog.Command(source, query, bind, timeoutSeconds);
+
+    public static async Task<T?> ExecuteScalarAsync<T>(
+        NpgsqlDataSource source, NativeSqlQuery query,
+        Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
+        CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
     {
-        var command = source.CreateCommand(query.Text);
         try
         {
-            if (timeoutSeconds > 0) command.CommandTimeout = timeoutSeconds;
-            bind?.Invoke(command.Parameters);
-            ValidateParameters(query, command.Parameters);
-            return command;
+            await using var connection = await source.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ExecuteScalarAsync<T>(connection, query, bind, timeoutSeconds, ct,
+                label ?? query.Name, null).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (Translatable(ex, onError))
         {
-            command.Dispose();
-            throw;
+            throw onError!(ex, label ?? query.Name);
         }
     }
 
-    public static Task<IReadOnlyList<T>> ReadRowsAsync<T>(
+    public static async Task<T?> ExecuteScalarAsync<T>(
+        NpgsqlConnection connection, NativeSqlQuery query,
+        Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
+        CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
+    {
+        try
+        {
+            await using var command = NpgsqlCatalog.Command(connection, null, query, bind, timeoutSeconds);
+            await command.PrepareAsync(ct).ConfigureAwait(false);
+            var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            return value is T typed ? typed : default;
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? query.Name);
+        }
+    }
+
+    public static async Task<IReadOnlyList<T>> ReadRowsAsync<T>(
         NpgsqlConnection conn, NativeSqlQuery query, Func<NpgsqlDataReader, T> map,
         Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
         CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
-        => ReadRowsAsync(conn, query.Text, map, parameters =>
+    {
+        try
         {
-            bind?.Invoke(parameters);
-            ValidateParameters(query, parameters);
-        }, timeoutSeconds, ct, label ?? query.Name, onError);
+            await using var command = NpgsqlCatalog.Command(conn, null, query, bind, timeoutSeconds);
+            return await ReadCommandRowsAsync(command, map, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? query.Name);
+        }
+    }
 
-    public static Task<IReadOnlyList<T>> ReadRowsAsync<T>(
+    public static async Task<IReadOnlyList<T>> ReadRowsAsync<T>(
         NpgsqlDataSource source, NativeSqlQuery query, Func<NpgsqlDataReader, T> map,
         Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
         CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
-        => ReadRowsAsync(source, query.Text, map, parameters =>
-        {
-            bind?.Invoke(parameters);
-            ValidateParameters(query, parameters);
-        }, timeoutSeconds, ct, label ?? query.Name, onError);
-
-    private static void ValidateParameters(NativeSqlQuery query, NpgsqlParameterCollection parameters)
     {
-        if (parameters.Count != query.ParameterTypes.Length)
-            throw new ArgumentException($"{query.Name}: expected {query.ParameterTypes.Length} parameters, got {parameters.Count}.");
-        for (var i = 0; i < parameters.Count; i++)
+        try
         {
-            string declared = query.ParameterTypes[i];
-            bool array = declared.EndsWith("[]", StringComparison.Ordinal);
-            string scalar = array ? declared[..^2] : declared;
-            var expected = scalar switch
-            {
-                "bytea" => NpgsqlDbType.Bytea,
-                "uuid" => NpgsqlDbType.Uuid,
-                "int4" => NpgsqlDbType.Integer,
-                "int8" => NpgsqlDbType.Bigint,
-                "text" => NpgsqlDbType.Text,
-                "bool" => NpgsqlDbType.Boolean,
-                "float8" => NpgsqlDbType.Double,
-                "timestamptz" => NpgsqlDbType.TimestampTz,
-                _ => throw new InvalidOperationException($"Unknown native parameter type {query.ParameterTypes[i]}."),
-            };
-            if (array) expected |= NpgsqlDbType.Array;
-            if (parameters[i].NpgsqlDbType != expected)
-                throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {query.ParameterTypes[i]}.");
-            // Catalog statements use $1..$n positions. A named parameter would make
-            // Npgsql rewrite named placeholders and drop the positional values.
-            parameters[i].ParameterName = string.Empty;
+            await using var connection = await source.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ReadRowsAsync(connection, query, map, bind, timeoutSeconds, ct,
+                label ?? query.Name, null).ConfigureAwait(false);
         }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? query.Name);
+        }
+    }
+
+    private static async Task<IReadOnlyList<T>> ReadCommandRowsAsync<T>(
+        NpgsqlCommand command, Func<NpgsqlDataReader,T> map, CancellationToken ct)
+    {
+        await command.PrepareAsync(ct).ConfigureAwait(false);
+        var rows = new List<T>(16);
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false)) rows.Add(map(reader));
+        return rows;
     }
 
     /// <summary>Two independent catalog reads in one batch round trip, each with its own row map.</summary>
@@ -98,13 +111,9 @@ public static class NpgsqlRead
         try
         {
             await using var batch = new NpgsqlBatch(conn) { Timeout = timeoutSeconds };
-            var firstCommand = new NpgsqlBatchCommand(first.Text);
-            bindFirst(firstCommand.Parameters);
-            ValidateParameters(first, firstCommand.Parameters);
+            var firstCommand = NpgsqlCatalog.Command(first, bindFirst);
             batch.BatchCommands.Add(firstCommand);
-            var secondCommand = new NpgsqlBatchCommand(second.Text);
-            bindSecond(secondCommand.Parameters);
-            ValidateParameters(second, secondCommand.Parameters);
+            var secondCommand = NpgsqlCatalog.Command(second, bindSecond);
             batch.BatchCommands.Add(secondCommand);
             await batch.PrepareAsync(ct).ConfigureAwait(false);
             await using var reader = await batch.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -172,13 +181,7 @@ public static class NpgsqlRead
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
-            await cmd.PrepareAsync(ct).ConfigureAwait(false);
-
-            var rows = new List<T>(16);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                rows.Add(map(reader));
-            return rows;
+            return await ReadCommandRowsAsync(cmd, map, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (Translatable(ex, onError))
         {
