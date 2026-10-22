@@ -53,4 +53,35 @@ public sealed class NativeUnicodeTableTests
         }
         finally { Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", previous); }
     }
+
+    [Theory]
+    [InlineData("LinkBracket.txt", "Link_Bracket")]
+    [InlineData("LinkEmail.txt", "Link_Email")]
+    [InlineData("LinkTerm.txt", "Link_Term")]
+    public async Task NativeLinkPropertiesRetainExplicitValuesAndIgnoreDeclaredDefaults(string name, string property)
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
+        string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
+            "unicode-tables", name);
+        static string Characters(string range) => string.Concat(range.Split("..", StringSplitOptions.None)
+            .Select(static hex => char.ConvertFromUtf32(Convert.ToInt32(hex, 16))));
+        var expected = File.ReadLines(path).Select(static line => line.Split('#', 2)[0].Trim())
+            .Where(static line => line.Length > 0).Select(line =>
+            {
+                string[] fields = line.Split(';', StringSplitOptions.TrimEntries);
+                string suffix = property == "Link_Email" ? "" : "\t" +
+                    (property == "Link_Bracket" ? Characters(fields[1]) : fields[1]);
+                return $"claim\t0\t1\t{Characters(fields[0])}\t{property}{suffix}";
+            }).ToArray();
+        Assert.Equal(4, expected.Length);
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await NativeRecipeExecution.Configured().ExecuteAsync(
+            new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path], Threads: 4), output, error);
+        string stdout = Encoding.UTF8.GetString(output.ToArray());
+        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + stdout);
+        Assert.DoesNotMatch(@"unresolved obligations: [1-9]", stdout);
+        Assert.Equal(expected, stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
+            .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal)));
+    }
 }
