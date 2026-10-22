@@ -268,10 +268,10 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             await ExecuteAsync(conn, null, Sql("stage.create"), ct).ConfigureAwait(false);
             // Operational edges are stored but never scored or masked: their relation type is a row of the stage,
             // bound as bytes, so no statement carries an id as text.
-            await using (var excluded = conn.CreateCommand())
+            await using (var excluded = NpgsqlCatalog.Command(conn, null, "stage.exclude_type",
+                identifiers: new Dictionary<string, string> { ["stage"] = _stage },
+                arguments: [FileEntity.MetadataRelationTypeId.ToBytes()]))
             {
-                excluded.CommandText = $"INSERT INTO {_stage}.excluded_type (type_id) VALUES ($1)";
-                excluded.Parameters.Add(new NpgsqlParameter { Value = FileEntity.MetadataRelationTypeId.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 await excluded.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
             if (_stageCompletion is null || _stageCompletion.Task.IsCompleted)
@@ -303,7 +303,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     {
         await using var control = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         // One load at a time reads and replaces the substrate's leaves.
-        await LoadLockAsync(control, "pg_advisory_lock", ct).ConfigureAwait(false);
+        await LoadLockAsync(control, acquire: true, ct).ConfigureAwait(false);
         try
         {
             await LoadHeldAsync(control, ct).ConfigureAwait(false);
@@ -313,15 +313,16 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             // A broken control session already released its lock; the load's own
             // failure is the one to report.
             if (control.FullState == System.Data.ConnectionState.Open)
-                await LoadLockAsync(control, "pg_advisory_unlock", CancellationToken.None).ConfigureAwait(false);
+                await LoadLockAsync(control, acquire: false, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
-    private static async Task LoadLockAsync(NpgsqlConnection control, string function, CancellationToken ct)
+    private static async Task LoadLockAsync(NpgsqlConnection control, bool acquire, CancellationToken ct)
     {
-        await using var cmd = new NpgsqlCommand($"SELECT {function}($1, $2)", control) { CommandTimeout = 0 };
-        cmd.Parameters.AddWithValue(AdvisoryTxLock.StagedLoadLockClass);
-        cmd.Parameters.AddWithValue(AdvisoryTxLock.StagedLoadLockKey);
+        await using var cmd = NpgsqlCatalog.Command(control, null,
+            acquire ? "advisory.lane_exclusive" : "advisory.lane_release",
+            AdvisoryTxLock.StagedLoadLockClass, AdvisoryTxLock.StagedLoadLockKey);
+        cmd.CommandTimeout = 0;
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
@@ -473,13 +474,18 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         return work;
     }
 
-    private string LeafSql(string name, LeafWork leaf, string replacement, string? target = null) => Sql(name)
+    private string LeafSql(string name, LeafWork leaf, string replacement, string? target = null,
+        string? index = null, string? indexName = null) => Sql(name)
         .Replace("{new}", replacement)
         .Replace("{table}", leaf.Table)
         .Replace("{leaf}", leaf.Leaf)
         .Replace("{target}", target ?? leaf.Columns)
         .Replace("{cols}", leaf.Columns)
-        .Replace("{r}", leaf.Remainder.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        .Replace("{r}", leaf.Remainder.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        .Replace("{modulus}", leaf.Modulus.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        .Replace("{key}", PartitionKey[leaf.Table])
+        .Replace("{index_name}", indexName ?? "")
+        .Replace("{index}", index ?? "");
 
     private const string ConsensusColumns = "id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at";
 
@@ -527,17 +533,16 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             await ExecuteAsync(conn, tx, create, ct).ConfigureAwait(false);
             if (primary)
                 await ExecuteAsync(conn, tx,
-                    $"ALTER TABLE laplace.{replacement} ADD CONSTRAINT {index} PRIMARY KEY USING INDEX {index}", ct)
+                    LeafSql("stage.leaf_primary_key", leaf, replacement, index: index), ct)
                     .ConfigureAwait(false);
         }
         await ExecuteAsync(conn, tx,
-            $"ALTER TABLE laplace.{replacement} ADD CONSTRAINT {replacement}_bound CHECK "
-            + $"(satisfies_hash_partition('laplace.{leaf.Table}'::regclass,{leaf.Modulus},{leaf.Remainder},{PartitionKey[leaf.Table]}))",
+            LeafSql("stage.leaf_hash_bound", leaf, replacement),
             ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
         TimeSpan indexed = elapsed.Elapsed;
         // Statistics belong to the table, so they carry through the swap.
-        await ExecuteAsync(conn, null, $"ANALYZE laplace.{replacement}", ct).ConfigureAwait(false);
+        await ExecuteAsync(conn, null, LeafSql("stage.leaf_analyze", leaf, replacement), ct).ConfigureAwait(false);
         _log.LogDebug("STAGED_LEAF {Leaf} existing_estimate={Existing} changed={Changed} "
             + "copy_ms={CopyMs} index_commit_ms={IndexMs} analyze_ms={AnalyzeMs}",
             leaf.Leaf, leaf.Rows, leaf.NewRows, copied.TotalMilliseconds,
@@ -553,18 +558,17 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         foreach (LeafWork leaf in rebuilt.OrderBy(static l => l.Table, StringComparer.Ordinal).ThenBy(static l => l.Remainder))
         {
             string replacement = Replacement(leaf);
-            Add($"ALTER TABLE laplace.{leaf.Table} DETACH PARTITION laplace.{leaf.Leaf}");
-            Add($"ALTER TABLE laplace.{leaf.Table} ATTACH PARTITION laplace.{replacement} "
-                + $"FOR VALUES WITH (MODULUS {leaf.Modulus}, REMAINDER {leaf.Remainder})");
+            Add(LeafSql("stage.leaf_detach", leaf, replacement));
+            Add(LeafSql("stage.leaf_attach", leaf, replacement));
             // Leaves belong to the extension that defines the substrate; the replacement
             // takes the old leaf's membership as well as its name.
-            Add($"ALTER EXTENSION laplace_substrate DROP TABLE laplace.{leaf.Leaf}");
-            Add($"DROP TABLE laplace.{leaf.Leaf}");
-            Add($"ALTER TABLE laplace.{replacement} RENAME TO {leaf.Leaf}");
-            Add($"ALTER EXTENSION laplace_substrate ADD TABLE laplace.{leaf.Leaf}");
-            Add($"ALTER TABLE laplace.{leaf.Leaf} DROP CONSTRAINT {replacement}_bound");
+            Add(LeafSql("stage.leaf_extension_drop", leaf, replacement));
+            Add(LeafSql("stage.leaf_drop", leaf, replacement));
+            Add(LeafSql("stage.leaf_rename", leaf, replacement));
+            Add(LeafSql("stage.leaf_extension_add", leaf, replacement));
+            Add(LeafSql("stage.leaf_unbound", leaf, replacement));
             for (int k = 0; k < leaf.Indexes.Count; k++)
-                Add($"ALTER INDEX laplace.{replacement}_{k} RENAME TO {leaf.Indexes[k].Name}");
+                Add(LeafSql("stage.leaf_index_rename", leaf, replacement, index: replacement + "_" + k, indexName: leaf.Indexes[k].Name));
         }
         try
         {
@@ -589,7 +593,7 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 orphans.Add(reader.GetString(0));
         foreach (string orphan in orphans)
-            await ExecuteAsync(control, null, $"DROP TABLE laplace.{orphan}", ct).ConfigureAwait(false);
+            await ExecuteAsync(control, null, SqlCatalog.Get("stage.leaf_drop").Text.Replace("{leaf}", orphan, StringComparison.Ordinal), ct).ConfigureAwait(false);
     }
 
     private static string Quote(string literal) => "'" + literal.Replace("'", "''", StringComparison.Ordinal) + "'";
@@ -701,16 +705,14 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
         {
             if (Volatile.Read(ref _epochRoute) < 0)
             {
-                await using var probe = new NpgsqlCommand(
-                    "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL", conn, tx);
+                await using var probe = NpgsqlCatalog.Command(conn, tx, "write.supports_epoch");
                 bool present = (bool)(await probe.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? false);
                 Interlocked.CompareExchange(ref _epochRoute, present ? 1 : 0, -1);
             }
             // Every write transaction advances the write epoch before it writes.
-            await using var guc = new NpgsqlCommand(
-                NpgsqlSubstrateWriter.TransactionGucs(_durability)
-                + (Volatile.Read(ref _epochRoute) == 1 ? SqlCatalog.Get("write.advance_epoch").Text : ""),
-                conn, tx);
+            string settings = NpgsqlSubstrateWriter.TransactionSettingsQuery(_durability);
+            await using var guc = NpgsqlCatalog.Command(conn, tx,
+                Volatile.Read(ref _epochRoute) == 1 ? [settings, "write.advance_epoch"] : [settings]);
             await guc.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             return tx;
         }
@@ -729,12 +731,13 @@ public sealed class StagedSourceWriter : ISubstrateWriter, IConsensusFoldMetrics
     }
 
     private static async Task<long> WalAsync(NpgsqlConnection conn, CancellationToken ct)
-        => await ScalarAsync(conn, "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0')::bigint", ct)
+        => await ScalarAsync(conn, "write.wal_position", ct)
             .ConfigureAwait(false);
 
-    private static async Task<long> ScalarAsync(NpgsqlConnection conn, string sql, CancellationToken ct)
+    private static async Task<long> ScalarAsync(NpgsqlConnection conn, string queryName, CancellationToken ct)
     {
-        await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = 0 };
+        await using var cmd = NpgsqlCatalog.Command(conn, null, queryName);
+        cmd.CommandTimeout = 0;
         return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L,
             System.Globalization.CultureInfo.InvariantCulture);
     }

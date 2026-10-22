@@ -61,6 +61,12 @@ public sealed class ReadPathArchitectureGateTests
     private static readonly Regex LeadingSqlWith = new(
         @"^\s*WITH\s",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex LeadingSqlWrite = new(
+        @"^\s*(?:INSERT\s+INTO\b|DELETE\s+FROM\b|UPDATE\s+\S+\s+SET\b|"
+        + @"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|INDEX|SCHEMA|FUNCTION|PROCEDURE|EXTENSION)\b|"
+        + @"ALTER\s+(?:TABLE|INDEX|SCHEMA|FUNCTION|EXTENSION)\b|DROP\s+(?:TABLE|INDEX|SCHEMA|FUNCTION|EXTENSION)\b|"
+        + @"TRUNCATE\s+|COPY\s+.*\s+(?:FROM|TO)\s+|SET\s+(?:(?:LOCAL|SESSION)\s+)?[a-z_]+\s*=)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static bool LiteralContainsSql(LiteralExpressionSyntax literal, string value)
         => TextContainsSql(literal.Token.Text, value);
@@ -69,10 +75,20 @@ public sealed class ReadPathArchitectureGateTests
         // Preserve the existing policy: ordinary literals must START with SELECT;
         // verbatim/raw literals can contain a SELECT inside a multi-line CTE.
         // This is an architecture ratchet, not an unrestricted SQL classifier.
-        => prefix.Contains('@') || prefix.Contains("\"\"\"", StringComparison.Ordinal)
+        => LeadingSqlWrite.IsMatch(value) || (prefix.Contains('@') || prefix.Contains("\"\"\"", StringComparison.Ordinal)
             ? SqlSelect.IsMatch(value)
             : LeadingSqlSelect.IsMatch(value)
-                || (LeadingSqlWith.IsMatch(value) && SqlSelect.IsMatch(value));
+                || (LeadingSqlWith.IsMatch(value) && SqlSelect.IsMatch(value)));
+
+    private static bool IsDiagnosticArgument(SyntaxNode node)
+    {
+        var argument = node.Ancestors().OfType<ArgumentSyntax>().FirstOrDefault();
+        if (argument?.Parent?.Parent is ObjectCreationExpressionSyntax creation)
+            return creation.Type.ToString().EndsWith("Exception", StringComparison.Ordinal);
+        if (argument?.Parent?.Parent is not InvocationExpressionSyntax invocation) return false;
+        string? name = (invocation.Expression as MemberAccessExpressionSyntax)?.Name.Identifier.ValueText;
+        return name is "LogTrace" or "LogDebug" or "LogInformation" or "LogWarning" or "LogError" or "LogCritical";
+    }
 
     internal static bool HasHandWrittenSql(string source)
         => HasSql(source, includeCommandConstruction: true);
@@ -105,8 +121,9 @@ public sealed class ReadPathArchitectureGateTests
                     MemberBindingExpressionSyntax member => member.Name.Identifier.ValueText,
                     _ => "",
                 }).Equals("CreateCommand", StringComparison.OrdinalIgnoreCase),
-            LiteralExpressionSyntax literal when literal.Token.Value is string value => LiteralContainsSql(literal, value),
-            InterpolatedStringExpressionSyntax expression => TextContainsSql(
+            LiteralExpressionSyntax literal when literal.Token.Value is string value =>
+                !IsDiagnosticArgument(literal) && LiteralContainsSql(literal, value),
+            InterpolatedStringExpressionSyntax expression => !IsDiagnosticArgument(expression) && TextContainsSql(
                 expression.StringStartToken.Text,
                 string.Concat(expression.Contents.OfType<InterpolatedStringTextSyntax>()
                     .Select(text => text.TextToken.ValueText))),
@@ -267,7 +284,7 @@ public sealed class ReadPathArchitectureGateTests
     {
         var folder = Path.Combine(TypeIdLawTests.FindRepoRootPublic(), "app", "Laplace.Substrate",
             "Crud", "Npgsql");
-        var files = Directory.EnumerateFiles(folder, "NpgsqlSubstrateReads*.cs").ToArray();
+        var files = Directory.EnumerateFiles(folder, "*.cs").ToArray();
         Assert.NotEmpty(files);
         var violations = files.Where(file => HasInlineSql(File.ReadAllText(file)))
             .Select(Path.GetFileName).ToArray();

@@ -52,23 +52,7 @@ public sealed class SecondaryIndexPolicy
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
-
-        cmd.CommandText =
-
-            "SELECT EXISTS ("
-
-            + "SELECT 1 FROM pg_index i "
-
-            + "JOIN pg_class t ON t.oid = i.indrelid "
-
-            + "JOIN pg_namespace n ON n.oid = t.relnamespace "
-
-            + "WHERE n.nspname = 'laplace' AND t.relname = $1 "
-
-            + "  AND NOT i.indisprimary AND NOT i.indisunique)";
-
-        cmd.Parameters.AddWithValue(table);
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "maintenance.secondary_indexes_present", table);
 
         var r = await cmd.ExecuteScalarAsync(ct);
 
@@ -94,20 +78,10 @@ public sealed class SecondaryIndexPolicy
 
         {
 
-            await using (var t = conn.CreateCommand())
-
+            await using (var t = NpgsqlCatalog.Command(conn, tx, "maintenance.index_settings",
+                (Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20).ToString(System.Globalization.CultureInfo.InvariantCulture) + "MB",
+                Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers.ToString(System.Globalization.CultureInfo.InvariantCulture)))
             {
-
-                t.Transaction = tx;
-
-                t.CommandText =
-
-                    "SET LOCAL search_path = laplace, public; "
-
-                    + $"SET LOCAL maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
-
-                    + $"SET LOCAL max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
-
                 await t.ExecuteNonQueryAsync(ct);
 
             }

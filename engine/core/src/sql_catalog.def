@@ -389,6 +389,34 @@ SQL_QUERY("write.commit_settings", "",
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 SQL_QUERY("write.supports_epoch", "", "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL")
 SQL_QUERY("write.current_epoch", "", "SELECT last_value FROM laplace.apply_write_epoch")
+SQL_QUERY("write.settings_async", "", "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; ")
+SQL_QUERY("write.settings_sync", "", "SET LOCAL synchronous_commit = on; SET LOCAL jit = off; ")
+SQL_QUERY("write.begin_settings", "text,text",
+    "SELECT set_config('synchronous_commit',$1,true),set_config('jit','off',true),set_config('lock_timeout',$2,true)")
+SQL_QUERY("advisory.timeout_session", "text", "SELECT set_config('lock_timeout',$1,false)")
+SQL_QUERY("advisory.timeout_local", "text", "SELECT set_config('lock_timeout',$1,true)")
+SQL_QUERY("advisory.lane_exclusive", "int4,int4", "SELECT pg_advisory_lock($1,$2)")
+SQL_QUERY("advisory.lane_shared", "int4,int4", "SELECT pg_advisory_lock_shared($1,$2)")
+SQL_QUERY("advisory.named_transaction", "text", "SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+SQL_QUERY("maintenance.secondary_indexes_present", "text",
+    "SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid "
+    "JOIN pg_namespace n ON n.oid=t.relnamespace "
+    "WHERE n.nspname='laplace' AND t.relname=$1 AND NOT i.indisprimary AND NOT i.indisunique)")
+SQL_QUERY("maintenance.index_settings", "text,text",
+    "SELECT set_config('search_path','laplace, public',true),set_config('maintenance_work_mem',$1,true),"
+    "set_config('max_parallel_maintenance_workers',$2,true)")
+SQL_QUERY("advisory.lane_holders", "int4,int4",
+    "SELECT l.pid,l.mode,coalesce(a.state,'?'),left(coalesce(a.query,''),120) "
+    "FROM pg_locks l LEFT JOIN pg_stat_activity a USING(pid) "
+    "WHERE l.locktype='advisory' AND l.granted "
+    "AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database()) "
+    "AND l.classid=$1::oid AND l.objid=$2::oid AND l.objsubid=2 ORDER BY l.pid")
+SQL_QUERY("advisory.named_holders", "text",
+    "WITH k AS (SELECT hashtextextended($1,0) AS key) "
+    "SELECT a.pid,coalesce(a.state,'?'),coalesce(now()-a.query_start,interval '0'),left(coalesce(a.query,''),200) "
+    "FROM pg_locks l JOIN k ON l.locktype='advisory' AND l.granted AND l.objsubid=1 "
+    "AND l.classid=((k.key>>32)&4294967295)::oid AND l.objid=(k.key&4294967295)::oid "
+    "JOIN pg_stat_activity a USING(pid) WHERE a.pid<>pg_backend_pid()")
 SQL_QUERY("consensus.supports_type_upsert", "",
     "SELECT to_regprocedure('consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])') IS NOT NULL")
 SQL_QUERY("consensus.deposit_mask", "bytea[],bytea[]",
@@ -1699,3 +1727,113 @@ SQL_QUERY("measurement.ingest_snapshot", "",
 
 SQL_QUERY("measurement.active_ingest_backends", "",
     "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'   AND pid <> pg_backend_pid()   AND query ~* 'consensus\\.upsert|COPY laplace\\.|highway_mask_deposit|attestations_exist|physicalities_exist'")
+
+/* Ingest journal commands: parameter types are part of the shared contract. */
+SQL_QUERY("journal.throughput_verdict", "uuid",
+    "SELECT status, throughput_status, throughput_compared, throughput_rows, throughput_elapsed_ms, throughput_rows_per_s, throughput_baseline_rows_per_s, throughput_slowdown_ratio FROM laplace.ingest_run_journal WHERE run_id = $1")
+SQL_QUERY("journal.liveness_lock", "int4,text",
+    "SELECT pg_advisory_lock($1,hashtext($2))")
+SQL_QUERY("journal.artifact_inventory", "uuid,text,text[],text[],text[],text[],text[],text[],int8[],timestamptz[]",
+    "INSERT INTO laplace.ingest_file_journal AS current_file (run_id, file_label, source_name, artifact_id, relative_path, disposition, disposition_reason, status, bytes, modified_at, started_at, ended_at) SELECT $1, u.file_label, $2, u.artifact_id, u.relative_path, u.disposition, u.reason, u.status, u.bytes, u.modified_at, now(), CASE WHEN u.status = 'not-selected' THEN now() ELSE NULL END FROM unnest($3, $4, $5, $6, $7, $8, $9, $10) AS u(file_label, artifact_id, relative_path, disposition, reason, status, bytes, modified_at) ON CONFLICT (run_id, file_label) DO UPDATE SET artifact_id = EXCLUDED.artifact_id, relative_path = EXCLUDED.relative_path, disposition = EXCLUDED.disposition, disposition_reason = EXCLUDED.disposition_reason, status = EXCLUDED.status, bytes = EXCLUDED.bytes, modified_at = EXCLUDED.modified_at, ended_at = EXCLUDED.ended_at")
+SQL_QUERY("journal.reconcile_orphans", "",
+    "SELECT * FROM ops.ingest_reconcile_orphans(interval '90 seconds')")
+SQL_QUERY("journal.run_progress", "uuid,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8",
+    "UPDATE laplace.ingest_run_journal SET units_attempted = $2, units_applied = $3, units_failed = $4, entities = $5, physicalities = $6, attestations = $7, files_done = $8, input_units_done = $9, consensus_backend_ms = $10, highway_mask_backend_ms = $11, consensus_calls = $12, highway_mask_calls = $13, highway_mask_pairs = $14 WHERE run_id = $1")
+SQL_QUERY("journal.run_phase", "uuid,text",
+    "UPDATE laplace.ingest_run_journal SET phase = $2 WHERE run_id = $1")
+SQL_QUERY("journal.run_completion", "uuid,int8,int8,int8,int8,int8,int8,int8,int8",
+    "UPDATE laplace.ingest_run_journal SET fold_drain_ms = $2, writer_maintenance_ms = $3, fold_span_ms = $4, consensus_backend_ms = $5, highway_mask_backend_ms = $6, consensus_calls = $7, highway_mask_calls = $8, highway_mask_pairs = $9 WHERE run_id = $1")
+SQL_QUERY("journal.run_finished", "uuid,text,int8,int8,int8,int8,int8,int8,text,int8,int8,int8,int8",
+    "UPDATE laplace.ingest_run_journal SET status = $2, phase = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'complete' END, ended_at = now(), throughput_elapsed_ms = $13, units_attempted = $3, units_applied = $4, units_failed = $5, entities = $6, physicalities = $7, attestations = $8, error = COALESCE($9, error), files_done = $10, input_units_done = $11, input_units_total = $12 WHERE run_id = $1")
+SQL_QUERY("journal.run_failed", "uuid,text,text",
+    "UPDATE laplace.ingest_run_journal SET status = $2, phase = 'failed', ended_at = now(), error = $3 WHERE run_id = $1")
+SQL_QUERY("journal.failed_before_start", "uuid,text,text,bool,text",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted, error) VALUES ($1, $2, laplace.source_id($2), -1, $3, 'failed', now(), $4, $5)")
+SQL_QUERY("journal.run_skip_identified", "uuid,text,bytea,int4,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) VALUES ($1, $2, $3, $4, 'skipped-complete', 'complete', now(), $5)")
+SQL_QUERY("journal.run_skip_named", "uuid,text,int4,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) VALUES ($1, $2, laplace.source_id($2), $3, 'skipped-complete', 'complete', now(), $4)")
+SQL_QUERY("journal.run_start_identified", "uuid,text,bytea,int4,int8,int8,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) VALUES ($1, $2, $3, $4, 'running', $5, $6, $7)")
+SQL_QUERY("journal.run_start_named", "uuid,text,int4,int8,int8,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) VALUES ($1, $2, laplace.source_id($2), $3, 'running', $4, $5, $6)")
+SQL_QUERY("journal.accepted_run", "uuid,text,bytea,timestamptz,timestamptz,int8,int8,int8,int8,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, started_at, ended_at, units_attempted, units_applied, entities, physicalities, attestations, files_done, files_total, input_units_done, input_units_total, throughput_elapsed_ms, evidence_persisted) VALUES ($1, $2, $3, 0, 'ok', 'complete', $4, $5, 1, 1, $6, $7, $8, 1, 1, 1, 1, $9, $10)")
+SQL_QUERY("journal.accepted_file", "uuid,text,text,bytea,timestamptz,timestamptz,int8,timestamptz,int8,int8,int8",
+    "INSERT INTO laplace.ingest_file_journal (run_id, file_label, source_name, file_id, status, started_at, ended_at, bytes, modified_at, records, entities, physicalities, attestations) VALUES ($1, $2, $3, $4, 'ok', $5, $6, $7, $8, 1, $9, $10, $11)")
+SQL_QUERY("journal.heartbeat", "uuid",
+    "UPDATE laplace.ingest_run_journal SET heartbeat_at = clock_timestamp() WHERE run_id = $1 AND status = 'running'")
+SQL_QUERY("journal.files_started", "uuid,text[],text[],int8[],timestamptz[],timestamptz[]",
+    "INSERT INTO laplace.ingest_file_journal AS current_file (run_id, file_label, source_name, status, bytes, modified_at, started_at) SELECT $1, u.file_label, u.source_name, 'running', u.bytes, u.modified_at, u.at FROM unnest($2, $3, $4, $5, $6) AS u(file_label, source_name, bytes, modified_at, at) ON CONFLICT (run_id, file_label) DO UPDATE SET status = 'running', started_at = EXCLUDED.started_at, ended_at = NULL, error = NULL, bytes = EXCLUDED.bytes, modified_at = COALESCE(EXCLUDED.modified_at, current_file.modified_at), file_id = NULL, resume_fingerprint = NULL, records = 0, entities = 0, physicalities = 0, attestations = 0")
+SQL_QUERY("journal.files_progress", "uuid,text[],int8[],int8[],int8[],int8[]",
+    "UPDATE laplace.ingest_file_journal f SET records = u.records, entities = u.entities, physicalities = u.physicalities, attestations = u.attestations FROM unnest($2, $3, $4, $5, $6) AS u(file_label, records, entities, physicalities, attestations) WHERE f.run_id = $1 AND f.file_label = u.file_label AND f.status = 'running'")
+SQL_QUERY("journal.files_composed", "uuid,text[],text[],bytea[],bytea[],int8[],int8[],int8[],int8[],timestamptz[]",
+    "INSERT INTO laplace.ingest_file_journal AS current_file (run_id, file_label, source_name, file_id, resume_fingerprint, status, records, entities, physicalities, attestations, started_at) SELECT $1, u.file_label, u.source_name, u.file_id, u.resume_fingerprint, 'composed', u.records, u.entities, u.physicalities, u.attestations, u.at FROM unnest($2, $3, $4, $5, $6, $7, $8, $9, $10) AS u(file_label, source_name, file_id, resume_fingerprint, records, entities, physicalities, attestations, at) ON CONFLICT (run_id, file_label) DO UPDATE SET file_id = COALESCE(EXCLUDED.file_id, current_file.file_id), resume_fingerprint = COALESCE(EXCLUDED.resume_fingerprint, current_file.resume_fingerprint), status = 'composed', records = EXCLUDED.records, entities = EXCLUDED.entities, physicalities = EXCLUDED.physicalities, attestations = EXCLUDED.attestations")
+SQL_QUERY("journal.files_finished", "uuid,text[],text[],text[],timestamptz[],text[]",
+    "INSERT INTO laplace.ingest_file_journal (run_id, file_label, source_name, status, ended_at, error, started_at) SELECT $1, u.file_label, u.source_name, u.status, u.at, u.error, u.at FROM unnest($2, $3, $4, $5, $6) AS u(file_label, source_name, status, at, error) ON CONFLICT (run_id, file_label) DO UPDATE SET status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, error = EXCLUDED.error")
+
+SQL_QUERY("write.journal_receipt_probe", "bytea",
+    "SELECT 1 FROM laplace.ingest_flush_journal WHERE working_set_id=$1")
+SQL_QUERY("write.journal_receipt", "bytea,bytea,text,bytea[]",
+    "WITH receipt AS ( INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3) RETURNING working_set_id) INSERT INTO laplace.ingest_flush_journal_sources (working_set_id, source_id) SELECT receipt.working_set_id, source_id FROM receipt CROSS JOIN unnest($4::bytea[]) AS source_id")
+SQL_QUERY("write.unicode_layer_completed", "",
+    "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE witness_id = laplace.source_id('Unicode') AND layer = 0)")
+SQL_QUERY("write.entities_have_rows", "",
+    "SELECT EXISTS (SELECT 1 FROM laplace.entities LIMIT 1)")
+SQL_QUERY("write.physicalities_have_rows", "",
+    "SELECT EXISTS (SELECT 1 FROM laplace.physicalities LIMIT 1)")
+SQL_QUERY("write.attestations_have_rows", "",
+    "SELECT EXISTS (SELECT 1 FROM laplace.attestations LIMIT 1)")
+SQL_QUERY("write.entities_stored_bitmap", "bytea[]",
+    "SELECT laplace.entities_stored_bitmap($1)")
+SQL_QUERY("write.physicalities_exist_bitmap", "bytea[]",
+    "SELECT laplace.physicalities_exist_bitmap($1)")
+SQL_QUERY("write.attestations_exist_bitmap", "bytea[],bytea[],bytea[]",
+    "SELECT laplace.attestations_exist_bitmap($1,$2,$3)")
+
+SQL_QUERY("stage.exclude_type", "bytea", "INSERT INTO {stage}.excluded_type(type_id) VALUES($1)")
+SQL_QUERY("advisory.lane_release", "int4,int4", "SELECT pg_advisory_unlock($1,$2)")
+SQL_QUERY("write.wal_position", "", "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(),'0/0')::bigint")
+SQL_QUERY("write.copy_entities", "", "COPY laplace.entities (id,tier,type_id) FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("write.copy_physicalities", "", "COPY laplace.physicalities (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("write.copy_attestations", "", "COPY laplace.attestations (id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
+
+SQL_QUERY("stage.leaf_primary_key", "", "ALTER TABLE laplace.{new} ADD CONSTRAINT {index} PRIMARY KEY USING INDEX {index}")
+
+SQL_QUERY("stage.leaf_hash_bound", "", "ALTER TABLE laplace.{new} ADD CONSTRAINT {new}_bound CHECK (satisfies_hash_partition('laplace.{table}'::regclass,{modulus},{r},{key}))")
+
+SQL_QUERY("stage.leaf_analyze", "", "ANALYZE laplace.{new}")
+
+SQL_QUERY("stage.leaf_detach", "", "ALTER TABLE laplace.{table} DETACH PARTITION laplace.{leaf}")
+
+SQL_QUERY("stage.leaf_attach", "", "ALTER TABLE laplace.{table} ATTACH PARTITION laplace.{new} FOR VALUES WITH (MODULUS {modulus}, REMAINDER {r})")
+
+SQL_QUERY("stage.leaf_extension_drop", "", "ALTER EXTENSION laplace_substrate DROP TABLE laplace.{leaf}")
+
+SQL_QUERY("stage.leaf_drop", "", "DROP TABLE laplace.{leaf}")
+
+SQL_QUERY("stage.leaf_rename", "", "ALTER TABLE laplace.{new} RENAME TO {leaf}")
+
+SQL_QUERY("stage.leaf_extension_add", "", "ALTER EXTENSION laplace_substrate ADD TABLE laplace.{leaf}")
+
+SQL_QUERY("stage.leaf_unbound", "", "ALTER TABLE laplace.{leaf} DROP CONSTRAINT {new}_bound")
+
+SQL_QUERY("stage.leaf_index_rename", "", "ALTER INDEX laplace.{index} RENAME TO {index_name}")
+
+SQL_QUERY("maintenance.physicalities_constituents_gin", "", "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL")
+
+SQL_QUERY("maintenance.physicalities_traj_first_id_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1")
+
+SQL_QUERY("maintenance.physicalities_traj_probe", "", "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL")
+
+SQL_QUERY("maintenance.physicalities_observed_brin", "", "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)")
+
+SQL_QUERY("maintenance.physicalities_hilbert_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)")
+
+SQL_QUERY("maintenance.physicalities_direction_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_direction_gist ON laplace.physicalities USING gist (public.laplace_direction_4d(coord) gist_geometry_ops_nd) WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL")
+
+SQL_QUERY("maintenance.physicalities_coord_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)")
+
+SQL_QUERY("maintenance.physicalities_type_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)")
+
+SQL_QUERY("maintenance.physicalities_entity_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)")
