@@ -1,5 +1,6 @@
 using global::Npgsql;
 using NpgsqlTypes;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -45,66 +46,7 @@ public static class NpgsqlChessCommentaryReads
         string? eco = null,
         string? motif = null,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH raw_lines AS MATERIALIZED (
-                SELECT DISTINCT p.entity_id AS line_id
-                FROM laplace.physicalities p
-                JOIN laplace.entities e ON e.id = p.entity_id
-                WHERE p.type = @projection_type
-                  AND e.type_id = @game_type
-                  AND p.trajectory IS NOT NULL
-                  AND public.laplace_trajectory_constituent_ids(p.trajectory)
-                      @> ARRAY[@position]::bytea[]
-                  AND @container_limit >= 1
-            ),
-            playings AS MATERIALIZED (
-                SELECT l.line_id, h.event_id, h.played_on,
-                       g.white_id, g.white, g.black_id, g.black, g.result, g.eco,
-                       CASE WHEN @white_to_move THEN g.white_id ELSE g.black_id END AS mover_id
-                FROM raw_lines l
-                CROSS JOIN LATERAL chess.line(l.line_id) h
-                CROSS JOIN LATERAL chess.game(h.event_id) g
-            ),
-            scored AS MATERIALIZED (
-                SELECT p.line_id, p.event_id, p.played_on,
-                       p.white_id, p.white, p.black_id, p.black, p.result,
-                       consensus.eff_mu(c.rating, c.rd)::double precision AS mover_eff_mu,
-                       elo.rating AS mover_elo,
-                       (CASE WHEN COALESCE(@eco, '') <> '' AND p.eco = @eco THEN 1 ELSE 0 END
-                        + CASE WHEN COALESCE(@motif, '') <> '' AND EXISTS (
-                               SELECT 1
-                               FROM laplace.attestations a
-                               WHERE a.subject_id = p.line_id
-                                 AND a.type_id = laplace.relation_type_id('GAME_HAS_MOTIF')
-                                 AND realize.realize(a.object_id) = @motif
-                           ) THEN 1 ELSE 0 END) AS opening_or_motif
-                FROM playings p
-                LEFT JOIN LATERAL (
-                    SELECT c.rating, c.rd
-                    FROM laplace.consensus c
-                    WHERE c.subject_id = p.mover_id
-                      AND c.type_id = laplace.relation_type_id('OUTCOME')
-                      AND consensus.eff_mu(c.rating, c.rd) > 0
-                    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
-                    LIMIT 1
-                ) c ON p.mover_id IS NOT NULL
-                LEFT JOIN LATERAL (
-                    SELECT pr.rating
-                    FROM chess.player_ratings(p.mover_id) pr
-                    LIMIT 1
-                ) elo ON p.mover_id IS NOT NULL
-            )
-            SELECT s.line_id, s.event_id, s.played_on,
-                   s.white_id, s.white, s.black_id, s.black, s.result,
-                   s.mover_eff_mu, s.mover_elo, s.opening_or_motif,
-                   count(*) OVER () AS witness_count
-            FROM scored s
-            ORDER BY s.mover_eff_mu DESC NULLS LAST,
-                     s.mover_elo DESC NULLS LAST,
-                     s.opening_or_motif DESC,
-                     s.event_id
-            LIMIT @limit
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("chess.commentary_position_history"),
             static r => new PositionHistoryRow(
                 r.GetFieldValue<byte[]>(0),
                 r.GetFieldValue<byte[]>(1),
@@ -146,41 +88,7 @@ public static class NpgsqlChessCommentaryReads
         int limit,
         CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH raw_lines AS MATERIALIZED (
-                SELECT DISTINCT p.entity_id AS line_id
-                FROM laplace.physicalities p
-                JOIN laplace.entities e ON e.id = p.entity_id
-                WHERE p.type = @projection_type
-                  AND e.type_id = @game_type
-                  AND p.trajectory IS NOT NULL
-                  AND public.laplace_trajectory_constituent_ids(p.trajectory)
-                      @> ARRAY[@position]::bytea[]
-            ),
-            steps AS (
-                SELECT step.nxt
-                FROM raw_lines l
-                JOIN laplace.physicalities p
-                  ON p.entity_id = l.line_id
-                 AND p.type = @projection_type
-                CROSS JOIN LATERAL (
-                    SELECT ids[i + 1] AS nxt
-                    FROM (
-                        SELECT public.laplace_trajectory_constituent_ids(p.trajectory) AS ids
-                    ) t
-                    CROSS JOIN LATERAL generate_subscripts(t.ids, 1) AS s(i)
-                    WHERE t.ids[s.i] = @position
-                      AND s.i < cardinality(t.ids)
-                    LIMIT 1
-                ) step
-                WHERE step.nxt IS NOT NULL
-            )
-            SELECT nxt, count(*)::bigint AS n
-            FROM steps
-            GROUP BY nxt
-            ORDER BY n DESC, nxt
-            LIMIT @limit
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("chess.commentary_position_continuations"),
             static r => new PositionContinuationCount(
                 r.GetFieldValue<byte[]>(0),
                 r.GetInt64(1)),

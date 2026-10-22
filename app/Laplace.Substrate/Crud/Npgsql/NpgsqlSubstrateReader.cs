@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
 
@@ -124,28 +123,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         IReadOnlyList<Hash128> heads, Hash128 typeId, CancellationToken ct = default)
     {
         // physicalities_traj_first_id_btree: the head is the trajectory's first constituent.
-        await using var cmd = _ds.CreateCommand(
-            "SELECT DISTINCT ON (h.head) h.head, e.id, e.tier, "
-            + "ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) "
-            + "FROM unnest($1::bytea[]) AS h(head) "
-            + "JOIN laplace.physicalities p ON p.type = 1 AND p.trajectory IS NOT NULL "
-            + "AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = h.head "
-            + "JOIN laplace.entities e ON e.id = p.entity_id AND e.type_id = $2 "
-            + "ORDER BY h.head, e.id");
-        cmd.Parameters.Add(new NpgsqlParameter { Value = ToByteArrays(heads), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
+        await using var cmd = NpgsqlCatalog.Command(_ds, "structural.trunks_by_head", ToByteArrays(heads), typeId.ToBytes());
         return await ReadComponentsAsync(cmd, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyDictionary<Hash128, OrderedCompositionComponent>> CompositionComponentsAsync(
         IReadOnlyList<Hash128> ids, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT DISTINCT ON (e.id) e.id, e.id, e.tier, "
-            + "ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) "
-            + "FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id "
-            + "WHERE e.id = ANY($1) ORDER BY e.id, p.type, p.id");
-        cmd.Parameters.Add(new NpgsqlParameter { Value = ToByteArrays(ids), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        await using var cmd = NpgsqlCatalog.Command(_ds, "structural.composition_components", ToByteArrays(ids));
         return await ReadComponentsAsync(cmd, ct).ConfigureAwait(false);
     }
 
@@ -183,21 +168,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
                 layers[i] = key.Layer;
                 digests[i] = key.Digest?.ToBytes();
             }
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "SELECT k.ord FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) "
-                + "WITH ORDINALITY AS k(witness_id, unit_id, layer, digest, ord) "
-                + "WHERE EXISTS (SELECT 1 FROM laplace.ingest_unit_completion c "
-                + "WHERE c.witness_id = k.witness_id AND c.unit_id = k.unit_id "
-                + "AND c.layer = k.layer AND c.digest IS NOT DISTINCT FROM k.digest)";
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = witnesses, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = units, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = layers, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer });
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = digests, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            await using var cmd = NpgsqlCatalog.Command(conn, null, "ingest.completed_units", witnesses, units, layers, digests);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await r.ReadAsync(ct).ConfigureAwait(false))
                 done.Add(keys[offset + (int)(r.GetInt64(0) - 1)]);
@@ -214,9 +185,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT ops.entity_count($1)");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ops.entity_count", typeId.ToBytes());
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long l ? l : 0L;
     }
@@ -225,17 +194,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         Hash128 sourceId,
         CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand(
-            "SELECT count(*)::bigint,"
-            + "       count(*) FILTER (WHERE EXISTS ("
-            + "         SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id"
-            + "       ))::bigint"
-            + " FROM laplace.entities e"
-            + " WHERE EXISTS (SELECT 1 FROM laplace.attestations a"
-            + "   WHERE a.source_id = $1 AND a.subject_id = e.id)");
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.physicality_coverage", sourceId.ToBytes());
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-
         await using var result = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await result.ReadAsync(ct).ConfigureAwait(false))
             return new PhysicalityCoverage(0, 0);
@@ -253,33 +213,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var rawTypes = new byte[typeIds.Count][];
         for (int i = 0; i < typeIds.Count; i++) rawTypes[i] = typeIds[i].ToBytes();
 
-        await using var cmd = _ds.CreateCommand(
-            "WITH touched AS MATERIALIZED ("
-            + " SELECT a.subject_id AS entity_id FROM laplace.attestations a WHERE a.source_id = $1"
-            + " UNION SELECT a.object_id FROM laplace.attestations a"
-            + "       WHERE a.source_id = $1 AND a.object_id IS NOT NULL"
-            + " UNION SELECT a.context_id FROM laplace.attestations a"
-            + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
-            + "), governed AS MATERIALIZED ("
-            + " SELECT DISTINCT e.id AS entity_id"
-            + " FROM laplace.entities e"
-            + " LEFT JOIN touched t ON t.entity_id = e.id"
-            + " WHERE e.type_id = ANY($2)"
-            + "   AND t.entity_id IS NOT NULL"
-            + ")"
-            + " SELECT count(*)::bigint,"
-            + "        count(*) FILTER (WHERE EXISTS ("
-            + "          SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = g.entity_id"
-            + "        ))::bigint"
-            + " FROM governed g");
+        await using var cmd = NpgsqlCatalog.Command(_ds, "ingest.physicality_coverage_types", sourceId.ToBytes(), rawTypes);
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            Value = rawTypes,
-            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-        });
-
         await using var result = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await result.ReadAsync(ct).ConfigureAwait(false))
             return new PhysicalityCoverage(0, 0);
@@ -375,10 +310,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         for (int i = 0; i < ids.Count; i++) byteaArray[i] = ids[i].ToBytes();
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.entities_exist_bitmap($1)";
-        var p = cmd.Parameters.AddWithValue(byteaArray);
-        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "ingest.entities_exist_bitmap", byteaArray);
         await cmd.PrepareAsync(ct);
         return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as byte[]
             ?? new byte[BitmapBits.ByteLength(ids.Count)];
@@ -442,12 +374,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         for (int i = 0; i < parents.Count; i++) parentArray[i] = parents[i];
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.content_descent_bitmap($1, $2)";
-        var p1 = cmd.Parameters.AddWithValue(byteaArray);
-        p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        var p2 = cmd.Parameters.AddWithValue(parentArray);
-        p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer;
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "ingest.content_descent_bitmap", byteaArray, parentArray);
         await cmd.PrepareAsync(ct);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result switch
@@ -497,12 +424,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         Array.Fill(tiers, tier);
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.tier_batch_existence_probe($1, $2)";
-        var p = cmd.Parameters.AddWithValue(byteaArray);
-        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        var pt = cmd.Parameters.AddWithValue(tiers);
-        pt.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint;
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "ingest.tier_batch_existence_probe", byteaArray, tiers);
         await cmd.PrepareAsync(ct);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result switch
@@ -529,11 +451,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             packed[i] = buf;
         }
 
-        await using var cmd = _ds.CreateCommand(
-            "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM consensus.classify_circuit($1)");
-        var p = cmd.Parameters.AddWithValue(packed);
-        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-
+        await using var cmd = NpgsqlCatalog.Command(_ds, "consensus.classify_circuit", packed);
         var rows = new List<CircuitRelation>(pairs.Count);
         await using var rdr = await cmd.ExecuteReaderAsync(ct);
         while (await rdr.ReadAsync(ct))
@@ -560,16 +478,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
         var ids = new byte[vocabulary.Count][];
         for (int i = 0; i < vocabulary.Count; i++) ids[i] = vocabulary[i].ToBytes();
-        await using var cmd = _ds.CreateCommand(
-            "SELECT subject_id, object_id, basis_type_ids "
-            + "FROM consensus.circuit_pair_proposals($1, $2, $3, $4, $5, $6)");
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea, Value = ids });
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = targetTypeId.ToBytes() });
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Boolean, Value = targetSymmetric });
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterSubject?.ToBytes() ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterObject?.ToBytes() ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Integer, Value = pageSize });
-
+        await using var cmd = NpgsqlCatalog.Command(_ds, "consensus.circuit_pair_proposals", ids, targetTypeId.ToBytes(), targetSymmetric, afterSubject?.ToBytes(), afterObject?.ToBytes(), pageSize);
         var rows = new List<CircuitPairProposal>(pageSize);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -605,12 +514,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
         // consensus.pair_scores scores an unattested pair as 0, collapsing absence and
         // a zero score; presence questions use consensus.cell instead.
-        await using var cmd = _ds.CreateCommand(
-            "SELECT score FROM consensus.pair_scores($1, $3, $2) ORDER BY ord");
-        var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        var p2 = cmd.Parameters.AddWithValue(obj); p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        var p3 = cmd.Parameters.AddWithValue(typeId.ToBytes()); p3.NpgsqlDbType = NpgsqlDbType.Bytea;
-
+        await using var cmd = NpgsqlCatalog.Command(_ds, "consensus.pair_scores_ordered", subj, obj, typeId.ToBytes());
         var outv = new List<double>(pairs.Count);
         await using var rdr = await cmd.ExecuteReaderAsync(ct);
         while (await rdr.ReadAsync(ct)) outv.Add(rdr.GetDouble(0));

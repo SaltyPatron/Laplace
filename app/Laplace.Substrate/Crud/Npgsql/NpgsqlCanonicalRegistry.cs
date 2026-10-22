@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 using NpgsqlTypes;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -76,7 +77,7 @@ public static class NpgsqlCanonicalRegistry
 
                 long inserted = await NpgsqlRead.ExecuteScalarAsync<long>(
                     dataSource,
-                    "SELECT realize.register_canonicals(@names)",
+                    SqlCatalog.Get("realize.register_canonicals"),
                     bind: p => p.Add(new NpgsqlParameter
                     {
                         ParameterName = "names",

@@ -1467,3 +1467,177 @@ SQL_QUERY("chess.has_eval_sums", "bytea,bytea,bytea[]",
 
 SQL_QUERY("generation.forward_code", "text,int4,int4,float8,int4,bytea[]",
     "SELECT g.step, g.entity, g.stride_used\nFROM generation.forward_text(\n    $1, $2, $3, $4, $5, NULL::bigint, 4, 16, $6::bytea[]) g\nORDER BY g.step")
+
+SQL_QUERY("generation.relation_plane", "text,text,int4,bytea[]",
+    "SELECT subject_id, object_id, w FROM generation.relation_plane($1, $2, $3, $4)")
+
+SQL_QUERY("generation.entity_relation_plane", "bytea[],text[],int4",
+    "SELECT subject_id, object_id, w FROM generation.entity_relation_plane($1, $2, $3)")
+
+SQL_QUERY("generation.consensus_layer_plane", "bytea[],float8,float8,int4",
+    "SELECT subject_id, object_id, w, layer_rank\nFROM generation.consensus_layer_plane($1, $2, $3, $4)")
+
+SQL_QUERY("generation.consensus_layer_plane_masked", "bytea[],bytea,int4",
+    "SELECT subject_id, object_id, w, layer_rank\nFROM generation.consensus_layer_plane_masked($1, $2, $3)")
+
+SQL_QUERY("generation.consensus_type_plane", "bytea[],int4,bytea[]",
+    "SELECT subject_id, object_id, w, type_id, layer_rank\nFROM generation.consensus_type_plane($1, $2, $3)")
+
+SQL_QUERY("generation.consensus_adjacency", "bytea[],int4",
+    "SELECT subject_id, object_id, w FROM generation.consensus_adjacency($1, $2)")
+
+SQL_QUERY("generation.metric_edges", "bytea[],text,int4,int4",
+    "SELECT subject_id, object_id, w FROM generation.metric_edges($1, $2, $3, $4)")
+
+SQL_QUERY("ops.entity_physicality_coords", "bytea[]",
+    "SELECT entity_id, x, y, z, m FROM ops.entity_physicality_coords($1)")
+
+SQL_QUERY("generation.entity_hilbert_keys", "bytea[]",
+    "SELECT entity_id, hilbert_index FROM generation.entity_hilbert_keys($1)")
+
+SQL_QUERY("laplace.entity_trajectory_plane", "bytea[],int4,int4",
+    "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)")
+
+SQL_QUERY("generation.grapheme_order", "bytea[],int4",
+    "SELECT subject_id, object_id, w FROM generation.grapheme_order($1, 50000, $2)")
+
+SQL_QUERY("generation.word_order", "bytea[],int4,int4",
+    "SELECT subject_id, object_id, w FROM generation.word_order($1, $2, $3)")
+
+SQL_QUERY("generation.continuation_conditional_plane", "bytea[],int4,float8,int4",
+    "SELECT subject_id, object_id, w\nFROM generation.continuation_conditional_plane($1, $2, $3, $4)")
+
+SQL_QUERY("foundry.warm_relation_type_id", "text",
+    "SELECT laplace.relation_type_id($1)")
+
+SQL_QUERY("foundry.highway_mask_refresh", "bytea[]",
+    "SELECT consensus.highway_mask_refresh($1)")
+
+SQL_QUERY("generation.vocab_dominant_pos", "bytea[]",
+    "SELECT word_id, pos_id FROM generation.vocab_dominant_pos($1)")
+
+SQL_QUERY("generation.pos_class_transitions", "bytea[]",
+    "SELECT subject_id, object_id, w FROM generation.pos_class_transitions($1)")
+
+SQL_QUERY("generation.sentence_order_word_bridge", "bytea[],int4",
+    "SELECT subject_id, object_id, w FROM generation.sentence_order_word_bridge($1, $2)")
+
+SQL_QUERY("generation.entity_highway_masks", "bytea[]",
+    "SELECT entity_id, highway_mask FROM generation.entity_highway_masks($1)")
+
+SQL_QUERY("generation.grapheme_floor_vocab", "int4",
+    "SELECT surface, weight FROM generation.grapheme_floor_vocab($1)")
+
+SQL_QUERY("generation.corpus_word_vocab", "int4,int4",
+    "SELECT surface FROM generation.corpus_word_vocab($1, $2)")
+
+SQL_QUERY("generation.foundry_vocab_crawl", "text[],int4,int4,int4",
+    "SELECT surface, weight FROM generation.foundry_vocab_crawl($1, $2, $3, $4)")
+
+SQL_QUERY("foundry.source_id", "text",
+    "SELECT laplace.source_id($1)")
+
+SQL_QUERY("realize.resolved_word_surfaces", "text[]",
+    "SELECT realize.render_text(laplace.word_id(s))\nFROM unnest($1::text[]) AS s\nWHERE laplace.word_id(s) IS NOT NULL")
+
+SQL_QUERY("foundry.attribute_outbound", "text,bytea[],int4",
+    "-- ONE PLAN, NOT ONE PER VOCAB ENTRY. consensus.edges_raw is LANGUAGE sql with\n-- UNION ALL + ORDER BY + LIMIT, so it does not inline: under CROSS JOIN LATERAL\n-- it re-plans against a 216-leaf partitioned table once per subject, and a\n-- foundry vocab is thousands of subjects inside the 180 s command timeout.\n-- Inlined here because both partition keys must reach the predicate: type_id is\n-- a folded IMMUTABLE literal (LIST level) and subject_id is a ScalarArrayOp\n-- (HASH level). Handing either one to a per-row variable loses the pruning.\n-- Equivalence to the edges_raw call it replaces, at THIS call site only:\n-- p_direction 'out' keeps the outbound arm; p_refuted true disables the refuted\n-- filter; a one-element p_types is an equality; the window reproduces\n-- ORDER BY eff_mu::float8/1e9 DESC, neighbour_id LIMIT p_limit per subject.\nWITH ranked AS (\n    SELECT c.subject_id,\n           c.object_id AS neighbour_id,\n           GREATEST(consensus.walk_edge_weight(c.rating, c.rd), 0) AS w,\n           row_number() OVER (\n               PARTITION BY c.subject_id\n               ORDER BY (consensus.eff_mu(c.rating, c.rd))::float8 / 1e9 DESC,\n                        c.object_id\n           ) AS rn\n    FROM laplace.consensus c\n    WHERE c.subject_id = ANY ($2)\n      AND c.type_id = laplace.relation_type_id($1)\n)\nSELECT subject_id, neighbour_id, w\nFROM ranked\nWHERE rn <= $3")
+
+SQL_QUERY("generation.probe", "text,int8[],int4",
+    "SELECT lane, seed, reply FROM generation.probe($1, $2, $3)")
+
+SQL_QUERY("content.reconstruct", "bytea,text",
+    "SELECT realize.reconstruct_content($1, $2)")
+
+SQL_QUERY("realize.register_canonicals", "text[]",
+    "SELECT realize.register_canonicals($1)")
+
+SQL_QUERY("attestations.present_ids", "bytea,bytea[]",
+    "SELECT a.id\nFROM laplace.attestations a\nWHERE a.type_id = $1\n  AND a.id = ANY($2::bytea[])")
+
+SQL_QUERY("consensus.cell", "bytea,bytea,bytea",
+    "SELECT rating, rd, witness_count FROM consensus.cell($1, $2, $3)")
+
+SQL_QUERY("consensus.by_ids", "bytea[],bytea",
+    "SELECT id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)")
+
+SQL_QUERY("consensus.by_ids_pair", "bytea[],bytea,bytea[],bytea",
+    "SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)\nUNION ALL\nSELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)")
+
+SQL_QUERY("consensus.by_ids_triple", "bytea[],bytea,bytea[],bytea,bytea[],bytea",
+    "SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)\nUNION ALL\nSELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)\nUNION ALL\nSELECT 2, id, eff_mu, rd, witness_count FROM consensus.by_ids($5, $6)")
+
+SQL_QUERY("ingest.evidence_count_for_relation_source", "text,text",
+    "SELECT ops.evidence_count(\n    p_type => laplace.relation_type_id($1),\n    p_source => laplace.source_id($2))")
+
+SQL_QUERY("ingest.evidence_count_for_source_name", "text",
+    "SELECT ops.evidence_count(p_source => laplace.source_id($1))")
+
+SQL_QUERY("ingest.content_count_for_source_name", "text",
+    "SELECT ops.content_count(p_source => laplace.source_id($1))")
+
+SQL_QUERY("ingest.evidence_count_for_relation", "text",
+    "SELECT ops.evidence_count(p_type => laplace.relation_type_id($1))")
+
+SQL_QUERY("ingest.evidence_count_for_relation_source_id", "text,bytea",
+    "SELECT ops.evidence_count(\n    p_type => laplace.relation_type_id($1), p_source => $2)")
+
+SQL_QUERY("ingest.close_run_count", "uuid,text",
+    "SELECT count(*) FROM ops.ingest_run_close($1, $2)")
+
+SQL_QUERY("ingest.source_bootstrap_present", "text,text",
+    "SELECT ops.source_bootstrap_present(\n    laplace.source_id($1), laplace.relation_type_id($2))")
+
+SQL_QUERY("ingest.source_layer_completed_operation", "int4,bytea",
+    "SELECT ops.layer_completed($2, $1)")
+
+SQL_QUERY("ingest.model_circuit_trajectory_count", "",
+    "SELECT consensus.entity_physicality_count(\n           realize.canonical_id('Model_Circuit'), 3)")
+
+SQL_QUERY("ingest.attestation_counts_by_source", "",
+    "SELECT s.source, s.evidence, encode(s.source_id, 'hex')\nFROM ops.source_counts() s\nORDER BY s.evidence DESC")
+
+SQL_QUERY("ingest.unicode_capital_a_content_probe", "",
+    "SELECT realize.render(realize.canonical_id('A')), f.tier,\n       p.x, p.y, p.z, p.m\nFROM ops.entity_facets(realize.canonical_id('A')) f\nCROSS JOIN ops.entity_physicalities(realize.canonical_id('A')) p\nWHERE p.type = 1")
+
+SQL_QUERY("structural.trunks_by_head", "bytea[],bytea",
+    "SELECT DISTINCT ON (h.head) h.head, e.id, e.tier, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) FROM unnest($1::bytea[]) AS h(head) JOIN laplace.physicalities p ON p.type = 1 AND p.trajectory IS NOT NULL AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = h.head JOIN laplace.entities e ON e.id = p.entity_id AND e.type_id = $2 ORDER BY h.head, e.id")
+
+SQL_QUERY("structural.composition_components", "bytea[]",
+    "SELECT DISTINCT ON (e.id) e.id, e.id, e.tier, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id WHERE e.id = ANY($1) ORDER BY e.id, p.type, p.id")
+
+SQL_QUERY("ops.entity_count", "bytea",
+    "SELECT ops.entity_count($1)")
+
+SQL_QUERY("ingest.physicality_coverage", "bytea",
+    "SELECT count(*)::bigint,       count(*) FILTER (WHERE EXISTS (         SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id       ))::bigint FROM laplace.entities e WHERE EXISTS (SELECT 1 FROM laplace.attestations a   WHERE a.source_id = $1 AND a.subject_id = e.id)")
+
+SQL_QUERY("ingest.physicality_coverage_types", "bytea,bytea[]",
+    "WITH touched AS MATERIALIZED ( SELECT a.subject_id AS entity_id FROM laplace.attestations a WHERE a.source_id = $1 UNION SELECT a.object_id FROM laplace.attestations a       WHERE a.source_id = $1 AND a.object_id IS NOT NULL UNION SELECT a.context_id FROM laplace.attestations a       WHERE a.source_id = $1 AND a.context_id IS NOT NULL), governed AS MATERIALIZED ( SELECT DISTINCT e.id AS entity_id FROM laplace.entities e LEFT JOIN touched t ON t.entity_id = e.id WHERE e.type_id = ANY($2)   AND t.entity_id IS NOT NULL) SELECT count(*)::bigint,        count(*) FILTER (WHERE EXISTS (          SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = g.entity_id        ))::bigint FROM governed g")
+
+SQL_QUERY("consensus.classify_circuit", "bytea[]",
+    "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM consensus.classify_circuit($1)")
+
+SQL_QUERY("consensus.circuit_pair_proposals", "bytea[],bytea,bool,bytea,bytea,int4",
+    "SELECT subject_id, object_id, basis_type_ids FROM consensus.circuit_pair_proposals($1, $2, $3, $4, $5, $6)")
+
+SQL_QUERY("consensus.pair_scores_ordered", "bytea[],bytea[],bytea",
+    "SELECT score FROM consensus.pair_scores($1, $3, $2) ORDER BY ord")
+
+SQL_QUERY("ingest.completed_units", "bytea[],bytea[],int4[],bytea[]",
+    "SELECT k.ord FROM unnest($1::bytea[], $2::bytea[], $3::int[], $4::bytea[]) WITH ORDINALITY AS k(witness_id, unit_id, layer, digest, ord) WHERE EXISTS (SELECT 1 FROM laplace.ingest_unit_completion c WHERE c.witness_id = k.witness_id AND c.unit_id = k.unit_id AND c.layer = k.layer AND c.digest IS NOT DISTINCT FROM k.digest)")
+
+SQL_QUERY("ingest.entities_exist_bitmap", "bytea[]",
+    "SELECT laplace.entities_exist_bitmap($1)")
+
+SQL_QUERY("ingest.content_descent_bitmap", "bytea[],int4[]",
+    "SELECT laplace.content_descent_bitmap($1, $2)")
+
+SQL_QUERY("ingest.tier_batch_existence_probe", "bytea[],int2[]",
+    "SELECT laplace.tier_batch_existence_probe($1, $2)")
+
+SQL_QUERY("chess.commentary_position_history", "bytea,bytea,int2,int4,int4,bool,text,text",
+    "WITH raw_lines AS MATERIALIZED (\n    SELECT DISTINCT p.entity_id AS line_id\n    FROM laplace.physicalities p\n    JOIN laplace.entities e ON e.id = p.entity_id\n    WHERE p.type = $3\n      AND e.type_id = $2\n      AND p.trajectory IS NOT NULL\n      AND public.laplace_trajectory_constituent_ids(p.trajectory)\n          @> ARRAY[$1]::bytea[]\n      AND $4 >= 1\n),\nplayings AS MATERIALIZED (\n    SELECT l.line_id, h.event_id, h.played_on,\n           g.white_id, g.white, g.black_id, g.black, g.result, g.eco,\n           CASE WHEN $6 THEN g.white_id ELSE g.black_id END AS mover_id\n    FROM raw_lines l\n    CROSS JOIN LATERAL chess.line(l.line_id) h\n    CROSS JOIN LATERAL chess.game(h.event_id) g\n),\nscored AS MATERIALIZED (\n    SELECT p.line_id, p.event_id, p.played_on,\n           p.white_id, p.white, p.black_id, p.black, p.result,\n           consensus.eff_mu(c.rating, c.rd)::double precision AS mover_eff_mu,\n           elo.rating AS mover_elo,\n           (CASE WHEN COALESCE($7, '') <> '' AND p.eco = $7 THEN 1 ELSE 0 END\n            + CASE WHEN COALESCE($8, '') <> '' AND EXISTS (\n                   SELECT 1\n                   FROM laplace.attestations a\n                   WHERE a.subject_id = p.line_id\n                     AND a.type_id = laplace.relation_type_id('GAME_HAS_MOTIF')\n                     AND realize.realize(a.object_id) = $8\n               ) THEN 1 ELSE 0 END) AS opening_or_motif\n    FROM playings p\n    LEFT JOIN LATERAL (\n        SELECT c.rating, c.rd\n        FROM laplace.consensus c\n        WHERE c.subject_id = p.mover_id\n          AND c.type_id = laplace.relation_type_id('OUTCOME')\n          AND consensus.eff_mu(c.rating, c.rd) > 0\n        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id\n        LIMIT 1\n    ) c ON p.mover_id IS NOT NULL\n    LEFT JOIN LATERAL (\n        SELECT pr.rating\n        FROM chess.player_ratings(p.mover_id) pr\n        LIMIT 1\n    ) elo ON p.mover_id IS NOT NULL\n)\nSELECT s.line_id, s.event_id, s.played_on,\n       s.white_id, s.white, s.black_id, s.black, s.result,\n       s.mover_eff_mu, s.mover_elo, s.opening_or_motif,\n       count(*) OVER () AS witness_count\nFROM scored s\nORDER BY s.mover_eff_mu DESC NULLS LAST,\n         s.mover_elo DESC NULLS LAST,\n         s.opening_or_motif DESC,\n         s.event_id\nLIMIT $5")
+
+SQL_QUERY("chess.commentary_position_continuations", "bytea,bytea,int2,int4",
+    "WITH raw_lines AS MATERIALIZED (\n    SELECT DISTINCT p.entity_id AS line_id\n    FROM laplace.physicalities p\n    JOIN laplace.entities e ON e.id = p.entity_id\n    WHERE p.type = $3\n      AND e.type_id = $2\n      AND p.trajectory IS NOT NULL\n      AND public.laplace_trajectory_constituent_ids(p.trajectory)\n          @> ARRAY[$1]::bytea[]\n),\nsteps AS (\n    SELECT step.nxt\n    FROM raw_lines l\n    JOIN laplace.physicalities p\n      ON p.entity_id = l.line_id\n     AND p.type = $3\n    CROSS JOIN LATERAL (\n        SELECT ids[i + 1] AS nxt\n        FROM (\n            SELECT public.laplace_trajectory_constituent_ids(p.trajectory) AS ids\n        ) t\n        CROSS JOIN LATERAL generate_subscripts(t.ids, 1) AS s(i)\n        WHERE t.ids[s.i] = $1\n          AND s.i < cardinality(t.ids)\n        LIMIT 1\n    ) step\n    WHERE step.nxt IS NOT NULL\n)\nSELECT nxt, count(*)::bigint AS n\nFROM steps\nGROUP BY nxt\nORDER BY n DESC, nxt\nLIMIT $4")

@@ -129,28 +129,18 @@ public static class NpgsqlIngestOps
 
     public static Task<long> EvidenceCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
-        ScalarLongAsync(conn, """
-            SELECT ops.evidence_count(p_source => laplace.source_id(@s))
-            """, p => p.AddWithValue("s", sourceKey), ct, "evidence_count_source_name");
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_source_name"), p => p.AddWithValue("s", sourceKey), ct, "evidence_count_source_name");
 
     public static Task<long> ContentCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
-        ScalarLongAsync(conn, """
-            SELECT ops.content_count(p_source => laplace.source_id(@s))
-            """, p => p.AddWithValue("s", sourceKey), ct, "content_count_source_name");
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.content_count_for_source_name"), p => p.AddWithValue("s", sourceKey), ct, "content_count_source_name");
 
     public static Task<long> EvidenceCountForRelationAsync(
         NpgsqlConnection conn, string relationType, string? sourceKey = null,
         CancellationToken ct = default) =>
         sourceKey is null
-            ? ScalarLongAsync(conn, """
-                SELECT ops.evidence_count(p_type => laplace.relation_type_id(@rel))
-                """, p => p.AddWithValue("rel", relationType), ct, "evidence_count_relation")
-            : ScalarLongAsync(conn, """
-                SELECT ops.evidence_count(
-                    p_type => laplace.relation_type_id(@rel),
-                    p_source => laplace.source_id(@src))
-                """, p =>
+            ? ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_relation"), p => p.AddWithValue("rel", relationType), ct, "evidence_count_relation")
+            : ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_relation_source"), p =>
                 {
                     p.AddWithValue("rel", relationType);
                     p.AddWithValue("src", sourceKey);
@@ -159,10 +149,7 @@ public static class NpgsqlIngestOps
     public static Task<long> EvidenceCountForRelationAndSourceIdAsync(
         NpgsqlConnection conn, string relationType, byte[] sourceId,
         CancellationToken ct = default) =>
-        ScalarLongAsync(conn, """
-            SELECT ops.evidence_count(
-                p_type => laplace.relation_type_id(@rel), p_source => @src)
-            """,
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_relation_source_id"),
             p =>
             {
                 p.AddWithValue("rel", relationType);
@@ -175,9 +162,7 @@ public static class NpgsqlIngestOps
     public static Task<long> CloseIngestRunAsync(
         NpgsqlConnection conn, Guid runId, string status,
         CancellationToken ct = default) =>
-        ScalarLongAsync(conn, """
-            SELECT count(*) FROM ops.ingest_run_close(@run, @status)
-            """,
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.close_run_count"),
             p =>
             {
                 p.AddWithValue("run", runId);
@@ -190,10 +175,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, string sourceKey, string lawRelation,
         CancellationToken ct = default)
     {
-        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT ops.source_bootstrap_present(
-                laplace.source_id(@src), laplace.relation_type_id(@rel))
-            """,
+        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, SqlCatalog.Get("ingest.source_bootstrap_present"),
             p =>
             {
                 p.AddWithValue("src", sourceKey);
@@ -208,12 +190,8 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, string prompt, long[] seeds, int steps,
         CancellationToken ct = default)
     {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT lane, seed, reply FROM generation.probe(@p, @s, @n)";
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "generation.probe", prompt, seeds, steps);
         cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("p", prompt);
-        cmd.Parameters.Add("s", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value = seeds;
-        cmd.Parameters.AddWithValue("n", steps);
         var rows = new List<(string, long, string?)>();
         await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await r.ReadAsync(ct).ConfigureAwait(false))
@@ -226,7 +204,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, int layer, Hash128 sourceId, CancellationToken ct = default)
     {
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn,
-            "SELECT ops.layer_completed(@src, @layer)",
+            SqlCatalog.Get("ingest.source_layer_completed_operation"),
             p =>
             {
                 p.AddWithValue("layer", layer);
@@ -237,20 +215,13 @@ public static class NpgsqlIngestOps
 
     public static Task<long> ModelCircuitTrajectoryCountAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        ScalarLongAsync(conn, """
-            SELECT consensus.entity_physicality_count(
-                       realize.canonical_id('Model_Circuit'), 3)
-            """, null, ct, "model_circuit_trajectory_count");
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.model_circuit_trajectory_count"), null, ct, "model_circuit_trajectory_count");
 
     public readonly record struct SourceEvidenceRow(string? Source, long Evidence, string? SourceId);
 
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT s.source, s.evidence, encode(s.source_id, 'hex')
-            FROM ops.source_counts() s
-            ORDER BY s.evidence DESC
-            """,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ingest.attestation_counts_by_source"),
             static r => new SourceEvidenceRow(r.IsDBNull(0) ? null : r.GetString(0), r.GetInt64(1),
                 r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");
@@ -260,24 +231,18 @@ public static class NpgsqlIngestOps
 
     public static Task<IReadOnlyList<UnicodeAtomProbeRow>> UnicodeCapitalAContentProbeAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT realize.render(realize.canonical_id('A')), f.tier,
-                   p.x, p.y, p.z, p.m
-            FROM ops.entity_facets(realize.canonical_id('A')) f
-            CROSS JOIN ops.entity_physicalities(realize.canonical_id('A')) p
-            WHERE p.type = 1
-            """,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ingest.unicode_capital_a_content_probe"),
             static r => new UnicodeAtomProbeRow(
                 r.GetString(0), r.GetInt16(1),
                 r.GetDouble(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             ct: ct, label: "unicode_capital_a_probe");
 
     private static async Task<long> ScalarLongAsync(
-        NpgsqlConnection conn, string sql, Action<NpgsqlParameterCollection>? bind,
+        NpgsqlConnection conn, NativeSqlQuery query, Action<NpgsqlParameterCollection>? bind,
         CancellationToken ct, string label)
     {
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(
-            conn, sql, bind, timeoutSeconds: 0, ct: ct, label: label).ConfigureAwait(false);
+            conn, query, bind, timeoutSeconds: 0, ct: ct, label: label).ConfigureAwait(false);
         return AsLong(v);
     }
 
