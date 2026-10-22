@@ -69,13 +69,6 @@ public class GrammarSpineConformanceTests
             // Wiktionary composes natively parsed rows through ComposeDecomposer.
             ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
             ("SemLink", ["GrammarWitnessIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
-            // Tatoeba runs sentences then links as phases: links resolve row ids through the
-            // id → content-root map the sentences build. Both phases compose directly; TSV
-            // packaging is not content.
-            ("Tatoeba", ["DecomposerPhase<TatoebaIngestRecord", "StreamingUtf8LineReader",
-                "DirectComposeHandler<TatoebaIngestRecord>", "TatoebaEmitter"]),
-            // ConceptNet: one triple file, ExtractFileAsync on RelationTripleDecomposerBase.
-            ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
                 "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
         };
@@ -113,21 +106,15 @@ public class GrammarSpineConformanceTests
         Assert.DoesNotContain("IngestPipelineDefaults.StructuredGrammar(", text, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void OpenSubtitles_UsesIngestPipeline_NotHandRolledBuilderLoop()
+    [Theory]
+    [InlineData("ConceptNet")]
+    [InlineData("Tatoeba")]
+    [InlineData("OpenSubtitles")]
+    public void NativeCorpusNamespacesContainMetadataRatherThanParallelManagedParsers(string corpus)
     {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "OpenSubtitles");
-        var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
-            .Where(p => !p.Contains("bin") && !p.Contains("obj"))
-            .Select(p => StripComments(File.ReadAllText(p))));
-        Assert.Contains("OpenSubtitlesZipIngest", text, StringComparison.Ordinal);
-        Assert.Contains("DecomposerMultiFile<AlignedSubtitleBlock", text, StringComparison.Ordinal);
-        Assert.Contains("OpenSubtitlesAlignedHandler", text, StringComparison.Ordinal);
-        Assert.Contains("ExtractFileAsync", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("RelationTripleMultiFileDecomposerBase", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("new SubstrateChangeBuilder", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("OpenSubtitlesIngestHandler", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("OpenSubtitlesFastIngest", text, StringComparison.Ordinal);
+        var types = typeof(OMWSource).Assembly.GetTypes()
+            .Where(type => !type.IsNested && type.Namespace == "Laplace.Decomposers." + corpus);
+        var metadata = Assert.Single(types);
+        Assert.Contains(typeof(ISeedSource), metadata.GetInterfaces());
     }
 }

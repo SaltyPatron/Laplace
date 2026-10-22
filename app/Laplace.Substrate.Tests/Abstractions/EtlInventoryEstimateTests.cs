@@ -131,7 +131,7 @@ public sealed class EtlInventoryEstimateTests
     }
 
     [Fact]
-    public async Task ConceptNet_DescribeInput_Uncapped_DoesNotRequireFullRead()
+    public void NewlineInventoryUncappedDoesNotRequireFullRead()
     {
         // Uncapped, a file over the threshold is estimated by sampling
         // (EstimateNewlineCount) and returns promptly with a plausible count.
@@ -154,14 +154,11 @@ public sealed class EtlInventoryEstimateTests
                 }
             }
 
-            var dec = new Laplace.Decomposers.ConceptNet.ConceptNetDecomposer();
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var inv = await dec.DescribeInputAsync(
-                new TempCtx(dir), DecomposerOptions.ForWitness("ConceptNetDecomposer"));
+            long count = EtlInventory.EstimateNewlineCount(csv);
             sw.Stop();
 
-            Assert.NotNull(inv);
-            Assert.True(inv!.TotalInputUnits > 0);
+            Assert.True(count > 0);
             Assert.True(sw.ElapsedMilliseconds < 15_000,
                 $"ConceptNet DescribeInput took {sw.ElapsedMilliseconds}ms");
         }
