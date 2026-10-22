@@ -21,6 +21,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// Tenants and content carry a per-run guid so cells have no prior history. Tier=live:
 /// writes to the seeded shared substrate; not a database-health gate.
 /// </summary>
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class ConversationProvenanceLiveTests
 {

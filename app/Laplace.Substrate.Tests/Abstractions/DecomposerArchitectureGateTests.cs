@@ -902,13 +902,12 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
-    public void UnicodeAuthority_UsesCompleteFlatXml()
+    public void UnicodeAuthority_UsesFullUcdAndTheSoleNativeFloorBuilder()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         string[] activePaths =
         [
             Path.Combine("engine", "CMakeLists.txt"),
-            Path.Combine("engine", "core", "CMakeLists.txt"),
             Path.Combine("scripts", "pipeline.sh"),
             Path.Combine("scripts", "ci-deps.sh"),
             Path.Combine("scripts", "win", "build-engine.cmd"),
@@ -925,6 +924,8 @@ public sealed class DecomposerArchitectureGateTests
 
         var cmake = File.ReadAllText(Path.Combine(repoRoot, "engine", "CMakeLists.txt"));
         var coreCmake = File.ReadAllText(Path.Combine(repoRoot, "engine", "core", "CMakeLists.txt"));
+        Assert.Contains("${LAPLACE_NATIVE}/tools/tier0.c", coreCmake, StringComparison.Ordinal);
+        Assert.DoesNotContain("tools/ucd_tables_emit", coreCmake, StringComparison.Ordinal);
         var codepoint = File.ReadAllText(Path.Combine(
             repoRoot, "engine", "core", "src", "codepoint_table.c"));
         Assert.Contains("LAPLACE_UCD_RELEASE_README", cmake, StringComparison.Ordinal);

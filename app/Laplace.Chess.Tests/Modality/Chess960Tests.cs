@@ -117,6 +117,7 @@ public class Chess960Tests
     /// rules more broadly than constructed positions do.
     /// </summary>
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public async Task RealChessComFreestyleGames_AllReplay()
     {
         string pgn = Path.Combine(Laplace.Chess.Service.Tests.ChessCorpusPaths.Games,

@@ -72,6 +72,7 @@ public sealed class FideCurrentMarkupTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresNetwork")]
     [Trait("Tier", "live")]
     public async Task OfficialFideProfileRatingListSearchAndRosterAreUsable()
     {

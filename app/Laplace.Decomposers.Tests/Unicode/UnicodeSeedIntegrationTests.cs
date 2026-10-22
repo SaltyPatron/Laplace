@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Unicode.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 {

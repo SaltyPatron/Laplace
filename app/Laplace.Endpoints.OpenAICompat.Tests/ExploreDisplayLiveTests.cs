@@ -11,6 +11,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// stay separate when realization abstains. Needs the standing CILI estate; the
 /// pg_regress fixture proves the display law without a seed.
 /// </summary>
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class ExploreDisplayLiveTests
 {

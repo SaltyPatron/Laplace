@@ -13,6 +13,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// so a non-empty reply cannot hide a disconnected evidence path. The answer depends on
 /// the seeded substrate's standing.
 /// </summary>
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class ForwardPassLiveTests
 {

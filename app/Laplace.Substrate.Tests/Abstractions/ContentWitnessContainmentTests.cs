@@ -87,16 +87,17 @@ public sealed class ContentWitnessContainmentTests
 
         var bm = new byte[(n + 7) / 8];
         bool marked = false;
+        var word = Hash128.Text("dog");
         for (uint i = 0; i < (uint)n; i++)
         {
-            if (tree.GetNode(i).Tier == 2)
+            if (tree.GetNode(i).Id == word)
             {
                 bm[(int)i >> 3] |= (byte)(1 << ((int)i & 7));
                 marked = true;
                 break;
             }
         }
-        Assert.True(marked, "expected at least one tier-2 word node");
+        Assert.True(marked, "expected the canonical dog subtree");
 
         using var partial = IntentStage.New(256);
         Assert.True(partial.EmitContentTree(tree, Src, bm, out _));

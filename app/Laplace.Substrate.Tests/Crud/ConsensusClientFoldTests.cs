@@ -11,6 +11,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// separately admitted evidence. A storage batch is not another rating period.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public class ConsensusClientFoldTests
 {

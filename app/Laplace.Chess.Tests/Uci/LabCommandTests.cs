@@ -425,6 +425,7 @@ public sealed class LabCommandTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public void Match_RealFastchess_StockfishAgainstItself()
     {
         var cfg = ChessLabConfig.Read();
