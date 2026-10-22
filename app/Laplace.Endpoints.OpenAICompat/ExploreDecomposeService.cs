@@ -115,9 +115,7 @@ internal sealed class ExploreDecomposeService
     public UnicodePointResponse UnicodePoint(uint codepoint)
     {
         EnsurePerfcache();
-        var records = CodepointPerfcache.Records;
-        if (codepoint >= (uint)records.Length) throw new ArgumentOutOfRangeException(nameof(codepoint));
-        ref readonly var r = ref records[(int)codepoint];
+        ref readonly var r = ref CodepointPerfcache.LookupScalar(codepoint);
         string display = Rune.IsValid((int)codepoint) ? new Rune((int)codepoint).ToString() : string.Empty;
         double radius = Math.Sqrt(r.CoordX*r.CoordX+r.CoordY*r.CoordY+r.CoordZ*r.CoordZ+r.CoordM*r.CoordM);
         return new UnicodePointResponse(codepoint, display, Convert.ToHexStringLower(r.Hash.ToBytes()),
@@ -261,12 +259,9 @@ internal sealed class ExploreDecomposeService
             uint? ducetRank = null;
             if (node.Tier == 0)
             {
-                var records = CodepointPerfcache.Records;
-                if (node.Atom >= (uint)records.Length)
+                if (!CodepointPerfcache.TryLookupScalar(node.Atom, out var atom))
                     throw new InvalidOperationException(
                         $"Tier-0 atom U+{node.Atom:X} is outside the published perfcache ROM.");
-
-                ref readonly var atom = ref records[(int)node.Atom];
                 if (node.Id != atom.Hash
                     || x != atom.CoordX || y != atom.CoordY
                     || z != atom.CoordZ || m != atom.CoordM
@@ -492,9 +487,7 @@ internal sealed class ExploreDecomposeService
     private static unsafe int PerfcacheResolver(
         uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
     {
-        var recs = CodepointPerfcache.Records;
-        if (atom >= (uint)recs.Length) return -1;
-        ref readonly var r = ref recs[(int)atom];
+        if (!CodepointPerfcache.TryLookupScalar(atom, out var r)) return -1;
         *outId = r.Hash;
         outCoord[0] = r.CoordX;
         outCoord[1] = r.CoordY;

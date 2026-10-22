@@ -13,7 +13,7 @@ set -euo pipefail
 # what a GitHub-hosted runner presents.
 for name in $(compgen -e); do
   case "$name" in
-    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
+    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
     LAPLACE_*|PG*) unset "$name" ;;
   esac
 done
@@ -35,6 +35,15 @@ export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
 BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.sh and the managed props read
 export LAPLACE_ENGINE_BUILD="$BUILD"
+export LAPLACE_BUILD="$WORK/build"
+export LAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_CI_ENGINE_SOURCE"
+export LAPLACE_OPERATIONS="$LAPLACE_CI_OPERATIONS_SOURCE"
+export LAPLACE_ICU_DIR="$LAPLACE_CI_ICU_DIR"
+export LAPLACE_TREESITTER="$EXT/tree-sitter"
+export LAPLACE_GRAMMARS="$WORK/grammars"
+export LAPLACE_TIER0="$BUILD/core/perfcache/tier0.bin"
+export LAPLACE_FLAGS="$BUILD/core/perfcache/tier0.flags"
+export LAPLACE_HIGHWAY="$BUILD/core/perfcache/highway.bin"
 # An empty machine declaration: the readers (scripts/machine-env.py, LaplaceInstall) take an
 # explicitly named file as the whole declaration, so this host's own declaration is never read.
 export LAPLACE_MACHINE_ENV="$WORK/machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
@@ -120,13 +129,20 @@ oneapi() {
 
 native() {
   oneapi
+  say "compiled recipe grammars"
+  bash "$LAPLACE_RECIPE_ENGINE_SOURCE/tools/build_grammars.sh" "$EXT/tree-sitter-grammars" "$LAPLACE_GRAMMARS"
+  bash "$LAPLACE_RECIPE_ENGINE_SOURCE/tools/build_grammars.sh" "$LAPLACE_RECIPE_ENGINE_SOURCE/recipes/formats/grammars" "$LAPLACE_GRAMMARS"
+  end
   say "native: configure and build (oneAPI, MKL required, tests on)"
-  cmake -S "$ROOT/engine" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  cmake -U 'ICU_*' -S "$ROOT/engine" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING=ON \
     -DLAPLACE_EXTERNAL="$EXT" -DLAPLACE_NATIVE="$LAPLACE_NATIVE" -DLAPLACE_UCD_PATH="$UCD" \
+    -DLAPLACE_OPERATIONS="$LAPLACE_OPERATIONS" -DLAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_RECIPE_ENGINE_SOURCE" \
+    -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR" \
     -DLAPLACE_CHESS_OPENINGS="$DATA/Games/Chess/lichess-openings"
   cmake --build "$BUILD" -j "$(nproc)"
-  find "$BUILD" -name 'laplace_t0_perfcache.bin' -print -quit | grep -q . || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
+  test -s "$LAPLACE_TIER0" || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
+  "$BUILD/core/recipe_engine/laplace" flags -u "$UCD" -o "$LAPLACE_FLAGS"
   end
   say "native: ctest (dev profile: everything but the regress label)"
   ctest --test-dir "$BUILD" --no-tests=error --output-on-failure -j "$(nproc)" -LE regress
@@ -139,7 +155,7 @@ managed() {
   dotnet build app/Laplace.slnx -c Release --nologo -v minimal
   end
   say "managed: dev tier (Tier!=db&Tier!=live&Tier!=perf) on the candidate native build"
-  export LAPLACE_PERFCACHE_BIN; LAPLACE_PERFCACHE_BIN="$(find "$BUILD" -name 'laplace_t0_perfcache.bin' -print -quit)"
+  export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
   bash scripts/sync-managed-native-artifacts.sh
   rm -rf "$WORK/managed-results"
   dotnet test app/Laplace.slnx -c Release --no-build --nologo -v minimal \

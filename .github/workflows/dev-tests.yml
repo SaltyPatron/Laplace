@@ -28,10 +28,42 @@ jobs:
     timeout-minutes: 120
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      LAPLACE_CI_NATIVE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_CI_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
+      LAPLACE_CI_OPERATIONS_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
+      LAPLACE_CI_ICU_DIR: /repos/deps/icu78
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Check out the canonical Native implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Native
+          ref: bdb47ea923338b53bf3dbfbd6e4edda486069a72
+          path: .ci-dependencies/Laplace-Native
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
+      - name: Check out the canonical recipe Engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Engine
+          ref: 25104e87337084087d5e53f0d0d4ff6c62cc6bc0
+          path: .ci-dependencies/Laplace-Engine
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
+      - name: Check out the shared floating-point contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Operations
+          ref: c5c6a18c125cb4c624b22c5554aa4c9d7553ae13
+          path: .ci-dependencies/Laplace-Operations
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
+      - name: Provide the pinned Rust compiler for the Tree-sitter generator
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.90.0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         env:
           # The runner account cannot write the default /usr/share/dotnet; the SDK goes in the runner's tool cache.
