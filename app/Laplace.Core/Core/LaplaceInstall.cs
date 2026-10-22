@@ -271,11 +271,15 @@ public static class LaplaceInstall
     }
 
     public static string ResolveIngestRoot()
+        => ExistingDirectory(DeclaredIngestRoot(), "LAPLACE_DATA");
+
+    /// <summary>The declared corpus path, including when the data is not installed.</summary>
+    public static string DeclaredIngestRoot()
     {
         var configured = TryGetProcessOrMachineSetting("LAPLACE_DATA");
         if (string.IsNullOrWhiteSpace(configured))
             throw new InvalidOperationException("Declare LAPLACE_DATA as the ingest corpus directory in the installation configuration.");
-        return ExistingDirectory(configured, "LAPLACE_DATA");
+        return Path.GetFullPath(configured.Trim());
     }
 
     private static string ExistingDirectory(string value, string setting)
@@ -289,6 +293,24 @@ public static class LaplaceInstall
         => Path.GetFullPath(Path.Combine(ResolveIngestRoot(), Path.Combine(relative)));
 
     public static string ResolveDataRoot() => ResolveIngestRoot();
+
+    /// <summary>
+    /// Resolves the model root declared by LAPLACE_MODELS in the environment or machine.env.
+    /// </summary>
+    public static string ResolveModelsRoot()
+        => ExistingDirectory(DeclaredModelsRoot(), "LAPLACE_MODELS");
+
+    /// <summary>The declared model path, including when the models are not installed.</summary>
+    public static string DeclaredModelsRoot()
+    {
+        var configured = TryGetProcessOrMachineSetting("LAPLACE_MODELS");
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("Declare LAPLACE_MODELS as the model directory in the installation configuration.");
+        return Path.GetFullPath(configured.Trim());
+    }
+
+    public static string ResolvePathUnderModels(params string[] relative)
+        => Path.GetFullPath(Path.Combine(ResolveModelsRoot(), Path.Combine(relative)));
 
     public static string ResolveIso639Dir() => ResolvePathUnderIngest("ISO639");
 

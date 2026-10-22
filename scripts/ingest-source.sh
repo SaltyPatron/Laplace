@@ -5,30 +5,18 @@ source="${1:-}"
 path="${2:-}"
 corpus(){ printf '%s' "${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"; }    # asked only where a path under the corpus is needed
 
-# The ladder stages and their order are declared once, in scripts/win/witness-manifest.json
-# (cadence[].sources, relations by their order); these arrays are read from it.
-MANIFEST="$(dirname "$0")/win/witness-manifest.json"
-stage_sources() {
-    python3 - "$MANIFEST" "$1" <<'PY'
-import json, sys
-stage = next(s for s in json.load(open(sys.argv[1], encoding="utf-8"))["cadence"] if s["stage"] == sys.argv[2])
-print("\n".join(s["cli"] for s in sorted(stage["sources"], key=lambda s: s.get("order", 0))))
-PY
-}
-mapfile -t FLOOR < <(stage_sources floor)
-mapfile -t DOCUMENT < <(stage_sources document)
-mapfile -t RELATIONS < <(stage_sources relations)
-mapfile -t USAGE < <(stage_sources usage)
-if [[ ${#FLOOR[@]} -eq 0 || ${#DOCUMENT[@]} -eq 0 || ${#RELATIONS[@]} -eq 0 || ${#USAGE[@]} -eq 0 ]]; then
-    echo "cannot read the ladder stages from $MANIFEST" >&2
+# The Python config reader and C# EtlManifest both consume the native recipes/order.
+mapfile -t SOURCE_ORDER < <(python3 "$(dirname "$0")/decomposer-isolate-plan.py" --list-sources)
+if [[ ${#SOURCE_ORDER[@]} -eq 0 ]]; then
+    echo "cannot read the canonical native recipes/order" >&2
     exit 2
 fi
-LADDER=" ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]} "
+LADDER=" ${SOURCE_ORDER[*]} "
 # Sources outside the ladder; each has its own route below.
 OTHER_SOURCES="chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
 
 usage_sources() {
-    echo "Sources: ${FLOOR[*]} ${DOCUMENT[*]} ${RELATIONS[*]} ${USAGE[*]}" >&2
+    echo "Sources: ${SOURCE_ORDER[*]}" >&2
     echo "         $OTHER_SOURCES" >&2
 }
 
@@ -216,7 +204,7 @@ if [[ "$LADDER" == *" $source "* ]]; then route=@ladder; fi
 case "$route" in
     all)
         require_cli
-        STAGES=( "${FLOOR[@]}" "${DOCUMENT[@]}" "${RELATIONS[@]}" "${USAGE[@]}" )
+        STAGES=( "${SOURCE_ORDER[@]}" )
         from="${INGEST_FROM:-}"
         skip=0; [[ -n "$from" ]] && skip=1
         for src in "${STAGES[@]}"; do

@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'laplace-paths.ps1')
 $Root = Get-LaplaceRepoRoot
-$deployRoot = if ($env:LAPLACE_DEPLOY) { $env:LAPLACE_DEPLOY } else { Join-Path (Get-LaplaceDataRoot) 'deploy' }
+$deployRoot = if ($env:LAPLACE_DEPLOY) { $env:LAPLACE_DEPLOY } else { Join-Path (Get-LaplaceWorkRoot) 'deploy' }
 $engineBuild = Resolve-LaplaceTreePath 'build-win'
 $extBuild = Resolve-LaplaceTreePath 'build-win-ext'
 $asanBuild = Resolve-LaplaceTreePath 'build-win-asan'

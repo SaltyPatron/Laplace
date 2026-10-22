@@ -14,7 +14,7 @@ REFRESH="$tmp/refresh"
 mkdir -p "$DATA" "$REFRESH"
 
 run_refresh() {
-  LAPLACE_DATA_ROOT="$DATA" \
+  LAPLACE_DATA="$DATA" \
   LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   LAPLACE_DATA_REFRESH_SOURCES="${LAPLACE_DATA_REFRESH_SOURCES:-$ROOT/scripts/dataset-estate-refresh.sources.psv}" \
     "$SCRIPT" "$@"
@@ -31,7 +31,7 @@ printf 'semantic|missing-first|url|missing.txt|https://example.invalid/missing||
 printf 'semantic|good-last|url|good.txt|https://example.invalid/good||||\n' >> "$manifest"
 printf 'present\n' > "$REFRESH/good.txt"
 set +e
-verify_output="$(LAPLACE_DATA_ROOT="$DATA" \
+verify_output="$(LAPLACE_DATA="$DATA" \
   LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   LAPLACE_DATA_REFRESH_SOURCES="$manifest" \
   "$SCRIPT" verify all 2>&1)"
@@ -46,7 +46,7 @@ grep -F 'good-last' <<<"$verify_output" | grep -F 'OK' >/dev/null
 # exits from inside the worker call stack.
 printf 'preserve-me' > "$REFRESH/finalized.bin"
 set +e
-LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA="$DATA" \
 LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   "$SCRIPT" _job invalid-finalized row_worker semantic invalid-finalized url \
   finalized.bin https://example.invalid/finalized '' 999999 '' '' >/dev/null 2>&1
@@ -60,7 +60,7 @@ set -e
 # The symmetric success path also records rc=0 without contacting the network: an
 # already-present unconstrained plain artifact is a valid staged observation.
 printf 'already-present\n' > "$REFRESH/already.txt"
-LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA="$DATA" \
 LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   "$SCRIPT" _job valid-existing row_worker semantic valid-existing url \
   already.txt https://example.invalid/already '' '' '' '' >/dev/null 2>&1
@@ -77,14 +77,14 @@ printf 'snapshot payload\n' > "$git_source/payload.txt"
 git -C "$git_source" add payload.txt
 git -C "$git_source" commit -qm 'fixture'
 git_sha="$(git -C "$git_source" rev-parse HEAD)"
-LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA="$DATA" \
 LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   "$SCRIPT" _job git-snapshot row_worker semantic git-snapshot git \
   snapshots "$git_source" "$git_sha" '' '' '' >/dev/null 2>&1
 snapshot="$REFRESH/snapshots/git-snapshot-$git_sha.tar.gz"
 [[ -f "$snapshot" && -f "$snapshot.sha256" ]] || { echo "Git snapshot sidecar was not created" >&2; exit 1; }
 rm -f -- "$snapshot.sha256"
-LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA="$DATA" \
 LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   "$SCRIPT" _job git-snapshot-replay row_worker semantic git-snapshot git \
   snapshots "$git_source" "$git_sha" '' '' '' >/dev/null 2>&1

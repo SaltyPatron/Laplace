@@ -172,9 +172,10 @@ try {
         recreate { Migrate $(if($Database -eq 'application'){'app-nuke'}else{'nuke'}) }
     }
     if($Operation -ne 'status' -and $Database -eq 'substrate'){
-        $deployExtDir=Join-Path $env:LAPLACE_DATA_ROOT 'deploy/share/extension'
+        $deployRoot=if($env:LAPLACE_DEPLOY){$env:LAPLACE_DEPLOY}else{Join-Path $env:LAPLACE_WORK 'deploy'}
+        $deployExtDir=Join-Path $deployRoot 'share/extension'
         if(-not(Test-Path -LiteralPath $deployExtDir -PathType Container)){
-            $deployExtDir=Join-Path $env:LAPLACE_DATA_ROOT 'deploy/pgsql-18/share/extension'
+            $deployExtDir=Join-Path $deployRoot 'pgsql-18/share/extension'
         }
         foreach($ext in 'laplace_geom','laplace_substrate'){
             $installed=(Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected)

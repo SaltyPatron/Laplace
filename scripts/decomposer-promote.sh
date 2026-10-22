@@ -25,7 +25,7 @@ export LAPLACE_DB="Host=${PGHOST:-/var/run/postgresql};Username=${PGUSER:-laplac
 echo "==== promote $SOURCE into $LAPLACE_CANONICAL_DB ===="
 
 if [[ "$SOURCE" == "document" ]]; then
-  doc="${LAPLACE_DATA_ROOT:-/vault/Data}/test-data/text"
+  doc="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/test-data/text"
   [[ -d "$doc" ]] || { echo "document promote requires $doc" >&2; exit 1; }
   "$SCRIPTS/ingest-source.sh" document "$doc"
 else

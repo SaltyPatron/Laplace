@@ -27,7 +27,7 @@ public sealed class OpeningSeedPathsTests
     [Fact]
     public void DataRootAndExplicitCorpusOverrideAreHonored()
     {
-        var priorData = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        var priorData = Environment.GetEnvironmentVariable("LAPLACE_WORK");
         var priorCorpus = Environment.GetEnvironmentVariable("LAPLACE_DATA");
         var priorOpenings = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS");
         var priorPrefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
@@ -38,11 +38,11 @@ public sealed class OpeningSeedPathsTests
         try
         {
             Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA", null);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", root);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA", root);
+            Environment.SetEnvironmentVariable("LAPLACE_WORK", root);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", null);
             Assert.Equal(refreshed, OpeningSeed.DefaultDir);
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", Path.Combine(root, "service-state"));
+            Environment.SetEnvironmentVariable("LAPLACE_WORK", Path.Combine(root, "service-state"));
             Environment.SetEnvironmentVariable("LAPLACE_DATA", root);
             Assert.Equal(refreshed, OpeningSeed.DefaultDir);
             string explicitPath = Path.Combine(root, "operator-selected");
@@ -51,7 +51,7 @@ public sealed class OpeningSeedPathsTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorData);
+            Environment.SetEnvironmentVariable("LAPLACE_WORK", priorData);
             Environment.SetEnvironmentVariable("LAPLACE_DATA", priorCorpus);
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", priorOpenings);
             Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", priorPrefix);

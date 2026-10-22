@@ -41,7 +41,8 @@ if [[ -n "$SINGLE_SOURCE" ]]; then
   exit 0
 fi
 
-mapfile -t ORDER < <(python3 -c "import json; print('\n'.join(json.load(open('$SCRIPTS/decomposer-gates.json'))['manifest_order']))")
+mapfile -t ORDER < <(python3 "$SCRIPTS/decomposer-isolate-plan.py" --list-sources)
+[[ ${#ORDER[@]} -gt 0 ]] || { echo "No canonical recipe source order" >&2; exit 2; }
 
 SKIP=0
 [[ -n "$FROM_SOURCE" ]] && SKIP=1

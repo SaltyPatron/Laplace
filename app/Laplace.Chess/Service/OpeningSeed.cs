@@ -12,8 +12,7 @@ public static class OpeningSeed
         {
             var configured = ChessRuntimeConfiguration.Read("LAPLACE_CHESS_OPENINGS");
             if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
-            var dataRoot = ChessRuntimeConfiguration.Read("LAPLACE_DATA")
-                ?? ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT");
+            var dataRoot = ChessRuntimeConfiguration.Read("LAPLACE_DATA");
             string gamesDir;
             if (!string.IsNullOrWhiteSpace(dataRoot))
             {

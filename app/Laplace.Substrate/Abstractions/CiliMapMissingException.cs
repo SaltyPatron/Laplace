@@ -14,5 +14,5 @@ public sealed class CiliMapMissingException : Exception
         $"CILI ILI map is required for {sourceName} ingest but is missing or empty. " +
         $"Expected file at {expectedPath}. " +
         $"Set LAPLACE_CILI_DIR to the directory containing {IliMap.MapFileName}, " +
-        $"or place the file under {{LAPLACE_DATA_ROOT}}/CILI/.";
+        $"or place the file under {{LAPLACE_DATA}}/CILI/.";
 }
