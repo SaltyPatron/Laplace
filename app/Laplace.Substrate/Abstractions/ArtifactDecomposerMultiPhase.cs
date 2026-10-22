@@ -64,7 +64,8 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
                 token);
 
         await foreach (SubstrateChange change in ParallelIngestWork.RunAsync(
-                           scheduled, workers, Execute, ct).ConfigureAwait(false))
+                           scheduled, workers, Execute, ct,
+                           releaseAbandoned: SubstrateApplyEnvelope.Discard).ConfigureAwait(false))
             yield return change;
     }
 

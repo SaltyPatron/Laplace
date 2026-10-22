@@ -151,21 +151,25 @@ public static class ParallelIngestWork
         IReadOnlyList<TWork> work,
         int maxConcurrency,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Action<TResult>? releaseAbandoned = null)
     {
         ArgumentNullException.ThrowIfNull(work);
-        return RunAsync(Enumerate(work), maxConcurrency, execute, ct);
+        return RunAsync(Enumerate(work), maxConcurrency, execute, ct, releaseAbandoned);
     }
 
     /// <summary>
     /// Streaming-work overload for input generated lazily or too large to materialize, with
     /// the same concurrency, backpressure, abandonment cancellation and failure propagation.
+    /// When supplied, releaseAbandoned owns results rejected by the channel or left queued
+    /// after consumption stops. Results already yielded belong to the consumer.
     /// </summary>
     public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IAsyncEnumerable<TWork> work,
         int maxConcurrency,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default,
+        Action<TResult>? releaseAbandoned = null)
     {
         ArgumentNullException.ThrowIfNull(work);
         ArgumentNullException.ThrowIfNull(execute);
@@ -181,12 +185,24 @@ public static class ParallelIngestWork
             FullMode = BoundedChannelFullMode.Wait,
         });
 
-        async Task ProduceAsync()
+        var workerFailures = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+        void RetainFailure(Exception failure)
+        {
+            if (!workerFailures.Any(known => ReferenceEquals(known, failure)
+                    || known is AggregateException aggregate
+                    && aggregate.Flatten().InnerExceptions.Any(inner => ReferenceEquals(inner, failure))))
+                workerFailures.Enqueue(failure);
+        }
+
+        async Task<(Exception? Failure, bool ExpectedCancellation)> ProduceAsync()
         {
             Exception? failure = null;
+            bool expectedCancellation = false;
+            Task? workers = null;
             try
             {
-                await Parallel.ForEachAsync(
+                workers = Parallel.ForEachAsync(
                     work,
                     new ParallelOptions
                     {
@@ -195,33 +211,109 @@ public static class ParallelIngestWork
                     },
                     async (item, token) =>
                     {
-                        await foreach (var result in execute(item, token)
-                                           .WithCancellation(token).ConfigureAwait(false))
-                            await output.Writer.WriteAsync(result, token).ConfigureAwait(false);
-                    }).ConfigureAwait(false);
+                        try
+                        {
+                            await foreach (var result in execute(item, token)
+                                               .WithCancellation(token).ConfigureAwait(false))
+                            {
+                                try { await output.Writer.WriteAsync(result, token).ConfigureAwait(false); }
+                                catch
+                                {
+                                    // Until the channel accepts it, the worker
+                                    // still owns this result.
+                                    try { releaseAbandoned?.Invoke(result); }
+                                    catch (Exception cause) { RetainFailure(cause); }
+                                    throw;
+                                }
+                            }
+                        }
+                        catch (Exception cause)
+                        {
+                            // Parallel.ForEachAsync can return cancellation when
+                            // a worker failed during consumer abandonment. Keep
+                            // the actual worker cause before that conversion.
+                            if (cause is not OperationCanceledException || !token.IsCancellationRequested)
+                                RetainFailure(cause);
+                            throw;
+                        }
+                    });
+                await workers.ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                failure = ex;
+                if (workers?.Exception is { } allFailures)
+                {
+                    // Await exposes one exception; the task retains every
+                    // concurrent worker and source-enumerator failure.
+                    foreach (Exception cause in allFailures.Flatten().InnerExceptions)
+                        if (cause is not OperationCanceledException cancelled
+                            || !cancelled.CancellationToken.IsCancellationRequested)
+                            RetainFailure(cause);
+                }
+                else if (ex is not OperationCanceledException || !stop.IsCancellationRequested)
+                    RetainFailure(ex);
+                else
+                {
+                    failure = ex;
+                    expectedCancellation = true;
+                }
             }
             finally
             {
+                Exception[] causes = workerFailures.Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+                if (causes.Length > 0)
+                {
+                    failure = causes.Length == 1 ? causes[0]
+                        : new AggregateException("Parallel ingest workers failed.", causes);
+                    expectedCancellation = false;
+                }
                 output.Writer.TryComplete(failure);
             }
+            return (failure, expectedCancellation);
         }
 
-        Task producer = ProduceAsync();
+        var producer = ProduceAsync();
+        Exception? readFailure = null;
         try
         {
-            await foreach (var result in output.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                yield return result;
+            await using var results = output.Reader.ReadAllAsync(ct).GetAsyncEnumerator(ct);
+            while (true)
+            {
+                bool next;
+                try { next = await results.MoveNextAsync().ConfigureAwait(false); }
+                catch (Exception cause) { readFailure = cause; throw; }
+                if (!next) break;
+                yield return results.Current;
+            }
         }
         finally
         {
-            stop.Cancel();
-            // ProduceAsync converts its terminal exception into channel completion,
-            // so this await observes teardown without masking ReadAllAsync's error.
-            await producer.ConfigureAwait(false);
+            List<Exception>? failures = null;
+            try { stop.Cancel(); }
+            catch (Exception cause) { (failures ??= []).Add(cause); }
+            try
+            {
+                var terminal = await producer.ConfigureAwait(false);
+                if (terminal.Failure is not null && !terminal.ExpectedCancellation)
+                    (failures ??= []).Add(terminal.Failure);
+            }
+            catch (Exception cause) { (failures ??= []).Add(cause); }
+            // All workers have joined; no new result can race this drain.
+            // Already-yielded results belong to the consumer. Pending results
+            // use only the explicit ownership policy supplied by the caller.
+            while (output.Reader.TryRead(out TResult? abandoned))
+            {
+                try { releaseAbandoned?.Invoke(abandoned); }
+                catch (Exception cause) { (failures ??= []).Add(cause); }
+            }
+            if (failures is not null)
+            {
+                if (readFailure is not null) failures.Insert(0, readFailure);
+                Exception[] causes = failures.Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+                if (causes.Length == 1)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(causes[0]).Throw();
+                throw new AggregateException("Parallel ingest teardown failed.", causes);
+            }
         }
     }
 
