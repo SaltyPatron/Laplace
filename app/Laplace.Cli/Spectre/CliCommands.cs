@@ -41,6 +41,9 @@ internal sealed class IngestCommand : ForwardCommand<IngestCommand.Settings>
         [CommandOption("--force")][Description("Rebuild content already proven present; existing witness identities remain unchanged.")] public bool Force { get; init; }
         [CommandOption("--no-analyze")][Description("chess: record game-grain only; defer derivation to chess-analyze.")] public bool NoAnalyze { get; init; }
         [CommandOption("--register-only")][Description("Register canonical ids only; no fold.")] public bool RegisterOnly { get; init; }
+        [CommandOption("--plan")][Description("Inspect the canonical Native recipe plan without loading records.")] public bool Plan { get; init; }
+        [CommandOption("--claims")][Description("Show claims from explicitly selected inputs without loading them.")] public bool Claims { get; init; }
+        [CommandOption("--no-load")][Description("Execute Native parsing and validation without database writes.")] public bool NoLoad { get; init; }
         [CommandOption("--emit-cross-lang")][Description("Emit cross-language links.")] public bool EmitCrossLang { get; init; }
         [CommandOption("--langs <SPEC>")][Description("Language filter spec.")] public string? Langs { get; init; }
         [CommandOption("--depth <N>")][Description("chess-analyze/eval: per-position engine search depth.")] public int Depth { get; init; }
@@ -67,11 +70,11 @@ internal sealed class DocumentCommand : ForwardCommand<DocumentCommand.Settings>
         => DocumentCommands.RunAsync(Raw(ctx));
 }
 
-[Description("Inspect source recipes, materialize native tuples, or ingest through the shared substrate writer. Subcommands: inspect, materialize, ingest.")]
+[Description("Inspect or execute the canonical Native recipe estate. Subcommands: plan, claims, check, ingest.")]
 internal sealed class CookbookCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct) =>
-        Task.FromResult(CookbookCommands.Run(Raw(ctx)));
+        CookbookCommands.RunAsync(Raw(ctx), ct);
 }
 
 [Description("Mold a runnable transformer from consensus+geometry. Subcommand: substrate. Flags incl. --scope-source, --recipe-from, --native-vocab/--dim/--layers/--heads/--kv-heads/--ffn, --tokenizer, --crawl/--hops/--fanout.")]

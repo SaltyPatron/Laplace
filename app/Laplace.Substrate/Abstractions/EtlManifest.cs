@@ -13,8 +13,10 @@ public static class EtlManifest
             var configured = Environment.GetEnvironmentVariable("LAPLACE_RECIPES");
             if (string.IsNullOrWhiteSpace(configured))
             {
+                var bundled = Path.Combine(AppContext.BaseDirectory, "native", "recipe-engine", "share", "laplace", "recipes");
                 var workspace = Environment.GetEnvironmentVariable("LAPLACE_SRC");
-                if (!string.IsNullOrWhiteSpace(workspace))
+                if (File.Exists(Path.Combine(bundled, "order"))) configured = bundled;
+                else if (!string.IsNullOrWhiteSpace(workspace))
                     configured = Path.Combine(workspace, "Laplace-Engine", "recipes");
                 else if (LaplaceInstall.TryRepoRoot(out var repository))
                     configured = Path.Combine(Path.GetDirectoryName(repository)!, "Laplace-Engine", "recipes");
