@@ -1,7 +1,5 @@
 using System.Runtime.CompilerServices;
 using global::Npgsql;
-using global::NpgsqlTypes;
-using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -57,14 +55,8 @@ public static partial class NpgsqlSubstrateReads
         [EnumeratorCancellation] CancellationToken ct)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var command = new NpgsqlCommand(
-            SqlCatalog.Get("conversation.forward_turn_observed").Text, connection);
-        command.Parameters.AddWithValue(NpgsqlDbType.Text, prompt);
-        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, (object?)session ?? DBNull.Value);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, steps);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, maxStride);
-        command.Parameters.AddWithValue(NpgsqlDbType.Double, spread);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, topK);
+        await using var command = NpgsqlCatalog.Command(connection, null,
+            "conversation.forward_turn_observed", prompt, session, steps, maxStride, spread, topK);
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

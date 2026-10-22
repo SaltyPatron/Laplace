@@ -116,4 +116,46 @@ public sealed class NativeSqlStreamingCommandTests
         using var source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=unused");
         Assert.Throws<ArgumentException>(() => NpgsqlCatalog.VacuumCommand(source, relation, false, false));
     }
+
+    [Fact]
+    public void SourceScopedInitializationBindsTheWholeScopeAsOneBinaryArray()
+    {
+        using var connection = new NpgsqlConnection("Host=127.0.0.1;Port=1;Database=unused");
+        byte[][] ids = [Enumerable.Repeat((byte)0xff, 16).ToArray(), new byte[16]];
+        using var command = NpgsqlCatalog.Command(connection, null, "foundry.initialize_scope", ids);
+        Assert.Single(command.Parameters);
+        Assert.Same(ids, command.Parameters[0].Value);
+        Assert.Equal("bytea[]", command.Parameters[0].DataTypeName);
+        Assert.DoesNotContain(Convert.ToHexString(ids[0]), command.CommandText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(';', command.CommandText);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(15)]
+    [InlineData(17)]
+    public void SourceScopedDatasourceRejectsMalformedIdsBeforeAnyConnection(int length)
+        => Assert.Throws<ArgumentException>(() => NpgsqlFoundryReads.CreateIngestDataSource(
+            "Host=127.0.0.1;Port=1;Database=unused", [new byte[length]]));
+
+    [Theory]
+    [InlineData("consensus.upsert", false, false)]
+    [InlineData("consensus.upsert_epoch", false, true)]
+    [InlineData("consensus.upsert_type", true, false)]
+    [InlineData("consensus.upsert_type_epoch", true, true)]
+    public void ConsensusRoutesRetainScalarVersusArrayTypeAndOneStatementEpochOrdering(
+        string name, bool direct, bool epoch)
+    {
+        using var connection = new NpgsqlConnection("Host=127.0.0.1;Port=1;Database=unused");
+        object[] values = Enumerable.Repeat<object>(Array.Empty<long>(), 13).ToArray();
+        values[0] = direct ? new byte[16] : new byte[][] { new byte[16] };
+        values[1] = values[2] = Array.Empty<byte[]>();
+        values[6] = Array.Empty<DateTime>();
+        using var command = NpgsqlCatalog.Command(connection, null, name, arguments: values);
+        Assert.Equal(13, command.Parameters.Count);
+        Assert.Equal(direct ? "bytea" : "bytea[]", command.Parameters[0].DataTypeName);
+        Assert.Equal("timestamptz[]", command.Parameters[6].DataTypeName);
+        Assert.Equal(epoch, command.CommandText.Contains("MATERIALIZED", StringComparison.Ordinal));
+        Assert.DoesNotContain(';', command.CommandText);
+    }
 }

@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions.Tests;
+using Laplace.Engine.Core;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
@@ -80,17 +81,20 @@ public sealed class WorkingSetQueryShapeTests
         // explicit-delta lane retains its native period route.
         Assert.Contains(
             "consensus.merge_evidence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+            SqlCatalog.Get("consensus.merge_evidence").Text, StringComparison.Ordinal);
+        Assert.Contains("NpgsqlCatalog.Command(connection, transaction, \"consensus.merge_evidence\"",
             atomicFold, StringComparison.Ordinal);
         Assert.DoesNotContain("consensus.upsert_evidence_type(", atomicFold, StringComparison.Ordinal);
         Assert.DoesNotContain("consensus.upsert_type(", atomicFold, StringComparison.Ordinal);
         Assert.DoesNotContain("consensus.upsert(", atomicFold, StringComparison.Ordinal);
-        Assert.Contains("command.Transaction = transaction", atomicFold);
         Assert.Contains("types[i] = cell.Key.T.ToBytes()", atomicFold);
         Assert.DoesNotContain("runStart", atomicFold, StringComparison.Ordinal);
-        Assert.Contains("NpgsqlDbType.Array | NpgsqlDbType.Bytea, types", atomicFold);
+        Assert.Contains("subjects, types, objects, phis, games, sums", atomicFold);
+        Assert.Equal("bytea[]", SqlCatalog.Get("consensus.merge_evidence").ParameterTypes[1]);
         Assert.Contains(
-            "consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
-            laneFold, StringComparison.Ordinal);
+            "consensus.upsert_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+            SqlCatalog.Get("consensus.upsert_type").Text, StringComparison.Ordinal);
+        Assert.Contains("\"consensus.upsert_type\"", laneFold, StringComparison.Ordinal);
         Assert.DoesNotContain("consensus.upsert_evidence_type(", laneFold, StringComparison.Ordinal);
         Assert.Contains("up.Parameters[0].Value = run.Type.ToBytes()", laneFold);
         Assert.Contains("? NpgsqlDbType.Bytea", laneFold);

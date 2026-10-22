@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -348,8 +349,11 @@ public sealed class IngestMutexGateTests
         const string installedName = "consensus.highway_mask_deposit";
         Assert.Contains($"CREATE OR REPLACE FUNCTION {installedName}", installer,
             StringComparison.Ordinal);
-        Assert.Contains($"SELECT {installedName}($1, $2)", writer,
-            StringComparison.Ordinal);
+        Assert.Contains("\"consensus.deposit_mask\"", writer, StringComparison.Ordinal);
+        Assert.Contains($"SELECT {installedName}($1,$2)",
+            SqlCatalog.Get("consensus.deposit_mask").Text, StringComparison.Ordinal);
+        Assert.Contains($"SELECT {installedName}($1,$2)",
+            SqlCatalog.Get("consensus.deposit_mask_epoch").Text, StringComparison.Ordinal);
         Assert.DoesNotContain("laplace.highway_mask_deposit(", writer,
             StringComparison.Ordinal);
         Assert.DoesNotContain("PERFORM pg_advisory_xact_lock", installer,
