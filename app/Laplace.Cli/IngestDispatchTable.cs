@@ -183,26 +183,20 @@ internal static class IngestDispatchTable
         return false;
     }
 
-    private static readonly IReadOnlyDictionary<string, string> SourceAliases =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["iso639"] = "iso-639", ["oewn"] = "open-english-wordnet",
-            ["omw"] = "open-multilingual-wordnet", ["wordnet"] = "princeton-wordnet",
-            ["ud"] = "universal-dependencies", ["atomic2020"] = "atomic-2020",
-        };
+    internal static string CanonicalSourceName(string sourceKey) => EtlManifest.CanonicalSourceName(sourceKey);
 
-    internal static string CanonicalSourceName(string sourceKey) =>
-        SourceAliases.TryGetValue(sourceKey, out var canonical) ? canonical : sourceKey.ToLowerInvariant();
+    /// <summary>The corpus inventory is exactly the Native directory declaration.</summary>
+    internal static IReadOnlyCollection<string> CanonicalSourceKeys => EtlManifest.SourceOrder;
 
     /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
     private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
 
     /// <summary>
-    /// Every canonical source, accepted alias, and operator command.
+    /// Canonical corpus keys and explicit operator commands. Input aliases are normalized before dispatch.
     /// Help and unknown-source errors read the same dispatch inventory.
     /// </summary>
     internal static IReadOnlyCollection<string> RegisteredKeys =>
-        EtlManifest.SourceOrder.Concat(SourceAliases.Keys).Concat(Routes.Keys)
+        CanonicalSourceKeys.Concat(Routes.Keys)
               .Concat(ModelAliases)
               .Distinct(StringComparer.OrdinalIgnoreCase)
               .ToArray();

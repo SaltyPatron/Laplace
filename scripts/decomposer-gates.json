@@ -30,7 +30,7 @@
         "17.0.0"
       ]
     },
-    "iso639": {
+    "iso-639": {
       "decomposer": "ISO639",
       "layer": 1,
       "consensus_gates": [
@@ -57,7 +57,7 @@
       "layer": 2,
       "prerequisites": [
         "unicode",
-        "iso639"
+        "iso-639"
       ],
       "consensus_gates": []
     },
@@ -87,7 +87,7 @@
       "decomposer": "DocumentDecomposer",
       "layer": 2,
       "prerequisites": [
-        "iso639"
+        "iso-639"
       ],
       "attestations": "optional"
     },
@@ -96,7 +96,7 @@
       "layer": 2,
       "attestations": "optional"
     },
-    "wordnet": {
+    "princeton-wordnet": {
       "decomposer": "WordNetDecomposer",
       "layer": 2,
       "consensus_gates": [
@@ -119,7 +119,7 @@
         "Source_Reference"
       ]
     },
-    "oewn": {
+    "open-english-wordnet": {
       "decomposer": "OEWN",
       "layer": 1,
       "consensus_gates": [
@@ -141,7 +141,7 @@
         "2025+"
       ]
     },
-    "omw": {
+    "open-multilingual-wordnet": {
       "decomposer": "OMW",
       "layer": 1,
       "consensus_gates": [
@@ -272,7 +272,7 @@
         }
       ]
     },
-    "atomic2020": {
+    "atomic-2020": {
       "decomposer": "Atomic2020Decomposer",
       "layer": 2,
       "consensus_gates": [
@@ -286,7 +286,7 @@
         }
       ]
     },
-    "ud": {
+    "universal-dependencies": {
       "decomposer": "UD",
       "layer": 2,
       "consensus_gates": [
