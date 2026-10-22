@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Laplace.Cli.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class FoundryQueryFailureTests : IAsyncLifetime
 {

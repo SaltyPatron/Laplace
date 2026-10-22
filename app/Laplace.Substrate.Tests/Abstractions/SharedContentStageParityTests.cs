@@ -69,16 +69,17 @@ public sealed class SharedContentStageParityTests
 
 
     [Theory]
-    [InlineData("dog", 2)]
-    [InlineData("ab", 2)]
+    [InlineData("dog", 1)]
+    [InlineData("ab", 1)]
+    [InlineData("banana", 2)]
+    [InlineData("ab ab", 2)]
     // A one-child composition is the child: the root of "A" is the tier-0 codepoint,
     // not a tier-1 wrapper. Only a multi-codepoint cluster roots at the grapheme tier.
     [InlineData("A", 0)]
     [InlineData("̐", 0)]
     [InlineData("\u00e7", 0)]
-    // NFC (text_decomposer.c) composes c+cedilla to U+00E7, one codepoint → tier 0.
-    // q+combining-acute has no precomposed form, so it stays a 2-codepoint cluster → tier 1.
-    [InlineData("c\u0327", 0)]
+    // Original NFD bytes remain two scalar leaves. Normalization is explicit.
+    [InlineData("c\u0327", 1)]
     [InlineData("q\u0301", 1)]
     public void RootTier_Is_The_Natural_Unit(string s, int expected)
     {

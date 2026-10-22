@@ -10,6 +10,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Ingestion.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 [Collection("GrammarPerfcache")]
 public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLifetime

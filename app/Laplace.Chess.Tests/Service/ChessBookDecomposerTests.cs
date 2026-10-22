@@ -123,6 +123,7 @@ public sealed class ChessBookDecomposerTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public void RealBooks_ExtractionSmoke()
     {
         string blueBook = Path.Combine(BooksDir, "the-blue-book-of-chess.txt");
@@ -138,6 +139,7 @@ public sealed class ChessBookDecomposerTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public void RealBooks_DescriptiveProseSmoke()
     {
         string strategy = Path.Combine(BooksDir, "chess-strategy.txt");

@@ -19,20 +19,19 @@ public sealed class TierFloorIdentityTests
         using var tree = IntentStage.BuildContentTree(Encoding.UTF8.GetBytes("dog"));
         Assert.NotNull(tree);
 
-        Hash128? wordId = null;
-        var aboveWord = new List<(int Tier, Hash128 Id)>();
+        var wordId = Hash128.Text("dog");
+        var root = tree!.GetNode((uint)tree.NodeCount - 1);
+        Assert.Equal(wordId, root.Id);
+        Assert.Equal(1, root.Tier); // Three scalar leaves, one composition above them.
         for (uint i = 0; i < tree!.NodeCount; i++)
         {
             var node = tree.GetNode(i);
-            if (node.Tier == 2) wordId ??= node.Id;
-            if (node.Tier > 2) aboveWord.Add((node.Tier, node.Id));
+            if (node.ChildCount == 1)
+                Assert.Equal(tree.GetNode(node.FirstChildIdx).Id, node.Id);
         }
-
-        Assert.NotNull(wordId);
-        var wrappers = aboveWord.Where(n => n.Id != wordId!.Value).ToList();
-        Assert.True(wrappers.Count == 0,
-            "one-word content minted wrapper entities above the word — tier is a floor, " +
-            "'dog' alone IS the tier-2 word; distinct ids found at tiers: " +
-            string.Join(", ", wrappers.Select(w => w.Tier).Distinct()));
+        using var stage = IntentStage.New(32);
+        Assert.True(stage.EmitContentTree(tree, wordId, default, out var emitted));
+        Assert.Equal(wordId, emitted);
+        Assert.Equal(1, stage.EntityCount);
     }
 }

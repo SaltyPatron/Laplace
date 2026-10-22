@@ -10,6 +10,7 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Tests;
 
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
 {

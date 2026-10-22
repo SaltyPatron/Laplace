@@ -11,7 +11,9 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Ingestion.Tests;
 
+[Trait("Category", "RequiresQualification")]
 [Trait("Tier", "perf")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 [Collection("GrammarPerfcache")]
 public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAsyncLifetime

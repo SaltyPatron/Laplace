@@ -9,6 +9,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// substrate. Tier=live, not Tier=db: database health does not imply the seeds the
 /// forward pass reads are resident.
 /// </summary>
+[Trait("Category", "RequiresNetwork")]
 [Trait("Tier", "live")]
 public sealed class RecallSessionLiveTests
 {

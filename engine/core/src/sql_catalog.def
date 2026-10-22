@@ -1030,3 +1030,14 @@ SQL_QUERY("lexical.case_mappings", "bytea[],int4[]",
     "AND a.object_id IS NOT DISTINCT FROM c.object_id AND a.qualifier_mask IS NOT NULL "
     "AND get_bit(a.qualifier_mask,q.bit)=1) "
     "ORDER BY c.subject_id,q.slot,consensus.eff_mu(c.rating,c.rd) DESC")
+SQL_QUERY("converse.infer", "text,int4",
+    "SELECT prediction, weight, bias_hits FROM converse.infer($1, $2)")
+SQL_QUERY("lexical.sense_audit", "text,int4",
+    "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses "
+    "FROM lexical.sense_audit($1, laplace.relation_type_id('HAS_LANGUAGE'), $2)")
+SQL_QUERY("converse.prompt_language", "text",
+    "SELECT realize.realize(lang_id) AS language, mass FROM converse.prompt_language($1)")
+SQL_QUERY("taxonomy.bubble_up_rendered", "bytea,int4",
+    "SELECT b.sense_id, realize.render(b.sense_id), b.synset_id, realize.render(b.synset_id), "
+    "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses "
+    "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b")

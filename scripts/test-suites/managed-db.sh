@@ -6,7 +6,7 @@ run_managed_db() {
   set_installed_perfcache
   sync_managed_native
   run_managed_dotnet_tests "${LAPLACE_MANAGED_DB_TEST_PROJECTS:-all}" managed-db \
-    'Tier=db' -m:1 -p:BuildInParallel=false
+    'Category=RequiresDatabase&Category!=RequiresQualification&Category!=RequiresNetwork' -m:1 -p:BuildInParallel=false
 }
 
 run_managed_db

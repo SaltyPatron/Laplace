@@ -11,6 +11,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// is raised during novel attestation COPY with an existing witness in the same apply.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class WorkingSetAtomicReplayTests
 {

@@ -31,23 +31,30 @@ set_dev_perfcache() {
   # Pre-install qualification must execute the exact candidate ROM, never the
   # currently installed floor. Resolve the CMake tree from machine configuration.
   build_dir="$(python3 "$ROOT/scripts/place-build-directory.py" "$ROOT")"
-  candidate=$(find -L "$build_dir" -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
-  [[ -n "$candidate" ]] || {
+  candidate="$build_dir/engine/core/perfcache/tier0.bin"
+  [[ -f "$candidate" ]] || candidate="$build_dir/core/perfcache/tier0.bin"
+  [[ -f "$candidate" ]] || {
     echo "::error::candidate T0 perfcache missing under $build_dir — build native before managed qualification" >&2
     return 1
   }
-  export LAPLACE_PERFCACHE_BIN="$candidate"
-  export LAPLACE_ENGINE_BUILD="$build_dir/engine"
+  set_native_caches "$(dirname "$candidate")"
+  export LAPLACE_ENGINE_BUILD="${candidate%/core/perfcache/tier0.bin}"
   echo "::notice::managed dev qualification T0 ROM: $LAPLACE_PERFCACHE_BIN"
 }
 
 set_installed_perfcache() {
-  local candidate
-  candidate=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
-  if [[ -z "$candidate" ]]; then
-    candidate=$(find -L build -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
-  fi
-  [[ -z "$candidate" ]] || export LAPLACE_PERFCACHE_BIN="$candidate"
+  set_native_caches "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace"
+}
+
+set_native_caches() {
+  local directory="$1"
+  [[ -f "$directory/tier0.bin" && -f "$directory/highway.bin" ]] || {
+    echo "::error::canonical Native tier0.bin/highway.bin pair missing in $directory" >&2
+    return 1
+  }
+  export LAPLACE_TIER0="$directory/tier0.bin"
+  export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
+  export LAPLACE_HIGHWAY="$directory/highway.bin"
 }
 
 run_ctest() {
