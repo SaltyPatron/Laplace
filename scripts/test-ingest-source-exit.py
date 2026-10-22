@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from ingest_catalog import canonical_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -178,7 +179,7 @@ fi
             result = subprocess.run(["bash", str(self.root / "scripts/ingest-source.sh"), source],
                                     env=self.env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{source}: {result.stderr}")
-            self.assertIn(f"INGEST_TIMING source={source} ", result.stdout)
+            self.assertIn(f"INGEST_TIMING source={canonical_source(source)} ", result.stdout)
 
     def test_os_temp_log_path_is_rejected_before_ingest(self):
         self.assertEqual(self.run_ingest(INGEST_LOGDIR="/tmp/laplace-forbidden").returncode, 2)

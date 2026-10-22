@@ -27,7 +27,9 @@ internal static partial class IngestCommands
             Console.WriteLine($"{command}: {source.Name}" + (source.Aliases.Count > 0 ? $" (aliases: {string.Join(", ", source.Aliases)})" : ""));
             Console.WriteLine($"  witness: {source.Witness}" + (source.Lineage.Length > 0 ? $"; lineage: {source.Lineage}" : ""));
             Console.WriteLine($"  content: {string.Join("; ", source.Files.Count > 0 ? source.Files : source.Roots)}");
-            Console.WriteLine($"  decomposers: {string.Join(", ", source.Recipes.Select(r => r.Name + " [" + r.Grammar + "]").Concat(source.Reads))}");
+            foreach (var recipe in source.Recipes)
+                Console.WriteLine($"  {recipe.Name} [{recipe.Grammar}]: {string.Join(" ", recipe.Match)}");
+            if (source.Reads.Count > 0) Console.WriteLine($"  formats: {string.Join(", ", source.Reads)}");
             if (source.After.Count > 0) Console.WriteLine($"  after: {string.Join(", ", source.After)}");
             if (source.Held.Length > 0) Console.WriteLine($"  held: {source.Held}");
         }

@@ -138,7 +138,10 @@ def markdown(catalog: dict) -> str:
         command = s["aliases"][0] if s["aliases"] else s["name"]
         names = ", ".join([s["name"], *s["aliases"]])
         formats = ", ".join(sorted({r["grammar"] or r["name"] for r in s["recipes"]} | set(s["reads"])))
+        patterns = sorted({pattern for recipe in s["recipes"] for pattern in recipe["match"]})
         content = "; ".join(s["files"] or s["roots"]) or s["held"]
+        if patterns:
+            content += "; matches " + ", ".join(patterns)
         cells = [f"`{command}`", f"{names}; {s['witness']}", content, formats, ", ".join(s["after"])]
         lines.append("| " + " | ".join(c.replace("|", "&#124;") for c in cells) + " |")
     lines.extend(["", "## File decomposers", "", "| Format | Grammar | Matches |", "|---|---|---|"])
