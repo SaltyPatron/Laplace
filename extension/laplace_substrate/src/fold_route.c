@@ -14,8 +14,8 @@
  * keyed update and novel rows by bulk COPY. A MERGE runs only when a
  * concurrent insert collides with a row classified novel.
  *
- * Cell id is blake3(subject || type || COALESCE(object, 16 zero bytes))
- * through the core hash128_blake3, the byte layout of the SQL consensus_id.
+ * Cell id is Native Merkle composition of the actual strand vertices, matching
+ * SQL consensus_id. An absent object contributes no synthetic zero vertex.
  */
 #include "postgres.h"
 
@@ -59,6 +59,16 @@ PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_after_retraction_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
+
+static hash128_t strand_id(const uint8_t *subject, const uint8_t *type, const uint8_t *object)
+{
+    hash128_t vertices[3], id;
+    memcpy(vertices, subject, 16);
+    memcpy(vertices + 1, type, 16);
+    if (object) memcpy(vertices + 2, object, 16);
+    hash128_merkle(0, vertices, object ? 3 : 2, &id);
+    return id;
+}
 
 /* ------------------------------------------------------------------ */
 /* Session plan cache: one HTAB per statement family, keyed by type id */
@@ -1352,8 +1362,8 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
 
-    /* Cell ids: blake3(subject || type || COALESCE(object, zeros)), the SQL
-     * consensus_id byte layout through the same core hash. The same pass
+    /* Cell ids use the same Native strand composition as SQL consensus_id.
+     * The same pass
      * rejects a cell named twice in one call. */
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
@@ -1363,18 +1373,12 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     cell_ids = (Datum *) palloc(sizeof(Datum) * subjects.n);
     for (i = 0; i < subjects.n; i++)
     {
-        uint8_t    buf[48];
         hash128_t  h;
         bytea     *out;
         bool       found;
 
-        memcpy(buf, bytea16(subjects.elems[i], label), 16);
-        memcpy(buf + 16, bytea16(types.elems[i], label), 16);
-        if (objects.nulls[i])
-            memset(buf + 32, 0, 16);
-        else
-            memcpy(buf + 32, bytea16(objects.elems[i], label), 16);
-        hash128_blake3(buf, sizeof(buf), &h);
+        h = strand_id(bytea16(subjects.elems[i], label), bytea16(types.elems[i], label),
+                      objects.nulls[i] ? NULL : bytea16(objects.elems[i], label));
 
         hash_search(seen, &h, HASH_ENTER, &found);
         if (found)
@@ -1524,18 +1528,12 @@ typed_cell_ids(const uint8_t *type16,const InArray *subjects,
     cell_ids = (Datum *) palloc(sizeof(Datum) * subjects->n);
     for (i = 0; i < subjects->n; i++)
     {
-        uint8_t   buf[48];
         hash128_t h;
         bytea    *out;
         bool      found;
 
-        memcpy(buf, bytea16(subjects->elems[i], label), 16);
-        memcpy(buf + 16, type16, 16);
-        if (objects->nulls[i])
-            memset(buf + 32, 0, 16);
-        else
-            memcpy(buf + 32, bytea16(objects->elems[i], label), 16);
-        hash128_blake3(buf, sizeof(buf), &h);
+        h = strand_id(bytea16(subjects->elems[i], label), type16,
+                      objects->nulls[i] ? NULL : bytea16(objects->elems[i], label));
         hash_search(seen, &h, HASH_ENTER, &found);
         if (found)
             ereport(ERROR,
@@ -2136,18 +2134,12 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
         while (run_end < subjects.n &&
                memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
         {
-            uint8_t   buf[48];
             hash128_t h;
             bytea    *out;
             bool      found;
 
-            memcpy(buf, bytea16(subjects.elems[run_end], label), 16);
-            memcpy(buf + 16, type16, 16);
-            if (objects.nulls[run_end])
-                memset(buf + 32, 0, 16);
-            else
-                memcpy(buf + 32, bytea16(objects.elems[run_end], label), 16);
-            hash128_blake3(buf, sizeof(buf), &h);
+            h = strand_id(bytea16(subjects.elems[run_end], label), type16,
+                          objects.nulls[run_end] ? NULL : bytea16(objects.elems[run_end], label));
             hash_search(seen, &h, HASH_ENTER, &found);
             if (found)
                 ereport(ERROR,
