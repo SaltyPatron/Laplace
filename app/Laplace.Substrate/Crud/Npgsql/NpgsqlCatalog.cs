@@ -12,6 +12,15 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlCatalog
 {
+    // A reference-type array is one PostgreSQL argument, not the params list.
+    // The typed overload wins for byte[][]/string[] and retains that array as a value.
+    public static NpgsqlCommand Command<TArgument>(NpgsqlDataSource source, string name, TArgument argument)
+        => Command(source, name, arguments: new object?[] { argument });
+
+    public static NpgsqlCommand Command<TArgument>(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, string name, TArgument argument)
+        => Command(connection, transaction, name, arguments: new object?[] { argument });
+
     public static NpgsqlCommand Command(NpgsqlDataSource source, string name, params object?[] arguments)
     {
         var query = SqlCatalog.Get(name);

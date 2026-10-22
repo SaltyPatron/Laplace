@@ -87,4 +87,22 @@ public sealed class NativeSqlStreamingCommandTests
         Assert.Equal(DBNull.Value, batch.Parameters[0].Value);
         Assert.Empty(batch.Parameters[0].ParameterName);
     }
+
+    [Fact]
+    public void SingleReferenceArrayIsOnePostgresArgumentForEitherCommandOwner()
+    {
+        using var source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=unused");
+        byte[][] ids = [new byte[16], new byte[16]];
+        using var entities = NpgsqlCatalog.Command(source, "entity.facets", ids);
+        Assert.Single(entities.Parameters);
+        Assert.Same(ids, entities.Parameters[0].Value);
+        Assert.Equal("bytea[]", entities.Parameters[0].DataTypeName);
+
+        using var connection = new NpgsqlConnection(source.ConnectionString);
+        string[] tags = ["en", "eng"];
+        using var language = NpgsqlCatalog.Command(connection, null, "language.tags", tags);
+        Assert.Single(language.Parameters);
+        Assert.Same(tags, language.Parameters[0].Value);
+        Assert.Equal("text[]", language.Parameters[0].DataTypeName);
+    }
 }
