@@ -2,7 +2,7 @@ CREATE OR REPLACE FUNCTION laplace.consensus_id(
     p_subject bytea, p_type bytea, p_object bytea)
     RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC
-    SELECT public.laplace_hash128_blake3(
-        p_subject || p_type
-        || COALESCE(p_object, '\x00000000000000000000000000000000'::bytea));
+    SELECT public.laplace_hash128_merkle(0::smallint,
+        CASE WHEN p_object IS NULL THEN ARRAY[p_subject, p_type]
+             ELSE ARRAY[p_subject, p_type, p_object] END);
 END;
