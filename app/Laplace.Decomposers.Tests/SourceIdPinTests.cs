@@ -4,7 +4,9 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Tests;
 
-// Pins every decomposer's SourceId and TrustClassId. A trust class id is the content id of
+// Pins the remaining managed providers' SourceId and TrustClassId. Canonical
+// sources retired to Native use content-dependent source trunks, not these fixed
+// managed provider IDs. A trust class id is the content id of
 // its label (engine/manifest/trust_classes.toml): Laplace-Native's lp_id_codepoints_utf8 of
 // the label, BLAKE3-128 of its codepoints' IDs with no domain byte (Laplace#1896). A failure
 // here means a content-addressed source or trust-class identity changed.
@@ -16,8 +18,6 @@ public class SourceIdPinTests
           "5f36a4c5fb03a7d845c2ad1981b18587", "9ed6235c81cafe911167a95e1a4587ed" },
         { () => new Laplace.Decomposers.ISO.ISODecomposer(),
           "2e0404bdd15c7e19517f1f26d57e240b", "9ed6235c81cafe911167a95e1a4587ed" },
-        { () => new Laplace.Decomposers.CILI.CILIDecomposer(),
-          "e46123b3b4d43df4a41a95d750c310e1", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.WordNet.WordNetDecomposer(),
           "4b1ee33be3034910df7629b2948cde35", "9ed6235c81cafe911167a95e1a4587ed" },
         { () => new Laplace.Decomposers.OMW.OMWDecomposer(),
