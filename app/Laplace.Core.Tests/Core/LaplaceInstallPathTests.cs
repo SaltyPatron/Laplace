@@ -15,7 +15,7 @@ public sealed class LaplaceInstallPathTests : IDisposable
     public LaplaceInstallPathTests()
     {
         Directory.CreateDirectory(_root);
-        foreach (var name in new[] { "LAPLACE_MACHINE_ENV", "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_BUILD", "LAPLACE_BUILD_ROOT", "LAPLACE_ENGINE_BUILD",
+        foreach (var name in new[] { "LAPLACE_MACHINE_ENV", "LAPLACE_DATA", "LAPLACE_DATA_ROOT", "LAPLACE_MODELS", "LAPLACE_BUILD", "LAPLACE_BUILD_ROOT", "LAPLACE_ENGINE_BUILD",
                      "LAPLACE_PERFCACHE_BIN", "LAPLACE_INSTALL_PREFIX", "LAPLACE_OUT", "HF_HUB_CACHE", "HF_HOME" })
         {
             _prior[name] = Environment.GetEnvironmentVariable(name);
@@ -114,5 +114,21 @@ public sealed class LaplaceInstallPathTests : IDisposable
         Assert.Equal(corpus, LaplaceInstall.ResolveIngestRoot());
         Assert.True(LaplaceInstall.TryDefaultBuildRoot(out var buildRoot));
         Assert.Equal(_root, buildRoot);
+    }
+
+    [Fact]
+    public void ModelsRootUsesDeclaredModelsOrSiblingOfData()
+    {
+        var corpus = Directory.CreateDirectory(Path.Combine(_root, "Data")).FullName;
+        var models = Directory.CreateDirectory(Path.Combine(_root, "CustomModels")).FullName;
+        Environment.SetEnvironmentVariable("LAPLACE_DATA", corpus);
+        Assert.Equal(Path.Combine(_root, "models"), LaplaceInstall.ResolveModelsRoot());
+
+        Environment.SetEnvironmentVariable("LAPLACE_MODELS", models);
+        Assert.Equal(models, LaplaceInstall.ResolveModelsRoot());
+        Assert.Equal(Path.Combine(models, "stack-v2"), LaplaceInstall.ResolvePathUnderModels("stack-v2"));
+
+        Environment.SetEnvironmentVariable("LAPLACE_MODELS", Path.Combine(_root, "missing-models"));
+        Assert.Throws<DirectoryNotFoundException>(() => LaplaceInstall.ResolveModelsRoot());
     }
 }
