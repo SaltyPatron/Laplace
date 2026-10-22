@@ -49,7 +49,8 @@ internal static partial class IngestCommands
         int AnalyzeDepth = 0,
         long AnalyzeNodes = 0,
         string? GitCorpusSelection = null,
-        string? GitCorpusReceipt = null);
+        string? GitCorpusReceipt = null,
+        NativeRecipeMode NativeMode = NativeRecipeMode.Ingest);
 
     internal static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
@@ -61,12 +62,25 @@ internal static partial class IngestCommands
         bool force = false;
         bool noAnalyze = false;
         bool recursive = false;
+        var nativeMode = NativeRecipeMode.Ingest;
         int analyzeDepth = 0;
         long analyzeNodes = 0;
         string? gitCorpusSelection = null, gitCorpusReceipt = null;
         for (int i = 0; i < rest.Count;)
         {
-            if (rest[i] is "--git-corpus-selection" or "--git-corpus-receipt")
+            if (rest[i] is "--plan" or "--claims" or "--no-load")
+            {
+                if (nativeMode != NativeRecipeMode.Ingest)
+                    throw new ArgumentException("Choose one recipe preview mode.");
+                nativeMode = rest[i] switch
+                {
+                    "--plan" => NativeRecipeMode.Plan,
+                    "--claims" => NativeRecipeMode.Claims,
+                    _ => NativeRecipeMode.NoLoad,
+                };
+                rest.RemoveAt(i);
+            }
+            else if (rest[i] is "--git-corpus-selection" or "--git-corpus-receipt")
             {
                 if (i + 1 >= rest.Count) throw new ArgumentException("Git corpus flag requires a path.");
                 if (rest[i] == "--git-corpus-selection") gitCorpusSelection = rest[i + 1];
@@ -135,7 +149,7 @@ internal static partial class IngestCommands
             noAnalyze,
             recursive,
             analyzeDepth,
-            analyzeNodes, gitCorpusSelection, gitCorpusReceipt);
+            analyzeNodes, gitCorpusSelection, gitCorpusReceipt, nativeMode);
         ValidateVerifiedGitArguments(parsed);
         return parsed;
     }
