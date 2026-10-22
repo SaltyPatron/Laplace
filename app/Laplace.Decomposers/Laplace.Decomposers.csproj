@@ -6,6 +6,16 @@
     <AssemblyName>Laplace.Decomposers</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <LaplaceRecipeRuntime Condition="'$(LAPLACE_RECIPE_RUNTIME)' != ''">$(LAPLACE_RECIPE_RUNTIME)</LaplaceRecipeRuntime>
+    <LaplaceRecipeRuntime Condition="'$(LaplaceRecipeRuntime)' == '' AND '$(LAPLACE_ENGINE_BUILD)' != ''">$(LAPLACE_ENGINE_BUILD)/core/recipe_engine/runtime</LaplaceRecipeRuntime>
+  </PropertyGroup>
+
+  <Target Name="RequireCanonicalRecipeRuntime" BeforeTargets="GetCopyToPublishDirectoryItems">
+    <Error Condition="'$(LaplaceRecipeRuntime)' == '' OR !Exists('$(LaplaceRecipeRuntime)/.complete')"
+           Text="Build the canonical Native recipe runtime before publishing: cmake --build the declared LAPLACE_ENGINE_BUILD --target laplace_recipe_runtime." />
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Laplace.Decomposers.Tests" />
     <InternalsVisibleTo Include="Laplace.Substrate.Tests" />
@@ -31,9 +41,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="../../recipes/**/*.json"
-             Link="recipes/%(RecursiveDir)%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(LaplaceRecipeRuntime)/**/*"
+             Exclude="$(LaplaceRecipeRuntime)/.complete"
+             Link="native/recipe-engine/%(RecursiveDir)%(Filename)%(Extension)"
+             Condition="'$(LaplaceRecipeRuntime)' != ''"
+             CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
     <!-- Copy the selected authority artifacts themselves. No generated lexical or ISA summaries. -->
     <Content Include="../../docs/INVENTION.md;../../docs/INVENTIONS.md"
              Link="seeds/operational/docs/%(Filename)%(Extension)"
