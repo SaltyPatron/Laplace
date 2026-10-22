@@ -2,12 +2,10 @@
  * fold_route.c — the consensus fold write: a set of attested evidence deltas
  * folded into their consensus cells in one call (ingest's "fold in sets").
  *
- * laplace.consensus is HASH(subject_id) partitioned. Input arrives as runs of
- * one relation type; each run uses session-cached plans whose type_id is a hex
- * literal in the plan text, and its subjects are routed in C through
+ * laplace.consensus is HASH(subject_id) partitioned. Mixed evidence arrays
+ * share bounded owner plans, and their subjects are routed in C through
  * PostgreSQL's own HASH partition function so each exact leaf receives only
- * the rows it owns. A type split across runs executes its plans twice on
- * disjoint rows.
+ * the rows it owns. Relation vocabulary does not multiply the evidence scans.
  *
  * Per run: read and row-lock stored priors from their exact leaves, fold every
  * cell natively (matched cells from their prior, novel cells from the neutral
@@ -32,13 +30,18 @@
 #include "partitioning/partdesc.h"
 #include "storage/fd.h"
 #include <inttypes.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "utils/array.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/partcache.h"
 #include "utils/resowner.h"
+#include "utils/rls.h"
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
@@ -54,6 +57,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_merge_evidence);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_evidence_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_after_retraction_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
 
 /* ------------------------------------------------------------------ */
@@ -70,7 +74,6 @@ static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
 static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
 static HTAB *upsert_merge_plans = NULL;   /* concurrent-insert collision MERGE */
 static HTAB *evidence_lock_plans = NULL;
-static HTAB *evidence_fold_plans = NULL;
 static HTAB *evidence_write_plans = NULL;
 
 /* One exact-leaf plan per (type, HASH remainder). A prior read whose subject
@@ -516,6 +519,15 @@ read_run_priors(const uint8_t *type16, Datum type_datum,
                 int run_start, int run_n, const char *label)
 {
     PriorRouteEntry *route = prior_route(type16, type_datum, label);
+    /* Exact-child plans do not inherit the parent's ACL or policies. A global
+     * standing cannot be read or mutated through a filtered parent view. Check
+     * authority on every call, including after SET ROLE and cached-plan reuse. */
+    if (pg_class_aclcheck(route->leaves->parent_oid, GetUserId(), ACL_SELECT) != ACLCHECK_OK ||
+        pg_class_aclcheck(route->leaves->parent_oid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
+        aclcheck_error(ACLCHECK_NO_PRIV, OBJECT_TABLE, "consensus");
+    if (check_enable_rls(route->leaves->parent_oid, InvalidOid, true) == RLS_ENABLED)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("%s: native standing mutation requires unfiltered consensus access", label)));
     int               nleaves = route->leaves->count;
     PriorLeafBatch   *batches = palloc0(sizeof(PriorLeafBatch) * nleaves);
     FoldPriorStates *states = fold_prior_states_create(run_n);
@@ -729,12 +741,31 @@ period_window(const PeriodArrays *periods, const InArray *cell_opponents,
     return window;
 }
 
-/* Error-detail only: the /proc/self/maps line (device, inode, path, deleted
- * marker) of the library that holds `address`, which identifies the mapped
- * code a running backend actually executes. */
+/* Error-detail only: identify the mapped code the backend actually executes,
+ * including the Windows execution module's statically linked core. */
 static char *
 fold_function_mapping(uintptr_t address)
 {
+#ifdef _WIN32
+    HMODULE module;
+    wchar_t path[32768];
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCWSTR) address, &module))
+        return psprintf("unavailable (GetModuleHandleExW error=%lu)",
+                        (unsigned long) GetLastError());
+    DWORD length = GetModuleFileNameW(module, path, lengthof(path));
+    if (length == 0 || length >= lengthof(path))
+        return psprintf("unavailable (GetModuleFileNameW error=%lu length=%lu)",
+                        (unsigned long) GetLastError(), (unsigned long) length);
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, path, length, NULL, 0, NULL, NULL);
+    if (bytes <= 0) return pstrdup("unavailable (module path UTF-8 conversion)");
+    char *result = palloc(bytes + 1);
+    if (WideCharToMultiByte(CP_UTF8, 0, path, length, result, bytes, NULL, NULL) != bytes)
+        return pstrdup("unavailable (module path UTF-8 conversion)");
+    result[bytes] = '\0';
+    return result;
+#else
     FILE *maps = AllocateFile("/proc/self/maps", "r");
     char line[2048];
     bool found = false;
@@ -756,6 +787,7 @@ fold_function_mapping(uintptr_t address)
     FreeFile(maps);
     if (!found) return pstrdup("not-found");
     return truncated ? psprintf("%s [truncated]", line) : pstrdup(line);
+#endif
 }
 
 /* Fold one type run in one native pass: matched cells from their locked
@@ -1569,6 +1601,73 @@ typedef struct FoldEvidenceStates
     Datum *timestamps;
 } FoldEvidenceStates;
 
+typedef struct EvidenceLeafPlan
+{
+    Oid owner;
+    SPIPlanPtr plan;
+} EvidenceLeafPlan;
+
+static HTAB *evidence_leaf_plans = NULL;
+
+/* Root permissions and policies still govern a parent-table read. Direct
+ * physical access is only an optimization when it has exactly those semantics.
+ * Otherwise execute one normal parent statement, letting PostgreSQL enforce
+ * the caller's ACLs and RLS. Never bypass a parent policy by reading its child. */
+static bool
+evidence_direct_leaf_allowed(const LaplaceHashLeaves *leaves)
+{
+    if (pg_class_aclcheck(leaves->parent_oid, GetUserId(), ACL_SELECT) != ACLCHECK_OK ||
+        check_enable_rls(leaves->parent_oid, InvalidOid, true) == RLS_ENABLED)
+        return false;
+    for (int i = 0; i < leaves->count; ++i)
+        if (pg_class_aclcheck(leaves->leaf_oids[i], GetUserId(), ACL_SELECT) != ACLCHECK_OK ||
+            check_enable_rls(leaves->leaf_oids[i], InvalidOid, true) == RLS_ENABLED)
+            return false;
+    return true;
+}
+
+static SPIPlanPtr
+evidence_owner_plan(Oid owner, bool direct)
+{
+    EvidenceLeafPlan *entry;
+    bool found;
+    if (evidence_leaf_plans == NULL)
+    {
+        HASHCTL ctl;
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = sizeof(Oid);
+        ctl.entrysize = sizeof(EvidenceLeafPlan);
+        ctl.hcxt = TopMemoryContext;
+        evidence_leaf_plans = hash_create("consensus durable evidence owners", 64,
+            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    entry = hash_search(evidence_leaf_plans, &owner, HASH_ENTER, &found);
+    if (!found) entry->plan = NULL;
+    if (entry->plan == NULL)
+    {
+        static const Oid args[4] =
+            {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT4ARRAYOID};
+        char *ns = get_namespace_name(get_rel_namespace(owner));
+        char *name = get_rel_name(owner);
+        StringInfoData relation, sql;
+        if (ns == NULL || name == NULL)
+            elog(ERROR, "consensus evidence owner disappeared");
+        initStringInfo(&relation);
+        appendStringInfo(&relation, "%s%s", direct ? "ONLY " : "",
+            quote_qualified_identifier(ns, name));
+        initStringInfo(&sql);
+        appendStringInfo(&sql, laplace_sql_query_text("consensus.evidence_rows_batch"),
+            relation.data, relation.data);
+        SPIPlanPtr plan = SPI_prepare(sql.data, 4, (Oid *) args);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "consensus evidence owner plan preparation failed");
+        entry->plan = plan;
+        pfree(relation.data);
+        pfree(sql.data);
+    }
+    return entry->plan;
+}
+
 static void
 lock_evidence_targets(const uint8_t *type16, ArrayType *ids,
                       const InArray *subjects, const InArray *objects,
@@ -1604,119 +1703,190 @@ lock_evidence_targets(const uint8_t *type16, ArrayType *ids,
  * it with the grouped-period kernel, recording its witness count and latest
  * observation time. A cell without testimony is an error. */
 static FoldEvidenceStates *
-read_evidence_states(const uint8_t *type16, const InArray *subjects,
-                     const InArray *objects, const InArray *games,
-                     const InArray *ts, FoldPriorStates *priors,
-                     const char *label, bool replayable_only, bool require_all)
+read_evidence_states_batch(const InArray *types, const InArray *subjects,
+                          const InArray *objects, const InArray *games,
+                          const InArray *ts, FoldPriorStates *priors,
+                          const char *label, bool replayable_only, bool require_all,
+                          bool matched_only)
 {
-    static const Oid args[2] = {BYTEAARRAYOID,BYTEAARRAYOID};
-    Datum vals[2] = {PointerGetDatum(subjects->array),PointerGetDatum(objects->array)};
-    SPIPlanPtr plan = typed_plan(&evidence_fold_plans,
-        "consensus exact durable evidence",type16,laplace_sql_query_text("consensus.evidence_rows_typed"),2,args);
+    const LaplaceHashLeaves *leaves = laplace_hash_leaves("attestations", label);
+    /* A policy returning some witnesses still returns plausible rows. Using
+     * that subset to replace a shared standing silently erases hidden votes.
+     * Require complete testimony visibility; never disable RLS or change role. */
+    if (check_enable_rls(leaves->parent_oid, InvalidOid, true) == RLS_ENABLED)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("%s: standing recomputation requires complete visibility of retained testimony", label)));
+    bool direct = evidence_direct_leaf_allowed(leaves);
+    int owners = direct ? leaves->count : 1;
+    int *routes = palloc0(sizeof(int) * subjects->n);
+    int *sizes = palloc0(sizeof(int) * owners);
+    int *starts = palloc0(sizeof(int) * (owners + 1));
+    int *fill = palloc0(sizeof(int) * owners);
+    int *positions = palloc(sizeof(int) * subjects->n);
     FoldEvidenceStates *out = palloc(sizeof(*out));
     bool *visited = palloc0(sizeof(bool)*subjects->n);
     out->recomputed = palloc0(sizeof(bool)*subjects->n);
-    out->counts = palloc(sizeof(Datum)*subjects->n);
-    out->timestamps = palloc(sizeof(Datum)*subjects->n);
+    out->counts = palloc0(sizeof(Datum)*subjects->n);
+    out->timestamps = palloc0(sizeof(Datum)*subjects->n);
     if (games != NULL) memcpy(out->counts,games->elems,sizeof(Datum)*subjects->n);
     if (ts != NULL) memcpy(out->timestamps,ts->elems,sizeof(Datum)*subjects->n);
+    if (direct) laplace_hash_leaf_route(leaves, subjects->elems, subjects->n, routes, label);
+    for (int i = 0; i < subjects->n; ++i)
+        if (!matched_only || priors->matched[i]) ++sizes[routes[i]];
+    for (int i = 0; i < owners; ++i) starts[i + 1] = starts[i] + sizes[i];
+    for (int i = 0; i < subjects->n; ++i)
+        if (!matched_only || priors->matched[i])
+            positions[starts[routes[i]] + fill[routes[i]]++] = i;
 
     /* Non-readonly SPI takes a fresh READ COMMITTED snapshot after the target
      * locks, so a writer that waited on another sees its committed testimony. */
-    int rc = SPI_execute_plan(plan,vals,NULL,false,0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "%s: durable evidence read failed", label);
-    uint64 rows = SPI_processed;
-    SPITupleTable *tuples = SPI_tuptable;
-    int64_t *opponents = NULL, *phis = NULL, *counts = NULL, *sums = NULL;
-    Size capacity = 0;
-    uint64 row = 0;
-    while (row < rows)
+    MemoryContext scratch = AllocSetContextCreate(CurrentMemoryContext,
+        "consensus evidence owner batch", ALLOCSET_DEFAULT_SIZES);
+    for (int owner = 0; owner < owners; ++owner)
     {
+        int n = sizes[owner];
+        if (n == 0) continue;
         CHECK_FOR_INTERRUPTS();
-        bool isnull;
-        int64 ord = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
-        if (isnull || ord < 1 || ord > subjects->n || visited[ord - 1])
-            elog(ERROR, "%s: invalid durable evidence target ordinal", label);
-        int i = (int) ord - 1;
-        visited[i] = true;
-        Size groups = 0;
-        int64 witnesses = 0;
-        Datum latest = (Datum) 0;
-        bool replayable = true;
-        do
+        MemoryContext previous = MemoryContextSwitchTo(scratch);
+        Datum *ss = palloc(sizeof(Datum) * n), *tt = palloc(sizeof(Datum) * n);
+        Datum *oo = palloc(sizeof(Datum) * n), *ord = palloc(sizeof(Datum) * n);
+        bool *nulls = palloc(sizeof(bool) * n);
+        for (int k = 0; k < n; ++k)
         {
-            Datum values[8];
-            bool nulls[8];
-            for (int c = 0; c < 8; ++c)
-                values[c] = SPI_getbinval(tuples->vals[row], tuples->tupdesc, c + 1, &nulls[c]);
-            for (int c = 0; c < 8; ++c)
-                if (nulls[c]) elog(ERROR, "%s: incomplete durable evidence row", label);
-            replayable &= DatumGetBool(values[7]);
-            if (groups == capacity)
+            int i = positions[starts[owner] + k];
+            ss[k] = subjects->elems[i]; tt[k] = types->elems[i];
+            oo[k] = objects->elems[i]; nulls[k] = objects->nulls[i];
+            ord[k] = Int32GetDatum(i + 1);
+        }
+        Datum vals[4] = {
+            PointerGetDatum(construct_array(ss, n, BYTEAOID, -1, false, 'i')),
+            PointerGetDatum(construct_array(tt, n, BYTEAOID, -1, false, 'i')),
+            PointerGetDatum(construct_md_array(oo, nulls, 1, &n, (int[]){1}, BYTEAOID, -1, false, 'i')),
+            PointerGetDatum(construct_array(ord, n, INT4OID, 4, true, 'i'))};
+        Oid oid = direct ? leaves->leaf_oids[owner] : leaves->parent_oid;
+        int rc = SPI_execute_plan(evidence_owner_plan(oid, direct),vals,NULL,false,0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "%s: durable evidence read failed", label);
+        uint64 rows = SPI_processed;
+        SPITupleTable *tuples = SPI_tuptable;
+        int64_t *opponents = NULL, *phis = NULL, *counts = NULL, *sums = NULL;
+        Size capacity = 0;
+        uint64 row = 0;
+        while (row < rows)
+        {
+            CHECK_FOR_INTERRUPTS();
+            bool isnull;
+            int64 ord = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
+            if (isnull || ord < 1 || ord > subjects->n || visited[ord - 1])
+                elog(ERROR, "%s: invalid durable evidence target ordinal", label);
+            int i = (int) ord - 1;
+            visited[i] = true;
+            Size groups = 0;
+            int64 witnesses = 0;
+            Datum latest = (Datum) 0;
+            bool replayable = true;
+            do
             {
-                Size next = capacity == 0 ? 8 : capacity * 2;
-                if (next > MaxAllocSize / sizeof(int64_t))
-                    ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                        errmsg("%s: evidence cell exceeds allocation capacity", label)));
-                opponents = opponents ? repalloc(opponents, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
-                phis = phis ? repalloc(phis, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
-                counts = counts ? repalloc(counts, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
-                sums = sums ? repalloc(sums, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
-                capacity = next;
+                Datum values[8];
+                bool nulls[8];
+                for (int c = 0; c < 8; ++c)
+                    values[c] = SPI_getbinval(tuples->vals[row], tuples->tupdesc, c + 1, &nulls[c]);
+                for (int c = 0; c < 8; ++c)
+                    if (nulls[c]) elog(ERROR, "%s: incomplete durable evidence row", label);
+                replayable &= DatumGetBool(values[7]);
+                if (groups == capacity)
+                {
+                    Size next = capacity == 0 ? 8 : capacity * 2;
+                    if (next > MaxAllocSize / sizeof(int64_t))
+                        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("%s: evidence cell exceeds allocation capacity", label)));
+                    opponents = opponents ? repalloc(opponents, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                    phis = phis ? repalloc(phis, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                    counts = counts ? repalloc(counts, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                    sums = sums ? repalloc(sums, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                    capacity = next;
+                }
+                opponents[groups] = DatumGetInt64(values[5]);
+                if (opponents[groups] == 0) opponents[groups] = CONSENSUS_FOLD_NEUTRAL_MU;
+                phis[groups] = DatumGetInt64(values[6]);
+                counts[groups] = DatumGetInt64(values[3]);
+                if (counts[groups] <= 0)
+                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("%s: non-positive durable observation count cannot be folded", label),
+                        errdetail("cell_index=%d observation_count=" INT64_FORMAT, i, counts[groups])));
+                sums[groups] = DatumGetInt64(values[4]);
+                ++groups;
+                latest = values[2];
+                ++row;
+                if (row == rows) break;
+                int64 next = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
+                if (isnull || next != ord) break;
+            } while (true);
+            if (!replayable)
+            {
+                if (replayable_only)
+                    ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("%s: non-replayable testimony has no retained continuous score", label),
+                        errdetail("cell_index=%d", i)));
+                continue;
             }
-            opponents[groups] = DatumGetInt64(values[5]);
-            if (opponents[groups] == 0) opponents[groups] = CONSENSUS_FOLD_NEUTRAL_MU;
-            phis[groups] = DatumGetInt64(values[6]);
-            counts[groups] = Max(DatumGetInt64(values[3]), INT64CONST(1));
-            sums[groups] = DatumGetInt64(values[4]);
-            ++groups;
-            latest = values[2];
-            ++row;
-            if (row == rows) break;
-            int64 next = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
-            if (isnull || next != ord) break;
-        } while (true);
-        if (!replayable)
-        {
-            if (replayable_only)
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("%s: non-replayable testimony has no retained continuous score", label),
-                    errdetail("cell_index=%d", i)));
-            continue;
-        }
-        for (Size g = 0; g < groups; ++g)
-        {
-            if (witnesses > PG_INT64_MAX - counts[g])
+            for (Size g = 0; g < groups; ++g)
+            {
+                if (witnesses > PG_INT64_MAX - counts[g])
+                    ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("%s: witness count exceeds bigint capacity", label)));
+                witnesses += counts[g];
+            }
+            glicko2_state_t state;
+            glicko2_init(&state, CONSENSUS_FOLD_NEUTRAL_MU,
+                CONSENSUS_FOLD_INITIAL_RD, CONSENSUS_FOLD_INITIAL_VOLATILITY);
+            if (glicko2_fold_grouped_period(&state, opponents, phis, counts, sums,
+                    groups, LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
                 ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                    errmsg("%s: witness count exceeds bigint capacity", label)));
-            witnesses += counts[g];
+                    errmsg("%s: grouped rating-period update failed", label)));
+            out->recomputed[i] = true;
+            priors->ratings[i] = Int64GetDatum(state.rating);
+            priors->rds[i] = Int64GetDatum(state.rd);
+            priors->volatilities[i] = Int64GetDatum(state.volatility);
+            out->counts[i] = Int64GetDatum(witnesses);
+            out->timestamps[i] = latest;
         }
-        glicko2_state_t state;
-        glicko2_init(&state, CONSENSUS_FOLD_NEUTRAL_MU,
-            CONSENSUS_FOLD_INITIAL_RD, CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        if (glicko2_fold_grouped_period(&state, opponents, phis, counts, sums,
-                groups, LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
-            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                errmsg("%s: grouped rating-period update failed", label)));
-        out->recomputed[i] = true;
-        priors->ratings[i] = Int64GetDatum(state.rating);
-        priors->rds[i] = Int64GetDatum(state.rd);
-        priors->volatilities[i] = Int64GetDatum(state.volatility);
-        out->counts[i] = Int64GetDatum(witnesses);
-        out->timestamps[i] = latest;
-    }
+        if (opponents) pfree(opponents);
+        if (phis) pfree(phis);
+        if (counts) pfree(counts);
+        if (sums) pfree(sums);
+        SPI_freetuptable(SPI_tuptable);
+        MemoryContextSwitchTo(previous);
+        MemoryContextReset(scratch);
+        }
+    MemoryContextDelete(scratch);
     for (int i = 0; require_all && i < subjects->n; ++i)
         if (!visited[i])
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
                 errmsg("%s: target has no durable accepted testimony", label),
                 errdetail("cell_index=%d", i)));
-    if (opponents) pfree(opponents);
-    if (phis) pfree(phis);
-    if (counts) pfree(counts);
-    if (sums) pfree(sums);
-    SPI_freetuptable(SPI_tuptable);
     pfree(visited);
+    pfree(routes); pfree(sizes); pfree(starts); pfree(fill); pfree(positions);
+    return out;
+}
+
+static FoldEvidenceStates *
+read_evidence_states(const uint8_t *type16, const InArray *subjects,
+                     const InArray *objects, const InArray *games,
+                     const InArray *ts, FoldPriorStates *priors,
+                     const char *label, bool replayable_only, bool require_all)
+{
+    bytea *type = palloc(VARHDRSZ + 16);
+    SET_VARSIZE(type, VARHDRSZ + 16);
+    memcpy(VARDATA(type), type16, 16);
+    InArray types;
+    memset(&types, 0, sizeof(types));
+    types.n = subjects->n;
+    types.elems = palloc(sizeof(Datum) * types.n);
+    for (int i = 0; i < types.n; ++i) types.elems[i] = PointerGetDatum(type);
+    FoldEvidenceStates *out = read_evidence_states_batch(&types, subjects, objects,
+        games, ts, priors, label, replayable_only, require_all, false);
+    pfree(types.elems); pfree(type);
     return out;
 }
 
@@ -1778,26 +1948,44 @@ write_run(const uint8_t *type16, Datum type, const Datum *types, ArrayType *ids,
             deconstruct_array(folds->rating_array, INT8OID, 8, true, 'd', &rat, &nul, &cnt);
             deconstruct_array(folds->rd_array, INT8OID, 8, true, 'd', &rds, &nul, &cnt);
             deconstruct_array(folds->volatility_array, INT8OID, 8, true, 'd', &vol, &nul, &cnt);
-            for (int leaf = 0; leaf < route->leaves->count; ++leaf)
+            /* Reuse the prior read's physical routing. Scatter positions once,
+             * as the native COPY path does; scanning the complete working set
+             * twice for every leaf makes partition count multiply client work. */
+            int owners = route->leaves->count;
+            int *sizes = palloc0(sizeof(int) * owners);
+            int *starts = palloc0(sizeof(int) * (owners + 1));
+            int *fill = palloc0(sizeof(int) * owners);
+            int *positions = palloc(sizeof(int) * matched_n);
+            for (int i = 0; i < n; ++i)
+                if (priors->matched[i]) ++sizes[priors->leaves[i]];
+            for (int leaf = 0; leaf < owners; ++leaf)
+                starts[leaf + 1] = starts[leaf] + sizes[leaf];
+            for (int i = 0; i < n; ++i)
+                if (priors->matched[i])
+                {
+                    int leaf = priors->leaves[i];
+                    positions[starts[leaf] + fill[leaf]++] = i;
+                }
+            MemoryContext scratch = AllocSetContextCreate(CurrentMemoryContext,
+                "consensus matched owner batch", ALLOCSET_DEFAULT_SIZES);
+            for (int leaf = 0; leaf < owners; ++leaf)
             {
-                int m = 0;
-                for (int i = 0; i < n; ++i)
-                    if (priors->matched[i] && priors->leaves[i] == leaf) ++m;
+                int m = sizes[leaf];
                 if (m == 0) continue;
+                CHECK_FOR_INTERRUPTS();
+                MemoryContext previous = MemoryContextSwitchTo(scratch);
                 Datum *mid = palloc(sizeof(Datum) * m), *ms = palloc(sizeof(Datum) * m);
                 Datum *mg = palloc(sizeof(Datum) * m), *mt = palloc(sizeof(Datum) * m);
                 Datum *mr = palloc(sizeof(Datum) * m), *md = palloc(sizeof(Datum) * m);
                 Datum *mv = palloc(sizeof(Datum) * m), *mc = palloc(sizeof(Datum) * m);
-                int k = 0;
-                for (int i = 0; i < n; ++i)
-                    if (priors->matched[i] && priors->leaves[i] == leaf)
-                    {
+                for (int k = 0; k < m; ++k)
+                {
+                        int i = positions[starts[leaf] + k];
                         mid[k] = all_ids[i]; ms[k] = subjects->elems[i];
                         mg[k] = evidence->counts[i]; mt[k] = evidence->timestamps[i];
                         mr[k] = rat[i]; md[k] = rds[i]; mv[k] = vol[i];
                         mc[k] = BoolGetDatum(evidence->recomputed[i]);
-                        ++k;
-                    }
+                }
                 Datum vals[8] = {
                     PointerGetDatum(construct_array(mid, m, BYTEAOID, -1, false, 'i')),
                     PointerGetDatum(construct_array(ms, m, BYTEAOID, -1, false, 'i')),
@@ -1813,7 +2001,11 @@ write_run(const uint8_t *type16, Datum type, const Datum *types, ArrayType *ids,
                         errmsg("%s: exact-leaf update affected %lu of %d rows",
                                label, (unsigned long) SPI_processed, m)));
                 done += SPI_processed;
+                MemoryContextSwitchTo(previous);
+                MemoryContextReset(scratch);
             }
+            MemoryContextDelete(scratch);
+            pfree(sizes); pfree(starts); pfree(fill); pfree(positions);
         }
         if (matched_n < (uint64) n)
         {
@@ -1940,7 +2132,6 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
     {
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
         int run_end = run_start;
-        uint64 key;
 
         while (run_end < subjects.n &&
                memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
@@ -1975,12 +2166,6 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_DATA_EXCEPTION),
                      errmsg("%s: type ids must be bytewise sorted", label)));
 
-        /* Writers of one relation type serialize here for the rest of their
-         * transaction. Runs arrive in ascending type order, so the locks are
-         * taken in one global order, and the prior read below sees every
-         * committed cell of this type: a cell read as novel is novel. */
-        memcpy(&key, type16, sizeof(key));
-        DirectFunctionCall1(pg_advisory_xact_lock_int8, Int64GetDatum((int64) key));
         run_start = run_end;
     }
     hash_destroy(seen);
@@ -1991,142 +2176,16 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
 
-    /* Route the whole batch once across the 64 HASH leaves and lock any
-     * existing prior cells in at most 64 SPI queries total. */
+    /* Lock the actual existing cells, not their relation vocabulary. Disjoint
+     * working sets sharing IS_A/HAS_NAME/etc must remain concurrent. A novel
+     * key can race: the PK arbiter then raises 23505 and the admission owner
+     * rolls back and retries its complete evidence transaction, as it does
+     * for entity/attestation COPY races. No partial fold survives that retry. */
     priors = read_run_priors(bytea16(types.elems[0], label), types.elems[0],
                              cell_ids, &subjects, 0, subjects.n, label);
 
-    evidence = palloc(sizeof(*evidence));
-    evidence->recomputed = palloc0(sizeof(bool) * subjects.n);
-    evidence->counts = palloc(sizeof(Datum) * subjects.n);
-    evidence->timestamps = palloc(sizeof(Datum) * subjects.n);
-    memcpy(evidence->counts, games.elems, sizeof(Datum) * subjects.n);
-    memcpy(evidence->timestamps, ts.elems, sizeof(Datum) * subjects.n);
-
-    if (!periods.exact || priors->matched_n > 0)
-    {
-        run_start = 0;
-        while (run_start < subjects.n)
-        {
-            const uint8_t *type16 = bytea16(types.elems[run_start], label);
-            int run_end = run_start + 1;
-            int run_n;
-            int m = 0;
-
-            while (run_end < subjects.n &&
-                   memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
-                ++run_end;
-            run_n = run_end - run_start;
-            for (int i = 0; i < run_n; ++i)
-                if (priors->matched[run_start + i])
-                    ++m;
-
-            if (periods.exact && m == 0)
-            {
-                run_start = run_end;
-                continue;
-            }
-            if (periods.exact && m < run_n)
-            {
-                int *matched_idx = palloc(sizeof(int) * m);
-                Datum *msub = palloc(sizeof(Datum) * m);
-                Datum *mobj = palloc(sizeof(Datum) * m);
-                bool *mobj_nulls = palloc(sizeof(bool) * m);
-                Datum *mgames = palloc(sizeof(Datum) * m);
-                Datum *mts = palloc(sizeof(Datum) * m);
-                InArray sub_subjects, sub_objects, sub_games, sub_ts;
-                FoldPriorStates *sub_priors = fold_prior_states_create(m);
-                FoldEvidenceStates *sub_ev;
-                int k = 0;
-
-                for (int i = 0; i < run_n; ++i)
-                {
-                    int pos = run_start + i;
-                    if (!priors->matched[pos]) continue;
-                    matched_idx[k] = pos;
-                    msub[k] = subjects.elems[pos];
-                    mobj[k] = objects.elems[pos];
-                    mobj_nulls[k] = objects.nulls[pos];
-                    mgames[k] = games.elems[pos];
-                    mts[k] = ts.elems[pos];
-                    sub_priors->matched[k] = true;
-                    sub_priors->ratings[k] = priors->ratings[pos];
-                    sub_priors->rds[k] = priors->rds[pos];
-                    sub_priors->volatilities[k] = priors->volatilities[pos];
-                    ++k;
-                }
-                sub_priors->matched_n = (uint64) m;
-                memset(&sub_subjects, 0, sizeof(sub_subjects));
-                sub_subjects.array = construct_array(msub, m, BYTEAOID, -1, false, 'i');
-                sub_subjects.elems = msub;
-                sub_subjects.n = m;
-                memset(&sub_objects, 0, sizeof(sub_objects));
-                sub_objects.array = construct_md_array(
-                    mobj, mobj_nulls, 1, &m, (int[]){1}, BYTEAOID, -1, false, 'i');
-                sub_objects.elems = mobj;
-                sub_objects.nulls = mobj_nulls;
-                sub_objects.n = m;
-                memset(&sub_games, 0, sizeof(sub_games));
-                sub_games.elems = mgames;
-                sub_games.n = m;
-                memset(&sub_ts, 0, sizeof(sub_ts));
-                sub_ts.elems = mts;
-                sub_ts.n = m;
-
-                sub_ev = read_evidence_states(type16, &sub_subjects, &sub_objects,
-                                              &sub_games, &sub_ts, sub_priors, label,
-                                              false, false);
-                for (k = 0; k < m; ++k)
-                {
-                    int pos = matched_idx[k];
-                    evidence->recomputed[pos] = sub_ev->recomputed[k];
-                    evidence->counts[pos] = sub_ev->counts[k];
-                    evidence->timestamps[pos] = sub_ev->timestamps[k];
-                    priors->ratings[pos] = sub_priors->ratings[k];
-                    priors->rds[pos] = sub_priors->rds[k];
-                    priors->volatilities[pos] = sub_priors->volatilities[k];
-                }
-            }
-            else
-            {
-                InArray run_subjects = in_array_window(&subjects, run_start, run_n,
-                                                       BYTEAOID, -1, false, 'i');
-                InArray run_objects = in_array_window(&objects, run_start, run_n,
-                                                      BYTEAOID, -1, false, 'i');
-                InArray run_games = in_array_window(&games, run_start, run_n,
-                                                    INT8OID, 8, true, 'd');
-                InArray run_ts = in_array_window(&ts, run_start, run_n,
-                                                 TIMESTAMPTZOID, 8, true, 'd');
-                FoldPriorStates *sub_priors = fold_prior_states_create(run_n);
-                FoldEvidenceStates *sub_ev;
-
-                for (int i = 0; i < run_n; ++i)
-                {
-                    int pos = run_start + i;
-                    sub_priors->matched[i] = priors->matched[pos];
-                    sub_priors->ratings[i] = priors->ratings[pos];
-                    sub_priors->rds[i] = priors->rds[pos];
-                    sub_priors->volatilities[i] = priors->volatilities[pos];
-                }
-                sub_priors->matched_n = (uint64) m;
-                sub_ev = read_evidence_states(type16, &run_subjects, &run_objects,
-                                              &run_games, &run_ts, sub_priors, label,
-                                              false, false);
-                for (int i = 0; i < run_n; ++i)
-                {
-                    int pos = run_start + i;
-                    evidence->recomputed[pos] = sub_ev->recomputed[i];
-                    evidence->counts[pos] = sub_ev->counts[i];
-                    evidence->timestamps[pos] = sub_ev->timestamps[i];
-                    priors->ratings[pos] = sub_priors->ratings[i];
-                    priors->rds[pos] = sub_priors->rds[i];
-                    priors->volatilities[pos] = sub_priors->volatilities[i];
-                }
-            }
-            run_start = run_end;
-            CHECK_FOR_INTERRUPTS();
-        }
-    }
+    evidence = read_evidence_states_batch(&types, &subjects, &objects,
+        &games, &ts, priors, label, false, false, periods.exact);
 
     fold_run_states(&phis, &opps, &games, &sums, &periods,
                     0, subjects.n, priors, label,
@@ -2298,10 +2357,11 @@ pg_laplace_consensus_upsert_evidence_type(PG_FUNCTION_ARGS)
 /* Refold existing cells from their retained testimony alone, through the same
  * lock, snapshot, native fold and result write as the evidence path; there is
  * no incoming delta. Every target must hold replayable testimony. */
-Datum
-pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
+static Datum
+consensus_refold_evidence_type(FunctionCallInfo fcinfo, bool retract)
 {
-    const char *label="consensus_refold_evidence_type";
+    const char *label=retract ? "consensus_refold_after_retraction_type"
+                             : "consensus_refold_evidence_type";
     InArray subjects,objects;
     Datum type_datum;
     const uint8_t *type16;
@@ -2322,10 +2382,22 @@ pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
     if (subjects.n!=objects.n)
         ereport(ERROR,(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
                        errmsg("%s: parallel arrays must share length",label)));
-    if (subjects.n==0) PG_RETURN_INT64(0);
+    if (subjects.n==0)
+    {
+        if (retract)
+        {
+            Datum empty[2]={Int64GetDatum(0),Int64GetDatum(0)};
+            PG_RETURN_ARRAYTYPE_P(construct_array(empty,2,INT8OID,8,true,'d'));
+        }
+        PG_RETURN_INT64(0);
+    }
     if (IsolationUsesXactSnapshot())
         ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                        errmsg("%s: retry the evidence transaction at READ COMMITTED",label)));
+    if (retract && check_enable_rls(get_relname_relid("attestations",
+            get_namespace_oid("laplace",false)),InvalidOid,true)==RLS_ENABLED)
+        ereport(ERROR,(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("%s: retraction requires complete visibility of retained testimony",label)));
     cell_ids=typed_cell_ids(type16,&subjects,&objects,label);
     ids=construct_array(cell_ids,subjects.n,BYTEAOID,-1,false,'i');
     if (SPI_connect()!=SPI_OK_CONNECT)
@@ -2336,7 +2408,82 @@ pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
     if (priors->matched_n!=(uint64)subjects.n)
         ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
                        errmsg("%s: locked target is absent from its physical owner",label)));
-    evidence=read_evidence_states(type16,&subjects,&objects,NULL,NULL,priors,label,true,true);
+    evidence=read_evidence_states(type16,&subjects,&objects,NULL,NULL,priors,label,true,!retract);
+    if (retract)
+    {
+        /* The same target locks and fresh snapshot govern both survivor refold
+         * and zero-survivor deletion. A concurrent admission cannot be lost
+         * between an aggregate read and a later conflict-arbitrated UPDATE. */
+        Datum *kept_ids=palloc(sizeof(Datum)*subjects.n);
+        Datum *kept_subjects=palloc(sizeof(Datum)*subjects.n);
+        Datum *kept_objects=palloc(sizeof(Datum)*subjects.n);
+        bool *kept_nulls=palloc(sizeof(bool)*subjects.n);
+        Datum *removed_ids=palloc(sizeof(Datum)*subjects.n);
+        Datum *removed_subjects=palloc(sizeof(Datum)*subjects.n);
+        FoldEvidenceStates kept;
+        FoldPriorStates *states=fold_prior_states_create(subjects.n);
+        kept.recomputed=palloc(sizeof(bool)*subjects.n);
+        kept.counts=palloc(sizeof(Datum)*subjects.n);
+        kept.timestamps=palloc(sizeof(Datum)*subjects.n);
+        int live=0,missing=0;
+        for (int i=0;i<subjects.n;++i)
+        {
+            if (!evidence->recomputed[i])
+            {
+                removed_ids[missing]=cell_ids[i];
+                removed_subjects[missing++]=subjects.elems[i];
+                continue;
+            }
+            kept_ids[live]=cell_ids[i];
+            kept_subjects[live]=subjects.elems[i];
+            kept_objects[live]=objects.elems[i];
+            kept_nulls[live]=objects.nulls[i];
+            kept.recomputed[live]=true;
+            kept.counts[live]=evidence->counts[i];
+            kept.timestamps[live]=evidence->timestamps[i];
+            states->ratings[live]=priors->ratings[i];
+            states->rds[live]=priors->rds[i];
+            states->volatilities[live]=priors->volatilities[i];
+            ++live;
+        }
+        int64 written=0,deleted=0;
+        if (live>0)
+        {
+            InArray ss={0},oo={0};
+            ss.n=oo.n=live;
+            ss.elems=kept_subjects; oo.elems=kept_objects; oo.nulls=kept_nulls;
+            ss.array=construct_array(kept_subjects,live,BYTEAOID,-1,false,'i');
+            oo.array=construct_md_array(kept_objects,kept_nulls,1,&live,(int[]){1},BYTEAOID,-1,false,'i');
+            folds.rating_array=construct_array(states->ratings,live,INT8OID,8,true,'d');
+            folds.rd_array=construct_array(states->rds,live,INT8OID,8,true,'d');
+            folds.volatility_array=construct_array(states->volatilities,live,INT8OID,8,true,'d');
+            written=write_evidence_states(type16,
+                construct_array(kept_ids,live,BYTEAOID,-1,false,'i'),&ss,&oo,&kept,&folds,label);
+        }
+        if (missing>0)
+        {
+            static SPIPlanPtr delete_plan=NULL;
+            static const Oid args[3]={BYTEAARRAYOID,BYTEAARRAYOID,BYTEAOID};
+            if (delete_plan==NULL)
+            {
+                SPIPlanPtr plan=SPI_prepare(laplace_sql_query_text("consensus.delete_locked_empty_cells"),3,(Oid *)args);
+                if (plan==NULL || SPI_keepplan(plan)!=0)
+                    elog(ERROR,"%s: empty-cell delete plan preparation failed",label);
+                delete_plan=plan;
+            }
+            Datum values[3]={
+                PointerGetDatum(construct_array(removed_ids,missing,BYTEAOID,-1,false,'i')),
+                PointerGetDatum(construct_array(removed_subjects,missing,BYTEAOID,-1,false,'i')),
+                type_datum};
+            int rc=SPI_execute_plan(delete_plan,values,NULL,false,0);
+            if (rc!=SPI_OK_DELETE || SPI_processed!=(uint64)missing)
+                elog(ERROR,"%s: locked empty-cell deletion did not preserve target cardinality",label);
+            deleted=(int64)SPI_processed;
+        }
+        Datum result[2]={Int64GetDatum(written),Int64GetDatum(deleted)};
+        SPI_finish();
+        PG_RETURN_ARRAYTYPE_P(construct_array(result,2,INT8OID,8,true,'d'));
+    }
     folds.seen_array=NULL;
     folds.rating_array=construct_array(priors->ratings,subjects.n,INT8OID,8,true,'d');
     folds.rd_array=construct_array(priors->rds,subjects.n,INT8OID,8,true,'d');
@@ -2344,4 +2491,16 @@ pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
     affected=write_evidence_states(type16,ids,&subjects,&objects,evidence,&folds,label);
     SPI_finish();
     PG_RETURN_INT64(affected);
+}
+
+Datum
+pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
+{
+    return consensus_refold_evidence_type(fcinfo,false);
+}
+
+Datum
+pg_laplace_consensus_refold_after_retraction_type(PG_FUNCTION_ARGS)
+{
+    return consensus_refold_evidence_type(fcinfo,true);
 }

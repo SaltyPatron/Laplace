@@ -16,6 +16,7 @@
 #include "laplace/core/xml_stream.h"
 #include <algorithm>
 #include <cmath>
+#include <cerrno>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -363,6 +364,8 @@ struct fact {
     // (win 1, draw 0.5, loss 0). A binary claim is one game at 1 or 0.
     int64_t games = 1;
     double score = -1;   // < 0: the categorical score of `confirm`
+    bool aggregate = false, has_score_sum = false;
+    int64_t score_sum = 0; // exact fixed-point sum after combining distinct scores
 };
 struct content_form {
     hash128_t id{};
@@ -940,14 +943,24 @@ struct laplace_recipe_stream {
         return content(stage, value);
     }
 
+    static int64_t score_sum(const fact& f) {
+        if (f.games < 1) throw std::runtime_error("invalid observation count");
+        if (f.has_score_sum) return f.score_sum;
+        const double score = f.score >= 0 ? f.score : (f.confirm ? 1.0 : 0.0);
+        if (!std::isfinite(score) || score < 0 || score > 1)
+            throw std::runtime_error("invalid observation score");
+        const int64_t fixed = static_cast<int64_t>(std::llround(score * 1e9));
+        if (fixed && f.games > INT64_MAX / fixed)
+            throw std::runtime_error("observation score sum overflow");
+        return fixed * f.games;
+    }
     void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
         if (f.has_subject) subj = f.subject;
         // The witness's trust is the claim's strength; relation rank is read-time salience.
         const double weight = trust;
         const hash128_t* observer = f.has_source ? &f.source : &current_witness;
-        if (f.games > 1 || f.score >= 0) {
-            const double score = f.score >= 0 ? f.score : (f.confirm ? 1.0 : 0.0);
-            const int64_t sum = static_cast<int64_t>(std::llround(score * 1e9)) * f.games;
+        if (f.games > 1 || f.score >= 0 || f.has_score_sum) {
+            const int64_t sum = score_sum(f);
         check(laplace_attestation_aggregated_build(&subj, &f.relation, f.has_object ? &f.object : nullptr,
                 f.has_object ? 0 : 1, observer, f.has_context ? &f.context : nullptr,
                 f.has_context ? 0 : 1, weight, f.games, sum, 0, &row), "graded testimony");
@@ -1131,11 +1144,14 @@ struct laplace_recipe_stream {
     // Aggregated claims: identical (subject, relation, object, context, outcome) facts
     // across the artifact become one graded game series staged at the end.
     std::unordered_map<std::string, fact> aggregates;
-    void aggregate_facts(size_t from) {
-        for (size_t i = from; i < facts.size(); ++i) {
+    void aggregate_facts() {
+        size_t kept = 0;
+        for (size_t i = 0; i < facts.size(); ++i) {
             fact f = facts[i];
+            if (!f.aggregate) { facts[kept++] = f; continue; }
             if (!f.has_subject) { f.subject = subject; f.has_subject = true; }
             if (!f.has_source) { f.source = current_witness; f.has_source = true; }
+            f.score_sum = score_sum(f); f.has_score_sum = true;
             std::string key(reinterpret_cast<const char*>(&f.subject), sizeof(f.subject));
             key.append(reinterpret_cast<const char*>(&f.source), sizeof(f.source));
             key.append(reinterpret_cast<const char*>(&f.relation), sizeof(f.relation));
@@ -1144,12 +1160,17 @@ struct laplace_recipe_stream {
             key.push_back(static_cast<char>((f.has_object ? 1 : 0) | (f.has_context ? 2 : 0) | (f.confirm ? 4 : 0)));
             auto [it, fresh] = aggregates.emplace(std::move(key), f);
             if (!fresh) {
+                if (it->second.games > INT64_MAX - f.games)
+                    throw std::runtime_error("aggregate observation count overflow in " + record_context);
+                if (it->second.score_sum > INT64_MAX - f.score_sum)
+                    throw std::runtime_error("aggregate observation score sum overflow in " + record_context);
                 it->second.games += f.games;
+                it->second.score_sum += f.score_sum;
                 for (size_t b = 0; b < 32; ++b) it->second.qualifiers[b] |= f.qualifiers[b];
                 it->second.has_qualifiers = it->second.has_qualifiers || f.has_qualifiers;
             }
         }
-        facts.resize(from);
+        facts.resize(kept);
     }
     // A record's own witness: the content composition of its self-description.
     hash128_t stage_witness(intent_stage_t* stage, const std::vector<std::string>& parts) {
@@ -1284,8 +1305,17 @@ struct laplace_recipe_stream {
                     for (size_t k = before; k < facts.size(); ++k) facts[k].confirm = false;
             }
             if (rule != fields.end() && facts.size() > before) qualify(path, rule->second, attributes, before);
-            if (rule != fields.end() && rule->second.aggregate) aggregate_facts(before);
-            else if (facts.size() > before) last_fact[path] = facts.size() - 1;
+            if (facts.size() > before) {
+                // Sibling fields still supply this claim's count and score. Keep
+                // it addressable until the complete record has been lowered.
+                if (rule != fields.end() && rule->second.aggregate)
+                    for (size_t k = before; k < facts.size(); ++k) {
+                        facts[k].aggregate = true;
+                        if (!facts[k].has_subject) { facts[k].subject = subject; facts[k].has_subject = true; }
+                        if (!facts[k].has_source) { facts[k].source = current_witness; facts[k].has_source = true; }
+                    }
+                last_fact[path] = facts.size() - 1;
+            }
         }
         catch (const std::runtime_error& e) {
             throw std::runtime_error("field " + path + " in " + record_context + ": " + e.what());
@@ -1312,8 +1342,10 @@ struct laplace_recipe_stream {
             fact& claim = facts[target->second];
             char* end = nullptr;
             if (!rule.observation_of.empty()) {
+                errno = 0;
                 const long long n = std::strtoll(raw.c_str(), &end, 10);
-                if (end == raw.c_str() || *end || n < 1) throw std::runtime_error("invalid observation count: " + raw);
+                if (errno == ERANGE || end == raw.c_str() || *end || n < 1)
+                    throw std::runtime_error("invalid observation count: " + raw);
                 claim.games = n;
             } else {
                 const double v = std::strtod(raw.c_str(), &end);
@@ -1801,6 +1833,7 @@ struct laplace_recipe_stream {
         const auto record_seen = with_ancestors(record, nullptr);
         for (const auto& child : record.children) lower_child(stage, route, child, child.name, &record_seen);
         if (route.parse.on) lower_parse(stage, route, record);
+        aggregate_facts();
         scope_attributes = nullptr;
         if (file_head_known) close_observation(stage);
         observing = false;

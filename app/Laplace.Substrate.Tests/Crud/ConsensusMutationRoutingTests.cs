@@ -51,16 +51,16 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
-    public void SourceEvictionRoutesReplacementAndCullingByPrimaryKeyAndLeaf()
+    public void SourceEvictionUsesTheNativeEvidenceRetractionOwner()
     {
         var sql = Read("extension", "laplace_substrate", "sql", "functions",
             "ops", "evict_source.sql.in");
 
-        Assert.Contains("consensus.partition_leaf(%L::bytea, d.subject_id)::oid", sql,
+        Assert.Contains("SELECT consensus.refold_after_retraction_type(", sql,
             StringComparison.Ordinal);
-        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("DELETE FROM ONLY %s c", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("consensus.partition_leaf(", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSERT INTO laplace.consensus", sql,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("UPDATE laplace.consensus", sql,
             StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("DELETE FROM laplace.consensus", sql,
@@ -107,18 +107,16 @@ public sealed class ConsensusMutationRoutingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        // Eviction is the only SQL writer of laplace.consensus (keyed replacement); refold
-        // goes through the native evidence route atomic admission uses, so both share one
-        // lock/snapshot contract.
-        Assert.Equal([
-            "extension/laplace_substrate/sql/functions/ops/evict_source.sql.in",
-        ], writers);
+        // SQL orchestrates admission/refold/retraction through one native
+        // lock/snapshot owner; it has no independent standing writer.
+        Assert.Empty(writers);
 
-        var evict = File.ReadAllText(Path.Combine(RepoRoot, Assert.Single(writers)));
+        var evict = Read("extension", "laplace_substrate", "sql", "functions",
+            "ops", "evict_source.sql.in");
         var refold = Read("extension", "laplace_substrate", "sql", "functions",
             "ops", "refold_source.sql.in");
         Assert.DoesNotMatch(@"\b(?:UPDATE|DELETE\s+FROM)\s+laplace\.consensus\b", evict);
-        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", evict,
+        Assert.Contains("SELECT consensus.refold_after_retraction_type(", evict,
             StringComparison.Ordinal);
         Assert.DoesNotMatch(directParentMutation, refold);
         Assert.Contains("SELECT consensus.refold_evidence_type(", refold,
@@ -132,5 +130,7 @@ public sealed class ConsensusMutationRoutingTests
         Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_evidence_type'", entry);
         Assert.Contains("CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(", entry);
         Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_refold_evidence_type'", entry);
+        Assert.Contains("CREATE OR REPLACE FUNCTION consensus.refold_after_retraction_type(", entry);
+        Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_refold_after_retraction_type'", entry);
     }
 }

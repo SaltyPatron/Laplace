@@ -148,6 +148,138 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         finally { await CleanupAsync(cell); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisjointCellsOfOneRelationDoNotWaitForAnotherWorkingSet(bool existing)
+    {
+        var a=Target("disjoint-working-set-a-"+existing);
+        var b=Target("disjoint-working-set-b-"+existing) with { Type=a.Type };
+        try
+        {
+            await using var first=await OpenAsync();
+            await using var second=await OpenAsync();
+            if (existing)
+            {
+                Witness[] seed=[new(0,7,3*Scale)];
+                await InsertAsync(first,a,seed); await FoldAsync(first,a,seed);
+                await InsertAsync(second,b,seed); await FoldAsync(second,b,seed);
+            }
+            await using var firstTransaction=await first.BeginTransactionAsync();
+            await using var secondTransaction=await second.BeginTransactionAsync();
+            Witness[] left=[new(1,19,19*Scale)],right=[new(2,23,0)];
+            await InsertAsync(first,a,left);
+            await using (var command=BatchFoldCommand(first,a,left))
+                Assert.Equal(1L,(long)(await command.ExecuteScalarAsync())!);
+            await InsertAsync(second,b,right);
+            await using (var command=BatchFoldCommand(second,b,right))
+            {
+                command.CommandTimeout=2;
+                // firstTransaction deliberately stays open. These are different
+                // cells; sharing a common relation must not serialize the writers.
+                Assert.Equal(1L,(long)(await command.ExecuteScalarAsync())!);
+            }
+            await secondTransaction.CommitAsync();
+            await firstTransaction.CommitAsync();
+            Assert.Equal(existing?26L:19L,(await ReadAsync(first,a)).Witnesses);
+            Assert.Equal(existing?30L:23L,(await ReadAsync(second,b)).Witnesses);
+            Assert.Equal(await CanonicalAsync(first,a),await ReadAsync(first,a));
+            Assert.Equal(await CanonicalAsync(second,b),await ReadAsync(second,b));
+        }
+        finally { await CleanupAsync(a); await CleanupAsync(b); }
+    }
+
+    [Fact]
+    public async Task NovelCellCollisionRetriesTheWholeEvidenceTransactionWithoutLosingOrDoublingTestimony()
+    {
+        var cell=Target("novel-working-set-collision");
+        try
+        {
+            await using var first=await OpenAsync();
+            await using var second=await OpenAsync();
+            await using var observer=await OpenAsync();
+            await using var firstTransaction=await first.BeginTransactionAsync();
+            Witness[] a=[new(1,19,19*Scale)],b=[new(2,23,0)];
+            await InsertAsync(first,cell,a);
+            await using (var command=BatchFoldCommand(first,cell,a))
+                Assert.Equal(1L,(long)(await command.ExecuteScalarAsync())!);
+            int attempts=0;
+            bool firstCommitted=false;
+            var retried=new List<string>();
+            var pending=Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry.ExecuteAsync(
+                async token =>
+                {
+                    attempts++;
+                    await using var transaction=await second.BeginTransactionAsync(token);
+                    await InsertAsync(second,cell,b);
+                    await using var command=BatchFoldCommand(second,cell,b);
+                    long count=(long)(await command.ExecuteScalarAsync(token))!;
+                    await transaction.CommitAsync(token);
+                    return count;
+                },CancellationToken.None,
+                (error,_,_)=>retried.Add(((PostgresException)error).SqlState));
+            try
+            {
+                await WaitForBlockerAsync(observer,second.ProcessID,first.ProcessID);
+                await firstTransaction.CommitAsync();
+                firstCommitted=true;
+                Assert.Equal(1L,await pending.WaitAsync(TimeSpan.FromSeconds(15)));
+            }
+            finally
+            {
+                // Release the holder even when a wait/assertion fails, then join
+                // the admitted operation before disposing either connection.
+                if (!firstCommitted)
+                    await firstTransaction.RollbackAsync();
+                try { await pending; } catch { }
+            }
+            Assert.Equal(2,attempts);
+            Assert.Equal([PostgresErrorCodes.UniqueViolation],retried);
+            Assert.Equal(42L,(await ReadAsync(observer,cell)).Witnesses);
+            Assert.Equal(2L,await EvidenceCountAsync(observer,cell));
+            Assert.Equal(await CanonicalAsync(observer,cell),await ReadAsync(observer,cell));
+        }
+        finally { await CleanupAsync(cell); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SourceRetractionWaitsForAdmissionAndPreservesItsCommittedWitness(bool unary)
+    {
+        var cell=Target("source-retraction-concurrent-"+unary) with
+        {
+            Source=SubstrateCanonicalIds.Source("RetractionSnapshotSource-"+unary)
+        };
+        if (unary) cell=cell with { Object=null };
+        var newWitness=cell with { Source=Id("retraction-surviving-source-"+unary) };
+        try
+        {
+            await using var first=await OpenAsync();
+            await using var second=await OpenAsync();
+            await using var observer=await OpenAsync();
+            Witness[] seed=[new(0,7,3*Scale)],admitted=[new(1,19,19*Scale)];
+            await InsertAsync(first,cell,seed);
+            await FoldAsync(first,cell,seed);
+            await using var transaction=await first.BeginTransactionAsync();
+            await InsertAsync(first,newWitness,admitted);
+            await using (var apply=BatchFoldCommand(first,newWitness,admitted))
+                await apply.ExecuteScalarAsync();
+            var evict=second.CreateCommand();
+            evict.CommandTimeout=20;
+            evict.CommandText="CALL ops.evict_source(@source,p_batch=>1,p_drain=>false)";
+            evict.Parameters.AddWithValue("source",cell.Source.ToBytes());
+            await using var pending=new RunningFold(evict);
+            await WaitForBlockerAsync(observer,second.ProcessID,first.ProcessID);
+            await transaction.CommitAsync();
+            await pending.Completion.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(1L,await EvidenceCountAsync(observer,cell));
+            Assert.Equal(19L,(await ReadAsync(observer,cell)).Witnesses);
+            Assert.Equal(await CanonicalAsync(observer,cell),await ReadAsync(observer,cell));
+        }
+        finally { await CleanupAsync(cell); }
+    }
+
     [Fact]
     public async Task ActualSourceRefoldWaitsForConcurrentAdmissionAndReadsItsCommittedEvidence()
     {
@@ -300,7 +432,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
 
         string source = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "engine", "core", "src", "sql_catalog.def"));
-        const string marker = "SQL_QUERY(\"consensus.evidence_rows_typed\"";
+        const string marker = "SQL_QUERY(\"consensus.evidence_rows_batch\"";
         int start = source.IndexOf(marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "the native evidence query owner must exist");
         start = source.IndexOf('\n', start) + 1;
@@ -313,9 +445,11 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             .TakeWhile(line => line.TrimStart().StartsWith('"'))
             .Select(line => JsonSerializer.Deserialize<string>(line.Trim().TrimEnd(')'))
                 ?? throw new InvalidDataException("null native SQL fragment")));
-        query = query.Replace("'\\x%s'::bytea", "@type", StringComparison.Ordinal)
+        query = query.Replace("%s", "laplace.attestations", StringComparison.Ordinal)
             .Replace("$1", "@subjects", StringComparison.Ordinal)
-            .Replace("$2", "@objects", StringComparison.Ordinal);
+            .Replace("$2", "@types", StringComparison.Ordinal)
+            .Replace("$3", "@objects", StringComparison.Ordinal)
+            .Replace("$4", "@ordinals", StringComparison.Ordinal);
         Assert.DoesNotContain("%s", query, StringComparison.Ordinal);
 
         foreach (string mode in new[] { "force_custom_plan", "force_generic_plan" })
@@ -361,7 +495,10 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             await using var command = connection.CreateCommand();
             command.CommandText = $"SELECT * FROM ({query}) result ORDER BY ord";
             command.CommandTimeout = 20;
-            command.Parameters.AddWithValue("type", NpgsqlDbType.Bytea, good.Type.ToBytes());
+            command.Parameters.AddWithValue("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                cells.Select(cell => cell.Type.ToBytes()).ToArray());
+            command.Parameters.AddWithValue("ordinals", NpgsqlDbType.Array | NpgsqlDbType.Integer,
+                Enumerable.Range(1, cells.Length).ToArray());
             command.Parameters.AddWithValue("subjects", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 cells.Select(cell => cell.Subject.ToBytes()).ToArray());
             command.Parameters.AddWithValue("objects", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
@@ -476,6 +613,16 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     {
         await using var command=FoldCommand(connection,cell,rows);
         return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static NpgsqlCommand BatchFoldCommand(NpgsqlConnection connection,Cell cell,Witness[] rows)
+    {
+        var command=FoldCommand(connection,cell,rows);
+        command.CommandText=command.CommandText.Replace(
+            "consensus.upsert_evidence_type(@type,ARRAY[@subject],ARRAY[@object]",
+            "consensus.merge_evidence(ARRAY[@subject],ARRAY[@type],ARRAY[@object]",
+            StringComparison.Ordinal);
+        return command;
     }
 
     private static async Task<Standing> ReadAsync(NpgsqlConnection connection,Cell cell)

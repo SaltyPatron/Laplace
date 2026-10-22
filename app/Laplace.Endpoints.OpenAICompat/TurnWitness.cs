@@ -16,10 +16,15 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
 {
     private readonly SubstrateClient _substrate;
     private readonly ILogger<TurnWitness> _log;
+    private readonly object _queueReadGate = new();
+    private volatile bool _stopping;
+    private volatile bool _online;
     private readonly Channel<TurnItem> _queue = Channel.CreateBounded<TurnItem>(
         new BoundedChannelOptions(4096)
         {
-            SingleReader = true,
+            // The worker consumes turns; shutdown may drain queued turns while
+            // the active database operation still owns its connection.
+            SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait
         });
 
@@ -54,7 +59,7 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         return activity.Start();
     }
 
-    public bool IsOnline { get; private set; }
+    public bool IsOnline { get => _online; private set => _online = value; }
 
     public bool IsAvailable => IsOnline;
 
@@ -83,8 +88,15 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             || !ConversationContent.IsValidIdentifier(tenant))
             throw new SubstrateUnavailableException("The conversation turn could not enter the witness writer.");
         var completion = new TaskCompletionSource<TurnCommit>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await _queue.Writer.WriteAsync(CaptureTurn(
-            tenant, userKey, sessionId, prompt, reply, completion, occurrenceKey, phase), ct).ConfigureAwait(false);
+        try
+        {
+            await _queue.Writer.WriteAsync(CaptureTurn(
+                tenant, userKey, sessionId, prompt, reply, completion, occurrenceKey, phase), ct).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException failure)
+        {
+            throw new SubstrateUnavailableException("The witness writer stopped before accepting the turn.", failure);
+        }
         var result = await completion.Task.WaitAsync(ct).ConfigureAwait(false);
         if (!result.Committed)
             throw new SubstrateUnavailableException("The conversation turn did not commit to the substrate.",
@@ -117,6 +129,46 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             _log.LogWarning("turn-witness rejected turn (lane offline or queue full)");
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _stopping = true;
+        IsOnline = false;
+        _queue.Writer.TryComplete();
+        // Resolve queued requests without waiting for an active connection's
+        // handshake/rollback. The active owner is still joined by BackgroundService.
+        Exception? diagnosticsFailure = null;
+        try { AbandonPendingTurns(); }
+        catch (Exception failure) { diagnosticsFailure = failure; }
+        try { await base.StopAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception stopFailure) when (diagnosticsFailure is not null)
+        {
+            throw new AggregateException("Turn shutdown/diagnostics failed.", diagnosticsFailure, stopFailure);
+        }
+        if (diagnosticsFailure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(diagnosticsFailure).Throw();
+    }
+
+    private void AbandonPendingTurns()
+    {
+        List<Exception>? failures = null;
+        while (true)
+        {
+            TurnItem abandoned;
+            lock (_queueReadGate)
+                if (!_queue.Reader.TryRead(out abandoned)) break;
+            var failure = new InvalidOperationException("The witness writer stopped before committing the queued turn.");
+            abandoned.Completion?.TrySetResult(new TurnCommit(false, failure));
+            try
+            {
+                using var diagnostics = abandoned.Diagnostics is { } context ? LogContext.Push(context) : null;
+                using var trace = TraceTurn(abandoned.ParentTrace);
+                _log.LogWarning(failure, "turn-witness abandoned pending turn during shutdown");
+            }
+            catch (Exception loggingFailure) { (failures ??= []).Add(loggingFailure); }
+        }
+        if (failures is not null) throw new AggregateException("Turn shutdown diagnostics failed.", failures);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         try
@@ -128,6 +180,7 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
             _log.LogError(ex, "turn-witness disabled: codepoint perf-cache unavailable");
             return;
         }
+        if (_stopping) return;
 
         // Turn admission (compose, persist, fold, receipt) is the shared TurnCloser,
         // the same one MCP and the CLI use. This service adds the bounded
@@ -140,8 +193,14 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
 
         try
         {
-        await foreach (var item in _queue.Reader.ReadAllAsync(ct))
+        while (await _queue.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
         {
+            TurnItem item;
+            lock (_queueReadGate)
+            {
+                if (_stopping || ct.IsCancellationRequested) return;
+                if (!_queue.Reader.TryRead(out item)) continue;
+            }
             using var diagnostics = item.Diagnostics is { } context ? LogContext.Push(context) : null;
             using var trace = TraceTurn(item.ParentTrace);
             bool deposited = false;
@@ -157,6 +216,11 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
                 if (!deposited)
                 {
                     depositFailure = closer.LastFailure;
+                    if (ct.IsCancellationRequested)
+                    {
+                        _log.LogWarning(depositFailure, "turn-witness stopped while awaiting turn commit");
+                        return;
+                    }
                     if (depositFailure is { } failure)
                         _log.LogError(failure, "turn-witness could not commit turn");
                     else
@@ -186,14 +250,7 @@ internal sealed class TurnWitness : BackgroundService, IConversationWitness
         {
             IsOnline = false;
             _queue.Writer.TryComplete();
-            while (_queue.Reader.TryRead(out var abandoned))
-            {
-                using var diagnostics = abandoned.Diagnostics is { } context ? LogContext.Push(context) : null;
-                using var trace = TraceTurn(abandoned.ParentTrace);
-                var failure = new InvalidOperationException("The witness writer stopped before committing the queued turn.");
-                _log.LogWarning(failure, "turn-witness abandoned pending turn during shutdown");
-                abandoned.Completion?.TrySetResult(new TurnCommit(false, failure));
-            }
+            AbandonPendingTurns();
         }
     }
 

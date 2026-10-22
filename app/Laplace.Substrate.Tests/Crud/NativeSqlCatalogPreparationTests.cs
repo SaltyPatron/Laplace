@@ -109,10 +109,10 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 }
                 await using var command = NpgsqlCatalog.Command(connection, null, name,
                     new object?[contract.ParameterTypes.Length]);
-                // fold_route.c's typed_plan specializes this relation id before SPI
-                // prepares the statement; retain that native substitution contract.
-                if (name == "consensus.evidence_rows_typed")
-                    command.CommandText = command.CommandText.Replace("%s", new string('0', 32), StringComparison.Ordinal);
+                // The native router quotes the physical owner; policy/ACL fallback
+                // uses the parent. Prepare that real fallback statement here.
+                if (name == "consensus.evidence_rows_batch")
+                    command.CommandText = command.CommandText.Replace("%s", "laplace.attestations", StringComparison.Ordinal);
                 await command.PrepareAsync();
                 await command.UnprepareAsync();
             }

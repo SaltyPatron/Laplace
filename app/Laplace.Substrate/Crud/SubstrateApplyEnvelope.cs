@@ -91,10 +91,19 @@ public sealed class SubstrateApplyEnvelope : IDisposable
         };
     }
 
-    internal static void Release(IReadOnlyList<SubstrateChange> changes)
+    internal static void Release(IReadOnlyList<SubstrateChange> changes, Exception? applyFailure = null)
     {
+        List<Exception>? failures = null;
         for (int i = 0; i < changes.Count; i++)
-            changes[i].ApplyEnvelope?.Dispose();
+        {
+            try { changes[i].ApplyEnvelope?.Dispose(); }
+            catch (Exception failure) { (failures ??= []).Add(failure); }
+        }
+        if (failures is null) return;
+        if (applyFailure is not null) failures.Insert(0, applyFailure);
+        if (failures.Count == 1)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        throw new AggregateException("Ingest apply/source release failed.", failures);
     }
 
     public void Dispose()

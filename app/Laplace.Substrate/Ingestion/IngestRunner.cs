@@ -247,6 +247,7 @@ public sealed class IngestRunner
 
         var runCt = ct;
         bool extractionSucceeded = false;
+        Exception? extractionFailure = null;
 
         try
         {
@@ -450,149 +451,164 @@ public sealed class IngestRunner
                 await using var pipelineCleanup = new ApplyPipelineCleanup(
                     pipelineCts, producer, buckets, channel.Reader);
 
-                while (await channel.Reader.WaitToReadAsync(runCt))
+                try
                 {
-                    while (channel.Reader.TryRead(out var queued))
+                    while (await channel.Reader.WaitToReadAsync(runCt))
                     {
-                        var intent = queued.Intent;
-                        using var transfer = new ApplyEnvelopeTransfer(intent);
-                        runCt.ThrowIfCancellationRequested();
-                        Interlocked.Add(ref bufferedRows, -queued.Rows);
-                        Interlocked.Add(ref bufferedBytes, -queued.SerializedBytes);
-                        try { drained.Release(); } catch (SemaphoreFullException) { }
-
-                        if (intent.ApplyBarrier is { } applyBarrier)
+                        while (channel.Reader.TryRead(out var queued))
                         {
-                            try
-                            {
-                                foreach (ApplyBatchBucket pendingBucket in buckets.Values.ToArray())
-                                    await FlushBucketAsync(pendingBucket).ConfigureAwait(false);
-                                applyBarrier.Complete();
-                            }
-                            catch (Exception ex)
-                            {
-                                applyBarrier.Fail(ex);
-                                throw;
-                            }
-                            continue;
-                        }
+                            var intent = queued.Intent;
+                            using var transfer = new ApplyEnvelopeTransfer(intent);
+                            runCt.ThrowIfCancellationRequested();
+                            Interlocked.Add(ref bufferedRows, -queued.Rows);
+                            Interlocked.Add(ref bufferedBytes, -queued.SerializedBytes);
+                            try { drained.Release(); } catch (SemaphoreFullException) { }
 
-                        if (!workingSet && batchSize == 1 && commitRows == 0)
-                        {
+                            if (intent.ApplyBarrier is { } applyBarrier)
+                            {
+                                try
+                                {
+                                    foreach (ApplyBatchBucket pendingBucket in buckets.Values.ToArray())
+                                        await FlushBucketAsync(pendingBucket).ConfigureAwait(false);
+                                    applyBarrier.Complete();
+                                }
+                                catch (Exception ex)
+                                {
+                                    applyBarrier.Fail(ex);
+                                    throw;
+                                }
+                                continue;
+                            }
+
+                            if (!workingSet && batchSize == 1 && commitRows == 0)
+                            {
+                                transfer.Complete();
+                                await ProcessOwnedIntentAsync(intent, decomposer, options, rng,
+                                                             counters, failures, log, runCt);
+                                continue;
+                            }
+
+                            var bucket = BucketFor(intent);
+                            long ib = queued.SerializedBytes;
+                            var admission = queued.Admission;
+
+                            // A terminal marker batches like any small control row: it follows its
+                            // file's data in the stream and may share a transaction with other
+                            // files. CompleteFileAsync runs only after the atomic apply returns,
+                            // so files_done never outruns durable rows.
+
+                            if (workingSet && ShouldFlushWorkingSetSourceBoundary(
+                                    bucket.Source, intent.Metadata.SourceId))
+                                await FlushBucketAsync(bucket);
+
+                            if (workingSet && bucket.Batch.Count > 0
+                                && (bucket.Rows + queued.Rows > applyRowLimit
+                                    || bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                                    || bucket.AdmissionWindow.ShouldFlushBefore(admission)))
+                                await FlushBucketAsync(bucket);
+
+                            if (workingSet) bucket.AdmissionWindow.Add(admission);
+                            bucket.Batch.Add(intent);
                             transfer.Complete();
-                            await ProcessOwnedIntentAsync(intent, decomposer, options, rng,
-                                                         counters, failures, log, runCt);
-                            continue;
+                            bucket.Source ??= intent.Metadata.SourceId;
+                            bucket.Rows += queued.Rows;
+                            bucket.Bytes += ib;
+
+                            bool capacityReached = workingSet
+                                ? bucket.Rows >= applyRowLimit
+                                    || ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
+                                    || bucket.AdmissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
+                                : ShouldFlush(bucket.Batch.Count, bucket.Rows)
+                                    || bucket.Batch.Count >= maxIntentsPerCommit;
+
+                            if (capacityReached)
+                                await FlushBucketAsync(bucket);
                         }
-
-                        var bucket = BucketFor(intent);
-                        long ib = queued.SerializedBytes;
-                        var admission = queued.Admission;
-
-                        // A terminal marker batches like any small control row: it follows its
-                        // file's data in the stream and may share a transaction with other
-                        // files. CompleteFileAsync runs only after the atomic apply returns,
-                        // so files_done never outruns durable rows.
-
-                        if (workingSet && ShouldFlushWorkingSetSourceBoundary(
-                                bucket.Source, intent.Metadata.SourceId))
-                            await FlushBucketAsync(bucket);
-
-                        if (workingSet && bucket.Batch.Count > 0
-                            && (bucket.Rows + queued.Rows > applyRowLimit
-                                || bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
-                                || bucket.AdmissionWindow.ShouldFlushBefore(admission)))
-                            await FlushBucketAsync(bucket);
-
-                        if (workingSet) bucket.AdmissionWindow.Add(admission);
-                        bucket.Batch.Add(intent);
-                        transfer.Complete();
-                        bucket.Source ??= intent.Metadata.SourceId;
-                        bucket.Rows += queued.Rows;
-                        bucket.Bytes += ib;
-
-                        bool capacityReached = workingSet
-                            ? bucket.Rows >= applyRowLimit
-                                || ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
-                                || bucket.AdmissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
-                            : ShouldFlush(bucket.Batch.Count, bucket.Rows)
-                                || bucket.Batch.Count >= maxIntentsPerCommit;
-
-                        if (capacityReached)
-                            await FlushBucketAsync(bucket);
                     }
+
+                    foreach (var bucket in buckets.Values.ToArray())
+                        await FlushBucketAsync(bucket);
+
+                    await producer;
                 }
-
-                foreach (var bucket in buckets.Values.ToArray())
-                    await FlushBucketAsync(bucket);
-
-                await producer;
+                catch (Exception failure)
+                {
+                    pipelineCleanup.ApplyFailure = failure;
+                    throw;
+                }
             }
             extractionSucceeded = failures.Count == 0 && counters.UnitsFailed == 0
                 && options.DecomposerOptions.MaxInputUnits <= 0 && !ct.IsCancellationRequested;
         }
+        catch (Exception failure) { extractionFailure = failure; throw; }
         finally
         {
+            List<Exception>? completionFailures = null;
             try
             {
-                try
+                if (extractionSucceeded)
+                    await bulkRun.CompleteAsync(
+                        phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
+                        .ConfigureAwait(false);
+                else
+                    await bulkRun.AbortAsync().ConfigureAwait(false);
+                if (deferredMetrics is not null)
                 {
-                    if (extractionSucceeded)
-                        await bulkRun.CompleteAsync(
-                            phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
-                            .ConfigureAwait(false);
-                    else
-                        await bulkRun.AbortAsync().ConfigureAwait(false);
-                    if (deferredMetrics is not null)
-                    {
-                        var committed = deferredMetrics.DeferredRowsInserted;
-                        Interlocked.Add(ref counters._entitiesInserted, committed.Entities - deferredAtStart.Entities);
-                        Interlocked.Add(ref counters._physicalitiesInserted, committed.Physicalities - deferredAtStart.Physicalities);
-                        Interlocked.Add(ref counters._attestationsInserted, committed.Attestations - deferredAtStart.Attestations);
-                    }
-                }
-                finally
-                {
-                    if (foldMetrics is not null)
-                    {
-                            _obs.OnBulkCompletion(
-                                decomposer.SourceName,
-                                foldMetrics.LastFoldDrainWallClock,
-                                foldMetrics.LastWriterMaintenanceWallClock,
-                                foldMetrics.LastFoldSpanWallClock,
-                                foldMetrics.ConsensusUpsertBackendWallClock,
-                                foldMetrics.HighwayMaskBackendWallClock,
-                                foldMetrics.ConsensusUpsertCalls,
-                                foldMetrics.HighwayMaskCalls,
-                                foldMetrics.HighwayMaskPairs);
-                            log.LogInformation(
-                                "LAPSIGHT_COMPLETION source={Source} fold_drain_ms={FoldMs} "
-                                + "writer_maintenance_ms={MaintenanceMs} fold_span_ms={FoldSpanMs} "
-                                + "consensus_backend_ms={ConsensusMs} consensus_calls={ConsensusCalls} "
-                                + "mask_backend_ms={MaskMs} mask_calls={MaskCalls} mask_pairs={MaskPairs}",
-                                decomposer.SourceName,
-                                foldMetrics.LastFoldDrainWallClock.TotalMilliseconds,
-                                foldMetrics.LastWriterMaintenanceWallClock.TotalMilliseconds,
-                                foldMetrics.LastFoldSpanWallClock.TotalMilliseconds,
-                                foldMetrics.ConsensusUpsertBackendWallClock.TotalMilliseconds,
-                                foldMetrics.ConsensusUpsertCalls,
-                                foldMetrics.HighwayMaskBackendWallClock.TotalMilliseconds,
-                            foldMetrics.HighwayMaskCalls,
-                            foldMetrics.HighwayMaskPairs);
-                    }
+                    var committed = deferredMetrics.DeferredRowsInserted;
+                    Interlocked.Add(ref counters._entitiesInserted, committed.Entities - deferredAtStart.Entities);
+                    Interlocked.Add(ref counters._physicalitiesInserted, committed.Physicalities - deferredAtStart.Physicalities);
+                    Interlocked.Add(ref counters._attestationsInserted, committed.Attestations - deferredAtStart.Attestations);
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception failure) { (completionFailures ??= []).Add(failure); }
+            try
             {
-                log.LogWarning("bulk-run completion cancelled while releasing run state");
+                if (foldMetrics is not null)
+                {
+                    _obs.OnBulkCompletion(
+                        decomposer.SourceName,
+                        foldMetrics.LastFoldDrainWallClock,
+                        foldMetrics.LastWriterMaintenanceWallClock,
+                        foldMetrics.LastFoldSpanWallClock,
+                        foldMetrics.ConsensusUpsertBackendWallClock,
+                        foldMetrics.HighwayMaskBackendWallClock,
+                        foldMetrics.ConsensusUpsertCalls,
+                        foldMetrics.HighwayMaskCalls,
+                        foldMetrics.HighwayMaskPairs);
+                    log.LogInformation(
+                        "LAPSIGHT_COMPLETION source={Source} fold_drain_ms={FoldMs} "
+                        + "writer_maintenance_ms={MaintenanceMs} fold_span_ms={FoldSpanMs} "
+                        + "consensus_backend_ms={ConsensusMs} consensus_calls={ConsensusCalls} "
+                        + "mask_backend_ms={MaskMs} mask_calls={MaskCalls} mask_pairs={MaskPairs}",
+                        decomposer.SourceName,
+                        foldMetrics.LastFoldDrainWallClock.TotalMilliseconds,
+                        foldMetrics.LastWriterMaintenanceWallClock.TotalMilliseconds,
+                        foldMetrics.LastFoldSpanWallClock.TotalMilliseconds,
+                        foldMetrics.ConsensusUpsertBackendWallClock.TotalMilliseconds,
+                        foldMetrics.ConsensusUpsertCalls,
+                        foldMetrics.HighwayMaskBackendWallClock.TotalMilliseconds,
+                        foldMetrics.HighwayMaskCalls,
+                        foldMetrics.HighwayMaskPairs);
+                }
+            }
+            catch (Exception failure) { (completionFailures ??= []).Add(failure); }
+            // These observers own file durability, including when an apply or
+            // bulk completion failed. Join them before releasing the run.
+            try { await counters.DrainPendingFileCompletionsAsync().ConfigureAwait(false); }
+            catch (Exception failure) { (completionFailures ??= []).Add(failure); }
+            if (completionFailures is not null)
+            {
+                if (extractionFailure is not null) completionFailures.Insert(0, extractionFailure);
+                Exception[] distinct = completionFailures.Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+                if (distinct.Length == 1)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(distinct[0]).Throw();
+                throw new AggregateException("Ingest extraction/completion failed.", distinct);
             }
         }
 
-        // File progress states durability, not composition. A pipelined fold can finish after
-        // its evidence apply returned, so the pending completion observers are joined before
-        // file and source completion are decided.
-        await counters.DrainPendingFileCompletionsAsync().ConfigureAwait(false);
-
+        // Cancellation can arrive during the non-cancellable durability/cleanup
+        // join. It must still prevent a successful source completion receipt.
+        ct.ThrowIfCancellationRequested();
         unitsAttempted = counters.UnitsAttempted;
         unitsApplied = counters.UnitsApplied;
         unitsFailed = counters.UnitsFailed;
@@ -817,14 +833,20 @@ public sealed class IngestRunner
         ILogger log,
         CancellationToken ct)
     {
+        Exception? applyFailure = null;
         try
         {
             await ProcessOneIntentAsync(
                 intent, decomposer, options, rng, counters, failures, log, ct);
         }
+        catch (Exception failure) { applyFailure = failure; throw; }
         finally
         {
-            intent.ApplyEnvelope?.Dispose();
+            try { intent.ApplyEnvelope?.Dispose(); }
+            catch (Exception releaseFailure) when (applyFailure is not null)
+            {
+                throw new AggregateException("Ingest apply/source release failed.", applyFailure, releaseFailure);
+            }
         }
     }
 
@@ -934,14 +956,16 @@ public sealed class IngestRunner
         bool workingSet,
         CancellationToken ct)
     {
+        Exception? applyFailure = null;
         try
         {
             await ProcessBatchAsync(
                 batch, decomposer, options, rng, counters, failures, log, workingSet, ct);
         }
+        catch (Exception failure) { applyFailure = failure; throw; }
         finally
         {
-            SubstrateApplyEnvelope.Release(batch);
+            SubstrateApplyEnvelope.Release(batch, applyFailure);
         }
     }
 
@@ -1321,15 +1345,34 @@ public sealed class IngestRunner
         IReadOnlyDictionary<Hash128, ApplyBatchBucket> buckets,
         ChannelReader<QueuedIntent> reader) : IAsyncDisposable
     {
+        internal Exception? ApplyFailure { get; set; }
+
         public async ValueTask DisposeAsync()
         {
-            cancellation.Cancel();
+            List<Exception>? failures = null;
+            // Cancellation callbacks, the producer and each source lease are
+            // independent owners. A fault in one must not abandon the rest.
+            try { cancellation.Cancel(); }
+            catch (Exception failure) { (failures ??= []).Add(failure); }
             try { await producer.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            catch (Exception failure) { (failures ??= []).Add(failure); }
             foreach (var bucket in buckets.Values)
-                SubstrateApplyEnvelope.Release(bucket.Batch);
+            {
+                try { SubstrateApplyEnvelope.Release(bucket.Batch); }
+                catch (Exception failure) { (failures ??= []).Add(failure); }
+            }
             while (reader.TryRead(out QueuedIntent abandoned))
-                abandoned.Intent.ApplyEnvelope?.Dispose();
+            {
+                try { abandoned.Intent.ApplyEnvelope?.Dispose(); }
+                catch (Exception failure) { (failures ??= []).Add(failure); }
+            }
+            if (failures is null) return;
+            if (ApplyFailure is not null) failures.Insert(0, ApplyFailure);
+            Exception[] distinct = failures.Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+            if (distinct.Length == 1)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(distinct[0]).Throw();
+            throw new AggregateException("Ingest apply/producer cleanup failed.", distinct);
         }
     }
 
@@ -1350,8 +1393,20 @@ public sealed class IngestRunner
         public async Task CompleteAsync(Action<BulkRunCompletionPhase>? onPhase)
         {
             if (Interlocked.Exchange(ref _completed, 1) != 0) return;
-            await _writer.CompleteBulkRunAsync(onPhase, CancellationToken.None)
-                .ConfigureAwait(false);
+            try
+            {
+                await _writer.CompleteBulkRunAsync(onPhase, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception completionFailure)
+            {
+                try { await _writer.AbortBulkRunAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception abortFailure)
+                {
+                    throw new AggregateException("Ingest bulk completion/abort failed.", completionFailure, abortFailure);
+                }
+                throw;
+            }
         }
 
         public async ValueTask DisposeAsync()

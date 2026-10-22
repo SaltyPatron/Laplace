@@ -1,7 +1,7 @@
 -- evict_source (GH #508): deposit v1 (witness + analysis sources) -> evict the
 -- analysis source -> cells with only-analysis evidence are GONE (not zeroed),
 -- mixed cells are refolded byte-identically to the canonical fold of their
--- surviving rows, untouched cells are byte-identical, markers are deleted,
+-- surviving rows, untouched cells and canonical marker content are retained,
 -- touched entities are queued for mask repair -> re-derive v2 -> witness counts
 -- equal the v1 snapshot (no double count). Unseeded evict is a no-op, not an
 -- error. The procedure COMMITs per batch, so this file runs outside an explicit
@@ -12,7 +12,7 @@ DECLARE
     type_t   bytea := public.laplace_hash128_blake3('Type');
     src_w    bytea := laplace.source_id('EvictTestWitness');
     src_a    bytea := laplace.source_id('EvictTestAnalysis');
-    marker_t bytea := laplace.entity_type_id('Evict_TestMarker');
+    marker_t bytea := public.laplace_hash128_blake3('test/evict/marker-type');
     rel_p    bytea := public.laplace_hash128_blake3('test/evict/rel');
     rel_hot  bytea := laplace.relation_type_id('IS_A');
     subj     bytea := public.laplace_hash128_blake3('test/evict/subject');
@@ -42,7 +42,7 @@ BEGIN
         (rel_p, 0, type_t), (subj, 0, type_t),
         (o1, 0, type_t), (o2, 0, type_t), (o3, 0, type_t),
         (o4, 0, type_t), (o5, 0, type_t),
-        -- m1/m2: the analysis lane's derivation-gate markers (deleted by evict).
+        -- m1/m2: canonical marker content (retained independently of the witness).
         -- m3: CONTENT first-observed by the analysis source (must survive).
         -- m4: a marker-typed entity of ANOTHER source (must survive).
         (m1, 4, marker_t), (m2, 4, marker_t),
@@ -80,12 +80,12 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/a1'), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/a2'), subj, rel_p, o1, src_a, NULL,
-         1, t3, 1, s_ref)phi_a
+         1, t3, 1, s_ref, phi_a),
         -- cell II (subj, rel_p, o2): MIXED — witness survives, cell refolds
         (public.laplace_hash128_blake3('test/evict/w1'), subj, rel_p, o2, src_w, NULL,
          2, t1, 3, 3 * s_conf, phi_w),
         (public.laplace_hash128_blake3('test/evict/a3'), subj, rel_p, o2, src_a, NULL,
-         2, t2, 2, s_conf)phi_a
+         2, t2, 2, s_conf, phi_a),
         -- cell III (subj, rel_p, o3): WITNESS ONLY — untouched, byte-identical
         (public.laplace_hash128_blake3('test/evict/w2'), subj, rel_p, o3, src_w, NULL,
          2, t1, 4, 2 * win, phi_w),
@@ -93,18 +93,18 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/w3'), subj, rel_hot, o4, src_w, NULL,
          2, t1, 2, 2 * s_conf, phi_w),
         (public.laplace_hash128_blake3('test/evict/a4'), subj, rel_hot, o4, src_a, NULL,
-         0, t2, 1, 0)phi_a
+         0, t2, 1, 0, phi_a),
         -- cell V (subj, rel_p, NULL): ANALYSIS ONLY, NULL object — culled
         (public.laplace_hash128_blake3('test/evict/a5'), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
         -- cell VI (subj, rel_p, o5): interleaved observations — grouped refold pin:
         -- surviving witness rows t1 and t3 straddle the deleted analysis row t2
         (public.laplace_hash128_blake3('test/evict/w4'), subj, rel_p, o5, src_w, NULL,
-         2, t1, 1, win)phi_w
+         2, t1, 1, win, phi_w),
         (public.laplace_hash128_blake3('test/evict/a6'), subj, rel_p, o5, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/w5'), subj, rel_p, o5, src_w, NULL,
-         1, t3, 2, s_conf)phi_w
+         1, t3, 2, s_conf, phi_w);
 
     -- Consensus built exactly as ingest builds it: one incremental fold per
     -- batch against the stored prior, batches in timestamp order.
@@ -159,14 +159,14 @@ END $$;
 -- relation; p_drain = false leaves highway_mask_dirty observable so its exact
 -- contents can be asserted before the logger-bearing drain path is exercised below.
 CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
-                  ARRAY[laplace.entity_type_id('Evict_TestMarker')],
+                  NULL,
                   p_batch => 2, p_drain => false);
 
 DO $$
 DECLARE
     src_w    bytea := laplace.source_id('EvictTestWitness');
     src_a    bytea := laplace.source_id('EvictTestAnalysis');
-    marker_t bytea := laplace.entity_type_id('Evict_TestMarker');
+    marker_t bytea := public.laplace_hash128_blake3('test/evict/marker-type');
     rel_p    bytea := public.laplace_hash128_blake3('test/evict/rel');
     rel_hot  bytea := laplace.relation_type_id('IS_A');
     subj     bytea := public.laplace_hash128_blake3('test/evict/subject');
@@ -293,10 +293,9 @@ BEGIN
             row_c.witness_count, row_c.last_observed_at;
     END IF;
 
-    -- markers: the evicted source's gates are gone; content it first observed and
-    -- other sources' markers survive
-    IF EXISTS (SELECT 1 FROM laplace.entities WHERE id IN (m1, m2)) THEN
-        RAISE EXCEPTION 'FAIL: analysis markers survived eviction';
+    -- Completion receipts were cleared; canonical content survives retraction.
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN (m1, m2)) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: source retraction deleted canonical marker content';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM laplace.entities WHERE id = m3) THEN
         RAISE EXCEPTION 'FAIL: content entity deleted — content is never evicted';
@@ -343,7 +342,7 @@ END $$;
 
 -- Idempotence: evicting an already-evicted source changes nothing.
 CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
-                  ARRAY[laplace.entity_type_id('Evict_TestMarker')],
+                  NULL,
                   p_batch => 2, p_drain => false);
 
 -- Unseeded no-op: a source with zero rows evicts cleanly (0 rows, not an error).
@@ -400,11 +399,11 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/v2/a1'), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a2'), subj, rel_p, o1, src_a, NULL,
-         1, t3, 1, s_ref)phi_a
+         1, t3, 1, s_ref, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a3'), subj, rel_p, o2, src_a, NULL,
-         2, t2, 2, s_conf)phi_a
+         2, t2, 2, s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a4'), subj, rel_hot, o4, src_a, NULL,
-         0, t2, 1, 0)phi_a
+         0, t2, 1, 0, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a5'), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a6'), subj, rel_p, o5, src_a, NULL,
@@ -500,8 +499,8 @@ BEGIN
     RAISE NOTICE '- evict fixture cleaned up';
 END $$;
 
--- DEFAULT is hash-subpartitioned into eight leaves. Nine dynamic relation types
--- guarantee at least one leaf contains more than one type; relation discovery
+-- All relations of one subject share its HASH leaf. Nine dynamic relation types
+-- exercise complete relation discovery within that single leaf; relation discovery
 -- must enumerate every distinct type below the DEFAULT ancestor, not LIMIT 1 per
 -- hash leaf and require repeated operator invocations to finish one source.
 DO $$
@@ -533,7 +532,7 @@ BEGIN
             (evid, subj, rel, obj, src, NULL,
              2, '2026-04-01 00:00:00+00', 1, 1000000000, 30000000000);
     END LOOP;
-    RAISE NOTICE '- default-subpartition fixture deposited: 9 dynamic relation types';
+    RAISE NOTICE '- HASH-leaf fixture deposited: 9 dynamic relation types';
 END $$;
 
 CALL ops.evict_source(laplace.source_id('EvictDefaultPartitionTest'), NULL, NULL,
@@ -562,5 +561,5 @@ BEGIN
         DELETE FROM laplace.entities WHERE id IN (rel, obj);
     END LOOP;
     DELETE FROM laplace.entities WHERE id IN (src, subj);
-    RAISE NOTICE '- default-subpartition discovery evicted all dynamic relations in one call';
+    RAISE NOTICE '- HASH-leaf discovery evicted all dynamic relations in one call';
 END $$;

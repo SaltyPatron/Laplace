@@ -138,8 +138,11 @@ relation_allows_direct_update(Oid oid, bool require_insert)
     table_close(relation, AccessShareLock);
     if (!allowed) return false;
 
-    AclMode mode = ACL_SELECT | ACL_UPDATE | (require_insert ? ACL_INSERT : 0);
-    return pg_class_aclcheck(oid, GetUserId(), mode) == ACLCHECK_OK;
+    /* aclcheck succeeds when ANY requested bit is available. This fast path
+     * needs every operation's authority, including on the partitioned parent. */
+    return pg_class_aclcheck(oid, GetUserId(), ACL_SELECT) == ACLCHECK_OK
+        && pg_class_aclcheck(oid, GetUserId(), ACL_UPDATE) == ACLCHECK_OK
+        && (!require_insert || pg_class_aclcheck(oid, GetUserId(), ACL_INSERT) == ACLCHECK_OK);
 }
 
 static void
