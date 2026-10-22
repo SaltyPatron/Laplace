@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class GutenbergRetainedDbTests
 {

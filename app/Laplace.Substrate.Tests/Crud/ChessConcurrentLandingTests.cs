@@ -16,6 +16,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// and the job is journaled in ingest_run_journal / ingest_file_journal like a CLI run.
 /// </summary>
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class ChessConcurrentLandingTests(LocalPgFixture pg)
 {

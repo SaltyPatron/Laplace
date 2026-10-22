@@ -355,10 +355,8 @@ internal sealed class SubstrateTools : IMcpTools
     // exists so no client composes SQL strings, so it does not compose one itself.
     private (string, bool) Infer(JsonObject? args)
     {
-        using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT prediction, weight, bias_hits FROM converse.infer($1, $2)");
-        cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
-        cmd.Parameters.Add(new() { Value = Int(args, "limit", 8) });
+        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "converse.infer",
+            Req(args, "prompt"), Int(args, "limit", 8));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())
@@ -375,10 +373,8 @@ internal sealed class SubstrateTools : IMcpTools
     // same hole wearing a schema.
     private (string, bool) SenseAudit(JsonObject? args)
     {
-        using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM lexical.sense_audit($1, laplace.relation_type_id('HAS_LANGUAGE'), $2)");
-        cmd.Parameters.Add(new() { Value = Req(args, "term") });
-        cmd.Parameters.Add(new() { Value = Int(args, "limit", 64) });
+        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "lexical.sense_audit",
+            Req(args, "term"), Int(args, "limit", 64));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())
@@ -396,9 +392,7 @@ internal sealed class SubstrateTools : IMcpTools
 
     private (string, bool) PromptLanguage(JsonObject? args)
     {
-        using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT realize.realize(lang_id) AS language, mass FROM converse.prompt_language($1)");
-        cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
+        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "converse.prompt_language", Req(args, "prompt"));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())
@@ -548,12 +542,7 @@ internal sealed class SubstrateTools : IMcpTools
         if (id is null)
             return JsonRows(Array.Empty<JsonObject>());
 
-        using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT b.sense_id, realize.render(b.sense_id), b.synset_id, realize.render(b.synset_id), " +
-            "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses " +
-            "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b");
-        cmd.Parameters.Add(new() { Value = id });
-        cmd.Parameters.Add(new() { Value = Int(args, "k", 5) });
+        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "taxonomy.bubble_up_rendered", id, Int(args, "k", 5));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())
@@ -1156,40 +1145,6 @@ internal sealed class SubstrateTools : IMcpTools
                 ["input_schema"] = hit.BuildSchema(),
             })
         };
-        return (result.ToJsonString(), false);
-    }
-
-    private (string, bool) Rows(NpgsqlDataSource source, string sql, int rowCap,
-        params (string Name, object? Value)[] parameters)
-    {
-        using var cmd = source.CreateCommand(sql);
-        foreach (var (pName, value) in parameters)
-        {
-            // A null optional is always a text arg here; DBNull without a
-            // declared type leaves the parameter untyped at the server (42P08).
-            // A pre-typed NpgsqlParameter (bytea session ids) passes through.
-            if (value is NpgsqlParameter typed)
-                cmd.Parameters.Add(typed);
-            else if (value is null)
-                cmd.Parameters.Add(new NpgsqlParameter(pName, NpgsqlTypes.NpgsqlDbType.Text) { Value = DBNull.Value });
-            else
-                cmd.Parameters.AddWithValue(pName, value);
-        }
-
-        using var reader = cmd.ExecuteReader();
-        var rows = new JsonArray();
-        var truncated = false;
-        while (reader.Read())
-        {
-            if (rows.Count >= rowCap) { truncated = true; break; }
-            var row = new JsonObject();
-            for (var i = 0; i < reader.FieldCount; i++)
-                row[reader.GetName(i)] = ToJson(reader.GetValue(i));
-            rows.Add(row);
-        }
-
-        var result = new JsonObject { ["rows"] = rows };
-        if (truncated) result["truncated_at"] = rowCap;
         return (result.ToJsonString(), false);
     }
 

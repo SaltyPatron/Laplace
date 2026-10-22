@@ -27,6 +27,7 @@ public sealed class UserContentEndpointPgCollection : ICollectionFixture<UserCon
 }
 
 [Collection(UserContentEndpointPgCollection.CollectionName)]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFixture pg)
 {

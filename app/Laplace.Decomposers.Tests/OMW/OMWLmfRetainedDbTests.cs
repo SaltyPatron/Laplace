@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Tests.OMW;
 
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class OMWLmfRetainedDbTests
 {

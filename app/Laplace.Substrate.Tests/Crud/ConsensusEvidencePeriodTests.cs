@@ -11,6 +11,7 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 [Collection("substrate-pg")]
+[Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
 public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
 {

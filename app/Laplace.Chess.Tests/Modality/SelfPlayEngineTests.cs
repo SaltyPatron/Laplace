@@ -86,6 +86,7 @@ public sealed class SelfPlayEngineTests
     }
 
     [Fact]
+    [Trait("Category", "RequiresQualification")]
     [Trait("Tier", "perf")]
     public async Task SelfPlay_ProducesLegalCompleteGames()
     {

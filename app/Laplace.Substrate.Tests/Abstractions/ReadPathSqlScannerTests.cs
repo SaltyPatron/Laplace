@@ -15,6 +15,7 @@ public sealed class ReadPathSqlScannerTests
     [InlineData("var text = \"\"\"path\"\"\"; // select the managed release")]
     [InlineData("var path = $@\"D:\\Data\\{name}\"; // select managed")]
     [InlineData("#if OTHER_PLATFORM\n// cmd.CommandText = sql;\n#endif")]
+    [InlineData("var message = $\"'{source}' declares multiple roots; select a path explicitly.\";")]
     public void IgnoresCommentsAndDoesNotCrossStringBoundaries(string source)
         => Assert.False(ReadPathArchitectureGateTests.HasHandWrittenSql(source));
 
@@ -25,6 +26,7 @@ public sealed class ReadPathSqlScannerTests
     [InlineData("var sql = \"\"\"\nSELECT * FROM entities\n\"\"\";")]
     [InlineData("var sql = \"\"\"\"SELECT 'a triple quote: \\\"\\\"\\\"'\"\"\"\";")]
     [InlineData("var sql = $\"SELECT * FROM {table}\";")]
+    [InlineData("var sql = $\"WITH x AS (SELECT * FROM {table}) SELECT * FROM x\";")]
     [InlineData("var sql = $@\"WITH x AS (SELECT * FROM {table}) SELECT * FROM x\";")]
     [InlineData("var sql = $$\"\"\"SELECT * FROM {{table}}\"\"\";")]
     [InlineData("var sql = @\"note \"\"quoted\"\" SELECT * FROM entities\";")]

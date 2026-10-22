@@ -57,14 +57,21 @@ public sealed class ReadPathArchitectureGateTests
     private static readonly Regex LeadingSqlSelect = new(
         @"^\s*SELECT\s",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex LeadingSqlWith = new(
+        @"^\s*WITH\s",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static bool LiteralContainsSql(LiteralExpressionSyntax literal, string value)
+        => TextContainsSql(literal.Token.Text, value);
+
+    private static bool TextContainsSql(string prefix, string value)
         // Preserve the existing policy: ordinary literals must START with SELECT;
         // verbatim/raw literals can contain a SELECT inside a multi-line CTE.
         // This is an architecture ratchet, not an unrestricted SQL classifier.
-        => (literal.Token.Text.StartsWith("@\"", StringComparison.Ordinal)
-                || literal.Token.Text.StartsWith("\"\"\"", StringComparison.Ordinal)
-            ? SqlSelect : LeadingSqlSelect).IsMatch(value);
+        => prefix.Contains('@') || prefix.Contains("\"\"\"", StringComparison.Ordinal)
+            ? SqlSelect.IsMatch(value)
+            : LeadingSqlSelect.IsMatch(value)
+                || (LeadingSqlWith.IsMatch(value) && SqlSelect.IsMatch(value));
 
     internal static bool HasHandWrittenSql(string source)
     {
@@ -92,7 +99,10 @@ public sealed class ReadPathArchitectureGateTests
                     _ => "",
                 }).Equals("CreateCommand", StringComparison.OrdinalIgnoreCase),
             LiteralExpressionSyntax literal when literal.Token.Value is string value => LiteralContainsSql(literal, value),
-            InterpolatedStringTextSyntax text => SqlSelect.IsMatch(text.TextToken.ValueText),
+            InterpolatedStringExpressionSyntax expression => TextContainsSql(
+                expression.StringStartToken.Text,
+                string.Concat(expression.Contents.OfType<InterpolatedStringTextSyntax>()
+                    .Select(text => text.TextToken.ValueText))),
             _ => false,
         });
     }
@@ -144,8 +154,6 @@ public sealed class ReadPathArchitectureGateTests
     /// </summary>
     private static readonly HashSet<string> HandWrittenSqlAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Intentional substrate SQL escape hatch (MCP tool "sql").
-        "Laplace.Endpoints.Mcp/SubstrateTools.cs",
     };
 
     /// <summary>Ratchet ceilings, measured 2026-07-26. Lower as files migrate; never raise.</summary>
@@ -158,7 +166,7 @@ public sealed class ReadPathArchitectureGateTests
     /// different lines. The gate reads whole files, so it sees them. Trust this number
     /// over a grep.
     /// </remarks>
-    private const int HandWrittenSqlCeiling = 1;
+    private const int HandWrittenSqlCeiling = 0;
 
     private static IEnumerable<string> ScannedFiles(string repoRoot)
     {

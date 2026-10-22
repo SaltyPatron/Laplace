@@ -388,8 +388,8 @@ phase_build_native() {
       laplace_modality_number_perfcache
 
   local t0 hw
-  t0=$(find -H "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
-  hw=$(find -H "$ROOT/build" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | head -1 || true)
+  t0=$(find -H "$ROOT/build" -name 'tier0.bin' 2>/dev/null | head -1 || true)
+  hw=$(find -H "$ROOT/build" -name 'highway.bin' 2>/dev/null | head -1 || true)
   [[ -n "$t0" && -n "$hw" ]] || { echo "::error::required perfcache output missing" >&2; return 1; }
   if grep -q 'add_custom_target(laplace_chess_position_perfcache' "$ROOT/engine/core/CMakeLists.txt"; then
     test -n "$(find -H "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' -print -quit)" || {
@@ -901,8 +901,8 @@ SQL
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
   local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" bin hwbin vocabbin chessbin transition preload newval
-  bin=$(find "$dir" -name 'laplace_t0_perfcache*.bin' | sort -V | tail -1)
-  hwbin=$(find "$dir" -name 'laplace_highway_perfcache*.bin' | sort -V | tail -1)
+  bin=$(find "$dir" -name 'tier0.bin' | sort -V | tail -1)
+  hwbin=$(find "$dir" -name 'highway.bin' | sort -V | tail -1)
   vocabbin=$(find "$dir" -name 'laplace_vocabulary_perfcache*.bin' | sort -V | tail -1)
   chessbin=$(find "$dir" -name 'laplace_chess_position_perfcache*.bin' | sort -V | tail -1)
   transition=$(find "$dir" -name 'laplace_chess_transition_perfcache*.bin' | sort -V | tail -1)
@@ -936,7 +936,7 @@ phase_api_env() {
       printf '\n%s=%s\n' "$key" "$value" >>"$env_file"
     fi
   }
-  bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' | sort -V | tail -1)
+  bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'tier0.bin' | sort -V | tail -1)
   [[ -n "$bin" ]] || { echo "::error::installed t0 perfcache missing" >&2; return 1; }
   example="$ROOT/deploy/linux/laplace-api.env.example"
   if [[ ! -f "$env_file" ]]; then
