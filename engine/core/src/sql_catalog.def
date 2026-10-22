@@ -1549,6 +1549,15 @@ SQL_QUERY("generation.probe", "text,int8[],int4",
 SQL_QUERY("content.reconstruct", "bytea,text",
     "SELECT realize.reconstruct_content($1, $2)")
 
+SQL_QUERY("maintenance.resolve_substrate_table", "text",
+    "SELECT c.oid::regclass::text FROM pg_class c WHERE c.relname=$1 AND c.relkind IN ('r','p') AND c.relnamespace IN ('laplace'::regnamespace,'realize'::regnamespace,'consensus'::regnamespace,'generation'::regnamespace) LIMIT 1")
+SQL_QUERY("maintenance.vacuum_plain", "", "VACUUM")
+SQL_QUERY("maintenance.vacuum_analyze", "", "VACUUM (ANALYZE)")
+SQL_QUERY("maintenance.vacuum_full", "", "VACUUM (FULL, ANALYZE)")
+SQL_QUERY("maintenance.vacuum_plain_relation", "", "VACUUM {relation}")
+SQL_QUERY("maintenance.vacuum_analyze_relation", "", "VACUUM (ANALYZE) {relation}")
+SQL_QUERY("maintenance.vacuum_full_relation", "", "VACUUM (FULL, ANALYZE) {relation}")
+
 SQL_QUERY("realize.register_canonicals", "text[]",
     "SELECT realize.register_canonicals($1)")
 

@@ -105,4 +105,15 @@ public sealed class NativeSqlStreamingCommandTests
         Assert.Same(tags, language.Parameters[0].Value);
         Assert.Equal("text[]", language.Parameters[0].DataTypeName);
     }
+
+    [Theory]
+    [InlineData("laplace.entities; VACUUM")]
+    [InlineData("laplace.entities WHERE true")]
+    [InlineData("laplace.entities.extra")]
+    [InlineData("laplace.entities\n")]
+    public void MaintenanceRelationSlotRejectsStatementsAndUnquotedSyntax(string relation)
+    {
+        using var source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=unused");
+        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.VacuumCommand(source, relation, false, false));
+    }
 }
