@@ -1,6 +1,7 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Engine.Core;
+using System.Text.RegularExpressions;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -8,10 +9,28 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// Command ownership for catalog operations that participate in an explicit
 /// application transaction or need a reader with an application-owned lifetime.
 /// Statement text and PostgreSQL parameter types come from the native catalog;
-/// arguments are positional values, never SQL or caller-selected identifiers.
+/// arguments are positional values. Utility relation names fill validated catalog slots.
 /// </summary>
 public static class NpgsqlCatalog
 {
+    private static readonly Regex QualifiedRelation = new(
+        "^(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*)(?:\\.(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*))?\\z",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    internal static NpgsqlCommand VacuumCommand(
+        NpgsqlDataSource source, string? relation, bool full, bool analyze)
+    {
+        // VACUUM accepts relation identifiers rather than parameter values. Only a
+        // regclass spelling (one or two quoted/unquoted identifiers) may fill this
+        // catalog slot; no caller supplies a statement or a command option.
+        if (relation is not null && (!QualifiedRelation.IsMatch(relation) || relation.Contains('\0')))
+            throw new ArgumentException("Expected a catalog-resolved relation name.", nameof(relation));
+        var mode = full ? "full" : analyze ? "analyze" : "plain";
+        var query = SqlCatalog.Get("maintenance.vacuum_" + mode + (relation is null ? "" : "_relation"));
+        var text = relation is null ? query.Text : query.Text.Replace("{relation}", relation, StringComparison.Ordinal);
+        return source.CreateCommand(text);
+    }
+
     // A reference-type array is one PostgreSQL argument, not the params list.
     // The typed overload wins for byte[][]/string[] and retains that array as a value.
     public static NpgsqlCommand Command<TArgument>(NpgsqlDataSource source, string name, TArgument argument)
