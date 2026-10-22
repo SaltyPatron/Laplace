@@ -29,13 +29,9 @@ void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t
      * the child id for exactly this reason.
      */
     (void)tier;
-    if (children && n >= 2) {   /* Laplace-Native's composition: BLAKE3-128 of the children's IDs, nothing else */
-        lp_id_compose((const lp_id*)children, n, (lp_id*)out);
-        return;
-    }
-    /* n < 2: callers collapse a one-child node to its child before they get here (hash_composer); what reaches this
-     * keeps the hash of the bytes it was given, as before */
-    hash128_blake3((const uint8_t*)children, children ? n * sizeof(hash128_t) : 0, out);
+    /* Native owns every arity, including the one-child collapse. Public C ABI
+     * callers must receive the same identity as the higher-level composer. */
+    lp_id_compose((const lp_id*)children, n, (lp_id*)out);
 }
 
 int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
