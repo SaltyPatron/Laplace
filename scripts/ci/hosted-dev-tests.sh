@@ -13,7 +13,7 @@ set -euo pipefail
 # what a GitHub-hosted runner presents.
 for name in $(compgen -e); do
   case "$name" in
-    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
+    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_CI_ISO639_ARCHIVE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
     LAPLACE_*|PG*) unset "$name" ;;
   esac
 done
@@ -98,8 +98,13 @@ iso639_fetch() {
   local zip="$WORK/iso-639-3_Code_Tables_20260415.zip"
   local sum=106a3f3b073e94bcc767f663e05f386358b1285ba2b063f24a2eeb6bafcc982a
   if ! echo "$sum  $zip" | sha256sum -c --status 2>/dev/null; then
-    curl -fsSL --retry 3 -o "$zip" \
-      https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_20260415.zip
+    if [[ -n "${LAPLACE_CI_ISO639_ARCHIVE:-}" && -f "$LAPLACE_CI_ISO639_ARCHIVE" ]]; then
+      echo "$sum  $LAPLACE_CI_ISO639_ARCHIVE" | sha256sum -c --status
+      cp "$LAPLACE_CI_ISO639_ARCHIVE" "$zip"
+    else
+      curl -fsSL --retry 3 -o "$zip" \
+        https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_20260415.zip
+    fi
     echo "$sum  $zip" | sha256sum -c --status
   fi
   rm -rf "$DATA/ISO639"; mkdir -p "$DATA/ISO639"

@@ -32,6 +32,7 @@ jobs:
       LAPLACE_CI_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
       LAPLACE_CI_OPERATIONS_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_CI_ICU_DIR: /repos/deps/icu78
+      LAPLACE_CI_ISO639_ARCHIVE: /vault/Data/ISO639/iso-639-3_Code_Tables_20260415.zip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
