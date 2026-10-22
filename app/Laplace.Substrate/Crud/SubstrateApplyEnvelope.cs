@@ -106,6 +106,29 @@ public sealed class SubstrateApplyEnvelope : IDisposable
         throw new AggregateException("Ingest apply/source release failed.", failures);
     }
 
+    /// <summary>Releases a change that left a worker but was never accepted by
+    /// the apply owner. Its source lease and native tuple stages are independent
+    /// resources; a failure closing one cannot abandon the others.</summary>
+    public static void Discard(SubstrateChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        List<Exception>? failures = null;
+        try { change.ApplyEnvelope?.Dispose(); }
+        catch (Exception failure) { (failures ??= []).Add(failure); }
+        if (!change.IntentStages.IsDefaultOrEmpty)
+        {
+            foreach (var stage in change.IntentStages)
+            {
+                try { stage.Dispose(); }
+                catch (Exception failure) { (failures ??= []).Add(failure); }
+            }
+        }
+        if (failures is null) return;
+        if (failures.Count == 1)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        throw new AggregateException("Discarding an unapplied ingest change failed.", failures);
+    }
+
     public void Dispose()
     {
         Interlocked.Exchange(ref _state, null)?.Release();
