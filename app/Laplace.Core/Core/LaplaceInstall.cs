@@ -240,6 +240,9 @@ public static class LaplaceInstall
             return selected;
         }
 
+        var bundled = Path.Combine(AppContext.BaseDirectory, "share", "laplace", "tier0.bin");
+        if (File.Exists(bundled)) return bundled;
+
         var work = TryGetProcessOrMachineSetting("LAPLACE_WORK");
         if (!string.IsNullOrWhiteSpace(work))
         {
@@ -317,6 +320,9 @@ public static class LaplaceInstall
             if (!File.Exists(path)) throw new FileNotFoundException("The selected Native highway cache does not exist.", path);
             return path;
         }
+        var bundled = Path.Combine(AppContext.BaseDirectory, "share", "laplace", "highway.bin");
+        if (File.Exists(bundled)) return bundled;
+
         if (TryResolveEngineBuildRoot(out var build))
         {
             var packaged = Path.Combine(build, "core", "perfcache", "highway.bin");

@@ -15,6 +15,12 @@ if not defined LAPLACE_DEPENDENCY_ZLIB_PREFIX set "LAPLACE_DEPENDENCY_ZLIB_PREFI
 if not defined LAPLACE_DEPENDENCY_LIBXML2_PREFIX set "LAPLACE_DEPENDENCY_LIBXML2_PREFIX=%LAPLACE_DEPS_PREFIX%\libxml2"
 if not defined ICU_ROOT set "ICU_ROOT=%LAPLACE_DEPS_PREFIX%\icu"
 if not defined LAPLACE_ONEAPI set "LAPLACE_ONEAPI=C:\Program Files (x86)\Intel\oneAPI"
+rem The dynamics library imports MKL's runtime dispatcher directly. Shipping its
+rem kernels alone leaves the application dependent on the developer shell PATH.
+set "MKL_RT="
+for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_rt.*.dll") do set "MKL_RT=%%~fF"
+if not defined MKL_RT ( echo missing build artifact: mkl_rt.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
+call :put "!MKL_RT!" || exit /b 1
 call :put "%LAPLACE_DEPENDENCY_ZLIB_PREFIX%\bin\z.dll" || exit /b 1
 call :put "%LAPLACE_DEPENDENCY_LIBXML2_PREFIX%\bin\libxml2.dll" || exit /b 1
 for %%F in (icuuc78 icuin78 icudt78) do call :put "%ICU_ROOT%\bin64\%%F.dll" || exit /b 1
@@ -31,10 +37,10 @@ set "MKL_CORE="
 for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_core.*.dll") do set "MKL_CORE=%%~fF"
 if not defined MKL_CORE ( echo missing build artifact: mkl_core.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
 call :put "!MKL_CORE!" || exit /b 1
-rem MKL's CPU dispatch kernels: mkl_core picks one at run time with LoadLibrary, so they are in no import table, and
+rem MKL's default threading layer and CPU dispatch kernels are loaded dynamically, so they are in no import table, and
 rem when the one for this CPU is missing MKL ends the process ("Intel oneMKL FATAL ERROR: Cannot load mkl_avx2.3.dll"),
 rem which in IIS crashes every worker until rapid-fail protection disables the pool. All of them, for any CPU.
-for %%K in (def mc3 avx2 avx512 vml_def vml_mc3 vml_avx2 vml_avx512 vml_cmpt) do (
+for %%K in (intel_thread def mc3 avx2 avx512 vml_def vml_mc3 vml_avx2 vml_avx512 vml_cmpt) do (
   set "MKL_K="
   for %%F in ("%LAPLACE_ONEAPI%\mkl\latest\bin\mkl_%%K.*.dll") do set "MKL_K=%%~fF"
   if not defined MKL_K ( echo missing build artifact: mkl_%%K.*.dll under oneAPI mkl\latest\bin & exit /b 1 )
