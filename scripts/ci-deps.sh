@@ -59,7 +59,7 @@ else
   echo "::warning::PostgreSQL is not accepting connections; delivery installs the native artifacts and restarts it"
 fi
 
-ucd_root="${LAPLACE_UCD_PATH:-${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest}"
+ucd_root="${LAPLACE_UCD_PATH:-${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/UCD/Public/UCD/latest}"
 ucd="$ucd_root/ucdxml/ucd.all.grouped.zip"
 [[ -f "$ucd" ]] || { echo "::error::UCD input missing: $ucd" >&2; exit 1; }
 [[ -f "$ucd_root/ReadMe.txt" ]] || { echo "::error::UCD release identity missing: $ucd_root/ReadMe.txt" >&2; exit 1; }

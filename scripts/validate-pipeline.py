@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import runpy
 import sys
 from pathlib import Path
 
@@ -458,24 +459,13 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
             f"seed workflow can run: {orphan_consensus}"
         )
 
-    manifest_order = gates.get("manifest_order", [])
-    expected_order: list[str] = []
-    for stage in manifest["cadence"]:
-        name = stage["stage"]
-        if name in ("code_capstone", "models"):
-            continue
-        sources = stage["sources"]
-        if name == "relations":
-            sources = sorted(sources, key=lambda s: s.get("order", 0))
-        for src in sources:
-            cli = src["cli"]
-            if cli not in ("stack", "repo", "safetensors", "tiny-codes"):
-                expected_order.append(cli)
-
-    if manifest_order != expected_order:
-        errs.append("decomposer-gates.json: manifest_order drift")
-        errs.append(f"  expected: {' '.join(expected_order)}")
-        errs.append(f"  actual:   {' '.join(manifest_order)}")
+    if "manifest_order" in gates:
+        errs.append("decomposer-gates.json must not duplicate recipes/order")
+    try:
+        planner = runpy.run_path(str(ROOT / "scripts" / "decomposer-isolate-plan.py"))
+        planner["source_order"]()
+    except (OSError, ValueError) as error:
+        errs.append(f"canonical recipes/order: {error}")
 
     return errs
 

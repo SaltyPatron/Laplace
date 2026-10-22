@@ -32,8 +32,8 @@ function Get-LaplaceRepoRoot {
 
 function Get-LaplaceDataRoot {
     Import-LaplaceEnv
-    if ($env:LAPLACE_DATA_ROOT) { return $env:LAPLACE_DATA_ROOT }
-    throw 'LAPLACE_DATA_ROOT is missing from the installation configuration'
+    if ($env:LAPLACE_DATA) { return $env:LAPLACE_DATA }
+    throw 'LAPLACE_DATA is missing from the installation configuration'
 }
 
 function Get-LaplaceBuildRoot {

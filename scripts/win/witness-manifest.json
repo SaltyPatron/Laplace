@@ -25,7 +25,7 @@
       "semlink"
     ]
   },
-  "vault_root": "D:/Data/Ingest on Windows (env.cmd sets INGEST and LAPLACE_DATA_ROOT); /vault/Data on Linux. Override LAPLACE_DATA_ROOT only when the vault lives elsewhere.",
+  "vault_root": "D:/Data/Ingest on Windows (env.cmd sets INGEST and LAPLACE_DATA); /vault/Data on Linux. Override LAPLACE_DATA only when the vault lives elsewhere.",
   "repos_root": "<REPOS> — example only; env.cmd default D:/Repositories",
   "models_root": "<LAPLACE_MODEL_HUB> — example only; env.cmd default D:/Models/hub",
   "cadence": [
@@ -113,7 +113,7 @@
   },
   "authority_sources": {
     "law": "Official language/platform sources and their documentation are the highest-trust code witnesses: the language's own repository testifies its idioms; its docs are the Rosetta intent<->implementation corpus. Acquire with download-code-data.cmd authority; ingest via the repo loop inside the code capstone.",
-    "root": "<LAPLACE_DATA_ROOT>/code-authority",
+    "root": "<LAPLACE_DATA>/code-authority",
     "clones": [
       { "repo": "postgres/postgres", "dir": "postgres", "witnesses": "C + SQL idioms from the database the substrate lives in" },
       { "repo": "python/cpython",    "dir": "cpython",  "witnesses": "C + Python from the language's source of truth" },

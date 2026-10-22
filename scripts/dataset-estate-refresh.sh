@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF="$ROOT/scripts/dataset-estate-refresh.sh"
 SOURCES="${LAPLACE_DATA_REFRESH_SOURCES:-$ROOT/scripts/dataset-estate-refresh.sources.psv}"
 SOURCE_ESTATE="${LAPLACE_SOURCE_ESTATE:-$ROOT/docs/source-estate.tsv}"
-DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
+DATA_ROOT="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
 STAGE_ROOT="${LAPLACE_DATA_REFRESH_ROOT:-$DATA_ROOT/.refresh-20260903}"
 JOB_ROOT="$STAGE_ROOT/.jobs"
 CACHE_ROOT="$STAGE_ROOT/.git-cache"
@@ -43,7 +43,7 @@ Explicit transitional active-worktree command:
                               Dirty/diverged/missing worktrees are SKIPPED, never reset.
 
 Environment:
-  LAPLACE_DATA_ROOT            active data root (default /vault/Data)
+  LAPLACE_DATA            active data root (default /vault/Data)
   LAPLACE_DATA_REFRESH_ROOT    staging root (default /vault/Data/.refresh-20260903)
   LAPLACE_DATA_REFRESH_SOURCES executable acquisition manifest override
   LAPLACE_SOURCE_ESTATE        authoritative source-estate TSV override

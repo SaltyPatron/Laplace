@@ -28,19 +28,18 @@ function Set-LaplaceDefault([string]$Name, [string]$Value) {
     if (-not [Environment]::GetEnvironmentVariable($Name)) { [Environment]::SetEnvironmentVariable($Name, $Value) }
     if (-not $values.Contains($Name)) { $values[$Name] = [Environment]::GetEnvironmentVariable($Name) }
 }
-Set-LaplaceDefault LAPLACE_DATA_ROOT ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace'))
 Set-LaplaceDefault LAPLACE_SRC ([IO.Path]::Combine($env:USERPROFILE, 'source\repos'))
-Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'work'))
-Set-LaplaceDefault LAPLACE_DATA ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'data'))
+Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace', 'work'))
+# Corpus/model roots are declared independently in machine.env; never derive them from state.
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))
 $checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')).TrimEnd('\').ToLowerInvariant()
 $workspaceId = [IO.Path]::GetFileName($checkout) + '-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($checkout))).Substring(0,12).ToLowerInvariant()
 Set-LaplaceDefault LAPLACE_BUILD_ROOT ([IO.Path]::Combine($env:LAPLACE_BUILD, 'worktrees', $workspaceId))
-Set-LaplaceDefault LAPLACE_DEPS ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'dependencies'))
+Set-LaplaceDefault LAPLACE_DEPS ([IO.Path]::Combine($env:LAPLACE_BUILD, 'dependencies'))
 Set-LaplaceDefault LAPLACE_DEPSRC ([IO.Path]::Combine($env:LAPLACE_DEPS, 'src'))
 Set-LaplaceDefault LAPLACE_EXTERNAL $env:LAPLACE_DEPSRC
 Set-LaplaceDefault LAPLACE_ENGINE_BUILD ([IO.Path]::Combine($env:LAPLACE_BUILD_ROOT, 'build-win'))
-Set-LaplaceDefault LAPLACE_PGDATA ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'pgdata'))
+Set-LaplaceDefault LAPLACE_PGDATA ([IO.Path]::Combine($env:LAPLACE_WORK, 'pgdata'))
 Set-LaplaceDefault LAPLACE_PGWAL ([IO.Path]::Combine($env:LAPLACE_PGDATA, 'pg_wal'))
 Set-LaplaceDefault LAPLACE_ROLE 'laplace'
 Set-LaplaceDefault LAPLACE_PGUSER $env:LAPLACE_ROLE

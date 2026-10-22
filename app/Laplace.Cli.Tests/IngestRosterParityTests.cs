@@ -89,6 +89,31 @@ public sealed class IngestRosterParityTests
     }
 
     [Fact]
+    public void CanonicalRecipeSourcesRetainTheirDeclaredRoots()
+    {
+        CliRuntime.InitializeServices();
+        var orderPath = Path.Combine(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot, "order");
+        Assert.True(File.Exists(orderPath), $"Missing {orderPath}");
+
+        var sources = File.ReadLines(orderPath)
+            .Select(static l => l.Split('#', 2)[0].Trim())
+            .Where(static l => l.Length > 0)
+            .Select(static l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0])
+            .ToList();
+
+        Assert.Equal(sources, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
+
+        foreach (var source in sources)
+        {
+            var roots = IngestDataPaths.ResolveRoots(source);
+            Assert.NotEmpty(roots);
+            Assert.All(roots, root => Assert.True(Path.IsPathFullyQualified(root), $"Source '{source}' has a relative root: {root}"));
+        }
+        // A same-format route is not evidence that another corpus is implemented.
+        // Native recipe dispatch acceptance is checked separately from this path contract.
+    }
+
+    [Fact]
     public void ShellWrapper_ExposesChessTacticOutcomeRoute()
     {
         var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "scripts", "ingest-source.sh"));
@@ -96,8 +121,8 @@ public sealed class IngestRosterParityTests
         // shared ingest function; a separate chess-specific invocation is not required.
         var branches = Regex.Matches(script,
             @"(?m)^\s*(?<routes>[a-z0-9|-]+)\)\s*\n(?<body>[\s\S]*?)^\s*;;");
-        var branch = Assert.Single(branches.Cast<Match>().Where(match =>
-            match.Groups["routes"].Value.Split('|').Contains("chess-tactic-outcomes", StringComparer.Ordinal)));
+        var branch = Assert.Single(branches.Cast<Match>(), match =>
+            match.Groups["routes"].Value.Split('|').Contains("chess-tactic-outcomes", StringComparer.Ordinal));
         var body = branch.Groups["body"].Value;
         Assert.Contains("require_cli", body, StringComparison.Ordinal);
         Assert.Contains("ingest \"$source\"", body, StringComparison.Ordinal);
