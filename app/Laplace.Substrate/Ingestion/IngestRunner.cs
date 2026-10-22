@@ -410,6 +410,10 @@ public sealed class IngestRunner
                     catch (Exception ex)
                     {
                         channel.Writer.TryComplete(ex);
+                        // The consumer may already be failing in apply and never
+                        // await the channel fault. Its cleanup joins this task,
+                        // so retain the producer's cause on that owner as well.
+                        throw;
                     }
                 }, "ingest-decompose-pcore", pipelineCts.Token);
 
