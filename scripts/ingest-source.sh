@@ -20,33 +20,12 @@ else
 fi
 [[ -f "$RECIPE_ROOT/order" ]] || { echo "Native recipe estate has no order declaration: $RECIPE_ROOT" >&2; exit 2; }
 export LAPLACE_RECIPES="$RECIPE_ROOT"
-SOURCE_ORDER=()
-declare -A earlier_sources=()
-while IFS= read -r declaration || [[ -n "$declaration" ]]; do
-    declaration="${declaration%$'\r'}"
-    declaration="${declaration%%#*}"
-    read -r -a fields <<< "$declaration"
-    [[ ${#fields[@]} -gt 0 ]] || continue
-    name="${fields[0]}"
-    if [[ ${#fields[@]} -ne 1 || ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ || -n "${earlier_sources[$name]:-}" || ! -f "$RECIPE_ROOT/$name/source" ]]; then
-        echo "Invalid, duplicate or undeclared recipes/order source: $declaration" >&2; exit 2
-    fi
-    while IFS= read -r dependency_line || [[ -n "$dependency_line" ]]; do
-        dependency_line="${dependency_line%$'\r'}"
-        dependency_line="${dependency_line%%#*}"
-        read -r -a dependencies <<< "$dependency_line"
-        [[ ${dependencies[0]:-} == after ]] || continue
-        for dependency in "${dependencies[@]:1}"; do
-            if [[ ! "$dependency" =~ ^[a-z0-9][a-z0-9-]*$ || -z "${earlier_sources[$dependency]:-}" ]]; then
-                echo "Source '$name' depends on '$dependency', which is not earlier in recipes/order" >&2; exit 2
-            fi
-        done
-    done < "$RECIPE_ROOT/$name/source"
-    SOURCE_ORDER+=("$name")
-    earlier_sources[$name]=1
-done < "$RECIPE_ROOT/order"
-[[ ${#SOURCE_ORDER[@]} -gt 0 ]] || { echo "Native recipes/order is empty" >&2; exit 2; }
+catalog_names="$(python3 "$ROOT/scripts/ingest_catalog.py" --format names)"
+mapfile -t SOURCE_ORDER <<< "$catalog_names"
 if [[ "$source" == --list-sources ]]; then printf '%s\n' "${SOURCE_ORDER[@]}"; exit 0; fi
+if [[ "$source" == --catalog ]]; then exec python3 "$ROOT/scripts/ingest_catalog.py"; fi
+# Normalize once for dispatch, completion and log paths; aliases remain accepted.
+if [[ -n "$source" ]]; then source="$(python3 "$ROOT/scripts/ingest_catalog.py" --resolve "$source")"; fi
 LADDER=" ${SOURCE_ORDER[*]} "
 # Sources outside the ladder; each has its own route below.
 OTHER_SOURCES="chess chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"

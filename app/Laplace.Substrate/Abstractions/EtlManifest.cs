@@ -30,56 +30,14 @@ public static class EtlManifest
         }
     }
 
-    public static IReadOnlyList<string> SourceOrder => ReadSourceOrder(RecipesRoot);
+    public static IReadOnlyList<string> SourceOrder => Catalog.Sources.Select(source => source.Name).ToArray();
+    public static NativeIngestCatalog Catalog => NativeIngestCatalog.Read(RecipesRoot);
 
     /// <summary>Validate the declared topological order, including each source's after edges.</summary>
-    public static IReadOnlyList<string> ReadSourceOrder(string recipeRoot)
-    {
-        var names = new List<string>();
-        var earlier = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var line in File.ReadLines(Path.Combine(recipeRoot, "order")))
-        {
-            var name = line.Split('#', 2)[0].Trim();
-            if (name.Length == 0) continue;
-            if ((!char.IsAsciiLetterLower(name[0]) && !char.IsAsciiDigit(name[0]))
-                || name.Any(c => !char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c) && c != '-')
-                || earlier.Contains(name))
-                throw new InvalidDataException($"Invalid or duplicate source in recipes/order: {name}");
-            string declaration = Path.Combine(recipeRoot, name, "source");
-            if (!File.Exists(declaration))
-                throw new InvalidDataException($"recipes/order source has no declaration: {name}");
-            foreach (string dependencyLine in File.ReadLines(declaration))
-            {
-                var fields = dependencyLine.Split('#', 2)[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                if (fields.Length == 0 || fields[0] != "after") continue;
-                foreach (string dependency in fields.Skip(1))
-                    if (!earlier.Contains(dependency))
-                        throw new InvalidDataException($"Source '{name}' depends on '{dependency}', which is not earlier in recipes/order.");
-            }
-            earlier.Add(name);
-            names.Add(name);
-        }
-        if (names.Count == 0) throw new InvalidDataException("recipes/order is empty.");
-        return names.AsReadOnly();
-    }
+    public static IReadOnlyList<string> ReadSourceOrder(string recipeRoot) => NativeIngestCatalog.ReadSourceOrder(recipeRoot);
 
     /// <summary>Normalize historical input spellings before selecting a Native source.</summary>
-    public static string CanonicalSourceName(string source) => source.ToLowerInvariant() switch
-    {
-        "ucd" => "unicode",
-        "iso639" => "iso-639",
-        "ud" => "universal-dependencies",
-        "oewn" => "open-english-wordnet",
-        "omw" => "open-multilingual-wordnet",
-        "wordnet" => "princeton-wordnet",
-        "atomic" or "atomic2020" => "atomic-2020",
-        "sbf" => "social-bias-frames",
-        "socialchem" => "social-chemistry-101",
-        "mhs" => "measuring-hate-speech",
-        "wiktextract" => "wiktionary",
-        "predicatematrix" => "predicate-matrix",
-        _ => source.ToLowerInvariant(),
-    };
+    public static string CanonicalSourceName(string source) => Catalog.Resolve(source);
 
     private static Hash128 Src(string name) => Hash128.Text($"substrate/source/{name}/v1");
 
@@ -108,16 +66,16 @@ public static class EtlManifest
             HasDedicatedDecomposer: hasDedicatedDecomposer,
             LanguageScope: languageScope);
 
-    private static readonly Dictionary<string, EtlSource> _rows = Build();
+    private static readonly Lazy<Dictionary<string, EtlSource>> _rows = new(Build);
 
     public static EtlSource Get(string cliName) =>
-        _rows.TryGetValue(CanonicalSourceName(cliName), out var r)
+        _rows.Value.TryGetValue(CanonicalSourceName(cliName), out var r)
             ? r
             : throw new KeyNotFoundException($"no EtlManifest row for source '{cliName}'");
 
-    public static bool TryGet(string cliName, out EtlSource src) => _rows.TryGetValue(CanonicalSourceName(cliName), out src!);
+    public static bool TryGet(string cliName, out EtlSource src) => _rows.Value.TryGetValue(CanonicalSourceName(cliName), out src!);
 
-    public static IReadOnlyCollection<string> Names => _rows.Keys;
+    public static IReadOnlyCollection<string> Names => _rows.Value.Keys;
 
     private static Dictionary<string, EtlSource> Build()
     {

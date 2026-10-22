@@ -3,7 +3,7 @@
  * takes them from app/Laplace.Core.Tests/Core/IdentityLawVectorTests.cs, one list) and checks, for each text:
  *   hash128_merkle over its codepoints' hash128_blake3  (the monorepo's composition, managed callers' path)
  *   hash128_merkle_runs over the same children           (the run-length path trajectories take)
- *   hash128_label_content_id, for word-character labels  (the label path)
+ *   hash128_label_content_id, for word-character labels  (candidate-ROM CTest build)
  *   lp_id_codepoints_utf8                                 (Laplace-Native, the one implementation)
  * and that run-length encoded children stream to the same ID as their expansion. Exit 1 on any difference. */
 #include <stdio.h>
@@ -34,12 +34,17 @@ static int check(const char *what, const char *text, const hash128_t *got, const
 
 #define MAXK 256
 static int vector(const char *text, const char *expected) {
-    hash128_t kids[MAXK], id; size_t n = 0, len = strlen(text), i = 0; uint32_t cp; int bad = 0, word = 1;
+    hash128_t kids[MAXK], id; size_t n = 0, len = strlen(text), i = 0; uint32_t cp; int bad = 0;
+#ifdef LAPLACE_IDENTITY_WITH_TEXT
+    int word = 1;
+#endif
     while (i < len) {
         size_t at = i;
         if (!lp_utf8_next((const uint8_t *)text, len, &i, &cp) || n == MAXK) { fprintf(stderr, "FAIL bad text %s\n", text); return 1; }
         hash128_blake3((const uint8_t *)text + at, i - at, &kids[n++]);
+#ifdef LAPLACE_IDENTITY_WITH_TEXT
         if (!(cp < 128 && (cp == '_' || (cp >= '0' && cp <= '9') || ((cp | 32) >= 'a' && (cp | 32) <= 'z')))) word = 0;
+#endif
     }
     if (n == 1) id = kids[0]; else hash128_merkle(2, kids, n, &id);
     bad |= check("hash128_merkle", text, &id, expected);
@@ -48,7 +53,12 @@ static int vector(const char *text, const char *expected) {
         if (hash128_merkle_runs(n, next_run, &r, &id) != 0) { fprintf(stderr, "FAIL hash128_merkle_runs %s: error\n", text); bad = 1; }
         else bad |= check("hash128_merkle_runs", text, &id, expected);
     }
-    if (word && hash128_label_content_id(text, len, &id) == 0) bad |= check("hash128_label_content_id", text, &id, expected);
+#ifdef LAPLACE_IDENTITY_WITH_TEXT
+    if (word) {
+        if (hash128_label_content_id(text, len, &id) != 0) { fprintf(stderr, "FAIL hash128_label_content_id %s: error\n", text); bad = 1; }
+        else bad |= check("hash128_label_content_id", text, &id, expected);
+    }
+#endif
     lp_id nid;
     if (!lp_id_codepoints_utf8(text, len, &nid)) { fprintf(stderr, "FAIL lp_id_codepoints_utf8 %s: error\n", text); bad = 1; }
     else bad |= check("lp_id_codepoints_utf8", text, (const hash128_t *)&nid, expected);
@@ -77,14 +87,19 @@ static int runs(void) {
     return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 2) return 2;
+    FILE *input = argc == 2 ? fopen(argv[1], "r") : stdin;
+    if (!input) { perror(argv[1]); return 2; }
     char line[1024]; int bad = 0, count = 0;
-    while (fgets(line, sizeof line, stdin)) {
+    while (fgets(line, sizeof line, input)) {
         char *tab = strchr(line, '\t'); if (!tab) continue;
         *tab = 0; char *e = tab + 1; e[strcspn(e, "\r\n")] = 0;
         bad |= vector(line, e); count++;
     }
-    if (count == 0) { fprintf(stderr, "FAIL no vectors read\n"); return 1; }
+    int failed_read = ferror(input);
+    if (input != stdin) fclose(input);
+    if (failed_read || count == 0) { fprintf(stderr, "FAIL reading vectors\n"); return 1; }
     bad |= runs();
     printf("%d vectors, %s\n", count, bad ? "FAILED" : "all match the law");
     return bad;

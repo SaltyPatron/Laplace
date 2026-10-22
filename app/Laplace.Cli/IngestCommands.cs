@@ -167,15 +167,18 @@ internal static partial class IngestCommands
 
     public static async Task<int> IngestAsync(string[] args)
     {
+        if (args.Length > 0 && args[0] is "catalog" or "--catalog" or "--list-sources")
+            return PrintIngestCatalog(args);
         if (args.Length > 0 && args[0].Equals("chain", StringComparison.OrdinalIgnoreCase))
             return await IngestChainAsync(args[1..]);
 
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace-mono ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
+                        + "       laplace-mono ingest catalog [--json]  — sources, aliases, content, decomposers and prerequisites\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         // Source list comes from the dispatch table TryDispatch routes through.
-                        + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
+                        + "  sources: " + string.Join(" | ", IngestDispatchTable.DisplayKeys) + "\n"
                         + "  --langs: language scope for this run\n"
                         + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
                         + "         floor before T0 runtime acceleration is mapped; stops at the first failing spec");
@@ -185,7 +188,7 @@ internal static partial class IngestCommands
         if (IngestDispatchTable.TryDispatch(sourceKey, cli, out var task))
             return await task;
 
-        return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+        return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.DisplayKeys)})");
     }
 
     /// <summary>
@@ -212,7 +215,7 @@ internal static partial class IngestCommands
             Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");
             if (!IngestDispatchTable.TryDispatch(cli.Source.ToLowerInvariant(), cli, out var task))
                 return Fail($"ingest chain: unknown source '{cli.Source}' in spec {i + 1} "
-                            + $"(supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+                            + $"(supported: {string.Join(", ", IngestDispatchTable.DisplayKeys)})");
             int rc = await task;
             if (rc != 0)
             {

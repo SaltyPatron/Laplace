@@ -6,8 +6,10 @@ from __future__ import annotations
 import json
 import re
 import runpy
+import subprocess
 import sys
 from pathlib import Path
+from ingest_catalog import canonical_source, load_catalog
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "scripts" / "win" / "witness-manifest.json"
@@ -258,7 +260,7 @@ def parse_audit_layer_map(text: str) -> dict[str, int] | None:
 
 
 def expected_audit_layer_map(relations: list[str]) -> dict[str, int]:
-    """Sequential layer-completion ordinals: iso639=1, then database sources in order."""
+    """Sequential layer-completion ordinals: ISO 639 first, then database sources."""
     out: dict[str, int] = {"iso639": 1}
     for i, cli in enumerate(relations, start=2):
         out[cli] = i
@@ -423,7 +425,7 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
         for src in stage.get("sources", []):
             cli = src.get("cli")
             if cli and cli not in ("stack", "repo", "safetensors", "tiny-codes"):
-                manifest_sources.add(cli)
+                manifest_sources.add(canonical_source(cli))
 
     missing_gates = sorted(manifest_sources - gate_sources)
     if missing_gates:
@@ -447,7 +449,8 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     # So test reachability directly: a key is legitimate off-ladder when a seed
     # workflow can dispatch it. Orphan thresholds still fail.
     sources_spec = gates.get("sources", {})
-    dispatchable = _seed_workflow_sources()
+    dispatchable = {canonical_source(key) for key in _seed_workflow_sources()}
+    dispatchable.update(source["name"] for source in load_catalog()["sources"])
     orphan_consensus = sorted(
         key
         for key in (gate_sources - manifest_sources)
@@ -490,14 +493,14 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
     sources = gates.get("sources", {})
 
     def gate_layer(key: str):
-        return sources.get(key, {}).get("layer")
+        return sources.get(canonical_source(key), {}).get("layer")
 
     for stage in manifest.get("cadence", []):
         if stage.get("stage") not in ("floor", "document", "relations", "usage"):
             continue
         for src in stage.get("sources", []):
             cli, layer = src.get("cli"), src.get("layer")
-            if cli not in sources:
+            if canonical_source(cli) not in sources:
                 errs.append(f"decomposer-gates.json: no entry for ladder source '{cli}'")
                 continue
             if layer is not None and layer != f"L{gate_layer(cli)}":
@@ -512,7 +515,7 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
             continue
         layer = recipe.get("layerOrder", 0)
         for alias in recipe.get("aliases") or []:
-            if alias in sources and gate_layer(alias) != layer:
+            if canonical_source(alias) in sources and gate_layer(alias) != layer:
                 errs.append(
                     f"layer drift: {alias} runs at layerOrder {layer} "
                     f"({path.relative_to(ROOT).as_posix()}), {gate_layer(alias)} in decomposer-gates.json"
@@ -521,7 +524,7 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
     etl = ROOT / "app" / "Laplace.Substrate" / "Abstractions" / "EtlManifest.cs"
     if etl.is_file():
         for name, layer in re.findall(r'\["([\w-]+)"\] = Row\("[\w-]+", "\w+", (\d+)', read_text(etl)):
-            key = _ETL_PHASE_OF.get(name, name)
+            key = canonical_source(_ETL_PHASE_OF.get(name, name))
             if key in sources and gate_layer(key) != int(layer):
                 errs.append(
                     f"layer drift: {name} is layer {layer} in EtlManifest.cs, "
@@ -530,7 +533,7 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
 
     foundation = manifest.get("foundation", {}).get("sources", [])
     for cli in foundation:
-        if cli not in sources:
+        if canonical_source(cli) not in sources:
             errs.append(f"decomposer-gates.json: no entry for foundation source '{cli}'")
 
     floor = [
@@ -546,17 +549,8 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
         for src in stage.get("sources", [])
     }
     workflow = read_text(ROOT / ".github" / "workflows" / "seed-foundation.yml")
-    m = re.search(r"^\s+source:\n(?:\s+[a-z_]+:.*\n)*?\s+options: \[([^\]]*)\]", workflow, re.M)
-    if not m:
-        errs.append("seed-foundation.yml: could not parse the source options")
-    else:
-        options = [o.strip() for o in m.group(1).split(",") if o.strip()]
-        unknown = [o for o in options if o != "ladder" and o not in ladder]
-        if unknown:
-            errs.append(f"seed-foundation.yml: source options outside the floor/relations ladder: {unknown}")
-        missing = [s for s in floor + [f for f in foundation if f not in floor] if s not in options]
-        if missing:
-            errs.append(f"seed-foundation.yml: source options lack {missing}")
+    if not re.search(r"^      source:\n(?:^        .*\n)*?^        type: string$", workflow, re.M):
+        errs.append("seed-foundation.yml must accept catalog names and aliases without duplicating source options")
 
     ingest_text = read_text(ROOT / "scripts" / "ingest-source.sh")
     other = re.search(r'^OTHER_SOURCES="([^"]*)"', ingest_text, re.M)
@@ -699,10 +693,14 @@ def main() -> int:
     else:
         errs.append("missing foundation helper: scripts/win/seed-foundation.cmd")
 
-    if "win/witness-manifest.json" not in ingest_text or not all(
-        f"stage_sources {stage})" in ingest_text for stage in ("floor", "document", "relations", "usage")
-    ):
-        errs.append("ingest-source.sh: must read its ladder stages from witness-manifest.json cadence")
+    try:
+        planner = runpy.run_path(str(ROOT / "scripts" / "decomposer-isolate-plan.py"))
+        actual = subprocess.run(["bash", str(ingest_sh), "--list-sources"],
+                                text=True, capture_output=True, check=True, timeout=30)
+        errs.extend(compare_order("ingest-source.sh canonical recipe order",
+                                  planner["source_order"](), actual.stdout.splitlines()))
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        errs.append(f"ingest-source.sh: could not resolve canonical recipes/order: {error}")
     errs.extend(compare_order(
         "seed-stage.cmd relations",
         expected_seed_stage_relations(manifest),

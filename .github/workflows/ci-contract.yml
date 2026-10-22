@@ -283,12 +283,22 @@ jobs:
     name: Static CI/CD contract
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      LAPLACE_RECIPES: ${{ github.workspace }}/.ci-dependencies/laplace-engine/recipes
     steps:
       - name: Check out exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Provide the canonical recipe estate for operator validation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Engine
+          ref: c68627ff2f62142db66e186e7ebeb0ac14cf2027
+          path: .ci-dependencies/laplace-engine
+          persist-credentials: false
 
       - name: Validate workflow, lifecycle, and operator contracts
         shell: bash

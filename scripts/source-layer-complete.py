@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from ingest_catalog import canonical_source
 
 GATES = Path(__file__).resolve().parent / "decomposer-gates.json"
 
@@ -30,7 +31,7 @@ def main(argv: list[str]) -> int:
     if not 2 <= len(argv) <= 4:
         print(__doc__, file=sys.stderr)
         return 2
-    name = argv[1]
+    name = canonical_source(argv[1])
     src = json.loads(GATES.read_text(encoding="utf-8"))["sources"].get(name, {})
     decomposer = src.get("decomposer") or (argv[2] if len(argv) > 2 else None)
     layer = src.get("layer", int(argv[3]) if len(argv) > 3 else None)
