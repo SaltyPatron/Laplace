@@ -673,6 +673,20 @@ internal static class WorkspaceCodeIndex
             .ToList();
     }
 
+    public static JsonObject Reindex(bool force)
+    {
+        var snapshot = EnsureIndex(force);
+        return new JsonObject
+        {
+            ["root_path"] = snapshot.RootPath,
+            ["built_at_utc"] = snapshot.BuiltAtUtc.ToString("o"),
+            ["indexed_files"] = FileCache.Count,
+            ["indexed_chunks"] = snapshot.Chunks.Length,
+            ["unique_words"] = snapshot.Postings.Count,
+            ["force"] = force,
+        };
+    }
+
     private static double ComputeSymbolAndPathBoost(CodeChunk chunk, string rawQuery, List<string> queryTokens)
     {
         double boost = 0.0;
