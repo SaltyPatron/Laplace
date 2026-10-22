@@ -17,6 +17,216 @@ public sealed class PersistentLoggingCollection;
 public sealed class PersistentLogSinkTests
 {
     [Fact]
+    public void CsvRetentionKeepsTheActiveSqlPathAndBoundsTheRetainedFiles()
+    {
+        WithLogDirectory(directory => WithRetention("2048", "3", () =>
+        {
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("retention", false, health: health).CreateLogger();
+            for (int i = 0; i < 40; i++)
+                logger.Information("Retention event {Sequence}: {Payload}", i, new string('x', 200));
+            Assert.True(health.Snapshot().Ready);
+            var files = Directory.GetFiles(directory, "laplace-retention*.csv");
+            Assert.Equal(3, files.Length);
+            Assert.All(files, file => Assert.InRange(new FileInfo(file).Length, 1, 2048));
+            Assert.Contains("Retention event 39:", ReadShared(Path.Combine(directory, "laplace-retention.csv")));
+            Assert.DoesNotContain("Retention event 0:", string.Concat(files.Select(ReadShared)));
+        }));
+    }
+
+    [Fact]
+    public void IndependentCsvWritersDoNotLoseOrInterleaveMultilineRecordsAcrossRollover()
+    {
+        WithLogDirectory(directory =>
+        {
+            string path = Path.Combine(directory, "laplace-concurrent.csv");
+            var sinks = Enumerable.Range(0, 4).Select(_ =>
+                new RetainedCsvFileSink(path, new OpsLogCsvTextFormatter("concurrent"), 2048, 1000)).ToArray();
+            Parallel.For(0, sinks.Length, writer =>
+            {
+                using var logger = new LoggerConfiguration().WriteTo.Sink(sinks[writer]).CreateLogger();
+                for (int record = 0; record < 30; record++)
+                    logger.ForContext("RecordId", $"{writer}:{record}")
+                        .Error(new IOException("quoted, \"cause\"\nand another line"), "Concurrent record {Writer}:{Record}", writer, record);
+            });
+            var ids = ReadCsvRecords(directory, "laplace-concurrent*.csv")
+                .Select(fields =>
+                {
+                    Assert.Equal(6, fields.Length);
+                    using var detail = JsonDocument.Parse(fields[5]);
+                    Assert.Contains("and another line", detail.RootElement.GetProperty("Exception").GetString());
+                    return detail.RootElement.GetProperty("Properties").GetProperty("RecordId").GetString();
+                }).ToArray();
+            Assert.Equal(120, ids.Length);
+            Assert.Equal(120, ids.Distinct().Count());
+        });
+    }
+
+    [Fact]
+    public void OversizedEventsRemainCompleteAndAnotherRolesFilesArePreserved()
+    {
+        WithLogDirectory(directory => WithRetention("1024", "1", () =>
+        {
+            string unrelated = Path.Combine(directory, "laplace-oversized.archive-operator.csv");
+            File.WriteAllText(unrelated, "operator-owned");
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("oversized", false, health: health).CreateLogger();
+            logger.Information("first");
+            logger.Information("Oversized {Payload}", new string('x', 4000));
+            Assert.True(health.Snapshot().Ready);
+            Assert.Contains(new string('x', 4000), ReadShared(Path.Combine(directory, "laplace-oversized.csv")));
+            Assert.Equal("operator-owned", File.ReadAllText(unrelated));
+            logger.Information("last");
+            Assert.Contains("last", ReadShared(Path.Combine(directory, "laplace-oversized.csv")));
+            Assert.Equal(2, Directory.GetFiles(directory, "laplace-oversized*.csv").Length);
+        }));
+    }
+
+    [Fact]
+    public void BlockedRolloverRetainsTheEventAndReportsUnhealthyPersistence()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Delete sharing is a Windows file-handle contract.
+        WithLogDirectory(directory => WithRetention("1024", "3", () =>
+        {
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("blocked-roll", false, health: health).CreateLogger();
+            logger.Information("{Payload}", new string('x', 900));
+            using (var reader = File.Open(Path.Combine(directory, "laplace-blocked-roll.csv"), FileMode.Open,
+                FileAccess.Read, FileShare.ReadWrite))
+            {
+                logger.Error(new IOException("rollover-cause"), "record-during-blocked-rollover");
+                Assert.False(health.Snapshot().Ready);
+                Assert.Contains("record-during-blocked-rollover", ReadShared(Path.Combine(directory, "laplace-blocked-roll.csv")));
+                Assert.Contains("record-during-blocked-rollover", string.Concat(Directory.GetFiles(directory, "*.jsonl").Select(ReadShared)));
+            }
+            logger.Information("record-after-reader-closes");
+            Assert.Contains("record-after-reader-closes", ReadShared(Path.Combine(directory, "laplace-blocked-roll.csv")));
+            Assert.False(health.Snapshot().Ready); // A later successful write cannot erase the failed retention.
+        }));
+    }
+
+    [Fact]
+    public void BlockedArchiveDeletionIsVisibleAndDoesNotSuppressTheIndependentJsonEvent()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        WithLogDirectory(directory => WithRetention("1024", "2", () =>
+        {
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("blocked-prune", false, health: health).CreateLogger();
+            logger.Information("{Payload}", new string('x', 900));
+            logger.Information("{Payload}", new string('y', 900));
+            string archive = Assert.Single(Directory.GetFiles(directory, "laplace-blocked-prune.archive-*.csv"));
+            using var reader = File.Open(archive, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            logger.Error(new IOException("prune-cause"), "record-during-blocked-deletion");
+            Assert.False(health.Snapshot().Ready);
+            Assert.Contains("record-during-blocked-deletion", ReadShared(Path.Combine(directory, "laplace-blocked-prune.csv")));
+            Assert.Contains("record-during-blocked-deletion", string.Concat(Directory.GetFiles(directory, "*.jsonl").Select(ReadShared)));
+        }));
+    }
+
+    [Theory]
+    [InlineData("0", "3")]
+    [InlineData("-1", "3")]
+    [InlineData("bytes", "3")]
+    [InlineData("1024", "0")]
+    [InlineData("1024", "2147483648")]
+    public void InvalidRetentionConfigurationCannotStartAHealthyLogger(string bytes, string files)
+    {
+        WithLogDirectory(_ => WithRetention(bytes, files, () =>
+        {
+            var health = new PersistentLogHealth();
+            Assert.Throws<InvalidOperationException>(() =>
+                new LoggerConfiguration().ApplyLaplaceSinks("invalid-retention", false, health: health).CreateLogger());
+            Assert.False(health.Snapshot().Ready);
+        }));
+    }
+
+    private static IEnumerable<string[]> ReadCsvRecords(string directory, string pattern)
+    {
+        foreach (string file in Directory.GetFiles(directory, pattern))
+        {
+            using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(file);
+            parser.SetDelimiters(",");
+            parser.HasFieldsEnclosedInQuotes = true;
+            while (!parser.EndOfData) yield return parser.ReadFields()!;
+        }
+    }
+
+    [Fact]
+    public void IncompleteActiveRecordIsPreservedAndRejectedBeforeAnyFurtherAppend()
+    {
+        WithLogDirectory(directory =>
+        {
+            string path = Path.Combine(directory, "laplace-incomplete.csv");
+            File.WriteAllText(path, "incomplete,\"record");
+            var health = new PersistentLogHealth();
+            var failure = Assert.Throws<InvalidDataException>(() =>
+                new LoggerConfiguration().ApplyLaplaceSinks("incomplete", false, health: health).CreateLogger());
+            Assert.Contains(path, failure.Message);
+            Assert.Equal("incomplete,\"record", File.ReadAllText(path));
+            Assert.False(health.Snapshot().Ready);
+        });
+    }
+
+    [Fact]
+    public void InterruptedReplacementCannotBeSilentlyIgnoredOnTheNextStartup()
+    {
+        WithLogDirectory(directory =>
+        {
+            string pending = Path.Combine(directory, ".laplace-interrupted.csv.pending-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(pending, "interrupted-event-fixture");
+            var health = new PersistentLogHealth();
+            var output = CaptureCompletion(() =>
+            {
+                var logger = new LoggerConfiguration().ApplyLaplaceSinks("interrupted", false, health: health).CreateLogger();
+                return LaplaceLogging.CompleteProcess(logger, "interrupted", 0, health);
+            });
+            Assert.Equal(1, output.ExitCode);
+            Assert.Contains("CSV_INCOMPLETE_ROLLOVER", output.Stderr);
+            Assert.Contains(pending, output.Stderr);
+            Assert.Equal("interrupted-event-fixture", File.ReadAllText(pending));
+            Assert.False(health.Snapshot().Ready);
+        });
+    }
+
+    [Fact]
+    public void ClockRollbackCannotCauseTheNewestArchiveToBePrunedBeforeOlderOnes()
+    {
+        WithLogDirectory(directory => WithRetention("1024", "2", () =>
+        {
+            string oldArchive = Path.Combine(directory, "laplace-clock.archive-"
+                + DateTime.UtcNow.AddDays(1).Ticks.ToString("D19") + "-" + Guid.NewGuid().ToString("N") + ".csv");
+            File.WriteAllText(oldArchive, "before-clock-rollback\n");
+            var health = new PersistentLogHealth();
+            using var logger = new LoggerConfiguration().ApplyLaplaceSinks("clock", false, health: health).CreateLogger();
+            logger.Information("retained-before-roll {Payload}", new string('x', 700));
+            logger.Information("retained-after-roll {Payload}", new string('y', 700));
+            var retained = string.Concat(Directory.GetFiles(directory, "laplace-clock*.csv").Select(ReadShared));
+            Assert.DoesNotContain("before-clock-rollback", retained);
+            Assert.Contains("retained-before-roll", retained);
+            Assert.Contains("retained-after-roll", retained);
+            Assert.True(health.Snapshot().Ready);
+        }));
+    }
+
+    private static void WithRetention(string bytes, string files, Action action)
+    {
+        string? oldBytes = Environment.GetEnvironmentVariable("LAPLACE_LOG_FILE_BYTES");
+        string? oldFiles = Environment.GetEnvironmentVariable("LAPLACE_LOG_RETAINED_FILES");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_LOG_FILE_BYTES", bytes);
+            Environment.SetEnvironmentVariable("LAPLACE_LOG_RETAINED_FILES", files);
+            action();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_LOG_FILE_BYTES", oldBytes);
+            Environment.SetEnvironmentVariable("LAPLACE_LOG_RETAINED_FILES", oldFiles);
+        }
+    }
+
+    [Fact]
     public void TraceBridgeRetainsTypedExceptionAndCorrelationInRealPersistentEvents()
     {
         WithLogDirectory(directory =>

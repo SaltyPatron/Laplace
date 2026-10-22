@@ -24,6 +24,8 @@ function Start-TestApi([string]$Name,[string]$LogDirectory){
     $start.WorkingDirectory=$evidence
     $start.Environment['LAPLACE_API_PORT']=[string]$port
     $start.Environment['LAPLACE_OPS_LOG_DIR']=$LogDirectory
+    $start.Environment['LAPLACE_LOG_FILE_BYTES']='8192'
+    $start.Environment['LAPLACE_LOG_RETAINED_FILES']='31'
     $start.Environment['LAPLACE_AUTH_MODE']='header'
     $start.Environment['LAPLACE_BILLING_STORE']='memory'
     $start.Environment['LAPLACE_SKIP_HOSTED_SERVICES']='1'
@@ -66,18 +68,28 @@ try{
     if(-not $ready){throw 'Test API did not become reachable.'}
     $client.DefaultRequestHeaders.Add('X-Correlation-Id',$marker)
     $client.DefaultRequestHeaders.Add('Origin',$client.BaseAddress.GetLeftPart([UriPartial]::Authority))
-    $body=@{kind='acceptance-check';operation='persistent-logging';path='/example?credential=do-not-retain';requestId=$marker;message=$marker} | ConvertTo-Json -Compress
-    $content=[Net.Http.StringContent]::new($body,[Text.Encoding]::UTF8,'application/json')
-    try{
-        $response=$client.PostAsync('/diagnostics/client',$content).GetAwaiter().GetResult()
-        try{if([int]$response.StatusCode -ne 204){throw "Diagnostic acknowledgement returned $([int]$response.StatusCode)."}}finally{$response.Dispose()}
-    }finally{$content.Dispose()}
+    # Exercise the actual HTTP logger across multiple CSV/JSONL rollovers before
+    # writing the final marker that SQL read-back selects from the active path.
+    foreach($sequence in 0..19){
+        $rollBody=@{kind='acceptance-check';operation='retention';path='/rollover';requestId=$marker;message=('rollover-'+$sequence+'-'+('x'*256))} | ConvertTo-Json -Compress
+        $rollContent=[Net.Http.StringContent]::new($rollBody,[Text.Encoding]::UTF8,'application/json')
+        try{
+            $rollResponse=$client.PostAsync('/diagnostics/client',$rollContent).GetAwaiter().GetResult()
+            try{if([int]$rollResponse.StatusCode -ne 204){throw 'Rollover HTTP diagnostic was not acknowledged.'}}finally{$rollResponse.Dispose()}
+        }finally{$rollContent.Dispose()}
+    }
     $response=$client.GetAsync('/health/status').GetAwaiter().GetResult()
     try{
         $status=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
         if(-not $status.logging_ready -or $status.logging_failure_count -ne 0){throw 'Healthy persistent sinks were not reported ready.'}
         if($status.substrate_reachable){throw 'The isolated test unexpectedly reached a substrate.'}
     }finally{$response.Dispose()}
+    $body=@{kind='acceptance-check';operation='persistent-logging';path='/example?credential=do-not-retain';requestId=$marker;message=$marker} | ConvertTo-Json -Compress
+    $content=[Net.Http.StringContent]::new($body,[Text.Encoding]::UTF8,'application/json')
+    try{
+        $response=$client.PostAsync('/diagnostics/client',$content).GetAwaiter().GetResult()
+        try{if([int]$response.StatusCode -ne 204){throw "Diagnostic acknowledgement returned $([int]$response.StatusCode)."}}finally{$response.Dispose()}
+    }finally{$content.Dispose()}
 }finally{
     $client.Dispose()
     Stop-TestApi $run
@@ -95,6 +107,7 @@ if(-not @($events | Where-Object {$_.MessageTemplate -eq 'Readiness failed while
 if(-not [IO.File]::ReadAllText((Join-Path $logs 'laplace-api.csv')).Contains($marker)){
     throw 'The SQL-compatible CSV source lost the diagnostic.'
 }
+if(-not @(Get-ChildItem -LiteralPath $logs -Filter 'laplace-api.archive-*.csv').Count){throw 'The HTTP fixture did not exercise CSV rollover.'}
 foreach($kind in 'csv','json'){
     $blocked=Join-Path $evidence ('blocked-'+$kind)
     $filename=if($kind -eq 'csv'){'laplace-api.csv'}else{'laplace-api-'+(Get-Date -Format yyyyMMdd)+'.jsonl'}
@@ -109,6 +122,6 @@ foreach($kind in 'csv','json'){
         throw "Logging startup failure lost the $kind exception/path diagnostic."
     }
 }
-@{schema='laplace.persistent-logging-acceptance/v1';api_assembly=$assembly;checked_utc=[DateTimeOffset]::UtcNow.ToString('o');marker=$marker;http_diagnostic_persisted=$true;readiness_failure_logged=$true;correlation_preserved=$true;query_string_excluded=$true;csv_verified=$true;startup_csv_failure_exit=1;startup_json_failure_exit=1} |
+@{schema='laplace.persistent-logging-acceptance/v1';api_assembly=$assembly;checked_utc=[DateTimeOffset]::UtcNow.ToString('o');marker=$marker;http_diagnostic_persisted=$true;readiness_failure_logged=$true;correlation_preserved=$true;query_string_excluded=$true;csv_verified=$true;csv_rollover_verified=$true;startup_csv_failure_exit=1;startup_json_failure_exit=1} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'receipt.json')
 Write-Host 'PASS real API acknowledgement, correlated JSONL/CSV persistence, readiness, and controlled startup failures.'

@@ -18,9 +18,12 @@ namespace Laplace.Ops;
 ///                          (MCP stdio JSON-RPC, UCI).
 ///
 /// role becomes the CSV application_name and the file laplace-{role}.csv. The filename is
-/// stable (Serilog shared-file append, no size roll) so the ops.app_log foreign table never
-/// needs repointing. CSV retention is an operator responsibility; JSONL retains at
-/// most 31 files, each rolling at 50 MiB or the next day.
+/// stable across atomic size rollover so the ops.app_log foreign table never
+/// needs repointing. Both formats retain 31 files of 50 MiB by default; JSONL
+/// also rolls daily. A single oversized event is retained intact.
+/// LAPLACE_LOG_FILE_BYTES and LAPLACE_LOG_RETAINED_FILES override these positive
+/// integer limits. ops.app_log reads the active CSV segment; older retained
+/// segments remain beside it as laplace-{role}.archive-*.csv.
 /// </summary>
 public static class LaplaceLogging
 {
@@ -141,10 +144,11 @@ public static class LaplaceLogging
             if (Trace.Listeners["LaplaceStructured"] is null) Trace.Listeners.Add(new StructuredTraceListener());
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
         ShareInstallDirectory(LaplaceInstall.OpsLogDirectory);
+        var retention = PersistentLogRetention.FromEnvironment();
         var path = Path.Combine(LaplaceInstall.OpsLogDirectory, $"laplace-{role}.csv");
         // File sinks otherwise report an inaccessible path only to SelfLog and can
         // leave the process running with a disabled persistent sink.
-        using (File.Open(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
+        var csv = new RetainedCsvFileSink(path, new OpsLogCsvTextFormatter(role), retention.FileBytes, retention.RetainedFiles);
         var jsonPath = Path.Combine(LaplaceInstall.OpsLogDirectory,
             $"laplace-{role}-{DateTime.Now:yyyyMMdd}.jsonl");
         using (File.Open(jsonPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { }
@@ -159,13 +163,11 @@ public static class LaplaceLogging
                 .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
                 ?? typeof(LaplaceLogging).Assembly.GetName().Version?.ToString() ?? "unknown")
             .Enrich.With(new ActivityEnricher())
-            // This compatibility file has an external rotation contract. Serilog's
-            // implicit 1 GiB limit must not silently stop it accepting events.
-            .WriteTo.File(new OpsLogCsvTextFormatter(role), path, shared: true, fileSizeLimitBytes: null)
+            .WriteTo.Sink(csv)
             .WriteTo.File(new JsonFormatter(renderMessage: true),
                 Path.Combine(LaplaceInstall.OpsLogDirectory, $"laplace-{role}-.jsonl"),
-                rollingInterval: RollingInterval.Day, fileSizeLimitBytes: 50 * 1024 * 1024,
-                rollOnFileSizeLimit: true, retainedFileCountLimit: 31, shared: true);
+                rollingInterval: RollingInterval.Day, fileSizeLimitBytes: retention.FileBytes,
+                rollOnFileSizeLimit: true, retainedFileCountLimit: retention.RetainedFiles, shared: true);
 
         if (console)
         {

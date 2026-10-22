@@ -236,7 +236,8 @@ public static class CpuTopology
     public static void RunPinnedParallel(int count, int workers, Action<int> body)
         => RunPinnedParallel(count, workers, body, PinWorkerThread);
 
-    internal static void RunPinnedParallel(int count, int workers, Action<int> body, Action<int> initializeWorker)
+    internal static void RunPinnedParallel(int count, int workers, Action<int> body, Action<int> initializeWorker,
+        Action<Thread>? startWorker = null)
 
     {
 
@@ -290,13 +291,10 @@ public static class CpuTopology
             })
             { IsBackground = true, Name = $"laplace-pcore-{w}" };
 
-            threads[w].Start();
-
         }
 
-        foreach (var t in threads) t.Join();
-
-        ThrowWorkerFailures(errors);
+        var startupFailure = StartAndJoinWorkers(threads, startWorker);
+        ThrowWorkerFailures(errors.Append(startupFailure));
 
     }
 
@@ -339,17 +337,46 @@ public static class CpuTopology
             })
             { IsBackground = true, Name = $"laplace-pcore-async-{idx}" };
 
-            threads[idx].Start();
-
         }
 
-        foreach (var t in threads) t.Join();
-
-        ThrowWorkerFailures(errors, ct);
+        var startupFailure = StartAndJoinWorkers(threads);
+        ThrowWorkerFailures(errors.Append(startupFailure), ct);
         ct.ThrowIfCancellationRequested();
 
         await Task.CompletedTask;
 
+    }
+
+    internal static Exception? StartAndJoinWorkers(Thread[] threads, Action<Thread>? startWorker = null)
+    {
+        List<Exception>? failures = null;
+        try
+        {
+            foreach (var thread in threads)
+                if (startWorker is null) thread.Start();
+                else startWorker(thread);
+        }
+        catch (Exception failure) { failures = [failure]; }
+        foreach (var thread in threads)
+        {
+            if ((thread.ThreadState & System.Threading.ThreadState.Unstarted) != 0) continue;
+            while (true)
+            {
+                try { thread.Join(); break; }
+                catch (ThreadInterruptedException failure)
+                {
+                    // Interruption is a caller failure, not permission to abandon
+                    // already-running workers that still own native/arena state.
+                    (failures ??= []).Add(failure);
+                }
+            }
+        }
+        return failures?.Count switch
+        {
+            null or 0 => null,
+            1 => failures[0],
+            _ => new AggregateException("Pinned worker startup/join failed.", failures)
+        };
     }
 
     private static void ThrowWorkerFailures(IEnumerable<Exception?> errors, CancellationToken caller = default)
