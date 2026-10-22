@@ -31,7 +31,8 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - ".github/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE*"
       - "docs/**"
       - "**/*.md"
       - "tests/**"
@@ -113,6 +114,11 @@ jobs:
           ref: 25104e87337084087d5e53f0d0d4ff6c62cc6bc0
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
+
+      - name: Provide the pinned Rust compiler for the Tree-sitter generator
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.90.0
 
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
@@ -244,6 +250,11 @@ jobs:
           ref: 25104e87337084087d5e53f0d0d4ff6c62cc6bc0
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
+
+      - name: Provide the pinned Rust compiler for the Tree-sitter generator
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.90.0
 
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
