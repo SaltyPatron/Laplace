@@ -90,12 +90,29 @@ jobs:
     timeout-minutes: 240
     env:
       LAPLACE_CONNINFO: ""
+      LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Check out canonical Native
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Native
+          ref: 91d1c15eeb9622db836ceb08ad70202458e523ab
+          path: .ci-dependencies/Laplace-Native
+          persist-credentials: false
+      - name: Check out canonical recipe Engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Engine
+          ref: 15f99722d4f2024904bd41626276680cc403f1d6
+          path: .ci-dependencies/Laplace-Engine
+          persist-credentials: false
 
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
@@ -204,12 +221,29 @@ jobs:
       queue: max
     env:
       LAPLACE_CONNINFO: ""
+      LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Check out canonical Native
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Native
+          ref: 91d1c15eeb9622db836ceb08ad70202458e523ab
+          path: .ci-dependencies/Laplace-Native
+          persist-credentials: false
+      - name: Check out canonical recipe Engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Engine
+          ref: 15f99722d4f2024904bd41626276680cc403f1d6
+          path: .ci-dependencies/Laplace-Engine
+          persist-credentials: false
 
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
@@ -259,6 +293,8 @@ jobs:
       queue: max
     env:
       LAPLACE_CONNINFO: ""
+      LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
