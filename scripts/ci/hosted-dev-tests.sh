@@ -33,7 +33,7 @@ export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models"
 export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 # A hosted runner has no laplace-runner group; the work roots belong to the runner's own group (scripts/lib/storage.sh).
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
-BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.sh and the managed props read
+BUILD="$WORK/build/engine"   # checkout cleanup must not discard the candidate compiler outputs
 export LAPLACE_ENGINE_BUILD="$BUILD"
 export LAPLACE_BUILD="$WORK/build"
 export LAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_CI_ENGINE_SOURCE"
