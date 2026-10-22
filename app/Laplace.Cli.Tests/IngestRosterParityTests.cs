@@ -89,6 +89,39 @@ public sealed class IngestRosterParityTests
     }
 
     [Fact]
+    public void CanonicalRecipesOrder_AllFortyThreeSourcesResolveDefaultPathsAndRoutes()
+    {
+        CliRuntime.InitializeServices();
+        var orderPath = Path.Combine(FindRepoRoot(), "recipes", "order");
+        Assert.True(File.Exists(orderPath), $"Missing {orderPath}");
+
+        var sources = File.ReadLines(orderPath)
+            .Select(static l => l.Split('#', 2)[0].Trim())
+            .Where(static l => l.Length > 0)
+            .Select(static l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0])
+            .ToList();
+
+        Assert.Equal(43, sources.Count);
+
+        var registered = IngestDispatchTable.RegisteredKeys
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in sources)
+        {
+            if (!string.Equals(source, "workspace-code", StringComparison.OrdinalIgnoreCase))
+            {
+                var defaultPath = IngestDataPaths.Resolve(source);
+                Assert.False(string.IsNullOrWhiteSpace(defaultPath),
+                    $"IngestDataPaths.Resolve('{source}') returned null or empty.");
+            }
+
+            var normalized = IngestDispatchTable.NormalizeLegacySourceAlias(source);
+            Assert.True(registered.Contains(source) || registered.Contains(normalized),
+                $"Canonical source '{source}' (normalized: '{normalized}') is not registered in IngestDispatchTable.");
+        }
+    }
+
+    [Fact]
     public void ShellWrapper_ExposesChessTacticOutcomeRoute()
     {
         var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "scripts", "ingest-source.sh"));

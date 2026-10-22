@@ -7,7 +7,8 @@
   "selected": true,
   "root": "OpenEnglishWordNet-2025-plus",
   "aliases": [
-    "oewn"
+    "oewn",
+    "open-english-wordnet"
   ],
   "artifacts": [
     {
