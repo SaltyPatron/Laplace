@@ -16,6 +16,7 @@
 #include "laplace/core/tier_tree.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/tier0.h"
 
 
 /* Five constant BLAKE3 digests, computed once per thread. Thread-local storage
@@ -64,6 +65,7 @@ int content_witness_emit_floor_atom(
     intent_stage_t* stage, uint32_t atom, const hash128_t* expected_id,
     int64_t observed_at_unix_us) {
     if (!stage || !expected_id) return -1;
+    if (!codepoint_table_is_loaded()) return -3;
     hash128_t entity, placement;
     double coord[4];
     hilbert128_t hilbert;
@@ -138,6 +140,7 @@ static int content_tree_build_mode_workers(const uint8_t* utf8, size_t len,
                                            tier_tree_t** out_tree) {
     if (len == 0) return -4;                          /* empty input */
     if (worker_count == 0) return -1;
+    if (!codepoint_table_is_loaded()) return -3;
 
     tier_tree_t* tree = NULL;
     if ((source_representation
@@ -236,12 +239,19 @@ int content_witness_add_underscored(
 
 
 
-typedef struct { uint32_t off; uint32_t idx; } seg_order_t;
+typedef struct {
+    const uint8_t *bytes;
+    laplace_word_emit_fn emit;
+    void *context;
+    uint32_t ordinal;
+} WordSegments;
 
-static int seg_order_cmp(const void* a, const void* b) {
-    uint32_t oa = ((const seg_order_t*)a)->off;
-    uint32_t ob = ((const seg_order_t*)b)->off;
-    return (oa > ob) - (oa < ob);
+static void emit_word_segment(void *sink, size_t offset, size_t length, const lp_ref *value) {
+    WordSegments *segments = sink;
+    const uint8_t *span = segments->bytes + offset;
+    if (!laplace_text_is_all_whitespace(span, length))
+        segments->emit(segments->context, segments->ordinal++, span, (uint32_t)length,
+                       (const hash128_t *)&value->id);
 }
 
 int laplace_content_word_segment(
@@ -249,55 +259,19 @@ int laplace_content_word_segment(
     size_t               len,
     laplace_word_emit_fn emit,
     void*                ctx) {
-    if (!utf8 || !emit) return -1;
-
-    tier_tree_t* tree = NULL;
-    int rc = content_tree_build(utf8, len, &tree);
-    if (rc != 0) return rc;
-
-    size_t nc = tier_tree_node_count(tree);
-    seg_order_t* words = (seg_order_t*)malloc(nc * sizeof(seg_order_t));
-    if (!words) { tier_tree_free(tree); return -2; }
-
-    
-    size_t nw = 0;
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        tier_node_view_t node;
-        if (tier_tree_get_node(tree, idx, &node) != 0) continue;
-        if (node.tier != 2) continue;
-        words[nw].off = node.text_range_off;
-        words[nw].idx = idx;
-        nw++;
+    if (!utf8 || !emit || len > INT32_MAX) return -1;
+    if (!len) return -4;
+    if (!codepoint_table_is_loaded()) return -3;
+    for (size_t at = 0; at < len;) {
+        size_t start = at; uint32_t cp; uint8_t canonical[4];
+        if (!lp_utf8_next(utf8, len, &at, &cp) || !lp_unicode_scalar(cp)) return -2;
+        size_t size = lp_utf8_put(cp, canonical);
+        if (at - start != size || memcmp(utf8 + start, canonical, size)) return -2;
     }
-    qsort(words, nw, sizeof(seg_order_t), seg_order_cmp);
-
-    /* Offsets are post-NFC: slice the tree's own buffer, never the caller's. NFC
-     * changes byte positions and lengths, so the caller's buffer would be sliced
-     * mid-UTF-8 or read past its end. */
-    size_t tree_text_len = 0;
-    const uint8_t* tree_text = tier_tree_text(tree, &tree_text_len);
-    if (!tree_text) { free(words); tier_tree_free(tree); return -2; }
-
-    uint32_t ord = 0;
-    for (size_t w = 0; w < nw; ++w) {
-        tier_node_view_t node;
-        if (tier_tree_get_node(tree, words[w].idx, &node) != 0) continue;
-        if (node.text_range_len == 0) continue;
-        if ((size_t)node.text_range_off + node.text_range_len > tree_text_len) continue;
-        const uint8_t* span = tree_text + node.text_range_off;
-        
-
-        if (laplace_text_is_all_whitespace(span, node.text_range_len)) continue;
-
-        
-
-        tier_node_view_t stand_in;
-        tier_tree_get_node(tree, collapse_idx(tree, words[w].idx), &stand_in);
-        emit(ctx, ord++, span, node.text_range_len, &stand_in.id);
-    }
-
-    free(words);
-    tier_tree_free(tree);
+    lp_text *text = text_identity_thread_context();
+    if (!text) return -3;
+    WordSegments segments = { utf8, emit, ctx, 0 };
+    lp_text_segments(text, utf8, len, emit_word_segment, &segments);
     return 0;
 }
 

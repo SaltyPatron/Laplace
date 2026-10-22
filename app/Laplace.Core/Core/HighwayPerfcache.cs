@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Laplace.Engine.Core;
 
 public static unsafe class HighwayPerfcache
@@ -21,8 +19,7 @@ public static unsafe class HighwayPerfcache
                 string why = rc switch
                 {
                     -1 => "open/stat/mmap failure (missing or unreadable file)",
-                    -2 => "bad magic / unsupported format version",
-                    -3 => "record count / size mismatch",
+                    -2 => "invalid Native LPHW cache (version, checksum, descriptors or identifiers)",
                     _ => "unknown error",
                 };
                 throw new InvalidOperationException(
@@ -54,6 +51,50 @@ public static unsafe class HighwayPerfcache
 
     public static bool IsLoaded => _loaded;
 
+    public static ReadOnlySpan<HighwayRecord> Records
+    {
+        get
+        {
+            if (NativeInterop.HighwayTableRecords(out nint records, out ulong count) != 0)
+                throw new InvalidOperationException("Native highway cache is not loaded.");
+            return new ReadOnlySpan<HighwayRecord>((void*)records, checked((int)count));
+        }
+    }
+
+    public static bool TryFind(Hash128 id, out HighwayRecord record)
+    {
+        nint pointer = NativeInterop.HighwayTableFind(&id);
+        record = pointer != 0 ? *(HighwayRecord*)pointer : default;
+        return pointer != 0;
+    }
+
+    public static bool TryLookup(string list, string key, out HighwayRecord record)
+    {
+        long slot = NativeInterop.HighwayTableKey(list, key);
+        nint pointer = slot is >= 0 and <= uint.MaxValue
+            ? NativeInterop.HighwayTableAt(list, (uint)slot) : 0;
+        record = pointer != 0 ? *(HighwayRecord*)pointer : default;
+        return pointer != 0;
+    }
+
+    public static byte[] Fingerprint()
+    {
+        var result = new byte[32];
+        fixed (byte* bytes = result)
+            if (NativeInterop.HighwayTableFingerprint(bytes) != 0)
+                throw new InvalidOperationException("Native highway cache is not loaded.");
+        return result;
+    }
+
+    public static uint[] Crosswalk(string from, uint slot, string to)
+    {
+        if (NativeInterop.HighwayTableEdgeSpan(from, slot, to, out nint edges, out ulong count) != 0)
+            throw new InvalidOperationException("Native highway cache is not loaded.");
+        var result = new uint[checked((int)count)];
+        for (int i = 0; i < result.Length; i++) result[i] = ((uint*)edges)[i * 2 + 1];
+        return result;
+    }
+
     private static bool IsLoadedUnlocked() => NativeInterop.HighwayTableIsLoaded() != 0;
 
     public static Mask256 BandMask(byte band)
@@ -79,7 +120,7 @@ public static unsafe class HighwayPerfcache
     public static bool TryGetRelation(Hash128 typeId, out byte bitPos, out float rank, out byte band)
     {
         if (!_loaded) { bitPos = 0; rank = 0; band = 0; return false; }
-        byte bp; float r; byte b;
+        byte bp = 0; float r = 0; byte b = 0;
         int rc = NativeInterop.HighwayTableRelationByHash(&typeId, &bp, &r, &b);
         bitPos = bp; rank = r; band = b;
         return rc == 0;

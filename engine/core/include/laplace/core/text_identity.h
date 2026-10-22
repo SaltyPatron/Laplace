@@ -14,6 +14,8 @@ int text_identity_utf8(void *context, const uint8_t *bytes, size_t length, hash1
 /* Native C callers share one reusable context per OS thread, released on exit. */
 int hash128_text(const uint8_t *bytes, size_t length, hash128_t *out);
 void *text_identity_thread_context(void);
+const void *text_identity_scalar_floor(void);
+const void *text_identity_load_scalar_floor(const char *path);
 int text_identity_atom(uint32_t scalar, hash128_t *id, double coord[4], hilbert128_t *hilbert);
 
 #ifdef __cplusplus

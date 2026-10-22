@@ -602,7 +602,7 @@ internal static class SyntheticContent
     private static OrderedCompositionComponent Atom(int codepoint)
     {
         CodepointPerfcache.LoadDefault();
-        var p = CodepointPerfcache.Records[codepoint];
+        var p = CodepointPerfcache.LookupScalar((uint)codepoint);
         return new(p.Hash, 0, p.CoordX, p.CoordY, p.CoordZ, p.CoordM, (uint)codepoint, true);
     }
 

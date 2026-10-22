@@ -590,7 +590,8 @@ TEST(OrderedCompositionStage, FloorSingletonCopiesExactLoadedBodyWithoutWrapperO
     atom.id = floor->hash;
     atom.atom = 'a';
     atom.has_atom = 1;
-    std::memcpy(atom.coord, floor->coord, sizeof(atom.coord));
+    hash128_t resolved; hilbert128_t placement;
+    ASSERT_EQ(codepoint_table_resolve_atom('a', &resolved, atom.coord, &placement), 0);
     auto value = request(&atom, 1);
     value.observed_at_unix_us += 123;
     Stage stage(intent_stage_new(0), intent_stage_free);
@@ -599,8 +600,8 @@ TEST(OrderedCompositionStage, FloorSingletonCopiesExactLoadedBodyWithoutWrapperO
     ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), &value, 1, &result), 0);
     EXPECT_EQ(result.tier, 0u);
     EXPECT_TRUE(hash128_equals(&result.id, &floor->hash));
-    EXPECT_EQ(std::memcmp(result.coord, floor->coord, sizeof(result.coord)), 0);
-    EXPECT_EQ(std::memcmp(&result.hilbert, &floor->hilbert, sizeof(result.hilbert)), 0);
+    EXPECT_EQ(std::memcmp(result.coord, atom.coord, sizeof(result.coord)), 0);
+    EXPECT_EQ(std::memcmp(&result.hilbert, &placement, sizeof(result.hilbert)), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), 0u);
     EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
     EXPECT_EQ(result.first_physicality_row, 0u);

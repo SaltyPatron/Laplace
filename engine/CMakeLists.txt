@@ -300,9 +300,6 @@ add_subdirectory(core)
 add_subdirectory(dynamics)
 add_subdirectory(synthesis)
 
-add_subdirectory(core/tools/ucd_tables_emit)
-# Tool is also listed in the blob custom_command DEPENDS (source-hash no-op).
-add_dependencies(laplace_t0_perfcache laplace_ucd_tables_emit)
 
 foreach(_laplace_engine_target IN ITEMS
         laplace_core laplace_core_static

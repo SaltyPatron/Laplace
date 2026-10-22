@@ -112,12 +112,12 @@ public sealed class TextEntityBuilderEmissionTests
         byte[] bytes = Encoding.UTF8.GetBytes("dog");
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out var ents, out _, out var rootId, out var rootTier));
 
-        Assert.Equal(EntityTier.Word, rootTier);
-        Assert.DoesNotContain(ents, e => e.Tier >= EntityTier.Sentence);
+        Assert.Equal((byte)1, rootTier); // A composition directly above scalars.
+        Assert.Single(ents);
 
         var root = Assert.Single(ents, e => e.Id.EqualsBytewise(rootId));
-        Assert.Equal(EntityTier.Word, root.Tier);
-        Assert.Equal(TextEntityBuilder.WordTypeId, root.TypeId);
+        Assert.Equal((short)1, root.Tier);
+        Assert.Equal(Hash128.Text("Text"), root.TypeId);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class TextEntityBuilderEmissionTests
     {
         Assert.True(TextEntityBuilder.TryBuildRows(Encoding.UTF8.GetBytes(text), Src,
             out var entities, out var physicalities, out var root, out var tier));
-        ref readonly var atom = ref CodepointPerfcache.Records[text[0]];
+        ref readonly var atom = ref CodepointPerfcache.LookupScalar((uint)text[0]);
         Assert.Equal(atom.Hash, root);
         Assert.Equal((byte)0, tier);
         Assert.Empty(entities);
