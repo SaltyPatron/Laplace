@@ -28,7 +28,7 @@ export LAPLACE_BUILD_ROOT="$WORK/managed" LAPLACE_WORK_ROOT="$WORK/work"
 # and the lichess openings revision the estate acquires (LichessOpenings/lichess-openings-<rev>.tar.gz),
 # the CILI checkout and the ISO 639-3 code tables, each at the revision hart-server's /vault/Data holds.
 DATA="$WORK/data"
-export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models" LAPLACE_SRC="$(dirname "$ROOT")"
+export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models"
 # Tests keep their scratch under the declared permanent work root (scripts/lib/storage.sh), never /tmp.
 export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 # A hosted runner has no laplace-runner group; the work roots belong to the runner's own group (scripts/lib/storage.sh).
@@ -179,6 +179,8 @@ native() {
 
 managed() {
   oneapi
+  # The managed catalog's workspace root does not relocate Native dependencies.
+  export LAPLACE_SRC="$(dirname "$ROOT")"
   say "managed: build"
   dotnet build app/Laplace.slnx -c Release --nologo -v minimal
   end
