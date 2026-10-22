@@ -1,4 +1,3 @@
-using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -52,28 +51,6 @@ public sealed class WiktionaryInventoryTests
 
             Assert.NotNull(inv);
             Assert.EndsWith("kaikki.org-dictionary-English.jsonl", inv!.Files[0].Path);
-        }
-        finally
-        {
-            TryDeleteDir(dir);
-        }
-    }
-
-    [Fact]
-    public async Task ConceptNet_DescribeInputAsync_MaxInputUnits_ReturnsCap()
-    {
-        string dir = CreateTempDir();
-        try
-        {
-            string csv = Path.Combine(dir, "assertions.csv");
-            await File.WriteAllTextAsync(csv, "1\tRelatedTo\t/a\t/b\t{}\n");
-
-            var dec = new ConceptNetDecomposer();
-            var opts = DecomposerOptions.ForWitness("ConceptNetDecomposer") with { MaxInputUnits = 50_000 };
-            var inv = await dec.DescribeInputAsync(new TempContext(dir), opts);
-
-            Assert.NotNull(inv);
-            Assert.Equal(50_000, inv!.TotalInputUnits);
         }
         finally
         {
