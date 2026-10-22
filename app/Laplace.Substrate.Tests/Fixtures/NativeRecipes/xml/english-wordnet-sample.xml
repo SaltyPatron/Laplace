@@ -1,0 +1,9 @@
+<LexicalResource xmlns:dc="http://purl.org/dc/elements/1.1/"><Lexicon id="oewn" label="Open English Wordnet" language="en" email="english-wordnet@googlegroups.com" license="https://creativecommons.org/licenses/by/4.0" version="2025+" url="https://github.com/globalwordnet/english-wordnet"><LexicalEntry id="oewn--ap-hood-n">
+      <Lemma writtenForm="'hood" partOfSpeech="n" />
+      <Sense id="oewn--apos-hood__1.14.01.." synset="oewn-08242255-n" />
+    </LexicalEntry><Synset id="oewn-08242255-n" ili="i80334" members="oewn-hood-n oewn--ap-hood-n" partOfSpeech="n" lexfile="noun.group">
+      <Definition>an urban, often lower-income inner-city area</Definition>
+      <SynsetRelation relType="exemplifies" target="oewn-07171981-n" />
+      <SynsetRelation relType="exemplifies" target="oewn-06960420-n" />
+      <SynsetRelation relType="hypernym" target="oewn-08242011-n" />
+    </Synset></Lexicon></LexicalResource>
