@@ -12,7 +12,10 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
-    add_compile_options(-Wall -Wextra)
+    # The managed interop consumes the public C ABI from all three libraries.
+    # A fresh build must export it without relying on an old cache option.
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra>")
     # The engine uses standard C functions (getenv/fopen/strncpy); MSVC CRT
     # deprecations are silenced as in extension/.
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
@@ -21,10 +24,10 @@ if(WIN32)
     # that override, so only that diagnostic is silenced.
     set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma- -Wno-overriding-option)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
-    add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
     set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option)
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra;-Wpedantic>")
     # The same deterministic floating-point contract in GCC/Clang spelling.
     set(LAPLACE_ENGINE_FP_FLAGS -fno-fast-math -ffp-contract=off)
 endif()
@@ -52,9 +55,9 @@ set(LAPLACE_TARGET_ISA "AVX2" CACHE STRING "AVX2 (default dev) | AVX512 (deploy)
 set_property(CACHE LAPLACE_TARGET_ISA PROPERTY STRINGS AVX2 AVX512)
 if(WIN32)
     if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
-        add_compile_options(/arch:AVX2)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/arch:AVX2>")
     elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_options(/arch:AVX512)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/arch:AVX512>")
     endif()
     if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
         add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
@@ -63,9 +66,9 @@ if(WIN32)
     endif()
 else()
     if(LAPLACE_TARGET_ISA STREQUAL "AVX2")
-        add_compile_options(-march=haswell)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-march=haswell>")
     elseif(LAPLACE_TARGET_ISA STREQUAL "AVX512")
-        add_compile_options(-march=sapphirerapids)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-march=sapphirerapids>")
     endif()
     if(LAPLACE_TARGET_ISA STREQUAL "AVX512")
         add_compile_definitions(LAPLACE_MKL_CBWR_AVX512=1)
@@ -246,7 +249,7 @@ endif()
 add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
     "${_blake3_binary_dir}" EXCLUDE_FROM_ALL)
 set(CMAKE_WARN_DEPRECATED ON CACHE BOOL "" FORCE)
-target_compile_options(blake3 PRIVATE -w)
+target_compile_options(blake3 PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:-w>")
 
 
 
