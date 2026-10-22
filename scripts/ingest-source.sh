@@ -5,15 +5,50 @@ source="${1:-}"
 path="${2:-}"
 corpus(){ printf '%s' "${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"; }    # asked only where a path under the corpus is needed
 
-# The Python config reader and C# EtlManifest both consume the native recipes/order.
-mapfile -t SOURCE_ORDER < <(python3 "$(dirname "$0")/decomposer-isolate-plan.py" --list-sources)
-if [[ ${#SOURCE_ORDER[@]} -eq 0 ]]; then
-    echo "cannot read the canonical native recipes/order" >&2
-    exit 2
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The canonical estate may be explicitly declared, published beside the CLI,
+# installed as the Native SDK, or present as the workspace Engine checkout.
+if [[ -n "${LAPLACE_RECIPES:-}" ]]; then
+    RECIPE_ROOT="$LAPLACE_RECIPES"
+else
+    prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+    packaged="${LAPLACE_INGEST_RUNTIME:-${LAPLACE_APP_DIR:-$prefix/app}/cli}/native/recipe-engine/share/laplace/recipes"
+    if [[ -f "$packaged/order" ]]; then RECIPE_ROOT="$packaged"
+    elif [[ -f "$prefix/share/laplace/recipes/order" ]]; then RECIPE_ROOT="$prefix/share/laplace/recipes"
+    else RECIPE_ROOT="${LAPLACE_SRC:-$ROOT/..}/Laplace-Engine/recipes"
+    fi
 fi
+[[ -f "$RECIPE_ROOT/order" ]] || { echo "Native recipe estate has no order declaration: $RECIPE_ROOT" >&2; exit 2; }
+SOURCE_ORDER=()
+declare -A earlier_sources=()
+while IFS= read -r declaration || [[ -n "$declaration" ]]; do
+    declaration="${declaration%$'\r'}"
+    declaration="${declaration%%#*}"
+    read -r -a fields <<< "$declaration"
+    [[ ${#fields[@]} -gt 0 ]] || continue
+    name="${fields[0]}"
+    if [[ ${#fields[@]} -ne 1 || ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ || -n "${earlier_sources[$name]:-}" || ! -f "$RECIPE_ROOT/$name/source" ]]; then
+        echo "Invalid, duplicate or undeclared recipes/order source: $declaration" >&2; exit 2
+    fi
+    while IFS= read -r dependency_line || [[ -n "$dependency_line" ]]; do
+        dependency_line="${dependency_line%$'\r'}"
+        dependency_line="${dependency_line%%#*}"
+        read -r -a dependencies <<< "$dependency_line"
+        [[ ${dependencies[0]:-} == after ]] || continue
+        for dependency in "${dependencies[@]:1}"; do
+            if [[ ! "$dependency" =~ ^[a-z0-9][a-z0-9-]*$ || -z "${earlier_sources[$dependency]:-}" ]]; then
+                echo "Source '$name' depends on '$dependency', which is not earlier in recipes/order" >&2; exit 2
+            fi
+        done
+    done < "$RECIPE_ROOT/$name/source"
+    SOURCE_ORDER+=("$name")
+    earlier_sources[$name]=1
+done < "$RECIPE_ROOT/order"
+[[ ${#SOURCE_ORDER[@]} -gt 0 ]] || { echo "Native recipes/order is empty" >&2; exit 2; }
+if [[ "$source" == --list-sources ]]; then printf '%s\n' "${SOURCE_ORDER[@]}"; exit 0; fi
 LADDER=" ${SOURCE_ORDER[*]} "
 # Sources outside the ladder; each has its own route below.
-OTHER_SOURCES="chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
+OTHER_SOURCES="chess chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
 
 usage_sources() {
     echo "Sources: ${SOURCE_ORDER[*]}" >&2
@@ -26,7 +61,6 @@ if [[ -z "$source" ]]; then
     exit 2
 fi
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/storage.sh"
 laplace_storage_init
 LOGDIR="${INGEST_LOGDIR:-$TMPDIR/laplace-ingest}"

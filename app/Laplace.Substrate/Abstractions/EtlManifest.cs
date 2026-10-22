@@ -30,26 +30,37 @@ public static class EtlManifest
         }
     }
 
-    public static IReadOnlyList<string> SourceOrder
+    public static IReadOnlyList<string> SourceOrder => ReadSourceOrder(RecipesRoot);
+
+    /// <summary>Validate the declared topological order, including each source's after edges.</summary>
+    public static IReadOnlyList<string> ReadSourceOrder(string recipeRoot)
     {
-        get
+        var names = new List<string>();
+        var earlier = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in File.ReadLines(Path.Combine(recipeRoot, "order")))
         {
-            var names = new List<string>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var root = RecipesRoot;
-            foreach (var line in File.ReadLines(Path.Combine(root, "order")))
+            var name = line.Split('#', 2)[0].Trim();
+            if (name.Length == 0) continue;
+            if ((!char.IsAsciiLetterLower(name[0]) && !char.IsAsciiDigit(name[0]))
+                || name.Any(c => !char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c) && c != '-')
+                || earlier.Contains(name))
+                throw new InvalidDataException($"Invalid or duplicate source in recipes/order: {name}");
+            string declaration = Path.Combine(recipeRoot, name, "source");
+            if (!File.Exists(declaration))
+                throw new InvalidDataException($"recipes/order source has no declaration: {name}");
+            foreach (string dependencyLine in File.ReadLines(declaration))
             {
-                var name = line.Split('#', 2)[0].Trim();
-                if (name.Length == 0) continue;
-                if (name.Any(c => !char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c) && c != '-') || !seen.Add(name))
-                    throw new InvalidDataException($"Invalid or duplicate source in recipes/order: {name}");
-                if (!File.Exists(Path.Combine(root, name, "source")))
-                    throw new InvalidDataException($"recipes/order source has no declaration: {name}");
-                names.Add(name);
+                var fields = dependencyLine.Split('#', 2)[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (fields.Length == 0 || fields[0] != "after") continue;
+                foreach (string dependency in fields.Skip(1))
+                    if (!earlier.Contains(dependency))
+                        throw new InvalidDataException($"Source '{name}' depends on '{dependency}', which is not earlier in recipes/order.");
             }
-            if (names.Count == 0) throw new InvalidDataException("recipes/order is empty.");
-            return names.AsReadOnly();
+            earlier.Add(name);
+            names.Add(name);
         }
+        if (names.Count == 0) throw new InvalidDataException("recipes/order is empty.");
+        return names.AsReadOnly();
     }
 
     private static Hash128 Src(string name) => Hash128.Text($"substrate/source/{name}/v1");
