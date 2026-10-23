@@ -1,5 +1,30 @@
 /* Query key, positional PostgreSQL parameter types, statement text.
  * This is the sole statement owner for migrated native and app query paths. */
+/* Native retained-database acceptance uses the same canonical identity and
+ * containment operations as the installed Engine, with no legacy projection. */
+SQL_QUERY("verify.native_source_witness", "text",
+    "SELECT w.id::text FROM public.witness w JOIN public.physicality p ON p.entity=w.id "
+    "WHERE public.laplace_path_starts(p.path,public.laplace_text_id($1)) ORDER BY w.id")
+SQL_QUERY("verify.native_claim", "text[],text,text[],text",
+    "WITH parts AS (SELECT "
+    "ARRAY(SELECT public.laplace_text_id(value) FROM unnest($1::text[]) WITH ORDINALITY t(value,n) ORDER BY n) AS s,"
+    "ARRAY(SELECT public.laplace_text_id(value) FROM unnest($3::text[]) WITH ORDINALITY t(value,n) ORDER BY n) AS o),"
+    "ends AS (SELECT CASE WHEN cardinality(s)=1 THEN s[1] ELSE public.laplace_compose(s) END AS s,"
+    "CASE WHEN cardinality(o)=1 THEN o[1] ELSE public.laplace_compose(o) END AS o FROM parts),"
+    "vertices AS (SELECT CASE WHEN $2::text IS NULL THEN ARRAY[s,o] "
+    "ELSE ARRAY[s,public.laplace_text_id($2),o] END AS ids FROM ends),"
+    "wanted AS (SELECT public.laplace_compose(ids) AS id,ids FROM vertices) "
+    "SELECT v.id::text,COALESCE(e.tier>1 AND p.entity IS NOT NULL "
+    "AND public.laplace_mask_has_value(p.mask,'kind','claim') "
+    "AND public.laplace_path_length(p.path)=cardinality(v.ids) "
+    "AND public.laplace_path_contains(p.path,v.ids) "
+    "AND public.laplace_path_starts(p.path,v.ids[1]) "
+    "AND public.laplace_path_ends(p.path,v.ids[cardinality(v.ids)]),false),"
+    "c.claim IS NOT NULL,EXISTS (SELECT FROM public.laplace_attested(ARRAY[v.id],false) a "
+    "WHERE a.witness AND a.trunk=$4::public.blake3),"
+    "COALESCE(c.matches,0)::bigint,COALESCE(c.rating,0)::double precision "
+    "FROM wanted v LEFT JOIN public.entity e ON e.id=v.id "
+    "LEFT JOIN public.physicality p ON p.entity=v.id LEFT JOIN public.consensus c ON c.claim=v.id")
 SQL_QUERY("browse.names", "bytea[]",
     "SELECT subject_id, object_id, rating, rd, witness_count FROM laplace.consensus "
     "WHERE object_id = ANY($1) AND type_id = ANY("

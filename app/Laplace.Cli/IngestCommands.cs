@@ -166,15 +166,18 @@ internal static partial class IngestCommands
 
     public static async Task<int> IngestAsync(string[] args)
     {
+        if (args.Length > 0 && args[0] is "catalog" or "--catalog" or "--list-sources")
+            return IngestCatalogCommands.Run(args);
         if (args.Length > 0 && args[0].Equals("chain", StringComparison.OrdinalIgnoreCase))
             return await IngestChainAsync(args[1..]);
 
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
             return Fail("usage: laplace-mono ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
+                        + "       laplace-mono ingest catalog [--json]  — sources, aliases, content, decomposers and prerequisites\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         // Source list comes from the dispatch table TryDispatch routes through.
-                        + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
+                        + "  sources: " + string.Join(" | ", IngestDispatchTable.DisplayKeys) + "\n"
                         + "  --langs: language scope for this run\n"
                         + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
                         + "         floor before T0 runtime acceleration is mapped; stops at the first failing spec");
@@ -184,7 +187,7 @@ internal static partial class IngestCommands
         if (IngestDispatchTable.TryDispatch(sourceKey, cli, out var task))
             return await task;
 
-        return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+        return Fail($"unknown ingest source '{cli.Source}' (supported: {string.Join(", ", IngestDispatchTable.DisplayKeys)})");
     }
 
     /// <summary>
@@ -211,7 +214,7 @@ internal static partial class IngestCommands
             Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");
             if (!IngestDispatchTable.TryDispatch(cli.Source.ToLowerInvariant(), cli, out var task))
                 return Fail($"ingest chain: unknown source '{cli.Source}' in spec {i + 1} "
-                            + $"(supported: {string.Join(", ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k))})");
+                            + $"(supported: {string.Join(", ", IngestDispatchTable.DisplayKeys)})");
             int rc = await task;
             if (rc != 0)
             {
@@ -223,32 +226,8 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    internal static async Task<int> OmwProbeAsync(IngestCliArgs cli)
-    {
-        string wns = IngestDataPaths.Resolve("omw", cli.Path);
-        if (!Directory.Exists(wns))
-            return Fail($"OMW path not found: {wns}");
-
-        long start = 0;
-        long max = 0;
-        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
-        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
-        HighwayPerfcache.LoadDefault();
-
-        Console.Error.WriteLine($"omw-probe: scanning {wns} start_row={start} max_rows={(max > 0 ? max.ToString() : "all")}");
-        var fail = await OmwComposeProbe.ScanFirstFailureAsync(wns, cli.LangOverride, start, max);
-        if (fail is null)
-        {
-            Console.Error.WriteLine("omw-probe: all rows passed probe+materialize_phys");
-            return 0;
-        }
-
-        Console.Error.WriteLine(
-            $"omw-probe: FAIL row={fail.RowIndex} file={fail.FilePath}\n"
-            + $"  error={fail.Error}\n"
-            + $"  bytes={fail.LineBytes} preview={fail.LinePreview}");
-        return 1;
-    }
+    internal static Task<int> OmwProbeAsync(IngestCliArgs cli)
+        => IngestNativeRecipeAsync("open-multilingual-wordnet", cli with { NativeMode = NativeRecipeMode.NoLoad });
 
     internal static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
     {

@@ -68,24 +68,4 @@ public sealed class CrossSourceLinkingTests
         Assert.NotNull(iliAnchor);
     }
 
-    [Fact]
-    public void OMWRowParser_And_WordNetDataLine_Extract_The_Same_Offset_From_Their_Native_Formats()
-    {
-
-
-
-
-
-        const string wordNetNativeLine = "10676319 05 n 02 dog 0 domestic_dog 0 001 @ 10675588 n 0000 | a member of the genus Canis";
-        var wnParts = wordNetNativeLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        Assert.True(long.TryParse(wnParts[0], out long wnOffset));
-        char wnSsType = wnParts[2][0];
-
-        byte[] omwLine = System.Text.Encoding.UTF8.GetBytes("10676319-n\teng:lemma\tdog");
-        Assert.True(Laplace.Decomposers.OMW.OMWRowParser.TryParseRow(omwLine, "eng", out var omwRow, out _));
-
-        Assert.Equal(wnOffset, omwRow.Offset);
-        Assert.Equal(wnSsType, omwRow.SsType);
-        Assert.Equal(ConceptAnchor.SynsetId(wnOffset, wnSsType, "pwn30"), ConceptAnchor.SynsetId(omwRow.Offset, omwRow.SsType, "pwn30"));
-    }
 }
