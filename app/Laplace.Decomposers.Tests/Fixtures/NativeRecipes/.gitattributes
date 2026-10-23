@@ -1,0 +1,2 @@
+# The final tab in each ISO row is its empty Comment field.
+iso-639/iso-639-3.tab whitespace=-blank-at-eol

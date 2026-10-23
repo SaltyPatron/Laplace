@@ -1,0 +1,13 @@
+File-Date: 2026-09-17
+%%
+Type: language
+Subtag: de
+Description: German
+Added: 2005-10-16
+Suppress-Script: Latn
+%%
+Type: language
+Subtag: en
+Description: English
+Added: 2005-10-16
+Suppress-Script: Latn
