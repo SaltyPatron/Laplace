@@ -79,7 +79,7 @@ public static class LaplaceDataSource
 
     /// <summary>Build a datasource under the named <paramref name="access"/> policy.</summary>
     public static NpgsqlDataSource Create(SubstrateAccess access, string? baseConnectionString = null)
-        => new NpgsqlDataSourceBuilder(ConnectionStringFor(access, baseConnectionString)).Build();
+        => Create(access, static _ => { }, baseConnectionString);
 
     /// <summary>
     /// Build a datasource under <paramref name="access"/>, letting the caller reach the
@@ -92,6 +92,9 @@ public static class LaplaceDataSource
     {
         ArgumentNullException.ThrowIfNull(configure);
         var builder = new NpgsqlDataSourceBuilder(ConnectionStringFor(access, baseConnectionString));
+#pragma warning disable NPG9001 // Public custom-converter API in pinned Npgsql 10.0.2.
+        builder.AddTypeInfoResolverFactory(new Blake3TypeInfoResolverFactory());
+#pragma warning restore NPG9001
         configure(builder);
         return builder.Build();
     }

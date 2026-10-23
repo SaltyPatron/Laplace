@@ -11,10 +11,10 @@ export LAPLACE_HIGHWAY="$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin"
   echo "Installed canonical caches are missing under $LAPLACE_INSTALL_PREFIX/share/laplace" >&2; exit 1;
 }
 results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/database-name-results"
-for project in Laplace.Endpoints.Lichess.Tests Laplace.Chess.Tests; do
+for project in Laplace.Endpoints.Lichess.Tests Laplace.Chess.Tests Laplace.Substrate.Tests; do
   dotnet test "$root/app/$project/$project.csproj" -c Release --nologo \
     -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/database-names" \
-    --filter 'FullyQualifiedName~LichessControlTests|FullyQualifiedName~UciClientTests.ReadinessCarriesTheActualDatabaseIdentity' \
+    --filter 'FullyQualifiedName~LichessControlTests|FullyQualifiedName~UciClientTests.ReadinessCarriesTheActualDatabaseIdentity|FullyQualifiedName~Blake3TransportTests' \
     --logger "trx;LogFileName=$project.trx" --results-directory "$results"
 done
 python3 - "$results" <<'PY'

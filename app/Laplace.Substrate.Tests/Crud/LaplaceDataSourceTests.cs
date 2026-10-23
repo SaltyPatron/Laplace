@@ -115,4 +115,35 @@ public sealed class LaplaceDataSourceTests
         Assert.Throws<ArgumentException>(() => LaplaceDataSource.Create(SubstrateAccess.Serving,
             "Host=localhost;Database=app;Maximum Pool Size=2;Minimum Pool Size=3"));
     }
+
+    [Fact]
+    public void CanonicalCatalogBindsBlake3WithoutReinterpretingTheIdentity()
+    {
+        using var source = LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=localhost;Database=not-opened");
+        Hash128 identity = new(0x0123456789abcdefUL, 0xffeeddccbbaa9988UL);
+        Hash128[] values = [identity, default];
+        using var command = NpgsqlCatalog.Command(source, "verify.blake3_transport", identity, values);
+        Assert.Equal("public.blake3", command.Parameters[0].DataTypeName);
+        Assert.Equal("public.blake3[]", command.Parameters[1].DataTypeName);
+        Assert.Equal(identity, Assert.IsType<Hash128>(command.Parameters[0].Value));
+        Assert.Same(values, command.Parameters[1].Value);
+    }
+
+    [Fact]
+    public void CanonicalCatalogRefusesAByteaCallbackForBlake3()
+    {
+        using var source = LaplaceDataSource.Create(SubstrateAccess.Serving,
+            "Host=localhost;Database=not-opened");
+        var error = Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(source,
+            SqlCatalog.Get("verify.blake3_transport"), parameters =>
+            {
+                parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, new byte[16]);
+                parameters.Add(new NpgsqlParameter
+                {
+                    DataTypeName = "public.blake3[]", Value = Array.Empty<Hash128>()
+                });
+            }));
+        Assert.Contains("parameter 1 must be public.blake3", error.Message);
+    }
 }

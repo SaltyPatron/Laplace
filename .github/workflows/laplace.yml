@@ -147,7 +147,7 @@ jobs:
       - name: Verify installed GIN maintenance with owner and restricted database roles
         run: bash tests/ingest-completion.sh
 
-      - name: Verify database profile upgrades and UCI database identity protocol
+      - name: Verify database profiles, BLAKE3 transport and UCI database identity
         run: bash tests/database-names.sh
 
       - name: Retain ingestion completion results

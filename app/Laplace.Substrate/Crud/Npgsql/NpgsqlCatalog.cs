@@ -174,6 +174,13 @@ public static class NpgsqlCatalog
             string declared = query.ParameterTypes[i];
             bool array = declared.EndsWith("[]", StringComparison.Ordinal);
             string scalar = array ? declared[..^2] : declared;
+            if (scalar == "public.blake3")
+            {
+                if (parameters[i].DataTypeName != declared)
+                    throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {declared}.");
+                parameters[i].ParameterName = string.Empty;
+                continue;
+            }
             var expected = scalar switch
             {
                 "bytea" => NpgsqlDbType.Bytea,
