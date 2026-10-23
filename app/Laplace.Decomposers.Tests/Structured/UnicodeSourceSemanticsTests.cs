@@ -1,74 +1,69 @@
-using Laplace.Decomposers.Abstractions;
-using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
 using Xunit;
-using static Laplace.Decomposers.Tests.Structured.SelectedRecipeSemanticsTests;
 
 namespace Laplace.Decomposers.Tests.Structured;
 
 public sealed class UnicodeSourceSemanticsTests
 {
-    private const string Recipes = "recipes/unicode/UCD/17.0.0/";
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4096)]
-    public void Link_formatting_preserves_the_pair_and_url_fragments(int chunk)
+    [Fact]
+    public async Task LinkFormattingPreservesPairsAndUrlFragments()
     {
-        var rows = Read(Recipes + "link-formatting-test.recipe.json",
-            "# comment\nhttps://example.com/#%CE%B1\n\n# between pair\nhttps://example.com/#α\n", chunk);
-        AssertClaim(rows, "https://example.com/#%CE%B1", "result", "https://example.com/#α", "UTS58/LinkFormatting");
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("LinkFormattingTest.txt",
+            "# comment\nhttps://example.com/#%CE%B1\n\n# between pair\nhttps://example.com/#α\n");
+        Assert.Equal(new[] { "claim\t0\t1\thttps://example.com/#%CE%B1\tnormalizes to\thttps://example.com/#α" },
+            (await fixture.Claims("unicode", path)).Claims());
     }
 
     [Fact]
-    public void Link_formatting_rejects_an_incomplete_pair()
+    public async Task LinkFormattingRejectsAnIncompletePair()
     {
-        var error = Assert.Throws<InvalidDataException>(() => Read(Recipes + "link-formatting-test.recipe.json", "https://example.com/%CE%B1\n"));
-        Assert.Contains("incomplete multiline record", error.Message);
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("LinkFormattingTest.txt", "https://example.com/%CE%B1\n");
+        var result = await fixture.Claims("unicode", path);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("does not parse completely", result.Error, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4096)]
-    public void Link_detection_preserves_repeated_spans_codepoint_offsets_and_zero_link_examples(int chunk)
+    [Fact]
+    public async Task LinkAnnotationsRetainRepeatedSpansAndUnicodePositions()
     {
-        var rows = Read(Recipes + "link-detection-test.recipe.json",
-            "é ⸠a.com#x⸡ ⸠a.com#x⸡\nno link here\n", chunk);
-        const string text = "é a.com#x a.com#x";
-        Hash128 first = Hash128.Merkle(EntityTier.Document, [Root(text), Root("2"), Root("8")]);
-        Hash128 second = Hash128.Merkle(EntityTier.Document, [Root(text), Root("10"), Root("16")]);
-        foreach (var span in new[] { first, second })
-        {
-            Assert.Contains(rows, r => r.SubjectId == Root(text) && r.ObjectId == span
-                && r.TypeId == RelationTypeRegistry.RelationTypeId("span"));
-            Assert.Contains(rows, r => r.SubjectId == span && r.ObjectId == Root("a.com#x")
-                && r.TypeId == RelationTypeRegistry.RelationTypeId("text")
-                && r.ContextId == Root("Link_Text"));
-        }
-        AssertClaim(rows, text, "spanCount", "2", "Link_Count");
-        AssertClaim(rows, "no link here", "spanCount", "0", "Link_Count");
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("LinkDetectionTest.txt", "é ⸠a.com#x⸡ ⸠a.com#x⸡\nno link here\n");
+        var result = await fixture.Claims("unicode", path);
+        string[] claims=result.Claims();
+        Assert.Equal(2,claims.Length);
+        string records = string.Join('\n', claims.Concat(result.Lines("held")).Concat(result.Lines("record")));
+        Assert.Contains("é a.com#x a.com#x", records, StringComparison.Ordinal);
+        Assert.Contains(claims,line => line.Split('\t')[3]=="[é a.com#x a.com#x, 2, 8]");
+        Assert.Contains(claims,line => line.Split('\t')[3]=="[é a.com#x a.com#x, 10, 16]");
+        Assert.Contains("no link here", records, StringComparison.Ordinal);
+        Assert.DoesNotContain("⸠", records, StringComparison.Ordinal);
+        Assert.DoesNotContain("⸡", records, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("⸠unterminated")]
     [InlineData("unopened⸡")]
     [InlineData("⸠nested ⸠link⸡⸡")]
-    public void Malformed_link_annotations_are_rejected(string source) =>
-        Assert.Throws<InvalidDataException>(() => Read(Recipes + "link-detection-test.recipe.json", source));
-
-    [Fact]
-    public void Link_properties_resolve_codepoints_and_keep_property_names()
+    public async Task MalformedLinkAnnotationsAreRejected(string source)
     {
-        var bracket = Read(Recipes + "link-bracket.recipe.json", "0029 ; 0028 # closing to opening\n");
-        Hash128 bracketProperty = Hash128.Merkle(EntityTier.Document, [Root("Link_Bracket"), Root("(")]);
-        Assert.Contains(bracket, r => r.SubjectId == Root(")") && r.ObjectId == bracketProperty
-            && r.TypeId == RelationTypeRegistry.RelationTypeId("pair"));
-        var email = Read(Recipes + "link-email.recipe.json", "0041..0042 # range\n");
-        Hash128 emailProperty = Hash128.Merkle(EntityTier.Document, [Root("Link_Email"), Root("Yes")]);
-        Assert.Contains(email, r => r.SubjectId == Root("A") && r.ObjectId == emailProperty);
-        Assert.Contains(email, r => r.SubjectId == Root("B") && r.ObjectId == emailProperty);
-        var term = Read(Recipes + "link-term.recipe.json", "0021 ; Soft\n");
-        Hash128 termProperty = Hash128.Merkle(EntityTier.Document, [Root("Link_Term"), Root("Soft")]);
-        Assert.Contains(term, r => r.SubjectId == Root("!") && r.ObjectId == termProperty);
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("LinkDetectionTest.txt", source + "\n");
+        var result = await fixture.Claims("unicode", path);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("does not parse completely", result.Error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("LinkBracket.txt", "0029 ; 0028 # closing to opening\n", "claim\t0\t1\t)\tLink_Bracket\t(")]
+    [InlineData("LinkEmail.txt", "# @missing: 0000..10FFFF; No\n0041..0042 # range\n", "claim\t0\t1\t[A, B]\tLink_Email")]
+    [InlineData("LinkTerm.txt", "# @missing: 0000..10FFFF; Include\n0021 ; Soft\n", "claim\t0\t1\t!\tLink_Term\tSoft")]
+    [InlineData("LinkTerm.txt", "0041..0042 ; Soft\n", "claim\t0\t1\t[A, B]\tLink_Term\tSoft")]
+    public async Task LinkPropertiesRetainTheirScalarsRangeBoundsAndSourcePropertyNames(
+        string name, string content, string expected)
+    {
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write(name, content);
+        Assert.Equal(new[] { expected }, (await fixture.Claims("unicode", path)).Claims());
     }
 }

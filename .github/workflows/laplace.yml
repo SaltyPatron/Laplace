@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 070def11cf342f6b0cb9c865c847ba32432e46a0
+          ref: 645fa95eff9a320222c559593de033ae18ec3326
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -121,6 +121,37 @@ jobs:
 
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
+
+      - name: Verify Native recipe records and file coverage without PostgreSQL
+        env:
+          LAPLACE_DB: Host=127.0.0.1;Port=1;Username=unavailable;Database=unavailable;Timeout=1
+          PGHOST: 127.0.0.1
+          PGPORT: "1"
+        run: |
+          set -euo pipefail
+          source scripts/lib/installation.sh
+          export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
+          export LAPLACE_REUSE_INSTALLED_NATIVE=1
+          export LAPLACE_RECIPES="$LAPLACE_RECIPE_ENGINE_SOURCE/recipes"
+          export LAPLACE_TIER0="$LAPLACE_ENGINE_BUILD/core/perfcache/tier0.bin"
+          export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
+          export LAPLACE_HIGHWAY="$LAPLACE_ENGINE_BUILD/core/perfcache/highway.bin"
+          results="$RUNNER_TEMP/native-recipe-results"
+          for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do
+            dotnet test "app/$project/$project.csproj" -c Release --nologo \
+              -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
+              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests' \
+              --logger "trx;LogFileName=$project.trx" --results-directory "$results"
+          done
+          python3 - "$results" <<'PY'
+          from pathlib import Path
+          import sys, xml.etree.ElementTree as ET
+          for project, expected in [('Laplace.Decomposers.Tests', 16), ('Laplace.Substrate.Tests', 3)]:
+              path = Path(sys.argv[1]) / (project + '.trx')
+              counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
+              if int(counters['passed']) != expected or int(counters['total']) != expected:
+                  raise SystemExit(f'All {expected} Native recipe checks must execute and pass: {project}')
+          PY
 
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
@@ -155,6 +186,7 @@ jobs:
         with:
           name: ingest-completion-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/native-recipe-results
             ${{ runner.temp }}/ingest-completion-results
             ${{ runner.temp }}/database-name-results
           if-no-files-found: error
@@ -246,7 +278,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 070def11cf342f6b0cb9c865c847ba32432e46a0
+          ref: 645fa95eff9a320222c559593de033ae18ec3326
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
