@@ -27,6 +27,17 @@ public sealed class NativeRecipeExecution
 
     public static NativeRecipeExecution Configured()
     {
+        string executable = ConfiguredExecutable();
+        string bundledGrammars = Path.Combine(Path.GetDirectoryName(executable)!, "grammars");
+        string grammars = Directory.Exists(bundledGrammars) ? bundledGrammars
+            : LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_GRAMMARS")
+                ?? throw new DirectoryNotFoundException("The Native Engine grammar bundle is not installed.");
+        return new NativeRecipeExecution(executable, EtlManifest.RecipesRoot, grammars,
+            LaplaceInstall.ResolveT0Perfcache(), LaplaceInstall.ResolveHighwayPerfcache());
+    }
+
+    private static string ConfiguredExecutable()
+    {
         string name = OperatingSystem.IsWindows() ? "laplace.exe" : "laplace";
         var candidates = new List<string>
         {
@@ -37,14 +48,8 @@ public sealed class NativeRecipeExecution
         if (!string.IsNullOrWhiteSpace(prefix)) candidates.Add(Path.Combine(prefix, "bin", name));
         var build = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_ENGINE_BUILD");
         if (!string.IsNullOrWhiteSpace(build)) candidates.Add(Path.Combine(build, "core", "recipe_engine", "runtime", "bin", name));
-        string executable = candidates.FirstOrDefault(File.Exists)
+        return candidates.FirstOrDefault(File.Exists)
             ?? throw new FileNotFoundException("The canonical Native recipe Engine is not installed or built.");
-        string bundledGrammars = Path.Combine(Path.GetDirectoryName(executable)!, "grammars");
-        string grammars = Directory.Exists(bundledGrammars) ? bundledGrammars
-            : LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_GRAMMARS")
-                ?? throw new DirectoryNotFoundException("The Native Engine grammar bundle is not installed.");
-        return new NativeRecipeExecution(executable, EtlManifest.RecipesRoot, grammars,
-            LaplaceInstall.ResolveT0Perfcache(), LaplaceInstall.ResolveHighwayPerfcache());
     }
 
     public NativeRecipeExecution(string executable, string recipes, string grammars, string tier0, string highway)
@@ -107,12 +112,7 @@ public sealed class NativeRecipeExecution
         if (request.Mode == NativeRecipeMode.Claims && paths.Length == 0)
             throw new ArgumentException("Claim inspection requires explicit input paths.", nameof(request));
 
-        var start = new ProcessStartInfo(Executable)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(Executable)!,
-        };
+        var start = ProcessInfo(Executable, request.ConnectionInfo);
         start.ArgumentList.Add("ingest");
         start.ArgumentList.Add("-r"); start.ArgumentList.Add(Recipes);
         start.ArgumentList.Add("-t"); start.ArgumentList.Add(Tier0);
@@ -121,8 +121,6 @@ public sealed class NativeRecipeExecution
         start.Environment.Remove("LAPLACE_INGEST_ONE");
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
         start.Environment["LAPLACE_GRAMMARS"] = Grammars;
-        if (request.ConnectionInfo is not null)
-            start.Environment["LAPLACE_CONNINFO"] = request.ConnectionInfo;
         if (request.Threads > 0)
         {
             start.ArgumentList.Add("-j");
@@ -147,13 +145,43 @@ public sealed class NativeRecipeExecution
         return start;
     }
 
-    public async Task<int> ExecuteAsync(NativeRecipeRequest request,
+    public Task<int> ExecuteAsync(NativeRecipeRequest request,
+        Stream standardOutput, Stream standardError, CancellationToken ct = default)
+        => ExecuteAsync(StartInfo(request), standardOutput, standardError, ct);
+
+    // Database inventory shares the same Native operation and selected target
+    // as laplace status. It does not require recipes or grammar bundles.
+    public static Task<int> StatusAsync(string connectionInfo, bool joins,
+        Stream standardOutput, Stream standardError, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionInfo);
+        var start = ProcessInfo(ConfiguredExecutable(), connectionInfo);
+        start.ArgumentList.Add("status");
+        start.Environment["LAPLACE_TIER0"] = LaplaceInstall.ResolveT0Perfcache();
+        start.Environment["LAPLACE_HIGHWAY"] = LaplaceInstall.ResolveHighwayPerfcache();
+        if (joins) start.ArgumentList.Add("--joins");
+        return ExecuteAsync(start, standardOutput, standardError, ct);
+    }
+
+    private static ProcessStartInfo ProcessInfo(string executable, string? connectionInfo)
+    {
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
+        };
+        if (connectionInfo is not null) start.Environment["LAPLACE_CONNINFO"] = connectionInfo;
+        return start;
+    }
+
+    private static async Task<int> ExecuteAsync(ProcessStartInfo start,
         Stream standardOutput, Stream standardError, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
         ct.ThrowIfCancellationRequested();
-        using var process = new Process { StartInfo = StartInfo(request) };
+        using var process = new Process { StartInfo = start };
         if (!process.Start()) throw new InvalidOperationException("The Native recipe Engine did not start.");
         using var cancellation = ct.Register(() => Stop(process));
         Task output = PumpAsync(process.StandardOutput.BaseStream, standardOutput, process, ct);
