@@ -30,11 +30,14 @@ public sealed class LeaderBandCatalogGateTests
         Assert.Contains("SqlCatalog.Get(\"leaders.named\")", text);
         Assert.DoesNotContain("SELECT ", text);
         Assert.Contains("SQL_QUERY(\"leaders.named\"", catalog);
-        Assert.Contains("FROM ops.band_leaders($1,$2) WITH ORDINALITY", catalog);
-        Assert.Contains("FROM converse.relation_band_catalog() AS b", catalog);
-        Assert.Contains("LEFT JOIN leaders AS l ON l.band=b.band", catalog);
-        Assert.DoesNotContain("FROM converse.relation_bands()", catalog);
-        Assert.DoesNotContain("JOIN converse.relation_bands()", catalog);
+        int start = catalog.IndexOf("SQL_QUERY(\"leaders.named\"", StringComparison.Ordinal);
+        int end = catalog.IndexOf("\nSQL_", start + 1, StringComparison.Ordinal);
+        string named = end < 0 ? catalog[start..] : catalog[start..end];
+        Assert.Contains("FROM ops.band_leaders($1,$2) WITH ORDINALITY", named);
+        Assert.Contains("FROM converse.relation_band_catalog() AS b", named);
+        Assert.Contains("LEFT JOIN leaders AS l ON l.band=b.band", named);
+        Assert.DoesNotContain("FROM converse.relation_bands()", named);
+        Assert.DoesNotContain("JOIN converse.relation_bands()", named);
     }
 
     private static string ExtractMethod(string text, string signaturePrefix)

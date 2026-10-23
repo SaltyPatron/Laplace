@@ -36,12 +36,13 @@ public sealed class ModelTokenEdgeETLTests
     }
 
     // A relation type id is the content id of its label under the identity law (Laplace#1896):
-    // Laplace-Native's lp_id_codepoints_utf8 of the label, as the reseeded database resolves it.
+    // Native UAX #29 composition of the complete label, independently checked with
+    // the Engine text command; underscores retain their actual constituent boundaries.
     [Theory]
     [InlineData("ATTENDS", "41d1aabfed422bec45b614d029ff593d")]
-    [InlineData("COMPLETES_TO", "86dd76759ce3b85b555521610185de40")]
-    [InlineData("OV_RELATES", "cedfb2c47dcd77a56308f644017e7a71")]
-    [InlineData("SIMILAR_TO", "7bb34b19e33b2bc81f1ae3c377636dd7")]
+    [InlineData("COMPLETES_TO", "6c823140e824506b36260b56ec1be599")]
+    [InlineData("OV_RELATES", "baac25ca948d5f90893e0e6e8181a3d7")]
+    [InlineData("SIMILAR_TO", "a0638ea96aed0d0c4a2e69b13c6cefb1")]
     public void ModelRelationIds_MatchRetainedDatabaseResolution(string relation, string expectedHex)
     {
         Hash128 id = RelationTypeRegistry.RelationTypeId(relation);

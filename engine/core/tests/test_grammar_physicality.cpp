@@ -112,17 +112,23 @@ TEST_F(GrammarPhysicality, DistinctSourcesStageEachFormOnce) {
         10, 1.0, nullptr, 0), 0);
     const size_t first_entities = intent_stage_entity_count(stage.get());
     ASSERT_GT(first_entities, 0u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
+    const size_t first_forms = intent_stage_physicality_count(stage.get());
+    ASSERT_GE(first_forms, forms.size()); // Includes the retained Native lexical floor.
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceB,
         20, 1.0, nullptr, 0), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), first_entities);
-    EXPECT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), first_forms);
     auto captured = capture(stage);
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* inputs = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, forms.size());
-    for (size_t i = 0; i < forms.size(); ++i) expect_body(inputs[i], *forms[i]);
+    ASSERT_EQ(count, first_forms);
+    for (size_t i = 0; i < count; ++i)
+        for (size_t j = 0; j < i; ++j)
+            EXPECT_FALSE(hash128_equals(&inputs[i].entity_id, &inputs[j].entity_id)
+                && inputs[i].type == inputs[j].type);
+    const size_t first = count - forms.size();
+    for (size_t i = 0; i < forms.size(); ++i) expect_body(inputs[first + i], *forms[i]);
 }
 
 // A present composition is its entity and its one composition physicality: a present
@@ -166,6 +172,8 @@ TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
     ASSERT_EQ(laplace_compose_drain_into_stage(original.get(), stage.get(), &kSourceA,
         10, 1.0, nullptr, 0), 0);
     const size_t entities = intent_stage_entity_count(stage.get());
+    const size_t first_forms = intent_stage_physicality_count(stage.get());
+    ASSERT_GE(first_forms, forms.size());
     ASSERT_EQ(laplace_compose_drain_into_stage(changed.get(), stage.get(), &kSourceB,
         20, 1.0, nullptr, 0), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), entities);
@@ -173,8 +181,12 @@ TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, forms.size());
-    expect_body(bodies[0], original->physicalities[0]);
+    ASSERT_EQ(count, first_forms);
+    for (size_t i = 0; i < count; ++i)
+        for (size_t j = 0; j < i; ++j)
+            EXPECT_FALSE(hash128_equals(&bodies[i].entity_id, &bodies[j].entity_id)
+                && bodies[i].type == bodies[j].type);
+    expect_body(bodies[count - forms.size()], original->physicalities[0]);
 }
 
 // Two identical games in one source are one composition occurring twice in the file's

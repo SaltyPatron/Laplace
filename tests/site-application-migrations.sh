@@ -46,7 +46,7 @@ cp "$work/stage/app/.laplace-source-revision" "$work/bundle/app/"
 cp "$work/stage/app/wwwroot/.laplace-web-source-revision" "$work/bundle/app/wwwroot/"
 touch "$work/bundle/app/Laplace.Endpoints.OpenAICompat.dll"
 mkdir -p "$work/bundle/app/cli/share/laplace"
-for cache in laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache; do
+for cache in tier0 highway laplace_chess_position_perfcache; do
   printf fixture > "$work/bundle/app/cli/share/laplace/$cache.bin"
 done
 printf '#!/bin/sh\nexit 0\n' > "$work/bundle/app/cli/Laplace.Cli"
@@ -59,11 +59,11 @@ LAPLACE_INSTALL_PREFIX="$work/installed" bash -c 'set -euo pipefail; fail() { ec
 [[ "$(cat "$work/stage/share/laplace/cache")" == new ]]
 [[ -x "$work/stage/app/cli/Laplace.Cli" ]]
 echo 'PASS receive stages caches without replacing the serving copy'
-rm "$work/stage/app/cli/share/laplace/laplace_highway_perfcache.bin"
+rm "$work/stage/app/cli/share/laplace/highway.bin"
 if bash -c 'set -euo pipefail; source "$SITE_WORK/functions.sh"; verify_cli_package "$SITE_WORK/stage/app/cli"' > "$work/missing-cache-result" 2>&1; then
   echo 'FAIL accepted CLI package without its highway cache'; exit 1
 fi
-grep -q 'missing laplace_highway_perfcache.bin' "$work/missing-cache-result"
+grep -q 'missing highway.bin' "$work/missing-cache-result"
 echo 'PASS missing CLI cache is rejected even when its executable starts'
 
 # Selecting a restricted substrate identity does not change the application login.
@@ -81,7 +81,8 @@ echo 'PASS substrate selection preserves the distinct application identity'
 
 sed -n '/^api_env() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
 mkdir -p "$work/runtime" "$work/prefix/share/laplace"
-touch "$work/runtime/laplace-api.env" "$work/prefix/share/laplace/laplace_t0_perfcache_17.bin"
+touch "$work/runtime/laplace-api.env"
+printf fixture > "$work/prefix/share/laplace/tier0.bin"
 export LAPLACE_APP_DIR="$work/runtime" LAPLACE_INSTALL_PREFIX="$work/prefix" LAPLACE_API_URL=http://127.0.0.1:5187 LAPLACE_EXTERNAL="$work/external"
 export LAPLACE_DB='Host=substrate;Username=substrate_runtime;Database=substrate'
 export LAPLACE_APP_DB='Host=application;Username=schema_owner;Database=app'

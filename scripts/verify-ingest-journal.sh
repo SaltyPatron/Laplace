@@ -22,7 +22,7 @@ usage() {
 SOURCE=""
 if [[ "${1:-}" == "--cli-key" ]]; then
   [[ $# -ge 2 ]] || usage
-  key="$2"
+  key="$(python3 "$ROOT/scripts/ingest_catalog.py" --resolve "$2")"
   SOURCE=$(python3 -c "
 import json, sys
 e = json.load(open('${ROOT}/scripts/decomposer-gates.json'))['sources'].get(sys.argv[1])

@@ -22,14 +22,22 @@ provision_deps() {
 
 # Repository-policy checks are an explicit `check` operation. They are not a
 # prerequisite hidden inside build, deploy, database, or ingest operations.
+ci_contract_check() {
+  local status=0
+  "$@" || status=$?
+  if (( status )); then ci_failed_checks+=("$* (exit $status)"); fi
+  return 0
+}
+
 run_ci_contract_checks() {
+  local -a ci_failed_checks=()
   local ci_tmp="${RUNNER_TEMP:-$ROOT/build/ci-policy-tmp}"
   export LAPLACE_WORK_ROOT="$ci_tmp/laplace-work"
   export LAPLACE_CHESS_PGN_CACHE="$LAPLACE_WORK_ROOT/chess-pgn-validation"
   mkdir -p "$ci_tmp" "$LAPLACE_WORK_ROOT" "$LAPLACE_CHESS_PGN_CACHE"
   export TMPDIR="$ci_tmp" TMP="$ci_tmp" TEMP="$ci_tmp"
 
-  bash -n \
+  ci_contract_check bash -n \
     scripts/product-ci.sh \
     scripts/pipeline.sh \
     scripts/ci-deps.sh \
@@ -41,7 +49,7 @@ run_ci_contract_checks() {
     scripts/check-deployed-revision.sh \
     scripts/publish-applications.sh \
     deploy/linux/deploy.sh
-  python3 -m py_compile \
+  ci_contract_check python3 -m py_compile \
     scripts/ci-impact-plan.py \
     scripts/ci-qualification-cache.py \
     scripts/ci-product-freshness.py \
@@ -49,54 +57,57 @@ run_ci_contract_checks() {
     scripts/ci_managed_projects.py \
     scripts/web-artifact.py \
     scripts/atomic-directory-exchange.py
-  python3 scripts/validate-pipeline.py
+  ci_contract_check python3 scripts/validate-pipeline.py
   # A BEGIN ATOMIC body binds its callees at CREATE: the install and upgrade manifests must
   # define every callee first, or a fresh CREATE EXTENSION fails (42883 on staging).
-  python3 scripts/check-sql-manifest-dependencies.py
-  python3 scripts/test-sql-manifest-dependencies.py
-  python3 scripts/test-ci-workspace.py
-  python3 scripts/test-runtime-installation.py
-  python3 scripts/test-service-units.py
-  python3 scripts/test-product-ci-artifact-ownership.py
-  python3 scripts/test-seed-workflow-ownership.py
-  python3 scripts/test-ingest-source-exit.py
-python3 scripts/test-db-reset-guard.py
-python3 scripts/test-host-lock-wait.py
-  ruby tests/site-workflow.rb
-  python3 tests/site-status.py
-  python3 scripts/test-platform-access-audit.py
-  python3 scripts/test-platform-access-enroll.py
-  python3 scripts/test-platform-owner-enroll.py
-  python3 tests/identity-owner-policy.py
-  bash tests/site-revision-receipts.sh
-  bash tests/site-application-migrations.sh
-  bash tests/database-application-maintenance.sh
-  bash tests/site-host-lock.sh
-  bash tests/machine-config.sh
-  python3 tests/linux-configuration.py
-  python3 tests/configured-paths.py
-  python3 scripts/test-workflow-architecture.py
-  python3 scripts/test-benchmark-suite.py
-  python3 scripts/test-ci-impact-plan.py
-  ruby tests/legacy-delivery-contracts.rb
-  python3 scripts/test-ci-qualification-cache.py
-  python3 scripts/test-ci-product-freshness.py
-  python3 scripts/test-ci-managed-projects.py
-  python3 scripts/test-managed-policy.py
-  python3 scripts/test-application-payload.py
-  python3 scripts/test-application-publish.py
-  python3 scripts/test-cutechess-calibration.py
-  python3 scripts/test-chess-x11-runtime.py
-  python3 scripts/test-chess-floor-artifacts.py
-  python3 scripts/test-recorded-chess-selection.py
-  python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
-  python3 scripts/test-managed-db-scheduling.py
-  python3 scripts/test-codegen-configure.py
-  python3 scripts/test-cmake-release.py
-  python3 scripts/test-perfcache-source-fingerprint.py
-  python3 scripts/test-web-artifact.py
-  python3 scripts/test-atomic-directory-exchange.py
-  python3 scripts/test-web-publication.py
+  ci_contract_check python3 scripts/check-sql-manifest-dependencies.py
+  ci_contract_check python3 scripts/test-sql-manifest-dependencies.py
+  ci_contract_check python3 scripts/test-ci-workspace.py
+  ci_contract_check python3 scripts/test-runtime-installation.py
+  ci_contract_check python3 scripts/test-service-units.py
+  ci_contract_check python3 scripts/test-product-ci-artifact-ownership.py
+  ci_contract_check python3 scripts/test-seed-workflow-ownership.py
+  ci_contract_check python3 scripts/test-ingest-source-exit.py
+  ci_contract_check python3 scripts/test-db-reset-guard.py
+  ci_contract_check python3 scripts/test-host-lock-wait.py
+  ci_contract_check ruby tests/site-workflow.rb
+  ci_contract_check python3 tests/site-status.py
+  ci_contract_check python3 scripts/test-platform-access-audit.py
+  ci_contract_check python3 scripts/test-platform-access-enroll.py
+  ci_contract_check python3 scripts/test-platform-owner-enroll.py
+  ci_contract_check python3 tests/identity-owner-policy.py
+  ci_contract_check bash tests/site-revision-receipts.sh
+  ci_contract_check bash tests/site-application-migrations.sh
+  ci_contract_check bash tests/database-application-maintenance.sh
+  ci_contract_check bash tests/site-host-lock.sh
+  ci_contract_check bash tests/machine-config.sh
+  ci_contract_check python3 tests/linux-configuration.py
+  ci_contract_check python3 tests/configured-paths.py
+  ci_contract_check python3 scripts/test-workflow-architecture.py
+  ci_contract_check python3 scripts/test-benchmark-suite.py
+  ci_contract_check python3 scripts/test-ci-impact-plan.py
+  ci_contract_check ruby tests/legacy-delivery-contracts.rb
+  ci_contract_check python3 scripts/test-ci-qualification-cache.py
+  ci_contract_check python3 scripts/test-ci-product-freshness.py
+  ci_contract_check python3 scripts/test-ci-managed-projects.py
+  ci_contract_check python3 scripts/test-managed-policy.py
+  ci_contract_check python3 scripts/test-application-payload.py
+  ci_contract_check python3 scripts/test-application-publish.py
+  ci_contract_check python3 scripts/test-cutechess-calibration.py
+  ci_contract_check python3 scripts/test-chess-x11-runtime.py
+  ci_contract_check python3 scripts/test-chess-floor-artifacts.py
+  ci_contract_check python3 scripts/test-recorded-chess-selection.py
+  ci_contract_check python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
+  ci_contract_check python3 scripts/test-managed-db-scheduling.py
+  ci_contract_check python3 scripts/test-codegen-configure.py
+  ci_contract_check python3 scripts/test-cmake-release.py
+  ci_contract_check python3 scripts/test-web-artifact.py
+  ci_contract_check python3 scripts/test-atomic-directory-exchange.py
+  ci_contract_check python3 scripts/test-web-publication.py
+  if (( ${#ci_failed_checks[@]} )); then
+    printf '::error::CI contract check failed: %s\n' "${ci_failed_checks[@]}" >&2
+    return 1
+  fi
 }
 
 require_built_revision() {

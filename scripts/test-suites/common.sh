@@ -19,6 +19,14 @@ sync_managed_native() {
 
 set_dev_perfcache() {
   local build_dir candidate
+  if [[ -n "${LAPLACE_CANDIDATE_ENGINE_BUILD:-}" ]]; then
+    build_dir="$LAPLACE_CANDIDATE_ENGINE_BUILD"
+    [[ -f "$build_dir/CMakeCache.txt" ]] || { echo "::error::candidate CMake build missing: $build_dir" >&2; return 1; }
+    set_native_caches "$build_dir/core/perfcache"
+    export LAPLACE_ENGINE_BUILD="$build_dir"
+    echo "::notice::managed dev qualification candidate ROM pair: $LAPLACE_TIER0, $LAPLACE_HIGHWAY"
+    return 0
+  fi
   if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
     set_installed_perfcache
     [[ -n "${LAPLACE_PERFCACHE_BIN:-}" && -f "$LAPLACE_PERFCACHE_BIN" ]] || {

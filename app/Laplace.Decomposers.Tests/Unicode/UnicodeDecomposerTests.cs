@@ -23,7 +23,7 @@ public sealed class UnicodeDecomposerTests
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();
 
-    private const int TotalCodepoints = 1_114_112;
+    private const int TotalCodepoints = 1_112_064; // Unicode scalar values exclude the surrogate range.
 
     private static UnicodeDecomposer NewDecomposer() => new UnicodeDecomposer();
 
@@ -165,12 +165,12 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
-    public async Task PhaseOrder_Tier0Codepoints_Before_MappingAttestations()
+    public async Task CappedFloorPhaseUsesTheMappedRomWithoutPersistingCodepointRows()
     {
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
-        // A capped Tier-0 prefix proves the persistence ordering; with any positive cap
-        // the property-mapping phases are not reached.
+        // The Native floor is mapped rather than inserted into PostgreSQL. A
+        // capped floor phase does not admit later property-mapping work.
         var opts = DecomposerOptions.Default with { MaxInputUnits = 64 };
 
         bool sawCodepointEntity = false;
@@ -205,10 +205,10 @@ public sealed class UnicodeDecomposerTests
                     sawMappingAttestation = true;
             }
         }
-        Assert.True(sawCodepointEntity,
-            "MaxInputUnits prefix must still contain persisted Tier-0 codepoint rows");
+        Assert.False(sawCodepointEntity,
+            "Tier-0 codepoints belong to the mapped Native ROM, never persisted seed rows");
         Assert.False(sawMappingAttestation,
-            "MaxInputUnits cap must stop after Tier-0 floor persistence; mapping phases must not run");
+            "MaxInputUnits cap must stop after the mapped floor phase; mapping phases must not run");
     }
 
     [Fact]

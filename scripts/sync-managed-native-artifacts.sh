@@ -25,11 +25,12 @@ if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
   )
   native_label="installed"
 else
+  engine_build="${LAPLACE_ENGINE_BUILD:-$ROOT/build/engine}"
   native=(
-    "build/engine/core/liblaplace_core.so"
-    "build/engine/dynamics/liblaplace_dynamics.so"
-    "build/engine/synthesis/liblaplace_synthesis.so"
-    "build/engine/core/liblaplace_syzygy.so"
+    "$engine_build/core/liblaplace_core.so"
+    "$engine_build/dynamics/liblaplace_dynamics.so"
+    "$engine_build/synthesis/liblaplace_synthesis.so"
+    "$engine_build/core/liblaplace_syzygy.so"
   )
   native_label="candidate"
 fi

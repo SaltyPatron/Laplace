@@ -5,11 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Relations source"
-        type: choice
+        description: "Source name or short alias from the recipe catalog"
+        type: string
         required: true
         default: omw
-        options: [omw, oewn, verbnet-gl, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles, project-gutenberg]
       language_scope:
         description: "Language scope for multilingual sources"
         type: choice

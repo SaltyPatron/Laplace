@@ -1,4 +1,6 @@
+using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Tests;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Xunit;
 
@@ -10,7 +12,7 @@ public sealed class CILIReferenceAdmissionTests
     public async Task CanonicalNativeRecipeRetainsIdentifierSubjectsAndLanguageQualifiedDefinitions()
     {
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
-        string fixture = Path.Combine(Directory.GetParent(repository)!.FullName, "Laplace-Engine", "tests",
+        string fixture = Path.Combine(Directory.GetParent(EtlManifest.RecipesRoot)!.FullName, "tests",
             "fixtures", "highway-identities", "cili", "ili.ttl");
         string[] claims = await NativeCorpusAssertions.ClaimsAsync("cili", fixture);
         Assert.Equal(2, claims.Length);

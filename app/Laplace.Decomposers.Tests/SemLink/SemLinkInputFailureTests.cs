@@ -43,8 +43,21 @@ public sealed class SemLinkInputFailureTests
     {
         await WithInputAsync("{\"mapping\":{}}", async path =>
         {
-            using var locked = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            Assert.NotEqual(0, await ExecuteAsync(path));
+            if (OperatingSystem.IsWindows())
+            {
+                using var locked = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                Assert.NotEqual(0, await ExecuteAsync(path));
+            }
+            else
+            {
+                var permissions = File.GetUnixFileMode(path);
+                try
+                {
+                    File.SetUnixFileMode(path, UnixFileMode.None);
+                    Assert.NotEqual(0, await ExecuteAsync(path));
+                }
+                finally { File.SetUnixFileMode(path, permissions); }
+            }
         });
     }
 

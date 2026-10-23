@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The dev test profile (native ctest without the regress label, every managed test project's Tier!=db/live/perf tests,
+# The dev test profile (native ctest without the regress label, every managed project's canonical dev-category tests,
 # the UCI handshake, the browser suites) on a CI runner. Everything it needs is public and pinned here or in
 # scripts/ci/tree-sitter-grammars.tsv: the dependency sources at the build host's revisions, the UCD release the build
 # pins, and the oneAPI compiler/MKL/TBB versions hart-server builds with. The perf caches are build products of those
@@ -13,7 +13,7 @@ set -euo pipefail
 # what a GitHub-hosted runner presents.
 for name in $(compgen -e); do
   case "$name" in
-    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
+    LAPLACE_CI_WORK|LAPLACE_CI_NATIVE_SOURCE|LAPLACE_CI_ENGINE_SOURCE|LAPLACE_CI_OPERATIONS_SOURCE|LAPLACE_CI_ICU_DIR|LAPLACE_CI_ISO639_ARCHIVE|LAPLACE_CI_UCD_FLAT_ARCHIVE|LAPLACE_EIGEN|LAPLACE_BUILD_GROUP) ;;
     LAPLACE_*|PG*) unset "$name" ;;
   esac
 done
@@ -28,15 +28,17 @@ export LAPLACE_BUILD_ROOT="$WORK/managed" LAPLACE_WORK_ROOT="$WORK/work"
 # and the lichess openings revision the estate acquires (LichessOpenings/lichess-openings-<rev>.tar.gz),
 # the CILI checkout and the ISO 639-3 code tables, each at the revision hart-server's /vault/Data holds.
 DATA="$WORK/data"
-export LAPLACE_DATA="$DATA"
+export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models"
 # Tests keep their scratch under the declared permanent work root (scripts/lib/storage.sh), never /tmp.
 export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
 # A hosted runner has no laplace-runner group; the work roots belong to the runner's own group (scripts/lib/storage.sh).
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
-BUILD="$ROOT/build/engine"   # the layout scripts/sync-managed-native-artifacts.sh and the managed props read
+BUILD="$WORK/build/engine"   # checkout cleanup must not discard the candidate compiler outputs
 export LAPLACE_ENGINE_BUILD="$BUILD"
 export LAPLACE_BUILD="$WORK/build"
 export LAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_CI_ENGINE_SOURCE"
+export LAPLACE_RECIPES="$LAPLACE_RECIPE_ENGINE_SOURCE/recipes"
+export LAPLACE_COOKBOOK_PATH="$ROOT/recipes"
 export LAPLACE_OPERATIONS="$LAPLACE_CI_OPERATIONS_SOURCE"
 export LAPLACE_ICU_DIR="$LAPLACE_CI_ICU_DIR"
 export LAPLACE_TREESITTER="$EXT/tree-sitter"
@@ -44,10 +46,11 @@ export LAPLACE_GRAMMARS="$WORK/grammars"
 export LAPLACE_TIER0="$BUILD/core/perfcache/tier0.bin"
 export LAPLACE_FLAGS="$BUILD/core/perfcache/tier0.flags"
 export LAPLACE_HIGHWAY="$BUILD/core/perfcache/highway.bin"
+export LAPLACE_NATIVE_TEST_LIBRARY="$BUILD/native/liblaplace.so"
 # An empty machine declaration: the readers (scripts/machine-env.py, LaplaceInstall) take an
 # explicitly named file as the whole declaration, so this host's own declaration is never read.
 export LAPLACE_MACHINE_ENV="$WORK/machine.env" LAPLACE_INSTALL_PREFIX="$WORK/no-install"
-mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess"
+mkdir -p "$EXT" "$UCD" "$LAPLACE_WORK_ROOT" "$TMPDIR" "$DATA/UCD/Public/UCD" "$DATA/Games/Chess" "$LAPLACE_MODELS"
 : > "$LAPLACE_MACHINE_ENV"
 
 say() { echo "::group::$*"; }
@@ -73,10 +76,11 @@ deps() {
   ln -sfnT "${LAPLACE_EIGEN:-/usr/include/eigen3}" "$EXT/eigen"
   local name rev url
   mkdir -p "$EXT/tree-sitter-grammars"
+  python3 scripts/ingest_catalog.py --grammar-sources "$ROOT/scripts/ci/tree-sitter-grammars.tsv" > "$WORK/required-grammars.tsv"
   while IFS=$'\t' read -r name rev url; do
     [[ -z "$name" || "$name" == \#* ]] && continue
     fetch "$EXT/tree-sitter-grammars/$name" "$url" "$rev" &
-  done < "$ROOT/scripts/ci/tree-sitter-grammars.tsv"
+  done < "$WORK/required-grammars.tsv"
   wait
   end
   say "UCD $(ucd_version)"
@@ -98,8 +102,13 @@ iso639_fetch() {
   local zip="$WORK/iso-639-3_Code_Tables_20260415.zip"
   local sum=106a3f3b073e94bcc767f663e05f386358b1285ba2b063f24a2eeb6bafcc982a
   if ! echo "$sum  $zip" | sha256sum -c --status 2>/dev/null; then
-    curl -fsSL --retry 3 -o "$zip" \
-      https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_20260415.zip
+    if [[ -n "${LAPLACE_CI_ISO639_ARCHIVE:-}" && -f "$LAPLACE_CI_ISO639_ARCHIVE" ]]; then
+      echo "$sum  $LAPLACE_CI_ISO639_ARCHIVE" | sha256sum -c --status
+      cp "$LAPLACE_CI_ISO639_ARCHIVE" "$zip"
+    else
+      curl -fsSL --retry 3 -o "$zip" \
+        https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_20260415.zip
+    fi
     echo "$sum  $zip" | sha256sum -c --status
   fi
   rm -rf "$DATA/ISO639"; mkdir -p "$DATA/ISO639"
@@ -120,6 +129,24 @@ ucd_fetch() {
     curl -fsSL --retry 3 -o "$UCD/uca/allkeys.txt" "$base/uca/allkeys.txt"
   fi
   grep -Fq "for Version $v of the Unicode Standard." "$UCD/ReadMe.txt"
+  # The Native flag generator reads flat XML; the tier-0 generator reads the
+  # grouped archive. Both are required inputs of the same Unicode 17 build.
+  [[ "$v" == 17.0.0 ]] || { echo "Update the flat XML input pin for Unicode $v" >&2; return 1; }
+  local flat="$UCD/ucdxml/ucd.all.flat.zip"
+  local sum=2776dfabc354323c81e5092afb17bc717e6c9f6661d083d1564c05ae837b6d2d
+  mkdir -p "$UCD/ucdxml"
+  if ! echo "$sum  $flat" | sha256sum -c --status 2>/dev/null; then
+    if [[ -n "${LAPLACE_CI_UCD_FLAT_ARCHIVE:-}" && -f "$LAPLACE_CI_UCD_FLAT_ARCHIVE" ]]; then
+      echo "$sum  $LAPLACE_CI_UCD_FLAT_ARCHIVE" | sha256sum -c --status
+      cp "$LAPLACE_CI_UCD_FLAT_ARCHIVE" "$flat"
+    else
+      curl -fsSL --retry 3 -o "$flat" "$base/ucdxml/ucd.all.flat.zip"
+    fi
+    echo "$sum  $flat" | sha256sum -c --status
+  fi
+  if [[ ! -s "$UCD/ucdxml/ucd.all.flat.xml" || "$flat" -nt "$UCD/ucdxml/ucd.all.flat.xml" ]]; then
+    unzip -q -o "$flat" -d "$UCD/ucdxml"
+  fi
 }
 
 oneapi() {
@@ -141,6 +168,8 @@ native() {
     -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR" \
     -DLAPLACE_CHESS_OPENINGS="$DATA/Games/Chess/lichess-openings"
   cmake --build "$BUILD" -j "$(nproc)"
+  cmake --build "$BUILD" --target laplace laplace_highway_perfcache -j "$(nproc)"
+  python3 scripts/ingest_catalog.py --check-engine "$BUILD/core/recipe_engine/laplace"
   test -s "$LAPLACE_TIER0" || { echo "::error::tier-0 perf-cache not produced" >&2; exit 1; }
   "$BUILD/core/recipe_engine/laplace" flags -u "$UCD" -o "$LAPLACE_FLAGS"
   end
@@ -151,15 +180,18 @@ native() {
 
 managed() {
   oneapi
+  # The managed catalog's workspace root does not relocate Native dependencies.
+  export LAPLACE_SRC="$(dirname "$ROOT")"
   say "managed: build"
   dotnet build app/Laplace.slnx -c Release --nologo -v minimal
+  python3 scripts/ingest_catalog.py --check-mono "$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
   end
-  say "managed: dev tier (Tier!=db&Tier!=live&Tier!=perf) on the candidate native build"
+  say "managed: canonical dev tier on the candidate native build"
   export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
-  bash scripts/sync-managed-native-artifacts.sh
+  export LAPLACE_CANDIDATE_ENGINE_BUILD="$BUILD"
+  test -s "$LAPLACE_HIGHWAY" && test -s "$LAPLACE_NATIVE_TEST_LIBRARY"
   rm -rf "$WORK/managed-results"
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo -v minimal \
-    --filter 'Tier!=db&Tier!=live&Tier!=perf' --logger 'trx' --results-directory "$WORK/managed-results"
+  bash scripts/test-suites/managed-dev.sh --logger trx --results-directory "$WORK/managed-results"
   python3 "$ROOT/scripts/ci/trx-summary.py" "$WORK/managed-results"
   end
 }

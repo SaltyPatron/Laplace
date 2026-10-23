@@ -15,6 +15,8 @@ internal static class Program
         int exitCode = 1;
         try
         {
+            if (args.Length >= 2 && args[0] == "ingest" && args[1] is "catalog" or "--catalog" or "--list-sources")
+                return IngestCatalogCommands.Run(args[1..]);
             logging = CliRuntime.LoggerFactory;
             using var scope = logging.CreateLogger("cli").BeginScope(
                 new Dictionary<string, object> { ["OperationId"] = Guid.NewGuid().ToString("N"),
@@ -36,7 +38,8 @@ internal static class Program
     private static async Task<int> RunAsync(string[] args)
     {
         if (args.Length > 0 && args[0] == "--api-client")
-            return await ApiClientCommands.RunAsync(args[1..]);
+            return await ApiClientCommands.RunAsync(args[1..], (error, message) =>
+                CliRuntime.LoggerFactory.CreateLogger("api-client").LogError(error, "{Failure}", message));
 
         // Native runtime init before any command touches the engine, keyed off the original
         // args[0] so cpu-topology (which can run before MKL is available) is exempt.

@@ -121,6 +121,7 @@ class DatabaseHealthScriptTests(unittest.TestCase):
         database_extension="test-ext",
         source_extension="test-ext",
         stale_relation_bands=False,
+        missing_band_columns=False,
     ):
         with tempfile.TemporaryDirectory(prefix="laplace-db-health-test-") as temporary:
             temp = Path(temporary)
@@ -161,11 +162,14 @@ elif "SELECT extversion FROM pg_extension" in query:
     print(os.environ["FAKE_DATABASE_EXTENSION"])
 elif "string_agg(name" in query:
     print("")
-elif "pg_get_functiondef('converse.relation_bands()'::regprocedure)" in query:
+elif "WITH RECURSIVE functions(oid)" in query:
     if os.environ.get("FAKE_STALE_RELATION_BANDS") == "1":
-        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM laplace.consensus $$;")
+        print("f")
     else:
-        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM laplace.relation_registry() $$;")
+        print("t")
+elif "FROM converse.relation_bands() WHERE false" in query:
+    if os.environ.get("FAKE_MISSING_BAND_COLUMNS") == "1":
+        raise SystemExit(1)
 elif "FROM laplace.attestations WHERE false" in query:
     if os.environ.get("FAKE_PSQL_MISSING_WRITER_COLUMN") == "1":
         print('column "fold_replayable" does not exist', file=sys.stderr)
@@ -209,12 +213,16 @@ raise SystemExit(0)
             env["FAKE_PSQL_LOG"] = str(log)
             env["FAKE_DATABASE_EXTENSION"] = database_extension
             env["FAKE_SOURCE_EXTENSION"] = source_extension
+            env["LAPLACE_PG_PREFIX"] = str(temp)
+            env["LAPLACE_DB_HEALTH_SCOPE"] = "source"
             if connect_fail:
                 env["FAKE_PSQL_CONNECT_FAIL"] = "1"
             if missing_writer_column:
                 env["FAKE_PSQL_MISSING_WRITER_COLUMN"] = "1"
             if stale_relation_bands:
                 env["FAKE_STALE_RELATION_BANDS"] = "1"
+            if missing_band_columns:
+                env["FAKE_MISSING_BAND_COLUMNS"] = "1"
 
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/check-database-health.sh"), "laplace"],
@@ -230,7 +238,7 @@ raise SystemExit(0)
     def test_health_connects_to_target_database_without_psql_command_metasyntax(self):
         result, calls = self._run_health()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext source_extension=test-ext artifact_scope=source relation_bands=maintained_counts", result.stdout)
+        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext source_extension=test-ext artifact_scope=source relation_bands=registry_dependency", result.stdout)
         self.assertGreaterEqual(len(calls), 9)
         self.assertEqual("laplace", calls[0][calls[0].index("-d") + 1])
         self.assertEqual("SELECT 1", calls[0][-1])
@@ -260,6 +268,11 @@ raise SystemExit(0)
         self.assertNotEqual(0, result.returncode)
         self.assertIn("converse.relation_bands() is stale", result.stderr)
         self.assertNotIn("DB_HEALTH_OK", result.stdout)
+
+    def test_health_rejects_missing_band_query_columns(self):
+        result, _ = self._run_health(missing_band_columns=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("does not expose the required query columns", result.stderr)
 
 
 if __name__ == "__main__":
