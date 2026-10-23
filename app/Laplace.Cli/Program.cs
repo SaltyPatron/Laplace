@@ -121,6 +121,7 @@ internal static class Program
             config.AddCommand<DbRoundtripCommand>("db-roundtrip");
             config.AddCommand<EvalCommand>("eval");
             config.AddCommand<StatsCommand>("stats");
+            config.AddCommand<StatusCommand>("status");
             config.AddCommand<EvictCommand>("evict");
             config.AddCommand<RebuildPhysIndexesCommand>("rebuild-phys-indexes");
             config.AddCommand<CloseRunCommand>("close-run");
