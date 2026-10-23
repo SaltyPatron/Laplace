@@ -1651,6 +1651,42 @@ SQL_QUERY("migration.app_tables_present", "",
     "SELECT bool_and(to_regclass(name) IS NOT NULL) "
     "FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',"
     "'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)")
+/* Run transactionally after DbUp, including already-journaled databases. */
+SQL_QUERY("migration.canonical_substrate", "",
+    "SET LOCAL search_path = public, pg_temp; "
+    "CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public; "
+    "ALTER EXTENSION laplace UPDATE; "
+    "DO $canonical$ DECLARE function_signature text; cache record; cache_path text; BEGIN "
+    "IF NOT EXISTS (SELECT FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace "
+    "WHERE e.extname='laplace' AND n.nspname='public') THEN "
+    "RAISE EXCEPTION 'The canonical laplace extension must own the public substrate'; END IF; "
+    "IF NOT EXISTS (SELECT FROM pg_type t JOIN pg_depend d ON d.objid=t.oid AND d.classid='pg_type'::regclass "
+    "JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass "
+    "WHERE t.oid=to_regtype('public.blake3') AND t.typlen=16 AND e.extname='laplace' AND d.deptype='e') "
+    "OR to_regtype('public.blake3[]') IS NULL THEN "
+    "RAISE EXCEPTION 'Canonical fixed-width blake3 identity type is not installed'; END IF; "
+    /* Existing managed connections prefer laplace,public. Native SPI must not
+       accidentally read laplace.consensus instead of public.consensus. */
+    "FOR function_signature IN SELECT format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)) "
+    "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+    "JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass "
+    "JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass "
+    "WHERE e.extname='laplace' AND d.deptype='e' AND p.prokind='f' "
+    "AND NOT COALESCE(p.proconfig @> ARRAY['search_path=public, pg_temp'],false) LOOP "
+    "EXECUTE 'ALTER FUNCTION '||function_signature||' SET search_path = public, pg_temp'; END LOOP; "
+    /* These are server-side installed paths, not paths from the invoking client. */
+    "FOR cache IN SELECT * FROM (VALUES ('laplace.tier0','laplace_substrate.perfcache_path'), "
+    "('laplace.highway','laplace_substrate.highway_perfcache_path')) AS paths(native_setting,installed_setting) LOOP "
+    "cache_path := NULLIF(current_setting(cache.installed_setting,true),''); "
+    "IF cache_path IS NOT NULL THEN "
+    "PERFORM set_config(cache.native_setting,cache_path,true); "
+    "EXECUTE format('ALTER DATABASE %I SET %s = %L',current_database(),cache.native_setting,cache_path); "
+    "END IF; END LOOP; "
+    "PERFORM public.laplace_fingerprint(); PERFORM public.laplace_highway_fingerprint(); "
+    "PERFORM public.laplace_ensure_stage(); END $canonical$;")
+SQL_QUERY("migration.canonical_substrate_status", "",
+    "SELECT current_database(),extversion,public.laplace_fingerprint(),public.laplace_highway_fingerprint() "
+    "FROM pg_extension WHERE extname='laplace'")
 SQL_QUERY("migration.reset_application_journal", "",
     "DO $$ BEGIN IF to_regclass('public.schemaversions') IS NOT NULL THEN "
     "DELETE FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_(app_|browser_)'; END IF; END $$;")

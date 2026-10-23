@@ -259,6 +259,29 @@ internal static class Program
                 return 1;
             }
             applied.AddRange(result.Scripts);
+            // Consolidated scripts may already be journaled. Reconcile the
+            // Native substrate on every substrate upgrade, never on app-up.
+            if (filter("20260606000000_layer1_database.sql"))
+            {
+                using var connection = new NpgsqlConnection(target);
+                connection.Open();
+                using var transaction = connection.BeginTransaction();
+                using var command = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate");
+                command.CommandTimeout = 0;
+                command.ExecuteNonQuery();
+                using var status = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate_status");
+                using var receipt = status.ExecuteReader();
+                if (!receipt.Read())
+                    throw new InvalidOperationException("Canonical Native substrate verification returned no receipt.");
+                var databaseName = receipt.GetString(0);
+                var extensionVersion = receipt.GetString(1);
+                var tier0Fingerprint = receipt.GetString(2);
+                var highwayFingerprint = receipt.GetString(3);
+                receipt.Close();
+                transaction.Commit();
+                Console.WriteLine($"Canonical Native substrate verified: database={databaseName} extension={extensionVersion} " +
+                    $"tier0={tier0Fingerprint} highway={highwayFingerprint}");
+            }
             const string runtimeGrants = "20261015000000_substrate_runtime_grants.sql";
             if (filter(runtimeGrants))
             {
