@@ -1837,3 +1837,45 @@ SQL_QUERY("maintenance.physicalities_coord_gist", "", "CREATE INDEX IF NOT EXIST
 SQL_QUERY("maintenance.physicalities_type_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)")
 
 SQL_QUERY("maintenance.physicalities_entity_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)")
+SQL_QUERY("migration.app_tables_present", "",
+    "SELECT bool_and(to_regclass(name) IS NOT NULL) "
+    "FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',"
+    "'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)")
+SQL_QUERY("migration.reset_application_journal", "",
+    "DO $$ BEGIN IF to_regclass('public.schemaversions') IS NOT NULL THEN "
+    "DELETE FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_(app_|browser_)'; END IF; END $$;")
+SQL_QUERY("migration.reset_journal", "", "DROP TABLE IF EXISTS public.schemaversions")
+
+/* Bootstrap metadata and explicitly confirmed database lifecycle commands. */
+SQL_QUERY("migration.database_options", "text",
+    "SELECT format('OWNER %I TEMPLATE template0 ENCODING %L LOCALE_PROVIDER %s LC_COLLATE %L LC_CTYPE %L TABLESPACE %I CONNECTION LIMIT %s',\n    pg_get_userbyid(d.datdba), pg_encoding_to_char(d.encoding),\n    CASE d.datlocprovider WHEN 'i' THEN 'icu' WHEN 'b' THEN 'builtin' ELSE 'libc' END,\n    d.datcollate, d.datctype, t.spcname, d.datconnlimit)\n    || CASE WHEN d.datlocprovider='i' THEN format(' ICU_LOCALE %L',d.datlocale)\n            WHEN d.datlocprovider='b' THEN format(' BUILTIN_LOCALE %L',d.datlocale) ELSE '' END\n    || CASE WHEN d.daticurules IS NOT NULL THEN format(' ICU_RULES %L',d.daticurules) ELSE '' END\n    || CASE WHEN d.datcollversion IS NOT NULL THEN format(' COLLATION_VERSION %L',d.datcollversion) ELSE '' END\nFROM pg_database d JOIN pg_tablespace t ON t.oid=d.dattablespace\nWHERE d.datname=$1 AND NOT d.datistemplate AND d.datallowconn AND d.datconnlimit>=-1")
+SQL_QUERY("migration.database_settings", "text",
+    "SELECT CASE WHEN s.setrole=0 THEN 'ALTER DATABASE ' ELSE format('ALTER ROLE %I IN DATABASE ',pg_get_userbyid(s.setrole)) END,\n       format(' SET %I TO %L',split_part(v,'=',1),substr(v,strpos(v,'=')+1))\nFROM pg_db_role_setting s JOIN pg_database d ON d.oid=s.setdatabase,\n     LATERAL unnest(s.setconfig) v\nWHERE d.datname=$1 ORDER BY s.setrole,v")
+SQL_QUERY("migration.database_access", "text",
+    "SELECT 'GRANT '||a.privilege_type||' ON DATABASE ',\n       ' TO '||CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END\n       ||CASE WHEN a.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END\nFROM pg_database d, LATERAL aclexplode(COALESCE(d.datacl,acldefault('d',d.datdba))) a\nWHERE d.datname=$1")
+SQL_QUERY("migration.object_targets", "",
+    "WITH objects AS (\n    SELECT 'SCHEMA '||quote_ident(nspname) AS target,nspacl AS acl,nspowner AS owner\n    FROM pg_namespace WHERE nspname !~ '^pg_' AND nspname<>'information_schema'\n    UNION ALL\n    SELECT CASE WHEN c.relkind='S' THEN 'SEQUENCE ' ELSE 'TABLE ' END||format('%I.%I',n.nspname,c.relname),c.relacl,c.relowner\n    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema' AND c.relkind IN ('r','p','v','m','f','S')\n    UNION ALL\n    SELECT CASE WHEN p.prokind='p' THEN 'PROCEDURE ' ELSE 'FUNCTION ' END||format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)),p.proacl,p.proowner\n    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'\n    UNION ALL\n    SELECT 'TYPE '||format('%I.%I',n.nspname,t.typname),t.typacl,t.typowner\n    FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'\n) SELECT target,'' FROM objects")
+SQL_QUERY("migration.object_access", "",
+    "WITH objects AS (\n    SELECT 'SCHEMA '||quote_ident(nspname) AS target,nspacl AS acl,nspowner AS owner\n    FROM pg_namespace WHERE nspname !~ '^pg_' AND nspname<>'information_schema'\n    UNION ALL\n    SELECT CASE WHEN c.relkind='S' THEN 'SEQUENCE ' ELSE 'TABLE ' END||format('%I.%I',n.nspname,c.relname),c.relacl,c.relowner\n    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema' AND c.relkind IN ('r','p','v','m','f','S')\n    UNION ALL\n    SELECT CASE WHEN p.prokind='p' THEN 'PROCEDURE ' ELSE 'FUNCTION ' END||format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)),p.proacl,p.proowner\n    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'\n    UNION ALL\n    SELECT 'TYPE '||format('%I.%I',n.nspname,t.typname),t.typacl,t.typowner\n    FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace\n    WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'\n)\n, defaults AS (\n    SELECT 'ALTER DEFAULT PRIVILEGES FOR ROLE '||quote_ident(pg_get_userbyid(d.defaclrole))\n        ||CASE WHEN n.oid IS NULL THEN '' ELSE ' IN SCHEMA '||quote_ident(n.nspname) END AS prefix,\n        CASE d.defaclobjtype WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES' WHEN 'f' THEN 'FUNCTIONS'\n            WHEN 'T' THEN 'TYPES' WHEN 'n' THEN 'SCHEMAS' END AS kind,d.defaclacl AS acl,\n        CASE WHEN n.oid IS NULL THEN '' ELSE 'SCHEMA '||quote_ident(n.nspname) END AS target\n    FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace\n), statements AS (\n    SELECT 0 AS ordinal,'REVOKE ALL ON '||target||' FROM PUBLIC' AS sql,target FROM objects WHERE acl IS NOT NULL\n    UNION ALL\n    SELECT 1,'GRANT '||a.privilege_type||' ON '||o.target||' TO '\n        ||CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END\n        ||CASE WHEN a.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END,o.target\n    FROM objects o,LATERAL aclexplode(o.acl) a\n    UNION ALL\n    SELECT 2,prefix||' REVOKE ALL ON '||kind||' FROM PUBLIC',target FROM defaults\n    UNION ALL\n    SELECT 3,d.prefix||' GRANT '||a.privilege_type||' ON '||d.kind||' TO '\n        ||CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END\n        ||CASE WHEN a.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END,d.target\n    FROM defaults d,LATERAL aclexplode(d.acl) a\n) SELECT sql,target FROM statements ORDER BY ordinal,sql")
+SQL_QUERY("migration.schema_owner", "text",
+    "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname=$1")
+SQL_QUERY("migration.reset_application_schema", "",
+    "DROP SCHEMA IF EXISTS app CASCADE;\nDO $$\nBEGIN\n    IF to_regclass('public.schemaversions') IS NOT NULL THEN\n        DELETE FROM public.schemaversions\n        WHERE scriptname ~ '^[0-9]+_(app_|browser_)';\n    END IF;\nEND $$;")
+SQL_QUERY("migration.database_create", "",
+    "CREATE DATABASE {database} {options}")
+SQL_QUERY("migration.database_revoke_public", "",
+    "REVOKE ALL ON DATABASE {database} FROM PUBLIC")
+SQL_QUERY("migration.database_block", "",
+    "ALTER DATABASE {database} ALLOW_CONNECTIONS false")
+SQL_QUERY("migration.database_rename", "",
+    "ALTER DATABASE {database} RENAME TO {replacement}")
+SQL_QUERY("migration.database_reopen", "",
+    "ALTER DATABASE {database} ALLOW_CONNECTIONS true")
+SQL_QUERY("migration.database_drop", "",
+    "DROP DATABASE {database} WITH (FORCE)")
+SQL_QUERY("migration.application_schema_owner", "",
+    "CREATE SCHEMA app AUTHORIZATION {owner}")
+SQL_QUERY("migration.application_schema", "",
+    "CREATE SCHEMA app")
+SQL_QUERY("migration.cutover_sessions", "text[]",
+    "SELECT pg_terminate_backend(pid,5000) FROM pg_stat_activity WHERE datname=ANY($1) AND pid<>pg_backend_pid()")
