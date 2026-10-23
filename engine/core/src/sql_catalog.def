@@ -2,6 +2,10 @@
  * This is the sole statement owner for migrated native and app query paths. */
 /* Native retained-database acceptance uses the same canonical identity and
  * containment operations as the installed Engine, with no legacy projection. */
+SQL_QUERY("verify.blake3_transport", "public.blake3,public.blake3[]",
+    "SELECT $1::public.blake3,$2::public.blake3[],public.blake3_send($1::public.blake3)")
+SQL_QUERY("verify.blake3_composition", "public.blake3[]",
+    "SELECT public.laplace_compose($1::public.blake3[])")
 SQL_QUERY("verify.native_source_witness", "text",
     "SELECT w.id::text FROM public.witness w JOIN public.physicality p ON p.entity=w.id "
     "WHERE public.laplace_path_starts(p.path,public.laplace_text_id($1)) ORDER BY w.id")
