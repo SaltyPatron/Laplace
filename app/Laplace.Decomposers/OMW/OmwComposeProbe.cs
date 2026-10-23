@@ -45,7 +45,9 @@ public static class OmwComposeProbe
                 {
                     using var composer = new GrammarRowComposer(
                         record.LineUtf8, ast, omw.SourceId, omw.Modality.GrammarId);
-                    _ = composer.Materialize(1.0);
+                    using var stage = IntentStage.NewBounded(0, IngestSizing.ResolveWorkingSetBudgetBytes());
+                    composer.DrainInto(stage, 1.0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000,
+                        System.Collections.Immutable.ImmutableArray.CreateBuilder<Laplace.SubstrateCRUD.AttestationRow>());
                 }
                 catch (Exception ex)
                 {

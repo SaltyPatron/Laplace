@@ -95,6 +95,12 @@ int content_witness_emit_tree(
     size_t             bitmap_bits,
     hash128_t*         out_root_id);
 
+/* Same Native emission with the caller's observation timestamp. */
+int content_witness_emit_tree_at(
+    intent_stage_t* stage, const tier_tree_t* tree, const hash128_t* source_id,
+    const uint8_t* existing_bitmap, size_t bitmap_bits, hash128_t* out_root_id,
+    int64_t observed_at_unix_us);
+
 /* Root id of an ALREADY-BUILT tree — the same collapse walk emit uses. Lets a
  * caller derive once and answer "is this ladder persisted?" from the built tree
  * instead of paying laplace_content_root_id's second full derivation. */

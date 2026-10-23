@@ -14,13 +14,16 @@ public sealed class GrammarRowComposerDrainParityTests
     private const long NowUs = 1_700_000_000_000_000L;
 
     [Theory]
-    [InlineData("1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]
-    [InlineData("7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}")]
-    public void DrainInto_Matches_Materialize_ByteForByte(string row)
+    [InlineData("tsv", "1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]
+    [InlineData("tsv", "7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}")]
+    [InlineData("json", "\"q\\u0301\"")]
+    [InlineData("json", "{\"name\":\"word word\"}")]
+    [InlineData("pgn", "[Event \"Example\"]\n1. e4 e5 *\n")]
+    public void DrainInto_Matches_Materialize_ByteForByte(string modality, string row)
     {
         byte[] utf8 = Encoding.UTF8.GetBytes(row);
-        using var ast = GrammarDecomposer.Parse(utf8, "tsv");
-        using var composer = new GrammarRowComposer(utf8, ast, Src, "tsv");
+        using var ast = GrammarDecomposer.Parse(utf8, modality);
+        using var composer = new GrammarRowComposer(utf8, ast, Src, modality);
 
         var (ents, phys, prec, root) = composer.Materialize(1.0);
         Assert.True(ents.Length > 0, "expected the tsv row to compose at least one entity");

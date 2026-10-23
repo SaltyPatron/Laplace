@@ -1318,8 +1318,8 @@ int laplace_compose_drain_into_stage(
                 free_emit_filter(&filter); return -1;
             }
             if (!filter.emit_all && !owner_novel(&root.id)) continue;
-            if (content_witness_emit_tree(stage, r->source_trees[i], source_id,
-                                          NULL, 0, &ignored) != 0) {
+            if (content_witness_emit_tree_at(stage, r->source_trees[i], source_id,
+                                          NULL, 0, &ignored, now_unix_us) != 0) {
                 free_emit_filter(&filter);
                 return -1;
             }

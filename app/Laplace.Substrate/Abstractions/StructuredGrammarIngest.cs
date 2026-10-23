@@ -351,7 +351,6 @@ public static class StructuredGrammarIngest
         byte[]? bitmap = containmentReader is not null
             ? await composer.ProbeDescentBitmapAsync(containmentReader, ct)
             : null;
-        var (ents, phys, atts, root) = composer.Materialize(witnessWeight, bitmap);
 
         // Deferred content sends anchors emitted during witnessing (CategoryAnchor /
         // ContentEmitter -> ContentWitnessBatch.TryAppendToBuilder) through ContentBatch's
@@ -360,9 +359,7 @@ public static class StructuredGrammarIngest
             .DeclareSourcePrior(sourceTrust)
             .SetCommitEpoch(0)
             .EnableDeferredContent(containmentReader);
-        foreach (var e in ents) builder.AddEntity(e);
-        foreach (var p in phys) builder.AddPhysicality(p);
-        foreach (var a in atts) builder.AddAttestation(a);
+        Hash128 root = composer.DrainInto(builder, witnessWeight, bitmap);
 
         witness.WalkRow(
             new GrammarComposeContext(utf8, ast, root, composer),

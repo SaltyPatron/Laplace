@@ -457,13 +457,14 @@ int content_witness_tree_root_id(
     return 0;
 }
 
-int content_witness_emit_tree(
+int content_witness_emit_tree_at(
     intent_stage_t*    stage,
     const tier_tree_t* tree,
     const hash128_t*   source_id,
     const uint8_t*     existing_bitmap,
     size_t             bitmap_bits,
-    hash128_t*         out_root_id) {
+    hash128_t*         out_root_id,
+    int64_t            now_us) {
     if (!stage || !tree || !source_id || !out_root_id) return -1;
 
     size_t nc = tier_tree_node_count(tree);
@@ -474,7 +475,6 @@ int content_witness_emit_tree(
     if (tier_tree_get_node(tree, root_idx, &root) != 0) return -2;
     *out_root_id = root.id;
 
-    int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
     if (root.tier == 0)
         return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
 
@@ -509,6 +509,13 @@ done:
     free(emitted);
     emit_scratch_free(&scratch);
     return rc;
+}
+
+int content_witness_emit_tree(
+    intent_stage_t* stage, const tier_tree_t* tree, const hash128_t* source_id,
+    const uint8_t* existing_bitmap, size_t bitmap_bits, hash128_t* out_root_id) {
+    return content_witness_emit_tree_at(stage, tree, source_id, existing_bitmap,
+        bitmap_bits, out_root_id, INTENT_STAGE_PG_EPOCH_UNIX_US);
 }
 
 int content_witness_batch_add_workers(
