@@ -17,11 +17,46 @@
 #include "laplace/core/grammar_decomposer.h"
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/codepoint_table.h"
+#include "laplace/core/physicality_descriptor_admission.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/trajectory.h"
 
 namespace {
+
+struct CapturedGrammar {
+    std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)> stage{nullptr, intent_stage_free};
+    std::unique_ptr<physicality_descriptor_vocabulary_t, decltype(&physicality_descriptor_vocabulary_free)>
+        vocabulary{nullptr, physicality_descriptor_vocabulary_free};
+    std::unique_ptr<physicality_descriptor_capture_t, decltype(&physicality_descriptor_capture_free)>
+        bodies{nullptr, physicality_descriptor_capture_free};
+};
+
+static CapturedGrammar capture_grammar(const laplace_compose_result_t* result,
+                                       const hash128_t& source) {
+    constexpr size_t budget = 64u * 1024u * 1024u;
+    CapturedGrammar out;
+    out.stage.reset(intent_stage_new_bounded(0, budget));
+    if (!out.stage) { ADD_FAILURE() << "stage allocation failed"; return out; }
+    const int rc = laplace_compose_drain_into_stage(result, out.stage.get(), &source,
+        INTENT_STAGE_PG_EPOCH_UNIX_US, 1.0, nullptr, 0);
+    EXPECT_EQ(rc, 0);
+    if (rc != 0) return out;
+    physicality_descriptor_vocabulary_t* vocabulary = nullptr;
+    const auto created = physicality_descriptor_vocabulary_create(&source, budget, &vocabulary);
+    EXPECT_EQ(created, PHYSICALITY_DESCRIPTOR_OK);
+    out.vocabulary.reset(vocabulary);
+    if (!vocabulary) return out;
+    physicality_descriptor_capture_t* bodies = nullptr;
+    const physicality_descriptor_limits_t limits{budget};
+    const intent_stage_t* stages[] = {out.stage.get()};
+    EXPECT_EQ(physicality_descriptor_capture_stages(stages, 1,
+        physicality_descriptor_vocabulary_basis(vocabulary), &limits, budget, &bodies),
+        PHYSICALITY_DESCRIPTOR_OK);
+    out.bodies.reset(bodies);
+    return out;
+}
 
 TEST(GrammarCompose, JsonStringDecodePreservesUnicodeScalarsAndEscapedControls) {
     const std::vector<std::pair<std::string, std::string>> cases = {
@@ -203,18 +238,18 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         ASSERT_TRUE(hash128_equals(&root, &probed_root));
 
         if (fixture.partial_json_floor) {
-            ASSERT_GT(laplace_compose_physicality_count(probe), 0u)
-                << "fixture must retain real grapheme forms during probing";
-            ASSERT_LT(laplace_compose_physicality_count(probe),
-                      laplace_compose_physicality_count(full))
-                << "floor forms alone cannot prove the AST body is complete";
+            ASSERT_GT(probe->source_tree_count, 0u)
+                << "probing retains the actual Native leaf trees";
+            ASSERT_EQ(laplace_compose_physicality_count(probe), 0u);
+            ASSERT_GT(laplace_compose_physicality_count(full), 0u)
+                << "Native leaves alone cannot stand in for an AST parent's body";
         }
         ASSERT_EQ(laplace_grammar_compose_materialize_phys(
             probe, bytes, length, ast, fixture.modality), 0);
         ASSERT_EQ(laplace_compose_entity_count(probe), entity_count);
         ASSERT_EQ(laplace_compose_entity_count(full), entity_count);
         const size_t count = laplace_compose_physicality_count(full);
-        ASSERT_GT(count, 0u);
+        ASSERT_TRUE(count > 0 || full->source_tree_count > 0);
         ASSERT_EQ(laplace_compose_physicality_count(probe), count);
         size_t root_forms = 0;
         size_t repeated_forms = 0;
@@ -240,9 +275,29 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
                 }
             }
         }
-        EXPECT_EQ(root_forms, 1u) << "a unary AST wrapper must not add a self-form";
+        ASSERT_EQ(full->source_tree_count, probe->source_tree_count);
+        bool native_root = false;
+        for (size_t i = 0; i < full->source_tree_count; ++i) {
+            tier_node_view_t expected{}, actual{};
+            ASSERT_EQ(content_witness_tree_root_node(full->source_trees[i], &expected), 0);
+            ASSERT_EQ(content_witness_tree_root_node(probe->source_trees[i], &actual), 0);
+            EXPECT_TRUE(hash128_equals(&expected.id, &actual.id));
+            EXPECT_EQ(expected.tier, actual.tier);
+            EXPECT_EQ(std::memcmp(expected.coord, actual.coord, sizeof expected.coord), 0);
+            native_root = native_root || hash128_equals(&expected.id, &root);
+            for (size_t j = 0; j < i; ++j) {
+                tier_node_view_t previous{};
+                ASSERT_EQ(content_witness_tree_root_node(full->source_trees[j], &previous), 0);
+                if (hash128_equals(&expected.id, &previous.id)) {
+                    ++repeated_forms;
+                    break;
+                }
+            }
+        }
+        EXPECT_EQ(root_forms + (native_root ? 1u : 0u), 1u)
+            << "a unary AST wrapper must not add a self-form";
         if (fixture.repeated_grapheme)
-            EXPECT_GT(repeated_forms, 0u) << "raw repeated occurrences must survive";
+            EXPECT_GT(repeated_forms, 0u) << "raw repeated Native leaf occurrences must survive";
         ASSERT_EQ(laplace_grammar_compose_materialize_phys(
             probe, bytes, length, ast, fixture.modality), 0);
         EXPECT_EQ(laplace_compose_physicality_count(probe), count)
@@ -397,22 +452,35 @@ TEST(GrammarCompose, EscapedJsonStringsConvergeThroughNativeComposition) {
                 }
                 EXPECT_EQ(root_entities, 1u);
             }
-            const size_t count = laplace_compose_physicality_count(full[0].get());
-            ASSERT_GT(count, 0u);
-            ASSERT_EQ(count, laplace_compose_physicality_count(full[1].get()));
+            // Compare actual staged Native bodies as well as AST parents.
+            auto escaped_capture = capture_grammar(full[0].get(), source);
+            auto literal_capture = capture_grammar(full[1].get(), source);
+            ASSERT_NE(escaped_capture.bodies, nullptr);
+            ASSERT_NE(literal_capture.bodies, nullptr);
+            size_t count = 0, literal_count = 0;
+            const auto* escaped_bodies = physicality_descriptor_capture_inputs(
+                escaped_capture.bodies.get(), &count);
+            const auto* literal_bodies = physicality_descriptor_capture_inputs(
+                literal_capture.bodies.get(), &literal_count);
+            uint32_t scalar = 0;
+            if (object || codepoint_table_lookup_id(&expected, &scalar) != 0)
+                ASSERT_GT(count, 0u);
+            ASSERT_EQ(count, literal_count);
             for (size_t i = 0; i < count; ++i) {
-                laplace_compose_physicality_t escaped{}, literal{};
-                ASSERT_EQ(laplace_compose_get_physicality(full[0].get(), i, &escaped), 0);
-                ASSERT_EQ(laplace_compose_get_physicality(full[1].get(), i, &literal), 0);
-                EXPECT_TRUE(hash128_equals(&escaped.id, &literal.id));
+                const auto& escaped = escaped_bodies[i];
+                const auto& literal = literal_bodies[i];
                 EXPECT_TRUE(hash128_equals(&escaped.entity_id, &literal.entity_id));
-                EXPECT_EQ(std::memcmp(escaped.coord, literal.coord, sizeof(escaped.coord)), 0);
-                EXPECT_EQ(std::memcmp(&escaped.hilbert, &literal.hilbert,
-                                      sizeof(escaped.hilbert)), 0);
+                EXPECT_EQ(escaped.type, literal.type);
+                EXPECT_EQ(std::memcmp(escaped.coord, literal.coord, sizeof escaped.coord), 0);
+                EXPECT_EQ(std::memcmp(&escaped.hilbert_index, &literal.hilbert_index,
+                                      sizeof escaped.hilbert_index), 0);
                 EXPECT_EQ(escaped.n_constituents, literal.n_constituents);
-                ASSERT_EQ(escaped.trajectory_n, literal.trajectory_n);
+                ASSERT_EQ(escaped.trajectory_vertices, literal.trajectory_vertices);
                 EXPECT_EQ(std::memcmp(escaped.trajectory_xyzm, literal.trajectory_xyzm,
-                                      escaped.trajectory_n * sizeof(double)), 0);
+                                      escaped.trajectory_vertices * 4 * sizeof(double)), 0);
+                if (escaped.type == 1)
+                    EXPECT_EQ(laplace_physicality_manifest_validate(&escaped.entity_id, escaped.type,
+                        escaped.trajectory_xyzm, escaped.trajectory_vertices, escaped.n_constituents), 0);
             }
         }
     }
