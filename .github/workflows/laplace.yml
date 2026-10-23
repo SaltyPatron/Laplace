@@ -35,7 +35,6 @@ on:
       - ".github/PULL_REQUEST_TEMPLATE*"
       - "docs/**"
       - "**/*.md"
-      - "tests/**"
       - "scripts/ci-impact-plan.py"
       - "scripts/ci-qualification-cache.py"
       - "scripts/ci-product-freshness.py"
