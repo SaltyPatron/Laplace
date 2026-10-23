@@ -160,7 +160,7 @@ public sealed partial class NpgsqlSubstrateWriter
         if (_leafModulus == 0)
             _leafModulus = await StagedSourceWriter.ModulusAsync(connection, ct).ConfigureAwait(false);
         await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
-            connection, "laplace_apply_batch", TransactionGucs(Durability), _log, ct).ConfigureAwait(false);
+            connection, "laplace_apply_batch", Durability, _log, ct).ConfigureAwait(false);
         connectionDiagnostic?.Complete();
 
         return await ApplyPreparedStagesCoreAsync(

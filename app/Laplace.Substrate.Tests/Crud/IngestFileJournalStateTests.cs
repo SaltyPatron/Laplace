@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions.Tests;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Ingestion.Tests;
@@ -13,7 +14,8 @@ public sealed class IngestFileJournalStateTests
             repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIngestObservability.cs");
         var text = File.ReadAllText(observability);
 
-        Assert.Contains("status = 'composed'", text, StringComparison.Ordinal);
+        Assert.Contains("\"journal.files_composed\"", text, StringComparison.Ordinal);
+        Assert.Contains("status = 'composed'", SqlCatalog.Get("journal.files_composed").Text, StringComparison.Ordinal);
         // A run that ends leaves every file it had not finished visible as incomplete.
         var runs = File.ReadAllText(Path.Combine(
             repoRoot, "extension", "laplace_substrate", "sql", "functions", "ops", "ingest_runs.sql.in"));

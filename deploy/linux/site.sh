@@ -227,6 +227,12 @@ phase_install() {
       }' | sort -u)
   for lib in "${MKLROOT:-/opt/intel/oneapi/mkl/latest}"/lib/libmkl_{core,def,mc3,avx2,avx512,vml_def,vml_mc3,vml_avx2,vml_avx512,vml_cmpt,intel_thread,sequential,tbb_thread,intel_lp64,intel_ilp64}.so.[0-9]; do
     [[ -e "$lib" ]] && want[$lib]=1; done
+  # SDL opens this runtime dynamically, so it may have no DT_NEEDED edge for
+  # ldd to discover. Resolve it from the same compiler used for this release.
+  local openmp_runtime
+  openmp_runtime="$(icx -print-file-name=libiomp5.so)"
+  [[ "$openmp_runtime" == /* && -s "$openmp_runtime" ]] || fail "the selected Intel compiler cannot resolve libiomp5.so"
+  want[$openmp_runtime]=1
   for lib in "${!want[@]}"; do cp -fL "$lib" "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" && mv -f "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" "$LAPLACE_INSTALL_PREFIX/lib/$(basename "$lib")"; done
   echo "  native dependencies beside the libraries: ${#want[@]} files"
   local missing
@@ -399,6 +405,8 @@ LAPLACE_DB=$runtime_substrate_db
 ${runtime_app_db:+LAPLACE_APP_DB=$runtime_app_db}
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
+LAPLACE_TIER0=$t0
+LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
 ASPNETCORE_URLS=$LAPLACE_API_URL
 LAPLACE_OPS_LOG_DIR=${LAPLACE_API_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
@@ -427,6 +435,8 @@ LAPLACE_PGPORT=$PGPORT
 LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
+LAPLACE_TIER0=$t0
+LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
 LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT
 LAPLACE_MCP_ORIGIN=$LAPLACE_MCP_ORIGIN
 LAPLACE_OPS_LOG_DIR=${LAPLACE_MCP_LOG_DIR:-$LAPLACE_APP_DIR/logs}
@@ -596,8 +606,11 @@ verify_cli_package() {
   for cache in tier0 highway laplace_chess_position_perfcache; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
-  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+  (cd "$SITE_WORK"; env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
     LD_LIBRARY_PATH="$cli" \
+    LAPLACE_TIER0="$cli/share/laplace/tier0.bin" \
+    LAPLACE_PERFCACHE_BIN="$cli/share/laplace/tier0.bin" \
+    LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
     "$cli/Laplace.Cli" decompose Laplace)
 }
 
@@ -733,7 +746,8 @@ phase_serve() {
   cd "$app"
   exec 8>&- # The foreground runtime is not a deployment transaction.
   LD_LIBRARY_PATH="$app:$LAPLACE_INSTALL_PREFIX/lib" ASPNETCORE_URLS="$LAPLACE_API_URL" ASPNETCORE_ENVIRONMENT=Production \
-    LAPLACE_PERFCACHE_BIN="$t0" LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" LAPLACE_AUTH_MODE=header LAPLACE_BILLING_BYPASS=true \
+    LAPLACE_TIER0="$t0" LAPLACE_PERFCACHE_BIN="$t0" LAPLACE_HIGHWAY="$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin" \
+    LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" LAPLACE_AUTH_MODE=header LAPLACE_BILLING_BYPASS=true \
     exec dotnet "$app/Laplace.Endpoints.OpenAICompat.dll"
 }
 

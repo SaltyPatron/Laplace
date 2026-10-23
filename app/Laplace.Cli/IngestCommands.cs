@@ -167,7 +167,7 @@ internal static partial class IngestCommands
     public static async Task<int> IngestAsync(string[] args)
     {
         if (args.Length > 0 && args[0] is "catalog" or "--catalog" or "--list-sources")
-            return PrintIngestCatalog(args);
+            return IngestCatalogCommands.Run(args);
         if (args.Length > 0 && args[0].Equals("chain", StringComparison.OrdinalIgnoreCase))
             return await IngestChainAsync(args[1..]);
 
@@ -743,15 +743,15 @@ internal static partial class IngestCommands
     // structural.anagrams_of) under a primary key of (id).
     private static readonly string[] SchemaPhysIndexDefs =
     [
-        "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
-        "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)",
-        "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)",
-        "CREATE INDEX IF NOT EXISTS physicalities_direction_gist ON laplace.physicalities USING gist (public.laplace_direction_4d(coord) gist_geometry_ops_nd) WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
-        "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
-        "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1",
-        "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL",
+        SqlCatalog.Get("maintenance.physicalities_entity_btree").Text,
+        SqlCatalog.Get("maintenance.physicalities_type_btree").Text,
+        SqlCatalog.Get("maintenance.physicalities_coord_gist").Text,
+        SqlCatalog.Get("maintenance.physicalities_direction_gist").Text,
+        SqlCatalog.Get("maintenance.physicalities_hilbert_btree").Text,
+        SqlCatalog.Get("maintenance.physicalities_observed_brin").Text,
+        SqlCatalog.Get("maintenance.physicalities_traj_probe").Text,
+        SqlCatalog.Get("maintenance.physicalities_traj_first_id_btree").Text,
+        SqlCatalog.Get("maintenance.physicalities_constituents_gin").Text,
     ];
 
     private static async Task RegisterDynamicCanonicalsAsync(
@@ -954,3 +954,4 @@ internal static partial class IngestCommands
     }
 
 }
+

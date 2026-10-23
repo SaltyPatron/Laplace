@@ -76,6 +76,56 @@ public static class NpgsqlCatalog
         return Bind(new NpgsqlCommand(query.Text, connection, transaction), query, arguments);
     }
 
+    /// <summary>One round trip for fixed catalog utilities that have no parameters.</summary>
+    internal static NpgsqlCommand Command(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, IReadOnlyList<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        if (names.Count == 0) throw new ArgumentException("Select at least one catalog command.", nameof(names));
+        var statements = names.Select(SqlCatalog.Get).ToArray();
+        if (statements.Any(query => query.ParameterTypes.Length != 0))
+            throw new ArgumentException("Parameterized catalog commands require their own binding.", nameof(names));
+        return new NpgsqlCommand(string.Join(";\n", statements.Select(query => query.Text.TrimEnd().TrimEnd(';'))),
+            connection, transaction);
+    }
+
+    internal static NpgsqlCommand Command(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, string name,
+        IReadOnlyDictionary<string, string> identifiers, params object?[] arguments)
+    {
+        var query = SqlCatalog.Get(name);
+        string text = query.Text;
+        foreach (var (slot, identifier) in identifiers)
+        {
+            string marker = "{" + slot + "}";
+            if (!Regex.IsMatch(slot, "^[a-z_][a-z0-9_]*\\z", RegexOptions.CultureInvariant)
+                || !text.Contains(marker, StringComparison.Ordinal)
+                || !QualifiedRelation.IsMatch(identifier) || identifier.Contains('\0'))
+                throw new ArgumentException("Expected a declared catalog identifier slot.", nameof(identifiers));
+            text = text.Replace(marker, identifier, StringComparison.Ordinal);
+        }
+        if (Regex.IsMatch(text, "\\{[a-z_][a-z0-9_]*\\}", RegexOptions.CultureInvariant))
+            throw new ArgumentException("A catalog identifier slot was not supplied.", nameof(identifiers));
+        return Bind(new NpgsqlCommand(text, connection, transaction), query, arguments);
+    }
+
+    internal static string BinaryCopyStatement(IntentStageTable table)
+    {
+        string name = table switch
+        {
+            IntentStageTable.Entities => "write.copy_entities",
+            IntentStageTable.Physicalities => "write.copy_physicalities",
+            IntentStageTable.Attestations => "write.copy_attestations",
+            _ => throw new ArgumentOutOfRangeException(nameof(table)),
+        };
+        string text = SqlCatalog.Get(name).Text;
+        int first = text.IndexOf('('), last = text.IndexOf(") FROM", StringComparison.Ordinal);
+        string columns = Regex.Replace(text[(first + 1)..last], @"\s+", "");
+        if (columns != Regex.Replace(IntentStage.CopyColumnList(table), @"\s+", ""))
+            throw new InvalidOperationException("Native COPY columns disagree with the catalog contract.");
+        return text;
+    }
+
     // The catalog name is authoritative even if an externally constructed
     // NativeSqlQuery record carries different text or parameter metadata.
     public static NpgsqlBatchCommand Command(NativeSqlQuery query,

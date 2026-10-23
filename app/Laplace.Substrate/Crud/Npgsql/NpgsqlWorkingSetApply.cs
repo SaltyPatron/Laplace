@@ -98,8 +98,7 @@ public sealed partial class NpgsqlSubstrateWriter
         int known = Volatile.Read(ref _applyWriteEpochRoute);
         if (known >= 0) return known == 1;
 
-        await using var probe = connection.CreateCommand();
-        probe.CommandText = "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL";
+        await using var probe = NpgsqlCatalog.Command(connection, null, "write.supports_epoch");
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(ref _applyWriteEpochRoute, supported ? 1 : 0, -1);
         return Volatile.Read(ref _applyWriteEpochRoute) == 1;
@@ -149,10 +148,7 @@ public sealed partial class NpgsqlSubstrateWriter
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion "
-            + "WHERE witness_id = laplace.source_id('Unicode') AND layer = 0)";
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "write.unicode_layer_completed");
         return await cmd.ExecuteScalarAsync(ct) is true;
     }
 
@@ -254,27 +250,20 @@ public sealed partial class NpgsqlSubstrateWriter
         string receiptKind,
         CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText =
-            "WITH receipt AS ("
-            + " INSERT INTO laplace.ingest_flush_journal"
-            + " (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3)"
-            + " RETURNING working_set_id)"
-            + " INSERT INTO laplace.ingest_flush_journal_sources (working_set_id, source_id)"
-            + " SELECT receipt.working_set_id, source_id"
-            + " FROM receipt CROSS JOIN unnest($4::bytea[]) AS source_id";
-        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, token.ToBytes());
-        command.Parameters.Add(new NpgsqlParameter
+        await using var command = NpgsqlCatalog.Command(connection, transaction, SqlCatalog.Get("write.journal_receipt"), parameters =>
+        {
+        parameters.AddWithValue(NpgsqlDbType.Bytea, token.ToBytes());
+        parameters.Add(new NpgsqlParameter
         {
             Value = source is { } sourceId ? sourceId.ToBytes() : DBNull.Value,
             NpgsqlDbType = NpgsqlDbType.Bytea,
         });
-        command.Parameters.AddWithValue(NpgsqlDbType.Text, receiptKind);
-        command.Parameters.Add(new NpgsqlParameter
+        parameters.AddWithValue(NpgsqlDbType.Text, receiptKind);
+        parameters.Add(new NpgsqlParameter
         {
             Value = sources.Select(sourceId => sourceId.ToBytes()).ToArray(),
             NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+        });
         });
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -437,9 +426,7 @@ public sealed partial class NpgsqlSubstrateWriter
             long epochForeignDelta = -1;
             if (epochRoute)
             {
-                await using var epoch = conn.CreateCommand();
-                epoch.Transaction = tx;
-                epoch.CommandText = SqlCatalog.Get("write.advance_epoch").Text;
+                await using var epoch = NpgsqlCatalog.Command(conn, tx, "write.advance_epoch");
                 long bumped = (long)(await epoch.ExecuteScalarAsync(ct))!;
                 rtEpoch++;
                 if (_epochAfterLastCommit >= 0)
@@ -451,12 +438,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
             if (workingSetToken is Hash128 token)
             {
-                await using var journal = conn.CreateCommand();
-                journal.Transaction = tx;
-                journal.CommandText =
-                    "SELECT 1 FROM laplace.ingest_flush_journal WHERE working_set_id = $1";
-                journal.Parameters.Add(new NpgsqlParameter
-                { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
+                await using var journal = NpgsqlCatalog.Command(conn, tx, "write.journal_receipt_probe", token.ToBytes());
                 object? replay = await journal.ExecuteScalarAsync(ct);
                 rtJournal++;
                 if (replay is not null)
@@ -582,18 +564,18 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             var entProbeTask = ProbePresentCoreAsync(
-                "SELECT laplace.entities_stored_bitmap($1)", probeEntIdsUse,
+                "write.entities_stored_bitmap", probeEntIdsUse,
                 static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
             // Id-only physicality probe: physicalities are partitioned by HASH(id),
             // so a Hilbert-keyed probe would search the wrong partition and report a
             // stored row absent.
             var physProbeTask = ProbePresentCoreAsync(
-                "SELECT laplace.physicalities_exist_bitmap($1)", probePhysIdsUse,
+                "write.physicalities_exist_bitmap", probePhysIdsUse,
                 static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
             var attProbeTask = ProbePresentKeyedParallelAsync(
-                "laplace.attestations_exist_bitmap", probeAttIdsUse, probeAttTypesUse,
+                "write.attestations_exist_bitmap", probeAttIdsUse, probeAttTypesUse,
                 probeAttSubjectsUse, r => Interlocked.Add(ref rtProbe, r), ct);
 
             await Task.WhenAll(entProbeTask, physProbeTask, attProbeTask).ConfigureAwait(false);
@@ -891,8 +873,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // read is absorbed into the baseline; only the logged delta is affected.
             if (epochRoute)
             {
-                await using var last = conn.CreateCommand();
-                last.CommandText = "SELECT last_value FROM laplace.apply_write_epoch";
+                await using var last = NpgsqlCatalog.Command(conn, null, "write.current_epoch");
                 _epochAfterLastCommit = (long)(await last.ExecuteScalarAsync(ct))!;
                 Interlocked.Exchange(ref _epochOwnBumpsSinceBaseline, 0);
                 rtEpoch++;
@@ -932,10 +913,10 @@ public sealed partial class NpgsqlSubstrateWriter
         }
     }
 
-    internal static string TransactionGucs(PostgresWriteDurability durability) => durability switch
+    internal static string TransactionSettingsQuery(PostgresWriteDurability durability) => durability switch
     {
-        PostgresWriteDurability.Asynchronous => "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; ",
-        PostgresWriteDurability.Synchronous => "SET LOCAL synchronous_commit = on; SET LOCAL jit = off; ",
+        PostgresWriteDurability.Asynchronous => "write.settings_async",
+        PostgresWriteDurability.Synchronous => "write.settings_sync",
         _ => throw new ArgumentOutOfRangeException(nameof(durability)),
     };
 
@@ -943,9 +924,7 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlConnection connection, NpgsqlTransaction transaction, PostgresWriteDurability durability,
         CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = SqlCatalog.Get("write.commit_settings").Text;
+        await using var command = NpgsqlCatalog.Command(connection, transaction, "write.commit_settings");
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("PostgreSQL commit settings are unavailable.");
         var receipt = new PostgresCommitReceipt(reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2), false);
@@ -1027,128 +1006,16 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlDataSource ds, string relation, CancellationToken ct)
     {
         await using var conn = await ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        // Relation name is an internal constant (entities/physicalities/attestations), not user input.
-        cmd.CommandText = $"SELECT EXISTS (SELECT 1 FROM laplace.{relation} LIMIT 1)";
+        string queryName = relation switch
+        {
+            "entities" => "write.entities_have_rows",
+            "physicalities" => "write.physicalities_have_rows",
+            "attestations" => "write.attestations_have_rows",
+            _ => throw new ArgumentOutOfRangeException(nameof(relation)),
+        };
+        await using var cmd = NpgsqlCatalog.Command(conn, null, queryName);
         var o = await cmd.ExecuteScalarAsync(ct);
         return o is true;
-    }
-
-    private readonly record struct EntityInvertResult(
-        List<int> RemainingIdx, long Resolved, int RoundTrips);
-
-    /// <summary>
-    /// Per-tier presence resolution: for each tier where fewer rows are stored than
-    /// this batch stages, load that tier's stored ids and resolve membership locally;
-    /// other tiers stay on the bitmap probe. Not used by the apply path, whose
-    /// presence is id-only over HASH(id) because tier is not identity.
-    /// <paramref name="rowIdx"/> are indices into <paramref name="ents"/>.
-    /// </summary>
-    private static async Task<EntityInvertResult> InvertEntityTiersBySmallerSideAsync(
-        NpgsqlDataSource ds,
-        CopyTupleParser.EntityRows ents, List<int> rowIdx, HashSet<Hash128> presentOut,
-        CancellationToken ct)
-    {
-        if (rowIdx.Count == 0)
-            return new EntityInvertResult(rowIdx, 0, 0);
-
-        var stagedPerTier = new Dictionary<short, int>();
-        for (int k = 0; k < rowIdx.Count; k++)
-        {
-            short tier = ents.Tiers[rowIdx[k]];
-            stagedPerTier.TryGetValue(tier, out int n);
-            stagedPerTier[tier] = n + 1;
-        }
-        // Bounded count, not a census: the number only feeds `have < staged`, so
-        // counting stops at `staged` (LIMIT need). At or above the bound the count
-        // equals staged and the test is false; below it the true count is returned.
-        var tierArr = new short[stagedPerTier.Count];
-        var needArr = new int[stagedPerTier.Count];
-        {
-            int ti = 0;
-            foreach (var (tier, staged) in stagedPerTier)
-            {
-                tierArr[ti] = tier;
-                needArr[ti] = staged;
-                ti++;
-            }
-        }
-
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using (var countCmd = conn.CreateCommand())
-        {
-            countCmd.CommandTimeout = 0;
-            countCmd.CommandText =
-                "SELECT t.tier, (SELECT count(*)::bigint FROM ("
-                + "  SELECT 1 FROM laplace.entities e WHERE e.tier = t.tier LIMIT t.need) z) "
-                + "FROM unnest($1::smallint[], $2::int[]) AS t(tier, need)";
-            countCmd.Parameters.Add(new NpgsqlParameter
-            { Value = tierArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            countCmd.Parameters.Add(new NpgsqlParameter
-            { Value = needArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer });
-            await countCmd.PrepareAsync(ct);
-            var presentCount = new Dictionary<short, long>();
-            await using (var reader = await countCmd.ExecuteReaderAsync(ct))
-                while (await reader.ReadAsync(ct))
-                    presentCount[reader.GetInt16(0)] = reader.GetInt64(1);
-
-            var invertTiers = new HashSet<short>();
-            foreach (var (tier, staged) in stagedPerTier)
-            {
-                presentCount.TryGetValue(tier, out long have);
-                if (have < staged) invertTiers.Add(tier);
-            }
-            if (invertTiers.Count == 0)
-                return new EntityInvertResult(rowIdx, 0, 1);
-
-            var invertArr = invertTiers.ToArray();
-            await using var loadCmd = conn.CreateCommand();
-            loadCmd.CommandTimeout = 0;
-            loadCmd.CommandText = "SELECT e.id FROM laplace.entities e WHERE e.tier = ANY($1)";
-            loadCmd.Parameters.Add(new NpgsqlParameter
-            { Value = invertArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            await loadCmd.PrepareAsync(ct);
-            var presentInLeaf = new HashSet<Hash128>();
-            await using (var idReader = await loadCmd.ExecuteReaderAsync(ct))
-            {
-                while (await idReader.ReadAsync(ct))
-                {
-                    var raw = (byte[])idReader[0];
-                    if (raw.Length >= 16) presentInLeaf.Add(Hash128.FromBytes(raw));
-                }
-            }
-
-            // Every staged tier inverted: no ids remain for the probe; only
-            // mark the present hits.
-            if (invertTiers.Count == stagedPerTier.Count)
-            {
-                if (presentInLeaf.Count > 0)
-                {
-                    for (int k = 0; k < rowIdx.Count; k++)
-                    {
-                        var id = ents.Ids[rowIdx[k]];
-                        if (presentInLeaf.Contains(id)) presentOut.Add(id);
-                    }
-                }
-                return new EntityInvertResult(new List<int>(), rowIdx.Count, 2);
-            }
-
-            var remainIdx = new List<int>();
-            long resolved = 0;
-            for (int k = 0; k < rowIdx.Count; k++)
-            {
-                int i = rowIdx[k];
-                if (!invertTiers.Contains(ents.Tiers[i]))
-                {
-                    remainIdx.Add(i);
-                    continue;
-                }
-                resolved++;
-                if (presentInLeaf.Contains(ents.Ids[i])) presentOut.Add(ents.Ids[i]);
-            }
-            return new EntityInvertResult(remainIdx, resolved, 2);
-        }
     }
 
     /// <summary>
@@ -1159,7 +1026,7 @@ public sealed partial class NpgsqlSubstrateWriter
     /// shape (id-only and keyed) uses this one implementation.
     /// </summary>
     private async Task<HashSet<Hash128>> ProbePresentCoreAsync(
-        string commandText, IReadOnlyList<Hash128> ids,
+        string queryName, IReadOnlyList<Hash128> ids,
         Action<NpgsqlParameterCollection, int, int> bindKeys,
         Action<int> addRoundTrips, CancellationToken ct)
     {
@@ -1181,12 +1048,13 @@ public sealed partial class NpgsqlSubstrateWriter
             for (int i = 0; i < n; i++) chunk[i] = ids[start + i].ToBytes();
 
             await using var conn = await _ds.OpenConnectionAsync(token);
-            await using var cmd = conn.CreateCommand();
+            await using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get(queryName), parameters =>
+            {
+                parameters.Add(new NpgsqlParameter
+                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                bindKeys(parameters, start, n);
+            });
             cmd.CommandTimeout = 0;
-            cmd.CommandText = commandText;
-            cmd.Parameters.Add(new NpgsqlParameter
-            { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            bindKeys(cmd.Parameters, start, n);
             await cmd.PrepareAsync(token);
             var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
 
@@ -1233,25 +1101,6 @@ public sealed partial class NpgsqlSubstrateWriter
         return present;
     }
 
-    /// <summary>Presence probe that passes each id's staged tier as a second
-    /// key array ($2 smallint[]) alongside the ids.</summary>
-    private Task<HashSet<Hash128>> ProbePresentTieredParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<short> tiers,
-        Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (tiers.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {tiers.Count} tiers");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
-            (parameters, start, n) =>
-            {
-                var chunk = new short[n];
-                for (int i = 0; i < n; i++) chunk[i] = tiers[start + i];
-                parameters.Add(new NpgsqlParameter
-                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            }, addRoundTrips, ct);
-    }
-
     // Identity permutation sorted by a partition-key comparison over indices, so all parallel
     // probe arrays can be reordered together for forward index walks (see the call site).
     private static int[] BuildProbePermutation(int count, Comparison<int> byKey)
@@ -1273,13 +1122,13 @@ public sealed partial class NpgsqlSubstrateWriter
     /// LIST(type_id) -> HASH(subject_id): passing type and subject lets the probe prune
     /// to one leaf per id, where an id-only probe would descend every leaf's index.</summary>
     private Task<HashSet<Hash128>> ProbePresentKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
+        string queryName, IReadOnlyList<Hash128> ids, IReadOnlyList<Hash128> typeIds,
         IReadOnlyList<Hash128> subjectIds, Action<int> addRoundTrips, CancellationToken ct)
     {
         if (typeIds.Count != ids.Count || subjectIds.Count != ids.Count)
             throw new InvalidOperationException(
                 $"keyed probe arrays misaligned: {ids.Count} ids / {typeIds.Count} types / {subjectIds.Count} subjects");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2, $3)", ids,
+        return ProbePresentCoreAsync(queryName, ids,
             (parameters, start, n) =>
             {
                 var chunkTypes = new byte[n][];
@@ -1663,18 +1512,15 @@ public sealed partial class NpgsqlSubstrateWriter
                 // parallel sub-transaction is its own write transaction and advances
                 // once. The route flag was resolved on the control connection first.
                 bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
-                await using (var guc = conn.CreateCommand())
+                string settings = TransactionSettingsQuery(Durability);
+                await using (var guc = NpgsqlCatalog.Command(conn, tx,
+                    epochBump ? [settings, "write.advance_epoch"] : [settings]))
                 {
-                    guc.Transaction = tx;
-                    guc.CommandText =
-                        TransactionGucs(Durability)
-                        + (epochBump ? SqlCatalog.Get("write.advance_epoch").Text : "");
                     await guc.ExecuteNonQueryAsync(ct);
                 }
                 if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
-                string cols = IntentStage.CopyColumnList(table);
                 var stream = await conn.BeginRawBinaryCopyAsync(
-                    $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
+                    NpgsqlCatalog.BinaryCopyStatement(table), ct);
                 // Disposing the stream completes the COPY and reads its acknowledgement,
                 // even when writing throws; the transaction and budget slot are released
                 // by their own enclosing scopes.
@@ -1781,9 +1627,8 @@ public sealed partial class NpgsqlSubstrateWriter
         // replacing the real exception. Packing first lets the real error propagate.
         byte[] packed = CopyTupleParser.PackFiltered(
             blobs, rows, patchedCounts, countValueOffsets, patchedSums, sumValueOffsets);
-        string cols = IntentStage.CopyColumnList(table);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
-            $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
+            NpgsqlCatalog.BinaryCopyStatement(table), ct);
         await CopyTupleParser.WritePackedAsync(stream, packed, ct);
     }
 }

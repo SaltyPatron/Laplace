@@ -17,7 +17,9 @@ public static partial class NativeInterop
 
     static NativeInterop()
     {
-        _ = LaplaceDynamicsInit();
+        int status = LaplaceDynamicsInit();
+        if (status != 0)
+            throw new InvalidOperationException($"Native Dynamics runtime initialization failed (status {status}).");
     }
 
     [LibraryImport(Library, EntryPoint = "laplacian_eigenmaps")]

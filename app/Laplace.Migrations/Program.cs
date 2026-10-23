@@ -148,11 +148,7 @@ internal static class Program
     {
         using var connection = new NpgsqlConnection(connectionString);
         connection.Open();
-        using var command = new NpgsqlCommand("""
-            SELECT bool_and(to_regclass(name) IS NOT NULL)
-            FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',
-                'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)
-            """, connection);
+        using var command = NpgsqlCatalog.Command(connection, null, "migration.app_tables_present");
         return command.ExecuteScalar() is true;
     }
 
@@ -364,20 +360,12 @@ internal static class Program
         conn.Open();
         if (applicationOnly && IsCoLocatedApplication(connectionString))
         {
-            using var cmd = new NpgsqlCommand("""
-                DO $$
-                BEGIN
-                    IF to_regclass('public.schemaversions') IS NOT NULL THEN
-                        DELETE FROM public.schemaversions
-                        WHERE scriptname ~ '^[0-9]+_(app_|browser_)';
-                    END IF;
-                END $$;
-                """, conn);
+            using var cmd = NpgsqlCatalog.Command(conn, null, "migration.reset_application_journal");
             cmd.ExecuteNonQuery();
             Console.WriteLine("[migrate reset] application schemaversions entries cleared. Run 'app-up' to re-apply.");
             return 0;
         }
-        using (var cmd = new NpgsqlCommand("DROP TABLE IF EXISTS public.schemaversions", conn))
+        using (var cmd = NpgsqlCatalog.Command(conn, null, "migration.reset_journal"))
             cmd.ExecuteNonQuery();
         Console.WriteLine("[migrate reset] schemaversions dropped. Run 'up' to re-apply.");
         return 0;
