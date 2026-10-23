@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<LexicalResource>
+  <Lexicon id="omw-it" label="MultiWordNet (Italian)" language="it" email="bond@ieee.org" license="https://creativecommons.org/licenses/by/3.0/" version="2.0" url="https://multiwordnet.fbk.eu/english/home.php" citation="Emanuele Pianta, Luisa Bentivogli and Christian Girardi. 2002. *MultiWordNet: Developing an Aligned Multilingual Database*. In *Proceedings of the First International Conference on Global WordNet*. Mysore, India. January 21-25, 2002. pp 293-302.">
+    <LexicalEntry id="omw-it-tenda_per_doccia-n">
+      <Lemma writtenForm="tenda per doccia" partOfSpeech="n" />
+      <Sense id="omw-it-tenda_per_doccia-04209239-n" synset="omw-it-04209239-n" lexicalized="false" />
+    </LexicalEntry>
+    <Synset id="omw-it-04209239-n" ili="i58874" partOfSpeech="n" lexicalized="false" members="omw-it-tenda_per_doccia-04209239-n">
+      <Definition>le tende che impediscono all'acqua di uscire dall'area della doccia</Definition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>
