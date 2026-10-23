@@ -405,6 +405,8 @@ LAPLACE_DB=$runtime_substrate_db
 ${runtime_app_db:+LAPLACE_APP_DB=$runtime_app_db}
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
+LAPLACE_TIER0=$t0
+LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
 ASPNETCORE_URLS=$LAPLACE_API_URL
 LAPLACE_OPS_LOG_DIR=${LAPLACE_API_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
@@ -433,6 +435,8 @@ LAPLACE_PGPORT=$PGPORT
 LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
 LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
+LAPLACE_TIER0=$t0
+LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
 LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT
 LAPLACE_MCP_ORIGIN=$LAPLACE_MCP_ORIGIN
 LAPLACE_OPS_LOG_DIR=${LAPLACE_MCP_LOG_DIR:-$LAPLACE_APP_DIR/logs}
@@ -602,8 +606,11 @@ verify_cli_package() {
   for cache in tier0 highway laplace_chess_position_perfcache; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
-  (cd "$SITE_WORK"; env -u LAPLACE_PERFCACHE_BIN -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+  (cd "$SITE_WORK"; env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
     LD_LIBRARY_PATH="$cli" \
+    LAPLACE_TIER0="$cli/share/laplace/tier0.bin" \
+    LAPLACE_PERFCACHE_BIN="$cli/share/laplace/tier0.bin" \
+    LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
     "$cli/Laplace.Cli" decompose Laplace)
 }
 
@@ -739,7 +746,8 @@ phase_serve() {
   cd "$app"
   exec 8>&- # The foreground runtime is not a deployment transaction.
   LD_LIBRARY_PATH="$app:$LAPLACE_INSTALL_PREFIX/lib" ASPNETCORE_URLS="$LAPLACE_API_URL" ASPNETCORE_ENVIRONMENT=Production \
-    LAPLACE_PERFCACHE_BIN="$t0" LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" LAPLACE_AUTH_MODE=header LAPLACE_BILLING_BYPASS=true \
+    LAPLACE_TIER0="$t0" LAPLACE_PERFCACHE_BIN="$t0" LAPLACE_HIGHWAY="$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin" \
+    LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" LAPLACE_AUTH_MODE=header LAPLACE_BILLING_BYPASS=true \
     exec dotnet "$app/Laplace.Endpoints.OpenAICompat.dll"
 }
 
