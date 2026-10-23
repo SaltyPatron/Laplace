@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-source "$root/scripts/lib/installation.sh"
+source "$root/scripts/lib/database.sh"
 export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
 export LAPLACE_REUSE_INSTALLED_NATIVE=1
 export LAPLACE_TIER0="${LAPLACE_INSTALL_PREFIX:?}/share/laplace/tier0.bin"
