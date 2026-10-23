@@ -14,6 +14,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static readonly SemaphoreSlim InitGate = new(1, 1);
     private static int _refCount;
     private static NpgsqlDataSource? _sharedDataSource;
+    private static bool _nativeFoundationReady;
 
     public const string DatabaseName = "laplace_substratecrud_test";
 
@@ -31,14 +32,18 @@ public sealed class LocalPgFixture : IAsyncLifetime
 
     public string ConnectionString => Conn.ConnectionString;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => InitializeAsync(requireNativeFoundation: true);
+
+    internal async Task InitializeAsync(bool requireNativeFoundation)
     {
         await InitGate.WaitAsync();
         try
         {
-            if (_ds is not null) return;
+            bool retained = _ds is not null;
+            if (retained && (!requireNativeFoundation || _nativeFoundationReady)) return;
             if (_refCount == 0)
             {
+                _nativeFoundationReady = false;
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
                 await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
                 // The database is shared across fixtures; its connection pool must
@@ -56,8 +61,6 @@ public sealed class LocalPgFixture : IAsyncLifetime
             SET search_path TO laplace, public;
         ";
                     await cmd.ExecuteNonQueryAsync();
-                    await DeclareNativeFixtureFloorAsync(conn);
-                    await DeclareNativeByteBasisAsync(candidate, conn);
                     _sharedDataSource = candidate;
                 }
                 catch
@@ -66,9 +69,35 @@ public sealed class LocalPgFixture : IAsyncLifetime
                     throw;
                 }
             }
+            try
+            {
+                if (requireNativeFoundation && !_nativeFoundationReady)
+                {
+                    await using var conn = await _sharedDataSource!.OpenConnectionAsync();
+                    await DeclareNativeFixtureFloorAsync(conn);
+                    await DeclareNativeByteBasisAsync(_sharedDataSource, conn);
+                    _nativeFoundationReady = true;
+                }
+            }
+            catch (Exception initializationFailure)
+            {
+                // A maintenance-only owner may already be using this pool.
+                // An unsuccessful foundation upgrade cannot release its lease.
+                if (_refCount == 0 && _sharedDataSource is { } failed)
+                {
+                    _sharedDataSource = null;
+                    try { await failed.DisposeAsync(); }
+                    catch (Exception cleanupFailure)
+                    { throw new AggregateException(initializationFailure, cleanupFailure); }
+                }
+                throw;
+            }
             // Acquire ownership only after initialization has succeeded.
-            _ds = _sharedDataSource ?? throw new InvalidOperationException("Shared fixture pool is unavailable");
-            _refCount++;
+            if (!retained)
+            {
+                _ds = _sharedDataSource ?? throw new InvalidOperationException("Shared fixture pool is unavailable");
+                _refCount++;
+            }
         }
         finally
         {
@@ -184,6 +213,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
             {
                 await _sharedDataSource!.DisposeAsync();
                 _sharedDataSource = null;
+                _nativeFoundationReady = false;
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
             }
         }

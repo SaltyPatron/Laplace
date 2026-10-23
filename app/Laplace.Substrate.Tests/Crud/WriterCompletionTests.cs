@@ -4,10 +4,9 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
-[Collection("substrate-pg")]
 [Trait("Category", "RequiresDatabase")]
 [Trait("Tier", "db")]
-public sealed class WriterCompletionTests(LocalPgFixture pg)
+public sealed class WriterCompletionTests(GinMaintenanceFixture pg) : IClassFixture<GinMaintenanceFixture>
 {
     [Fact]
     public async Task CompletionDefersUnownedGinWithoutLosingQueryableRows()
@@ -84,4 +83,17 @@ public sealed class WriterCompletionTests(LocalPgFixture pg)
             await cleanup.ExecuteNonQueryAsync();
         }
     }
+}
+
+/// <summary>
+/// Uses the existing shared PostgreSQL fixture and pool without running a
+/// content ingest as a prerequisite for GIN maintenance assertions.
+/// </summary>
+public sealed class GinMaintenanceFixture : IAsyncLifetime
+{
+    private readonly LocalPgFixture _database = new();
+    public global::Npgsql.NpgsqlDataSource DataSource => _database.DataSource;
+    public string ConnectionString => _database.ConnectionString;
+    public Task InitializeAsync() => _database.InitializeAsync(requireNativeFoundation: false);
+    public Task DisposeAsync() => _database.DisposeAsync();
 }
