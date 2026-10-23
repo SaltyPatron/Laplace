@@ -75,24 +75,3 @@ public readonly struct PredicateMatrixSource : ISeedSource
 
     public static IngestSourceProfile Profile => IngestSourceProfile.PredicateMatrix;
 }
-
-public readonly struct WordFrameNetSource : ISeedSource
-{
-    public static Hash128 SourceId { get; } =
-        SubstrateCanonicalIds.Source("WordFrameNetDecomposer");
-
-    public static string SourceName => "WordFrameNetDecomposer";
-
-    public static Hash128 TrustClass { get; } =
-        TrustClassRegistry.Id("AcademicCurated");
-
-    public static IReadOnlyList<string> Relations { get; } =
-        ["lu_synset", "WordFrameNet", "wordframenet", "WFN", "XWFN", "eXtendedWFN"];
-
-    public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["FrameNet_LU"];
-
-    public static SourceLicense License => SourceLicense.Unknown;
-
-    public static IngestSourceProfile Profile => IngestSourceProfile.Default;
-}

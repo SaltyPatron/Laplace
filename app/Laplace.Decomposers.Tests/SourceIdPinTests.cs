@@ -18,8 +18,6 @@ public class SourceIdPinTests
     {
         { () => new Laplace.Decomposers.Unicode.UnicodeDecomposer(),
           "876b5fddd2c2cb59e6fb8a6c76a0b159", "9ed6235c81cafe911167a95e1a4587ed" },
-        { () => new Laplace.Decomposers.SemLink.WordFrameNetDecomposer(),
-          "83f23c6a65f35e74b3dc3fd108447036", "d37a0d1e87aae7aaf5aaaad8b119955f" },
         { () => new Laplace.Decomposers.Code.CodeDecomposer(),
           "a4be3d948f1f6c1a491f4edf47cff57e", "c62668c333824c0b89b84db531007db0" },
         { () => new Laplace.Decomposers.Code.RepoDecomposer(),
