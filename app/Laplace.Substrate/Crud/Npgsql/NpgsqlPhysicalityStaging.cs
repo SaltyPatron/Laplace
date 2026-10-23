@@ -158,7 +158,7 @@ public sealed partial class NpgsqlSubstrateWriter
         await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         bool epochRoute = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
         if (_leafModulus == 0)
-            _leafModulus = await StagedSourceWriter.ModulusAsync(connection, ct).ConfigureAwait(false);
+            _leafModulus = await ResolveLeafModulusAsync(connection, ct).ConfigureAwait(false);
         await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
             connection, "laplace_apply_batch", Durability, _log, ct).ConfigureAwait(false);
         connectionDiagnostic?.Complete();
@@ -167,5 +167,18 @@ public sealed partial class NpgsqlSubstrateWriter
             connection, transaction, epochRoute, stages, workingSetToken,
             workingSetSource, workingSetSources, transactionParticipant,
             completions, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<int> ResolveLeafModulusAsync(NpgsqlConnection connection, CancellationToken ct)
+    {
+        var moduli = new HashSet<int>();
+        await using (var command = NpgsqlCatalog.Command(connection, null, "write.partition_leaves"))
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                moduli.Add(reader.GetInt32(2));
+        if (moduli.Count != 1 || !System.Numerics.BitOperations.IsPow2(moduli.First()))
+            throw new InvalidOperationException(
+                "substrate writes route by one power-of-two hash modulus for every substrate table");
+        return moduli.First();
     }
 }

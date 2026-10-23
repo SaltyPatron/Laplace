@@ -108,9 +108,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             try
             {
                 var contract = SqlCatalog.Get(name);
-                // StagedSourceWriter expands its identifier templates and runs their
-                // dependent DDL/COPY lifecycle in StagedSourceWriterTests. They are
-                // not executable fixed statements and cannot be prepared raw.
+                // Identifier-bearing operation and maintenance templates have their
+                // own lifecycle checks; they cannot be prepared without expansion.
                 if (Regex.IsMatch(contract.Text, @"\{[a-z_][a-z0-9_]*\}", RegexOptions.IgnoreCase))
                 {
                     if (name.StartsWith("migration.", StringComparison.Ordinal))
@@ -132,8 +131,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                         await utility.UnprepareAsync();
                         continue;
                     }
-                    Assert.True(name.StartsWith("stage.", StringComparison.Ordinal)
-                        || name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal)
+                    Assert.True(name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal)
                         || name.StartsWith("operation.", StringComparison.Ordinal),
                         $"No lifecycle verification owns template {name}.");
                     templates.Add(name);
@@ -156,7 +154,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.NotEmpty(templates);
         Assert.True(failures.Count == 0,
             $"{failures.Count} of {names.Length - templates.Count} fixed native SQL contracts failed preparation " +
-            $"({templates.Count} staged templates require their lifecycle tests):\n" + string.Join("\n", failures));
+            $"({templates.Count} identifier templates require their lifecycle tests):\n" + string.Join("\n", failures));
     }
 
     [Fact]
