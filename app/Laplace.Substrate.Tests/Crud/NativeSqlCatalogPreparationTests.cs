@@ -113,6 +113,25 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 // not executable fixed statements and cannot be prepared raw.
                 if (Regex.IsMatch(contract.Text, @"\{[a-z_][a-z0-9_]*\}", RegexOptions.IgnoreCase))
                 {
+                    if (name.StartsWith("migration.", StringComparison.Ordinal))
+                    {
+                        // Parse utility syntax without executing lifecycle operations.
+                        // Confirmed recreation remains a separate operator action.
+                        using var identifiers = new NpgsqlCommandBuilder();
+                        string statement = Regex.Replace(contract.Text, @"\{([a-z_]+)\}", match =>
+                            match.Groups[1].Value switch
+                            {
+                                "database" => identifiers.QuoteIdentifier(connection.Database),
+                                "replacement" => identifiers.QuoteIdentifier("laplace_catalog_prepare"),
+                                "options" => "TEMPLATE template0",
+                                "owner" => "CURRENT_USER",
+                                _ => throw new InvalidOperationException($"Unknown bootstrap DDL slot in {name}."),
+                            });
+                        await using var utility = new NpgsqlCommand(statement, connection);
+                        await utility.PrepareAsync();
+                        await utility.UnprepareAsync();
+                        continue;
+                    }
                     Assert.True(name.StartsWith("stage.", StringComparison.Ordinal)
                         || name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal)
                         || name.StartsWith("operation.", StringComparison.Ordinal),

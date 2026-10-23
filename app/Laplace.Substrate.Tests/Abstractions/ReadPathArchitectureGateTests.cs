@@ -192,7 +192,7 @@ public sealed class ReadPathArchitectureGateTests
     /// </remarks>
     private const int HandWrittenSqlCeiling = 0;
 
-    private static IEnumerable<string> ScannedFiles(string repoRoot)
+    private static IEnumerable<string> ScannedFiles(string repoRoot, bool includeTransportAndBootstrap = false)
     {
         var appRoot = Path.Combine(repoRoot, "app");
         if (!Directory.Exists(appRoot)) yield break;
@@ -205,9 +205,9 @@ public sealed class ReadPathArchitectureGateTests
             if (file.Contains($"{sep}bin{sep}") || file.Contains($"{sep}obj{sep}")) continue;
             if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
             // The sanctioned home — Npgsql is SUPPOSED to live here.
-            if (file.Contains(sanctioned, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!includeTransportAndBootstrap && file.Contains(sanctioned, StringComparison.OrdinalIgnoreCase)) continue;
             // DbUp bootstrap runs before the extension exists.
-            if (file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!includeTransportAndBootstrap && file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
             // Not substrate catalog: a THIRD-PARTY SQLite container the agents lane
             // unpacks (Cursor store.db, Zed threads.db, Crush crush.db, Goose/OpenCode
             // session dbs) is a FORMAT CODEC, the same class as Fathom for syzygy — it
@@ -288,6 +288,16 @@ public sealed class ReadPathArchitectureGateTests
         Assert.NotEmpty(files);
         var violations = files.Where(file => HasInlineSql(File.ReadAllText(file)))
             .Select(Path.GetFileName).ToArray();
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void AllPostgresSqlLiteralsAreCatalogOwnedIncludingStorageAndBootstrap()
+    {
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var violations = ScannedFiles(root, includeTransportAndBootstrap: true)
+            .Where(file => HasInlineSql(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(root, file)).ToArray();
         Assert.Empty(violations);
     }
 
