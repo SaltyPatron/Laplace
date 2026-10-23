@@ -85,8 +85,10 @@ template<class F> canonical_stage_status_t guarded(canonical_stage* s,F work) {
     catch(const std::bad_alloc&) { return s->error=CANONICAL_STAGE_LIMIT; }
     catch(const std::length_error&) { return s->error=CANONICAL_STAGE_LIMIT; }
 }
-bool cached(canonical_stage* s,const lp_id& id) {
-    return lp_tier0_contains(s->floor,&id) || (s->highway && lp_highway_contains(s->highway,&id));
+bool floor_atom(canonical_stage* s,const lp_id& id) {
+    // Only Unicode scalars are storage-free leaves. A highway entry supplies
+    // identity and coordinates, not a receipt for its persisted logical path.
+    return lp_tier0_contains(s->floor,&id);
 }
 void validate(canonical_stage* s,const lp_ref& ref) {
     require(lp_coord_inside(&ref.c) && ref.said<=LP_M_SAID_MASK && ref.outcome<=LP_OUTCOME_SCORE
@@ -126,7 +128,7 @@ lp_ref compose(canonical_stage* s,const lp_ref* children,size_t count,uint8_t ti
         require(lp_mask_merge(s->highway,0,entity_mask,&checked));
         require(lp_mask_merge(s->highway,0,path_mask,&checked));
     }
-    if(count==1 || cached(s,value.id)) {
+    if(count==1 || floor_atom(s,value.id)) {
         require(!entity_mask && !path_mask && !spine);
         validate(s,value);
         return value;
@@ -176,7 +178,7 @@ lp_ref text_composition(void* owner,const lp_ref* children,uint32_t n,uint8_t ti
 }
 void queue(canonical_stage* s,const lp_id& id) {
     int64_t at=lp_idmap_find(s->index,&id);
-    if(at<0) { require(cached(s,id)); return; }
+    if(at<0) { require(floor_atom(s,id)); return; }
     s->stack.push_back(size_t(at));
     while(!s->stack.empty()) {
         size_t i=s->stack.back();s->stack.pop_back();Node& node=s->nodes[i];
@@ -187,7 +189,7 @@ void queue(canonical_stage* s,const lp_id& id) {
         for(size_t v=0;v<node.count;++v) {
             const lp_id child=s->vertices[node.first+v].id;
             int64_t child_at=lp_idmap_find(s->index,&child);
-            if(child_at>=0)s->stack.push_back(size_t(child_at)); else require(cached(s,child));
+            if(child_at>=0)s->stack.push_back(size_t(child_at)); else require(floor_atom(s,child));
         }
     }
 }
@@ -237,8 +239,12 @@ extern "C" canonical_stage_status_t canonical_stage_reference(canonical_stage_t*
         if(at>=0) {
             require(std::memcmp(s->nodes[size_t(at)].value.c.m,value.c.m,sizeof value.c.m)==0,CANONICAL_STAGE_CONFLICT);
             s->nodes[size_t(at)].external=true;
-        } else if(cached(s,value.id)) validate(s,value);
-        else {require(value.tier>0);s->nodes[insert(s,value)].external=true;}
+        } else if(floor_atom(s,value.id)) validate(s,value);
+        else {
+            require(value.tier>0);
+            if(s->highway && lp_highway_contains(s->highway,&value.id))validate(s,value);
+            s->nodes[insert(s,value)].external=true;
+        }
     });
 }
 extern "C" canonical_stage_status_t canonical_stage_compose(canonical_stage_t* s,

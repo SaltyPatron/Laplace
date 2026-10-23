@@ -33,6 +33,40 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
+    /// <summary>Commit one canonical structural window with the writer's durability policy.</summary>
+    public async Task<Laplace.Ingestion.StagedWriteResult> ApplyCanonicalWorkingSetAsync(
+        Laplace.Ingestion.StagedSourceWriter window, Hash128[] roots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(roots);
+        await using var connection = await _ds.OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        string settings = Durability == PostgresWriteDurability.Synchronous
+            ? "write.settings_sync" : "write.settings_async";
+        await using (var command = NpgsqlCatalog.Command(connection, transaction, settings))
+            await command.ExecuteNonQueryAsync(ct);
+        var result = await ApplyCanonicalWorkingSetAsync(window, connection, transaction, roots, ct);
+        await transaction.CommitAsync(ct);
+        return result;
+    }
+
+    /// <summary>
+    /// Apply a Native canonical structural window through the installed extension.
+    /// This method does not commit a caller-owned transaction or register a source witness.
+    /// </summary>
+    public Task<Laplace.Ingestion.StagedWriteResult> ApplyCanonicalWorkingSetAsync(
+        Laplace.Ingestion.StagedSourceWriter window, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Hash128[] roots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(roots);
+        if (transaction.Connection != connection)
+            throw new ArgumentException("The canonical source transaction belongs to a different connection.", nameof(transaction));
+        return window.WriteAsync(connection, transaction, roots, ct);
+    }
+
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
     private static readonly IngestSizing.ApplyIoPlan ApplySizing =
         IngestSizing.ResolveApplyIo(ApplyParallelism);

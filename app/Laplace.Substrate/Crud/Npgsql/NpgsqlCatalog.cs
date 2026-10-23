@@ -13,6 +13,14 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlCatalog
 {
+    internal static async Task<NpgsqlRawCopyStream> BeginBinaryCopyAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, string name,
+        IReadOnlyDictionary<string, string> identifiers, CancellationToken ct)
+    {
+        await using var command = Command(connection, transaction, name, identifiers: identifiers);
+        return await connection.BeginRawBinaryCopyAsync(command.CommandText, ct);
+    }
+
     internal static NpgsqlCommand InstalledOperationCommand(
         NpgsqlDataSource source, bool procedure, string qualifiedName,
         IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments, long rowsToFetch)
