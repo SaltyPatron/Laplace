@@ -23,20 +23,21 @@ public sealed class NativeSqlTransportCommandTests
     }
 
     [Fact]
-    public void StageTemplateSeparatesIdentifiersFromBinaryValuesAndRejectsStatementInjection()
+    public void ActiveCatalogCommandsSeparateIdentifiersFromBinaryValuesAndRejectStatementInjection()
     {
         using var connection = new NpgsqlConnection();
-        var identifiers = new Dictionary<string, string> { ["stage"] = "laplace_stage_abcd" };
+        var identifiers = new Dictionary<string, string> { ["relation"] = "laplace.physicalities" };
         byte[] id = Enumerable.Range(0, 16).Select(value => (byte)value).ToArray();
-        using var command = NpgsqlCatalog.Command(connection, null, "stage.exclude_type", identifiers, id);
-        Assert.Contains("laplace_stage_abcd.excluded_type", command.CommandText, StringComparison.Ordinal);
-        Assert.DoesNotContain("{stage}", command.CommandText, StringComparison.Ordinal);
-        Assert.Equal("bytea", command.Parameters[0].DataTypeName);
-        Assert.Same(id, command.Parameters[0].Value);
-        identifiers["stage"] = "x; DROP SCHEMA public";
-        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "stage.exclude_type", identifiers, id));
-        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "stage.exclude_type",
-            new Dictionary<string, string>(), id));
+        using var utility = NpgsqlCatalog.Command(connection, null, "maintenance.vacuum_plain_relation", identifiers: identifiers);
+        Assert.Equal("VACUUM laplace.physicalities", utility.CommandText);
+        Assert.Empty(utility.Parameters);
+        using var query = NpgsqlCatalog.Command(connection, null, "conversation.lock", id);
+        Assert.Equal("bytea", query.Parameters[0].DataTypeName);
+        Assert.Same(id, query.Parameters[0].Value);
+        identifiers["relation"] = "x; DROP SCHEMA public";
+        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "maintenance.vacuum_plain_relation", identifiers: identifiers));
+        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "maintenance.vacuum_plain_relation",
+            identifiers: new Dictionary<string, string>()));
     }
 
     [Fact]

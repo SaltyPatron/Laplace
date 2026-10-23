@@ -479,204 +479,12 @@ SQL_QUERY("language.tags", "text[]",
     "ON c.subject_id=l.id,rel WHERE c.type_id=rel.ext AND c.object_id IS NOT NULL) "
     "SELECT t FROM unnest(realize.render_text_batch((SELECT array_agg(id) FROM tags))) t WHERE t IS NOT NULL")
 
-/* The staged load (StagedSourceWriter). A source is extracted completely into its
- * own staging schema ({stage}) before any record is processed; the load then runs
- * once over the complete staged set: the records converge by identity (a staged id
- * equal to a stored id is that entity), the entities and physicalities the substrate
- * does not hold and the merged claims are persisted, consensus is folded, and each
- * touched partition leaf is rebuilt beside its live leaf and swapped in. {lanes} and
- * {lane} are integers the caller formats; COPY takes no bind parameters. */
-SQL_QUERY("stage.create", "",
-    "CREATE SCHEMA {stage}; "
-    "CREATE UNLOGGED TABLE {stage}.excluded_type (type_id bytea PRIMARY KEY); "
-    "CREATE UNLOGGED TABLE {stage}.entity (id bytea,tier smallint,type_id bytea); "
-    "CREATE UNLOGGED TABLE {stage}.physicality (id bytea,entity_id bytea,type smallint,coord geometry,"
-    "hilbert_index bytea,trajectory geometry,n_constituents integer,alignment_residual double precision,"
-    "source_dim integer,observed_at timestamptz); "
-    "CREATE UNLOGGED TABLE {stage}.attestation (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
-    "source_id bytea,context_id bytea,outcome smallint,last_observed_at timestamptz,"
-    "observation_count bigint,sum_score_fp1e9 bigint,opponent_rd_fp1e9 bigint,"
-    "opponent_rating_fp1e9 bigint,fold_replayable boolean,qualifier_mask bytea)")
-SQL_QUERY("stage.entity_copy", "", "COPY {stage}.entity (id,tier,type_id) FROM STDIN (FORMAT BINARY)")
-SQL_QUERY("stage.physicality_copy", "",
-    "COPY {stage}.physicality (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,"
-    "alignment_residual,source_dim,observed_at) FROM STDIN (FORMAT BINARY)")
-SQL_QUERY("stage.attestation_copy", "",
-    "COPY {stage}.attestation (id,subject_id,type_id,object_id,source_id,context_id,outcome,"
-    "last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,"
-    "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
-/* The staged records converged: one row per entity id and per physicality id, each
- * with the hash partition it lands in. A partition is PostgreSQL's own hash routing of
- * the key (hashbyteaextended under the partition seed, combined with zero, modulo the
- * power-of-two modulus), computed from the key alone. */
-SQL_QUERY("stage.structure", "",
-    "CREATE UNLOGGED TABLE {stage}.node AS SELECT d.id,d.tier,d.type_id,(((hashbyteaextended(d.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part FROM "
-    "(SELECT DISTINCT ON (id) id,tier,type_id FROM {stage}.entity ORDER BY id,tier) d; "
-    "CREATE UNIQUE INDEX ON {stage}.node (id); "
-    "CREATE UNLOGGED TABLE {stage}.form AS SELECT d.*,(((hashbyteaextended(d.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part FROM "
-    "(SELECT DISTINCT ON (id) * FROM {stage}.physicality ORDER BY id) d; "
-    "CREATE INDEX ON {stage}.form (entity_id); "
-    "ANALYZE {stage}.node; ANALYZE {stage}.form")
-/* Claims the substrate has not admitted, sorted by id for the native merge; a stored
- * claim is a replay of an observation already folded. */
-SQL_QUERY("stage.claims_out", "",
-    "COPY (SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,"
-    "a.last_observed_at,a.observation_count,a.sum_score_fp1e9,a.opponent_rd_fp1e9,a.opponent_rating_fp1e9,"
-    "a.fold_replayable,a.qualifier_mask FROM {stage}.attestation a WHERE NOT EXISTS "
-    "(SELECT 1 FROM laplace.attestations s WHERE s.id=a.id AND s.type_id=a.type_id AND s.subject_id=a.subject_id) "
-    "ORDER BY a.id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.claim_table", "",
-    "CREATE UNLOGGED TABLE {stage}.claim (LIKE {stage}.attestation)")
-SQL_QUERY("stage.claim_copy", "",
-    "COPY {stage}.claim (id,subject_id,type_id,object_id,source_id,context_id,outcome,"
-    "last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,"
-    "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
-/* Every claimed relation's Highway bit on its subject and object, one native deposit
- * per leading id byte. */
-/* Scoring: every evidence row of each cell the source touches, the stored testimony
- * and the source's new claims, in the canonical aggregate's order, with whether the
- * cell already stands. */
-SQL_QUERY("stage.score_out", "",
-    "COPY (WITH claim AS MATERIALIZED (SELECT * FROM {stage}.claimp c "
-    "WHERE NOT EXISTS (SELECT 1 FROM {stage}.excluded_type x WHERE x.type_id=c.type_id) AND c.part%{lanes}={lane}), "
-    "touched AS MATERIALIZED (SELECT DISTINCT subject_id,type_id,object_id FROM claim), "
-    "evidence AS ("
-    "SELECT subject_id,type_id,object_id,source_id,opponent_rating_fp1e9,opponent_rd_fp1e9,"
-    "observation_count,sum_score_fp1e9,last_observed_at,id FROM claim "
-    "UNION ALL SELECT a.subject_id,a.type_id,a.object_id,a.source_id,a.opponent_rating_fp1e9,"
-    "a.opponent_rd_fp1e9,a.observation_count,a.sum_score_fp1e9,a.last_observed_at,a.id "
-    "FROM touched t JOIN laplace.attestations a ON a.subject_id=t.subject_id AND a.type_id=t.type_id "
-    "AND a.object_id=t.object_id "
-    "UNION ALL SELECT a.subject_id,a.type_id,a.object_id,a.source_id,a.opponent_rating_fp1e9,"
-    "a.opponent_rd_fp1e9,a.observation_count,a.sum_score_fp1e9,a.last_observed_at,a.id "
-    "FROM touched t JOIN laplace.attestations a ON a.subject_id=t.subject_id AND a.type_id=t.type_id "
-    "AND a.object_id IS NULL WHERE t.object_id IS NULL) "
-    "SELECT e.subject_id,e.type_id,e.object_id,e.source_id,e.opponent_rating_fp1e9,e.opponent_rd_fp1e9,"
-    "GREATEST(e.observation_count,1),e.sum_score_fp1e9,e.last_observed_at,k.rating,k.rd,k.volatility "
-    "FROM evidence e LEFT JOIN laplace.consensus k ON k.id=public.laplace_hash128_blake3("
-    "e.subject_id||e.type_id||coalesce(e.object_id,'\\x00000000000000000000000000000000'::bytea)) "
-    "AND k.type_id=e.type_id AND k.subject_id=e.subject_id "
-    "ORDER BY e.subject_id,e.type_id,e.object_id NULLS FIRST,e.last_observed_at,e.id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.standing_table", "",
-    "CREATE UNLOGGED TABLE {stage}.standing (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
-    "rating bigint,rd bigint,volatility bigint,witness_count bigint,last_observed_at timestamptz)")
-SQL_QUERY("stage.standing_copy", "",
-    "COPY {stage}.standing (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,"
-    "last_observed_at) FROM STDIN (FORMAT BINARY)")
-SQL_QUERY("stage.claim_parts", "",
-    "CREATE UNLOGGED TABLE {stage}.claimp AS SELECT c.*,(((hashbyteaextended(c.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
-    "FROM {stage}.claim c; "
-    "CREATE INDEX ON {stage}.claimp (part); ANALYZE {stage}.claimp")
-SQL_QUERY("stage.cell_table", "",
-    "CREATE UNLOGGED TABLE {stage}.cell (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
-    "rating bigint,rd bigint,volatility bigint,witness_count bigint,last_observed_at timestamptz)")
-SQL_QUERY("stage.cell_copy", "",
-    "COPY {stage}.cell (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,"
-    "last_observed_at) FROM STDIN (FORMAT BINARY)")
-/* The new records of every table with the hash partition each lands in. A new entity
- * brings its physicalities; a physicality of a record no new entity realizes (a floor
- * atom's observation, another physicality type of a present entity) is new only when
- * the substrate lacks its id. */
-SQL_QUERY("stage.new_sets", "",
-    "CREATE UNLOGGED TABLE {stage}.new_entity AS SELECT n.id,n.tier,n.type_id,n.part FROM {stage}.node n "
-    "WHERE NOT EXISTS (SELECT 1 FROM laplace.entities s WHERE s.id=n.id); "
-    "CREATE INDEX ON {stage}.new_entity (part); "
-    "CREATE UNLOGGED TABLE {stage}.new_form AS SELECT f.* FROM {stage}.form f "
-    "WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p WHERE p.id=f.id); "
-    "CREATE INDEX ON {stage}.new_form (part); "
-    "CREATE UNLOGGED TABLE {stage}.typebit AS SELECT t.type_id,CASE WHEN consensus.highway_ready() THEN "
-    "coalesce(consensus.relation_highway_bit(t.type_id),(SELECT consensus.relation_highway_bit(f.object_id) FROM "
-    "(SELECT object_id FROM laplace.consensus WHERE subject_id=t.type_id AND type_id=laplace.relation_type_id('IS_A') "
-    "AND object_id IS NOT NULL UNION ALL SELECT object_id FROM {stage}.claim WHERE subject_id=t.type_id "
-    "AND type_id=laplace.relation_type_id('IS_A') AND object_id IS NOT NULL) f "
-    "WHERE consensus.relation_highway_bit(f.object_id) IS NOT NULL LIMIT 1)) END AS bit "
-    "FROM (SELECT DISTINCT c.type_id FROM {stage}.claim c WHERE NOT EXISTS (SELECT 1 FROM {stage}.excluded_type x WHERE x.type_id=c.type_id)) t; "
-    "CREATE UNLOGGED TABLE {stage}.mask AS SELECT x.id,(((hashbyteaextended(x.id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part,"
-    "consensus.highway_mask_from_bits(array_agg(DISTINCT b.bit ORDER BY b.bit)) AS mask "
-    "FROM (SELECT subject_id AS id,type_id FROM {stage}.claim UNION SELECT object_id,type_id FROM {stage}.claim "
-    "WHERE object_id IS NOT NULL) x JOIN {stage}.typebit b ON b.type_id=x.type_id AND b.bit IS NOT NULL "
-    "GROUP BY x.id; "
-    "CREATE INDEX ON {stage}.mask (part,id); "
-    "CREATE UNLOGGED TABLE {stage}.cellp AS SELECT c.*,(((hashbyteaextended(c.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
-    "FROM {stage}.cell c; "
-    "CREATE INDEX ON {stage}.cellp (part); "
-    "CREATE UNLOGGED TABLE {stage}.standingp AS SELECT s.*,(((hashbyteaextended(s.subject_id,8816678312871386365)&{partmask})+{partadd})&{partmask})::int AS part "
-    "FROM {stage}.standing s; "
-    "CREATE INDEX ON {stage}.standingp (part,id); "
-    "ANALYZE {stage}.new_entity; ANALYZE {stage}.new_form; ANALYZE {stage}.mask; ANALYZE {stage}.cellp; "
-    "ANALYZE {stage}.standingp")
-/* Physicality closure of the source's new entities: each is realized by a form the
- * source staged with it. */
-SQL_QUERY("stage.closure", "",
-    "SELECT count(*),count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM {stage}.form f "
-    "WHERE f.entity_id=n.id)) FROM {stage}.new_entity n")
-/* New rows per table and partition. */
-SQL_QUERY("stage.part_counts", "",
-    "SELECT 'entities',part,count(*) FROM (SELECT part FROM {stage}.new_entity UNION ALL "
-    "SELECT part FROM {stage}.mask) x GROUP BY part UNION ALL "
-    "SELECT 'physicalities',part,count(*) FROM {stage}.new_form GROUP BY part UNION ALL "
-    "SELECT 'attestations',part,count(*) FROM {stage}.claimp GROUP BY part UNION ALL "
-    "SELECT 'consensus',part,count(*) FROM (SELECT part FROM {stage}.cellp UNION ALL "
-    "SELECT part FROM {stage}.standingp) x GROUP BY part")
-/* Each substrate leaf: its table, name, hash bound and approximate rows. */
-SQL_QUERY("stage.leaves", "",
+/* Physical partition metadata used by the active COPY writer. */
+SQL_QUERY("write.partition_leaves", "",
     "SELECT t.relname,l.relname,(regexp_match(pg_get_expr(l.relpartbound,l.oid),'modulus (\\d+)'))[1]::int,"
     "(regexp_match(pg_get_expr(l.relpartbound,l.oid),'remainder (\\d+)'))[1]::int,greatest(l.reltuples,0)::bigint "
     "FROM pg_inherits i JOIN pg_class t ON t.oid=i.inhparent JOIN pg_class l ON l.oid=i.inhrelid "
     "WHERE t.relnamespace='laplace'::regnamespace AND t.relname IN ('entities','physicalities','attestations','consensus')")
-SQL_QUERY("stage.table_columns", "",
-    "SELECT c.relname,string_agg(a.attname,',' ORDER BY a.attnum) FROM pg_class c JOIN pg_attribute a "
-    "ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped AND a.attgenerated='' "
-    "WHERE c.relnamespace='laplace'::regnamespace AND c.relname IN ('entities','physicalities','attestations','consensus') "
-    "GROUP BY c.relname")
-SQL_QUERY("stage.leaf_indexes", "",
-    "SELECT ic.relname,pg_get_indexdef(i.indexrelid),i.indisprimary FROM pg_index i "
-    "JOIN pg_class ic ON ic.oid=i.indexrelid JOIN pg_class l ON l.oid=i.indrelid "
-    "WHERE l.relnamespace='laplace'::regnamespace AND l.relname={leafname} ORDER BY ic.relname")
-/* Replacement leaves left behind by a load that never swapped them in. */
-SQL_QUERY("stage.orphan_leaves", "",
-    "SELECT relname FROM pg_class WHERE relnamespace='laplace'::regnamespace AND relkind='r' "
-    "AND relname LIKE 'stg\\_%' AND NOT relispartition")
-/* A leaf rebuilt on the side: created in the transaction that fills it, so under
- * wal_level=minimal its rows and every index built there are written without WAL and
- * fsynced at commit, and COPY FREEZE lands its rows frozen with their hint bits set, so
- * no later read rewrites its pages. Its rows are the leaf's current rows and the
- * source's new rows for that partition, each streamed once out of PostgreSQL. */
-SQL_QUERY("stage.leaf_create", "",
-    "CREATE TABLE laplace.{new} (LIKE laplace.{table} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS)")
-SQL_QUERY("stage.leaf_fill", "", "COPY laplace.{new} ({target}) FROM STDIN (FORMAT BINARY, FREEZE)")
-SQL_QUERY("stage.rows_current", "", "COPY (SELECT {cols} FROM laplace.{leaf}) TO STDOUT (FORMAT BINARY)")
-/* An entity's Highway mask is the union of the bits it already carries and the bits of
- * every relation the source claims it in, as subject or object: a byte-exact OR of the
- * four 64-bit words (bytea <-> bigint casts are big-endian). */
-SQL_QUERY("stage.rows_entities_current", "",
-    "COPY (SELECT e.id,e.tier,e.type_id,e.created_at,CASE WHEN m.id IS NULL THEN e.highway_mask ELSE "
-    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),1,8)::bigint|substr(m.mask,1,8)::bigint)::bytea||"
-    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),9,8)::bigint|substr(m.mask,9,8)::bigint)::bytea||"
-    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),17,8)::bigint|substr(m.mask,17,8)::bigint)::bytea||"
-    "(substr(coalesce(e.highway_mask,'\\x0000000000000000000000000000000000000000000000000000000000000000'::bytea),25,8)::bigint|substr(m.mask,25,8)::bigint)::bytea END "
-    "FROM laplace.{leaf} e LEFT JOIN {stage}.mask m ON m.part={r} AND m.id=e.id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.rows_entities", "",
-    "COPY (SELECT n.id,n.tier,n.type_id,m.mask FROM {stage}.new_entity n "
-    "LEFT JOIN {stage}.mask m ON m.part={r} AND m.id=n.id WHERE n.part={r} ORDER BY n.id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.rows_physicalities", "",
-    "COPY (SELECT {cols} FROM {stage}.new_form WHERE part={r} ORDER BY hilbert_index) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.rows_attestations", "",
-    "COPY (SELECT {cols} FROM {stage}.claimp WHERE part={r} ORDER BY subject_id,id) TO STDOUT (FORMAT BINARY)")
-/* A consensus leaf: its current cells with the standing the source's evidence
- * recomputed (over all of the cell's evidence), then the source's new cells. */
-SQL_QUERY("stage.rows_consensus_current", "",
-    "COPY (SELECT c.id,c.subject_id,c.type_id,c.object_id,coalesce(s.rating,c.rating),coalesce(s.rd,c.rd),"
-    "coalesce(s.volatility,c.volatility),coalesce(s.witness_count,c.witness_count),"
-    "GREATEST(c.last_observed_at,s.last_observed_at) FROM laplace.{leaf} c LEFT JOIN {stage}.standingp s "
-    "ON s.part={r} AND s.id=c.id AND s.type_id=c.type_id AND s.subject_id=c.subject_id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.rows_consensus", "",
-    "COPY (SELECT id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at "
-    "FROM {stage}.cellp WHERE part={r} ORDER BY id) TO STDOUT (FORMAT BINARY)")
-SQL_QUERY("stage.census", "",
-    "SELECT (SELECT count(*) FROM {stage}.entity),(SELECT count(*) FROM {stage}.physicality),"
-    "(SELECT count(*) FROM {stage}.attestation)")
-SQL_QUERY("stage.drop", "", "DROP SCHEMA IF EXISTS {stage} CASCADE")
 
 SQL_QUERY("ingest.physicality_descriptor_provider_metadata", "bytea[]",
     "SELECT p.id,p.entity_id,p.type,p.coord,p.hilbert_index,p.trajectory,"
@@ -1816,34 +1624,11 @@ SQL_QUERY("write.physicalities_exist_bitmap", "bytea[]",
 SQL_QUERY("write.attestations_exist_bitmap", "bytea[],bytea[],bytea[]",
     "SELECT laplace.attestations_exist_bitmap($1,$2,$3)")
 
-SQL_QUERY("stage.exclude_type", "bytea", "INSERT INTO {stage}.excluded_type(type_id) VALUES($1)")
 SQL_QUERY("advisory.lane_release", "int4,int4", "SELECT pg_advisory_unlock($1,$2)")
 SQL_QUERY("write.wal_position", "", "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(),'0/0')::bigint")
 SQL_QUERY("write.copy_entities", "", "COPY laplace.entities (id,tier,type_id) FROM STDIN (FORMAT BINARY)")
 SQL_QUERY("write.copy_physicalities", "", "COPY laplace.physicalities (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) FROM STDIN (FORMAT BINARY)")
 SQL_QUERY("write.copy_attestations", "", "COPY laplace.attestations (id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
-
-SQL_QUERY("stage.leaf_primary_key", "", "ALTER TABLE laplace.{new} ADD CONSTRAINT {index} PRIMARY KEY USING INDEX {index}")
-
-SQL_QUERY("stage.leaf_hash_bound", "", "ALTER TABLE laplace.{new} ADD CONSTRAINT {new}_bound CHECK (satisfies_hash_partition('laplace.{table}'::regclass,{modulus},{r},{key}))")
-
-SQL_QUERY("stage.leaf_analyze", "", "ANALYZE laplace.{new}")
-
-SQL_QUERY("stage.leaf_detach", "", "ALTER TABLE laplace.{table} DETACH PARTITION laplace.{leaf}")
-
-SQL_QUERY("stage.leaf_attach", "", "ALTER TABLE laplace.{table} ATTACH PARTITION laplace.{new} FOR VALUES WITH (MODULUS {modulus}, REMAINDER {r})")
-
-SQL_QUERY("stage.leaf_extension_drop", "", "ALTER EXTENSION laplace_substrate DROP TABLE laplace.{leaf}")
-
-SQL_QUERY("stage.leaf_drop", "", "DROP TABLE laplace.{leaf}")
-
-SQL_QUERY("stage.leaf_rename", "", "ALTER TABLE laplace.{new} RENAME TO {leaf}")
-
-SQL_QUERY("stage.leaf_extension_add", "", "ALTER EXTENSION laplace_substrate ADD TABLE laplace.{leaf}")
-
-SQL_QUERY("stage.leaf_unbound", "", "ALTER TABLE laplace.{leaf} DROP CONSTRAINT {new}_bound")
-
-SQL_QUERY("stage.leaf_index_rename", "", "ALTER INDEX laplace.{index} RENAME TO {index_name}")
 
 SQL_QUERY("maintenance.physicalities_constituents_gin", "", "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL")
 
