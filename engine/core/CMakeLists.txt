@@ -97,6 +97,7 @@ set(LAPLACE_CORE_SOURCES
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c
+    src/staged_load.cpp
     src/physicality_descriptor.c
     src/physicality_descriptor_stage.c
     src/physicality_descriptor_read.c
@@ -225,7 +226,7 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     get_filename_component(_laplace_pg_root "$ENV{PGBIN}" DIRECTORY)
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
-set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c src/unicode_properties.c PROPERTIES
+set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c src/unicode_properties.c src/staged_load.cpp PROPERTIES
     INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
 set_source_files_properties(src/codepoint_table.c PROPERTIES
     INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src")

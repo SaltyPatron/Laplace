@@ -21,6 +21,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_tier_tree.cpp
     test_intent_stage.cpp
     test_intent_stage_physicality_law.cpp
+    test_staged_load.cpp
     test_ordered_composition.cpp
     test_absence_filter.cpp
     test_merkle_dedup.cpp
