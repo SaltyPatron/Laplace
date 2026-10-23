@@ -3,11 +3,13 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/grammar_compose.h"
+#include "laplace/core/grammar_registry.h"
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/physicality_descriptor_admission.h"
 #include "laplace/core/trajectory.h"
@@ -38,10 +40,10 @@ protected:
         vocabulary.reset(raw);
     }
 
-    Ast parse(const std::string& source) {
+    Ast parse(const std::string& source, const char* modality = "pgn") {
         laplace_ast_t* raw = nullptr;
         EXPECT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(source.data()),
-            source.size(), tree_sitter_pgn(), &raw), 0);
+            source.size(), laplace_grammar_lookup_by_id(modality), &raw), 0);
         Ast ast(raw, laplace_ast_free);
         if (!ast) return ast;
         laplace_ast_diagnostics_t diagnostics{};
@@ -52,12 +54,13 @@ protected:
         return ast;
     }
 
-    Result compose(const std::string& source, const Ast& ast, bool source_representation = false) {
+    Result compose(const std::string& source, const Ast& ast, bool source_representation = false,
+                   const char* modality = "pgn") {
         laplace_compose_result_t* raw = nullptr;
         const auto* bytes = reinterpret_cast<const uint8_t*>(source.data());
         const int status = source_representation ?
-            laplace_grammar_source_compose(bytes, source.size(), ast.get(), "pgn", &raw) :
-            laplace_grammar_compose(bytes, source.size(), ast.get(), "pgn", kSourceA, {}, &raw);
+            laplace_grammar_source_compose(bytes, source.size(), ast.get(), modality, &raw) :
+            laplace_grammar_compose(bytes, source.size(), ast.get(), modality, kSourceA, {}, &raw);
         EXPECT_EQ(status, 0);
         return Result(raw, laplace_compose_result_free);
     }
@@ -112,17 +115,23 @@ TEST_F(GrammarPhysicality, DistinctSourcesStageEachFormOnce) {
         10, 1.0, nullptr, 0), 0);
     const size_t first_entities = intent_stage_entity_count(stage.get());
     ASSERT_GT(first_entities, 0u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
+    const size_t first_forms = intent_stage_physicality_count(stage.get());
+    ASSERT_GE(first_forms, forms.size()); // Includes the retained Native lexical floor.
     ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceB,
         20, 1.0, nullptr, 0), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), first_entities);
-    EXPECT_EQ(intent_stage_physicality_count(stage.get()), forms.size());
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), first_forms);
     auto captured = capture(stage);
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* inputs = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, forms.size());
-    for (size_t i = 0; i < forms.size(); ++i) expect_body(inputs[i], *forms[i]);
+    ASSERT_EQ(count, first_forms);
+    for (size_t i = 0; i < count; ++i)
+        for (size_t j = 0; j < i; ++j)
+            EXPECT_FALSE(hash128_equals(&inputs[i].entity_id, &inputs[j].entity_id)
+                && inputs[i].type == inputs[j].type);
+    const size_t first = count - forms.size();
+    for (size_t i = 0; i < forms.size(); ++i) expect_body(inputs[first + i], *forms[i]);
 }
 
 // A present composition is its entity and its one composition physicality: a present
@@ -146,6 +155,65 @@ TEST_F(GrammarPhysicality, PresentCompositionsStageNoEntityAndNoPhysicality) {
     EXPECT_EQ(intent_stage_physicality_count(stage.get()), 0u);
 }
 
+TEST_F(GrammarPhysicality, RetainedContentManifestsHaveCompleteDescendants) {
+    const struct { const char* modality; const char* source; } cases[] = {
+        {"pgn", kGame},
+        {"pgn", "[Event \"q\xCC\x81\"]\n1. e4 e5 *\n"},
+        {"json", R"({"name":"q\u0301","other":"\ud83d\udc69\u200d\ud83d\udcbb"})"},
+        {"tsv", "q\xCC\x81\tword word\t42\n"}
+    };
+    for (const auto& fixture : cases) {
+    SCOPED_TRACE(fixture.modality);
+    const std::string source = fixture.source;
+    auto ast = parse(source, fixture.modality);
+    ASSERT_NE(ast, nullptr);
+    for (int mode : {0, 1, 2}) {
+        SCOPED_TRACE(mode == 1 ? "uploaded source" : mode == 2 ? "materialized probe" : "grammar record");
+        auto result = compose(source, ast, mode == 1, fixture.modality);
+        if (mode == 2) {
+            laplace_compose_result_t* probe = nullptr;
+            const auto* bytes = reinterpret_cast<const uint8_t*>(source.data());
+            ASSERT_EQ(laplace_grammar_compose_probe(bytes, source.size(), ast.get(),
+                fixture.modality, kSourceA, {}, &probe), 0);
+            result.reset(probe);
+            ASSERT_EQ(laplace_grammar_compose_materialize_phys(result.get(), bytes,
+                source.size(), ast.get(), fixture.modality), 0);
+        }
+        ASSERT_NE(result, nullptr);
+        Stage stage(intent_stage_new_bounded(0, kBudget), intent_stage_free);
+        ASSERT_NE(stage, nullptr);
+        ASSERT_EQ(laplace_compose_drain_into_stage(result.get(), stage.get(), &kSourceA,
+            10, 1.0, nullptr, 0), 0);
+        auto captured = capture(stage);
+        ASSERT_NE(captured, nullptr);
+        size_t count = 0;
+        const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
+        std::set<std::array<uint64_t, 2>> retained;
+        for (size_t i = 0; i < count; ++i)
+            if (bodies[i].type == 1) retained.insert({bodies[i].entity_id.hi, bodies[i].entity_id.lo});
+        for (size_t i = 0; i < count; ++i) {
+            const auto& body = bodies[i];
+            if (body.type != 1) continue;
+            ASSERT_EQ(0, laplace_physicality_manifest_validate(&body.entity_id, body.type,
+                body.trajectory_xyzm, body.trajectory_vertices, body.n_constituents));
+            std::vector<hash128_t> children;
+            ASSERT_EQ(0, trajectory_visit_vertices(body.trajectory_xyzm, body.trajectory_vertices,
+                [](void* context, size_t, const hash128_t* id, size_t, uint64_t) {
+                    static_cast<std::vector<hash128_t>*>(context)->push_back(*id);
+                    return 0;
+                }, &children));
+            for (const auto& child : children) {
+                uint32_t cp;
+                if (codepoint_table_lookup_id(&child, &cp) == 0) continue;
+                ASSERT_FALSE(hash128_equals(&child, &body.entity_id)) << "non-scalar content cannot contain itself";
+                ASSERT_TRUE(retained.contains({child.hi, child.lo}))
+                    << "a retained parent references a non-scalar child with no retained physicality";
+            }
+        }
+    }
+    }
+}
+
 // A physicality id is its entity and its type: a second body computed for the same
 // placement is the form already staged, not another one.
 TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
@@ -166,6 +234,8 @@ TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
     ASSERT_EQ(laplace_compose_drain_into_stage(original.get(), stage.get(), &kSourceA,
         10, 1.0, nullptr, 0), 0);
     const size_t entities = intent_stage_entity_count(stage.get());
+    const size_t first_forms = intent_stage_physicality_count(stage.get());
+    ASSERT_GE(first_forms, forms.size());
     ASSERT_EQ(laplace_compose_drain_into_stage(changed.get(), stage.get(), &kSourceB,
         20, 1.0, nullptr, 0), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), entities);
@@ -173,8 +243,12 @@ TEST_F(GrammarPhysicality, AnotherBodyAtTheSamePlacementIsTheStagedForm) {
     ASSERT_NE(captured, nullptr);
     size_t count = 0;
     const auto* bodies = physicality_descriptor_capture_inputs(captured.get(), &count);
-    ASSERT_EQ(count, forms.size());
-    expect_body(bodies[0], original->physicalities[0]);
+    ASSERT_EQ(count, first_forms);
+    for (size_t i = 0; i < count; ++i)
+        for (size_t j = 0; j < i; ++j)
+            EXPECT_FALSE(hash128_equals(&bodies[i].entity_id, &bodies[j].entity_id)
+                && bodies[i].type == bodies[j].type);
+    expect_body(bodies[count - forms.size()], original->physicalities[0]);
 }
 
 // Two identical games in one source are one composition occurring twice in the file's
