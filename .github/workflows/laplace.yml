@@ -144,7 +144,7 @@ jobs:
       - name: Exercise installed database recreation and failure recovery
         run: bash tests/database-recreation.sh
 
-      - name: Verify ingestion completion with owner and restricted database roles
+      - name: Verify installed GIN maintenance with owner and restricted database roles
         run: bash tests/ingest-completion.sh
 
       - name: Verify database profile upgrades and UCI database identity protocol
