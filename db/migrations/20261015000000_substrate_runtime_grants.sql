@@ -8,7 +8,20 @@ DECLARE
     reader boolean;
     namespace record;
     owner_role text;
+    canonical_tables text;
 BEGIN
+    -- Scope public write access to the Native substrate and its partitions.
+    -- Other public extension tables retain their existing read-only grants.
+    WITH RECURSIVE substrate(oid) AS (
+        SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname IN ('entity','physicality','witness','consensus')
+          AND c.relkind IN ('r','p')
+        UNION
+        SELECT i.inhrelid FROM pg_inherits i JOIN substrate s ON s.oid=i.inhparent
+    )
+    SELECT string_agg(format('%I.%I', n.nspname,c.relname), ', ' ORDER BY c.oid)
+    INTO canonical_tables
+    FROM substrate s JOIN pg_class c ON c.oid=s.oid JOIN pg_namespace n ON n.oid=c.relnamespace;
     FOR candidate IN
         SELECT rolname FROM pg_roles
         WHERE rolname = 'laplace_runtime'
@@ -25,6 +38,13 @@ BEGIN
         reader := candidate LIKE 'laplace_mono_uci\_%' ESCAPE '\';
         IF NOT reader THEN
             EXECUTE format('GRANT pg_read_all_stats, pg_signal_backend TO %I', candidate);
+            IF canonical_tables IS NOT NULL THEN
+                EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE,MAINTAIN ON TABLE %s TO %I',
+                    canonical_tables,candidate);
+            END IF;
+            IF to_regnamespace('stage') IS NOT NULL THEN
+                EXECUTE format('GRANT CREATE ON SCHEMA stage TO %I',candidate);
+            END IF;
         END IF;
         EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), candidate);
         FOR namespace IN

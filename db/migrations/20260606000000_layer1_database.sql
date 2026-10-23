@@ -1,5 +1,9 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+-- The Engine and managed entry points use the same Native substrate contract.
+-- This extension owns the fixed-width blake3 type and canonical public tables.
+CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
+
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
