@@ -1,7 +1,5 @@
-using System.Globalization;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
-using Npgsql;
 
 namespace Laplace.Cli;
 
@@ -28,34 +26,6 @@ internal static partial class IngestCommands
         finally { Console.CancelKeyPress -= Cancel; }
     }
 
-    // Values pass through the child environment, never the argument vector or a
-    // shell. libpq's quoted connection values escape backslashes and apostrophes.
     internal static string NativeConnectionInfo(string connectionString)
-    {
-        var settings = new NpgsqlConnectionStringBuilder(connectionString);
-        if (string.IsNullOrWhiteSpace(settings.Host) || string.IsNullOrWhiteSpace(settings.Database))
-            throw new ArgumentException("The substrate host and database must be declared.", nameof(connectionString));
-        static string Pair(string name, string value) => name + "='"
-            + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("'", "\\'", StringComparison.Ordinal) + "'";
-        var fields = new List<string>
-        {
-            Pair("host", settings.Host),
-            Pair("port", settings.Port.ToString(CultureInfo.InvariantCulture)),
-            Pair("dbname", settings.Database),
-            Pair("connect_timeout", settings.Timeout.ToString(CultureInfo.InvariantCulture)),
-            Pair("sslmode", settings.SslMode switch
-            {
-                SslMode.Disable => "disable", SslMode.Allow => "allow", SslMode.Prefer => "prefer",
-                SslMode.Require => "require", SslMode.VerifyCA => "verify-ca", SslMode.VerifyFull => "verify-full",
-                _ => throw new ArgumentOutOfRangeException(nameof(connectionString)),
-            }),
-        };
-        if (!string.IsNullOrEmpty(settings.Username)) fields.Add(Pair("user", settings.Username));
-        if (!string.IsNullOrEmpty(settings.Password)) fields.Add(Pair("password", settings.Password));
-        if (!string.IsNullOrEmpty(settings.RootCertificate)) fields.Add(Pair("sslrootcert", settings.RootCertificate));
-        if (!string.IsNullOrEmpty(settings.SslCertificate)) fields.Add(Pair("sslcert", settings.SslCertificate));
-        if (!string.IsNullOrEmpty(settings.SslKey)) fields.Add(Pair("sslkey", settings.SslKey));
-        if (!string.IsNullOrEmpty(settings.Options)) fields.Add(Pair("options", settings.Options));
-        return string.Join(" ", fields);
-    }
+        => NativeRecipeExecution.ConnectionInfoFromNpgsql(connectionString);
 }

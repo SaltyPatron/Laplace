@@ -8,22 +8,6 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class GrammarSpineConformanceTests
 {
     [Fact]
-    public void OmwRowParser_ParsesLemmaRow()
-    {
-        ReadOnlySpan<byte> line = "1740-n\teng:lemma\tcat"u8;
-        Assert.True(OMWRowParser.TryParseRow(line, "eng", out var row, out var valueUtf8));
-        Assert.Equal(OmwType.Lemma, row.Type);
-        Assert.Equal("cat", Encoding.UTF8.GetString(valueUtf8));
-        Assert.Equal("eng", row.Lang);
-    }
-
-    [Fact]
-    public void OmwRowParser_SkipsCommentLines()
-    {
-        Assert.False(OMWRowParser.TryParseRow("# comment"u8, "eng", out _, out _));
-    }
-
-    [Fact]
     public void TsvSpan_ParsesConllUFields()
     {
         ReadOnlySpan<byte> line = "1\tform\t_\t_\t_\t_\t0\troot\t_\t_"u8;
@@ -61,28 +45,8 @@ public class GrammarSpineConformanceTests
     }
 
     [Fact]
-    public void StructuredSources_UseDeclaredGenericPipelineAdapters()
+    public void CanonicalSourcesHaveNoParallelManagedRegistrations()
     {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var grammarSpine = new (string Project, string[] Needles)[]
-        {
-            ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
-                "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
-        };
-
-        foreach (var (project, needles) in grammarSpine)
-        {
-            var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", project);
-            var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
-                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                         && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
-                .Select(p => StripComments(File.ReadAllText(p))));
-            foreach (var needle in needles)
-                Assert.True(text.Contains(needle, StringComparison.Ordinal),
-                    $"{project} must use grammar spine pattern '{needle}' in CODE "
-                    + "(comments are stripped — a mention is not a use)");
-        }
-
         // Canonical corpora use the Native recipe engine, never a second managed
         // per-record provider registered under the same source name.
         Assert.Empty(EtlManifest.SourceOrder.Intersect(
@@ -104,6 +68,7 @@ public class GrammarSpineConformanceTests
     }
 
     [Theory]
+    [InlineData("OMW")]
     [InlineData("ConceptNet")]
     [InlineData("Tatoeba")]
     [InlineData("OpenSubtitles")]

@@ -3,19 +3,6 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.OMW;
 
-internal enum OmwRelation
-{
-    HasDefinition, HasExample, IsSynonymOf, HasLanguage, HasPos,
-    HasName, HasVersion, HasLicense, HasSourceUrl, HasCitation, HasAttribution,
-    Contains, Requires, FormOf, HasSense, IsSenseOf, HasSenseFrequency, HasFeature,
-    CorrespondsTo, HasVerbFrame, HasLexCategory, HasMember, HasProperty, IsAntonymOf,
-    HasHypernym, IsInstanceOf, HasHyponym, HasInstance, IsMemberOf, IsSubstanceOf,
-    IsPartOf, HasSubstance, HasPart, HasAttribute, DerivationallyRelated,
-    HasDomainTopic, IsDomainTopicMember, HasDomainRegion, IsDomainRegionMember,
-    Entails, Causes, AlsoSee, IsSimilarTo, IsParticipleOf, PertainsTo,
-    HasDomainUsage, IsDomainUsageMember, HasExternalId,
-}
-
 public readonly struct OMWSource : ISeedSource
 {
     public static Hash128 LexiconTypeId { get; } = EntityTypeRegistry.Id("OMW_Lexicon");
@@ -44,12 +31,6 @@ public readonly struct OMWSource : ISeedSource
         "IS_SIMILAR_TO", "IS_PARTICIPLE_OF", "PERTAINS_TO",
         "exemplifies", "IS_DOMAIN_USAGE_MEMBER", "HAS_EXTERNAL_ID",
     ];
-
-    private static readonly RelationTypeRegistry.RelationTypeResolution[] Resolutions =
-        Relations.Select(RelationTypeRegistry.Resolve).ToArray();
-
-    internal static RelationTypeRegistry.RelationTypeResolution Resolve(OmwRelation relation) =>
-        Resolutions[(int)relation];
 
     public static IReadOnlyList<string>? TypeNodeNames =>
         ["OMW_Lexicon", "OMW_Lexical_Entry", "OMW_Syntactic_Behaviour", "OMW_Package",

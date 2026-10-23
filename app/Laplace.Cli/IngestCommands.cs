@@ -226,32 +226,8 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    internal static async Task<int> OmwProbeAsync(IngestCliArgs cli)
-    {
-        string wns = IngestDataPaths.Resolve("omw", cli.Path);
-        if (!Directory.Exists(wns))
-            return Fail($"OMW path not found: {wns}");
-
-        long start = 0;
-        long max = 0;
-        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
-        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
-        HighwayPerfcache.LoadDefault();
-
-        Console.Error.WriteLine($"omw-probe: scanning {wns} start_row={start} max_rows={(max > 0 ? max.ToString() : "all")}");
-        var fail = await OmwComposeProbe.ScanFirstFailureAsync(wns, cli.LangOverride, start, max);
-        if (fail is null)
-        {
-            Console.Error.WriteLine("omw-probe: all rows passed probe+materialize_phys");
-            return 0;
-        }
-
-        Console.Error.WriteLine(
-            $"omw-probe: FAIL row={fail.RowIndex} file={fail.FilePath}\n"
-            + $"  error={fail.Error}\n"
-            + $"  bytes={fail.LineBytes} preview={fail.LinePreview}");
-        return 1;
-    }
+    internal static Task<int> OmwProbeAsync(IngestCliArgs cli)
+        => IngestNativeRecipeAsync("open-multilingual-wordnet", cli with { NativeMode = NativeRecipeMode.NoLoad });
 
     internal static async Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli)
     {
@@ -954,4 +930,3 @@ internal static partial class IngestCommands
     }
 
 }
-
