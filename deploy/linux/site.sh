@@ -94,7 +94,11 @@ host_lock() {
   case "$mode" in shared|exclusive) ;; *) fail "invalid host lock mode: $mode" ;; esac
   [[ -d "$(dirname "$path")" ]] || fail "missing shared host lock directory: $path"
   host_lock_hold "$mode" 8 "$path" "$wait" || rc=$?      # through the turnstile: a waiting deployment is not overtaken
-  [[ $rc == 0 ]] || fail "host lock deadline expired: $path; no deployment phase ran"
+  case $rc in
+    0) ;;
+    3) fail "host lock deadline expired: $path; no deployment phase ran" ;;
+    *) fail "host lock could not be acquired (status $rc): $path; no deployment phase ran" ;;
+  esac
 }
 revision() {
   local app="$1" rev web

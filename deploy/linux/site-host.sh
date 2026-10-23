@@ -179,7 +179,13 @@ for d in "$PREFIX" "$PREFIX/app" "$PREFIX/app/logs" "$PREFIX/app/mcp-runtime" "$
 say "$PREFIX" "$RUN_USER:$RUN_GROUP 2775; secrets 2770"
 # the restart trigger's directory is Operations' (setup.sh shared: tmpfiles at boot); made here too if it is not yet
 [[ -d "$LOCKS" ]] || { install -d -g "$RUN_GROUP" -m 2775 "$LOCKS"; say "$LOCKS" "made (Operations setup.sh declares it at boot)"; }
-if ! [[ /proc/self/fd/8 -ef "$LOCKS/host-resource.lock" ]]; then exec 8>>"$LOCKS/host-resource.lock"; fi
+if ! [[ /proc/self/fd/8 -ef "$LOCKS/host-resource.lock" ]]; then
+  lock_mask=$(umask); umask 002
+  exec 8>>"$LOCKS/host-resource.lock"
+  umask "$lock_mask"
+fi
+chgrp "$RUN_GROUP" "$LOCKS/host-resource.lock"
+chmod 0664 "$LOCKS/host-resource.lock"
 flock -xn 8 || { echo 'Another deployment or ingest owns the host lock' >&2; exit 1; }
 
 echo "=== units"

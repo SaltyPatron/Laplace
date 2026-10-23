@@ -17,8 +17,22 @@ host_lock_hold() {
   [[ "$fd" =~ ^[0-9]+$ && "$fd" != 7 ]] || { echo "host_lock_hold: FD is a descriptor number, not 7 (the turnstile's)" >&2; return 2; }
   [[ -z "$wait" || "$wait" =~ ^[0-9]+$ ]] || { echo "host_lock_hold: WAIT must be a nonnegative integer" >&2; return 2; }
   if [[ /proc/self/fd/$fd -ef "$path" ]]; then flock "$flag" -n "$fd" && return 0
-  else eval "exec $fd>>\"\$path\""; fi
-  mask=$(umask); umask 002; exec 7>>"$path.turnstile"; umask "$mask"
+  else
+    mask=$(umask); umask 002
+    if ! eval "exec $fd>>\"\$path\""; then
+      umask "$mask"
+      echo "cannot open host lock: $path (check ownership and group write permission)" >&2
+      return 1
+    fi
+    umask "$mask"
+  fi
+  mask=$(umask); umask 002
+  if ! exec 7>>"$path.turnstile"; then
+    umask "$mask"
+    echo "cannot open host lock turnstile: $path.turnstile" >&2
+    return 1
+  fi
+  umask "$mask"
   start=$SECONDS
   if ! flock -x -n 7; then
     echo "Waiting ${wait:+up to ${wait}s }for $path ($mode)" >&2; said=1

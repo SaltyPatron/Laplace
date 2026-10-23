@@ -24,9 +24,9 @@ SQL_QUERY("write.canonical_merge", "text,text",
     "SELECT * FROM public.laplace_merge_stage($1::regclass,$2::regclass)")
 SQL_QUERY("write.canonical_stage_drop", "",
     "DROP TABLE {entity_stage},{path_stage}")
-SQL_QUERY("verify.canonical_staged_root", "public.blake3,text",
+SQL_QUERY("verify.canonical_staged_root", "public.blake3",
     "SELECT e.id,e.tier,public.laplace_text(e.id),"
-    "public.ST_AsEWKB(e.coord)=public.laplace_text_coord_ewkb($2),"
+    "public.ST_X(e.coord),public.ST_Y(e.coord),public.ST_Z(e.coord),public.ST_M(e.coord),"
     "to_regclass('stage.lp_entity_'||pg_current_xact_id()::text) IS NULL "
     "AND to_regclass('stage.lp_path_'||pg_current_xact_id()::text) IS NULL "
     "FROM public.entity e JOIN public.physicality p ON p.entity=e.id WHERE e.id=$1")
