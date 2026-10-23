@@ -39,17 +39,22 @@
     Tier=perf also stays explicit because a throughput threshold on a busy self-hosted
     runner measures ambient machine load as much as code.
 
+    Category=RequiresQualification covers full corpus estates and installed model
+    checkpoints. It also stays explicit: mounting local data must not turn a normal
+    development test run into a full-corpus qualification.
+
     Explicit filters still override the default:
 
       dotnet test /p:VSTestTestCaseFilter="Tier=db"    run DB-backed tests
       dotnet test /p:VSTestTestCaseFilter="Tier=live"  run seeded/shared product smokes
       dotnet test /p:VSTestTestCaseFilter="Tier=perf"  run performance tests intentionally
+      dotnet test /p:VSTestTestCaseFilter="Category=RequiresQualification"  run corpus/model qualification
       dotnet test /p:VSTestTestCaseFilter=""           run absolutely everything
   -->
   <!-- IsTestProject is set by the test SDK, which imports AFTER this file, so it
        is empty here; key off the project name, which is known immediately. -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(VSTestTestCaseFilter)' == ''">
-    <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=live</VSTestTestCaseFilter>
+    <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=live&amp;Category!=RequiresQualification</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
     <!-- Outputs live outside the repo, so tests can no longer find the repo

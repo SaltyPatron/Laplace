@@ -10,6 +10,7 @@ namespace Laplace.Decomposers.Model.Tests;
 
 
 
+[Trait("Category", "RequiresQualification")]
 public class RealModelManifestTests
 {
     private static string HubRoot =>

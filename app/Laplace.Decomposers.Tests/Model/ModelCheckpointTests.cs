@@ -89,6 +89,7 @@ public sealed class ModelCheckpointTests
     }
 
     [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
     public void MiniLmHeader_StagesOrderedProvenanceWithoutNumericPayload()
     {
         const string model = "/vault/models/models--sentence-transformers--all-MiniLM-L6-v2";

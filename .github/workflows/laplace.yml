@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 645fa95eff9a320222c559593de033ae18ec3326
+          ref: 91c143338a8a1cf42ea3ce3f4fc87b76e770fda9
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -141,13 +141,13 @@ jobs:
           for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do
             dotnet test "app/$project/$project.csproj" -c Release --nologo \
               -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
-              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests' \
+              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests' \
               --logger "trx;LogFileName=$project.trx" --results-directory "$results"
           done
           python3 - "$results" <<'PY'
           from pathlib import Path
           import sys, xml.etree.ElementTree as ET
-          for project, expected in [('Laplace.Decomposers.Tests', 16), ('Laplace.Substrate.Tests', 3)]:
+          for project, expected in [('Laplace.Decomposers.Tests', 27), ('Laplace.Substrate.Tests', 3)]:
               path = Path(sys.argv[1]) / (project + '.trx')
               counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
               if int(counters['passed']) != expected or int(counters['total']) != expected:
@@ -279,7 +279,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 645fa95eff9a320222c559593de033ae18ec3326
+          ref: 91c143338a8a1cf42ea3ce3f4fc87b76e770fda9
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
