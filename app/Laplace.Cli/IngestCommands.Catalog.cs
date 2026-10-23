@@ -3,12 +3,15 @@ using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.Cli;
 
-internal static partial class IngestCommands
+internal static class IngestCatalogCommands
 {
-    private static int PrintIngestCatalog(string[] args)
+    internal static int Run(string[] args)
     {
-        if (args.Length > 2 || (args.Length == 2 && args[1] != "--json"))
-            return CliRuntime.Fail("usage: laplace-mono ingest catalog [--json]");
+        if (args.Length == 0 || args.Length > 2 || (args.Length == 2 && args[1] != "--json"))
+        {
+            Console.Error.WriteLine("usage: laplace-mono ingest catalog [--json]");
+            return 2;
+        }
         var catalog = EtlManifest.Catalog;
         if (args[0] == "--list-sources")
         {

@@ -150,15 +150,57 @@ def markdown(catalog: dict) -> str:
     return "\n".join(lines)
 
 
+def grammar_sources(catalog: dict, recipes: Path, lock: Path) -> str:
+    aliases = dict(line.split("\t") for line in
+                   (recipes.parent / "grammar-sources.tsv").read_text().splitlines()[1:] if line)
+    cmake = (ROOT / "engine/core/grammars/CMakeLists.txt").read_text()
+    required = set(re.findall(r'\$\{_TSG\}/([^/"\s]+)', cmake))
+    definitions = [*catalog["formats"], *(recipe for source in catalog["sources"] for recipe in source["recipes"])]
+    for recipe in definitions:
+        language = recipe["grammar"]
+        if not language or language in {"text", "layout", "pgn"} or (recipes / "formats/grammars" / language).is_dir():
+            continue
+        required.add(aliases.get(language, "tree-sitter-" + language))
+    rows = {}
+    for line in lock.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        name, revision, origin = line.split("\t")
+        if name in rows or not re.fullmatch(r"[0-9a-f]{40}", revision) or not origin.startswith("https://"):
+            raise ValueError(f"Invalid locked grammar source: {line}")
+        rows[name] = line
+    missing = required - rows.keys()
+    if missing:
+        raise ValueError("No locked grammar revision for: " + ", ".join(sorted(missing)))
+    return "\n".join(rows[name] for name in sorted(required))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipes", type=Path)
     parser.add_argument("--format", choices=("json", "markdown", "names"), default="json")
     parser.add_argument("--resolve")
     parser.add_argument("--check-engine", type=Path, help="Verify the actual Engine exposes the same complete catalog")
+    parser.add_argument("--check-mono", type=Path, help="Verify the built monorepo CLI catalog without a database or caches")
+    parser.add_argument("--grammar-sources", type=Path, help="Select required grammar source revisions from a TSV lock")
     args = parser.parse_args()
     catalog = load_catalog(args.recipes)
-    if args.check_engine:
+    if args.grammar_sources:
+        print(grammar_sources(catalog, args.recipes or recipe_root(), args.grammar_sources))
+    elif args.check_mono:
+        executable = args.check_mono.resolve()
+        command = ["dotnet", str(executable)] if executable.suffix == ".dll" else [str(executable)]
+        environment = dict(os.environ, LAPLACE_RECIPES=str(args.recipes or recipe_root()),
+                           LAPLACE_TIER0="/no-catalog-cache", LAPLACE_HIGHWAY="/no-catalog-highway",
+                           LAPLACE_PERFCACHE_BIN="/no-catalog-cache", LAPLACE_DB="host=invalid")
+        actual = json.loads(subprocess.check_output(command + ["ingest", "catalog", "--json"], text=True, env=environment))
+        if actual != catalog:
+            raise ValueError("Monorepo and operator recipe catalogs differ")
+        human = subprocess.check_output(command + ["ingest", "catalog"], text=True, env=environment)
+        if any(source["name"] not in human for source in catalog["sources"]):
+            raise ValueError("Human CLI catalog omits a declared source")
+        print(f"Monorepo/operator catalog parity without caches or database: {len(catalog['sources'])} sources, {len(catalog['formats'])} formats")
+    elif args.check_engine:
         native = json.loads(subprocess.check_output(
             [str(args.check_engine.resolve()), "ingest", "-r", str(args.recipes or recipe_root()), "--catalog"], text=True))
         if native != catalog:

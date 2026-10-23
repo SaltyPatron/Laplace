@@ -19,7 +19,7 @@ public sealed class NativeXmlRecipeTests
     {
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
         string path = source == "propbank"
-            ? Path.Combine(Directory.GetParent(repository)!.FullName, "Laplace-Engine", "tests", "fixtures",
+            ? Path.Combine(Directory.GetParent(EtlManifest.RecipesRoot)!.FullName, "tests", "fixtures",
                 "highway-identities", "propbank", name)
             : Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes", "xml", name);
         var document = XDocument.Load(path);

@@ -16,7 +16,7 @@ internal static class Program
         try
         {
             if (args.Length >= 2 && args[0] == "ingest" && args[1] is "catalog" or "--catalog" or "--list-sources")
-                return await IngestCommands.IngestAsync(args[1..]);
+                return IngestCatalogCommands.Run(args[1..]);
             logging = CliRuntime.LoggerFactory;
             using var scope = logging.CreateLogger("cli").BeginScope(
                 new Dictionary<string, object> { ["OperationId"] = Guid.NewGuid().ToString("N"),

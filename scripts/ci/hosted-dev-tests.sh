@@ -76,10 +76,11 @@ deps() {
   ln -sfnT "${LAPLACE_EIGEN:-/usr/include/eigen3}" "$EXT/eigen"
   local name rev url
   mkdir -p "$EXT/tree-sitter-grammars"
+  python3 scripts/ingest_catalog.py --grammar-sources "$ROOT/scripts/ci/tree-sitter-grammars.tsv" > "$WORK/required-grammars.tsv"
   while IFS=$'\t' read -r name rev url; do
     [[ -z "$name" || "$name" == \#* ]] && continue
     fetch "$EXT/tree-sitter-grammars/$name" "$url" "$rev" &
-  done < "$ROOT/scripts/ci/tree-sitter-grammars.tsv"
+  done < "$WORK/required-grammars.tsv"
   wait
   end
   say "UCD $(ucd_version)"
@@ -183,6 +184,7 @@ managed() {
   export LAPLACE_SRC="$(dirname "$ROOT")"
   say "managed: build"
   dotnet build app/Laplace.slnx -c Release --nologo -v minimal
+  python3 scripts/ingest_catalog.py --check-mono "$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
   end
   say "managed: canonical dev tier on the candidate native build"
   export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"

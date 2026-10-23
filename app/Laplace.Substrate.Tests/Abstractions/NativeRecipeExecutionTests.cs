@@ -14,9 +14,8 @@ public sealed class NativeRecipeExecutionTests
     public async Task CanonicalEngineReadsRealPropbankThroughTheManagedProcessBoundary(NativeRecipeMode mode)
     {
         Assert.True(LaplaceInstall.TryRepoRoot(out var repository));
-        string workspace = Directory.GetParent(repository)!.FullName;
         var execution = NativeRecipeExecution.Configured();
-        string fixture = Path.Combine(workspace, "Laplace-Engine", "tests", "fixtures",
+        string fixture = Path.Combine(Directory.GetParent(execution.Recipes)!.FullName, "tests", "fixtures",
             "highway-identities", "propbank", "abandon.xml");
         using var output = new MemoryStream();
         using var error = new MemoryStream();
