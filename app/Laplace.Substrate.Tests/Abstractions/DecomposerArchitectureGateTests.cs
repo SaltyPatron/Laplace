@@ -60,7 +60,6 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         GenericDecomposer,
-        "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
     };
@@ -219,7 +218,6 @@ public sealed class DecomposerArchitectureGateTests
         // the decomposer's parser.
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "app/Laplace.Decomposers/ISO/LanguageGraph.cs",
             "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
             "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",
             // Laplace's own source-generation manifests (*.source.json): the install

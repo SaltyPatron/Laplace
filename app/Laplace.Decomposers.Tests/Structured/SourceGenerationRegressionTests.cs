@@ -163,10 +163,9 @@ public sealed class SourceGenerationRegressionTests
     }
 
     [Theory]
-    [InlineData(false, ".landed")]
-    [InlineData(true, ".landed")]
-    [InlineData(true, "ucd/.laplace-archive-sha256")]
-    public async Task Acquisition_receipts_are_control_artifacts_without_hiding_unknown_files(bool unicode, string receipt)
+    [InlineData(".landed")]
+    [InlineData("ucd/.laplace-archive-sha256")]
+    public async Task Acquisition_receipts_are_control_artifacts_without_hiding_unknown_files(string receipt)
     {
         CodepointPerfcache.LoadDefault();
         string root = TemporaryDirectory();
@@ -174,9 +173,7 @@ public sealed class SourceGenerationRegressionTests
         {
             Write(root, receipt, "acquisition metadata");
             Write(root, "unrecognized-source.txt", "source content");
-            var graph = unicode
-                ? await new Unicode.UnicodeDecomposer().DescribeArtifactsAsync(root, DecomposerOptions.Default)
-                : await new ISO.ISODecomposer().DescribeArtifactsAsync(root, DecomposerOptions.Default);
+            var graph = await new Unicode.UnicodeDecomposer().DescribeArtifactsAsync(root, DecomposerOptions.Default);
             Assert.NotNull(graph);
             Assert.Equal(IngestArtifactDisposition.ExcludedWithReason,
                 Assert.Single(graph.Artifacts, a => a.RelativePath == receipt).Disposition);
