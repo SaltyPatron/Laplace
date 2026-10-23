@@ -45,6 +45,14 @@ public sealed class TextEntityBuilder
         using var stage = IntentStage.NewBounded(nodeCount, grant);
         if (!stage.EmitContentTree(_tree, _sourceId, _existingBitmap, out _))
             throw new InvalidOperationException("native content tree emission failed");
+        return ExportNativeStage(stage, _sourceId, grant);
+    }
+
+    internal static unsafe (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities)
+        ExportNativeStage(IntentStage stage, Hash128 sourceId, long grant)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(grant);
         // The native stage supplies every identity, tier, coordinate and RLE carrier; an
         // atomic root keeps its floor placement. The allocation counter brackets the managed
         // export (decoders, temporaries and retained row arrays) as a conservative charge
@@ -80,7 +88,7 @@ public sealed class TextEntityBuilder
                 double[]? trajectory = width == 0 ? null
                     : new ReadOnlySpan<double>(input.Trajectory, width).ToArray();
                 physicalities.Add(new PhysicalityRow(origin.PlacementId,
-                    input.EntityId, _sourceId, (PhysicalityType)input.Type,
+                    input.EntityId, sourceId, (PhysicalityType)input.Type,
                     input.Coordinate[0], input.Coordinate[1], input.Coordinate[2], input.Coordinate[3],
                     input.HilbertIndex, trajectory, input.Constituents,
                     input.AlignmentResidualIsNull != 0 ? null : input.AlignmentResidual,

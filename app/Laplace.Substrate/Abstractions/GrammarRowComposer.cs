@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -8,7 +9,6 @@ public enum GrammarCompositionMode { CuratedRecord, FullSource }
 
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
-    private static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
     internal static string DescribeContent(byte[] utf8)
     {
@@ -227,37 +227,6 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     }
 
 
-    private readonly struct EmitFilter
-    {
-        private readonly bool[]? _novelEntity;
-        public EmitFilter(bool[] novelEntity) => _novelEntity = novelEntity;
-        public bool EmitAll => _novelEntity is null;
-        public bool EntityNovel(nuint i) => _novelEntity is null || _novelEntity[(int)i];
-    }
-
-
-
-
-
-    private EmitFilter ComputeFilter(byte[]? existingBitmap)
-    {
-        EnsureComposed(existingBitmap);
-        if (existingBitmap is not { Length: > 0 }) return default;
-        IntPtr treePtr = NativeInterop.ComposeGetTierTree(ActiveResult);
-        if (treePtr == IntPtr.Zero) return default;
-        using var tree = TierTree.FromBorrowedHandle(treePtr);
-        int nodeCount = tree.NodeCount;
-        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
-        if (nodeCount == 0 || nodeCount != (int)nEnt) return default;
-        if (existingBitmap.Length < (nodeCount + 7) / 8) return default;
-
-        var novelIdx = new uint[nodeCount];
-        int novelCount = MerkleDedup.TrunkShortcircuit(tree, existingBitmap, novelIdx);
-        var novelEntity = new bool[nodeCount];
-        for (int i = 0; i < novelCount; i++) novelEntity[novelIdx[i]] = true;
-        return new EmitFilter(novelEntity);
-    }
-
     public (ImmutableArray<EntityRow> Entities,
             ImmutableArray<PhysicalityRow> Physicalities,
             ImmutableArray<AttestationRow> Precedes,
@@ -273,59 +242,50 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             Hash128 RootId) Materialize(double witnessWeight, byte[]? existingBitmap)
     {
         EnsureComposed(existingBitmap);
-        long nowUs = IngestClock.NowUnixUs();
-        var entities = ImmutableArray.CreateBuilder<EntityRow>();
-        var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>();
-        var precedes = ImmutableArray.CreateBuilder<AttestationRow>();
-        var filter = ComputeFilter(existingBitmap);
-
-        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
-        for (nuint i = 0; i < nEnt; i++)
+        long grant = IngestSizing.ResolveWorkingSetBudgetBytes();
+        long allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        using var all = IntentStage.NewBounded(0, grant);
+        Hash128 root = EmitNativeStage(all, witnessWeight, IngestClock.NowUnixUs(), null);
+        var (entities, physicalities) = TextEntityBuilder.ExportNativeStage(all, _sourceId, grant);
+        if (existingBitmap is { Length: > 0 })
         {
-            if (!filter.EntityNovel(i)) continue;
-            NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
-            // Same cut the native drain makes (laplace_compose_drain_into_stage).
-            // This is the SECOND drain off one compose result — StructuredGrammarIngest
-            // uses it — and it silently kept staging packaging after the native one
-            // stopped. One operation, two implementations, exactly the drift the
-            // packaging flag exists to end.
-            if (e.Packaging != 0) continue;
-            entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId));
+            // Materialize is an inspection snapshot: it retains every observed body.
+            // Presence still filters entities through the same Native traversal used
+            // by persistence. Production ingestion drains directly, without row arrays.
+            long remaining = checked(grant - all.AllocatedBytes
+                - (GC.GetAllocatedBytesForCurrentThread() - allocationStart));
+            if (remaining <= 0)
+                throw new InvalidOperationException("grammar row inspection exhausted its allocation grant");
+            using var novel = IntentStage.NewBounded(0, remaining);
+            EmitNativeStage(novel, witnessWeight, IngestClock.NowUnixUs(), existingBitmap);
+            entities = CopyTupleParser.DecodeEntityRows([novel.TupleBuffer(IntentStageTable.Entities)])
+                .ToImmutableArray();
+            if (checked(all.AllocatedBytes + novel.AllocatedBytes
+                + GC.GetAllocatedBytesForCurrentThread() - allocationStart) > grant)
+                throw new InvalidOperationException("grammar row inspection exceeded its allocation grant");
         }
+        // Constituent order is carried by Native physicality trajectories.
+        return (entities, physicalities, [], root);
+    }
 
-        nuint nPhys = NativeInterop.ComposePhysicalityCount(ActiveResult);
-        for (nuint i = 0; i < nPhys; i++)
+    private Hash128 EmitNativeStage(IntentStage stage, double witnessWeight, long nowUs,
+                                     byte[]? existingBitmap)
+    {
+        Hash128 source = _sourceId;
+        int rc;
+        if (existingBitmap is { Length: > 0 })
         {
-            NativeInterop.ComposePhysicalityNative ph;
-            NativeInterop.ComposeGetPhysicality(ActiveResult, i, &ph);
-            int trajLen = (int)ph.TrajectoryN.ToUInt64();
-            double[] traj = trajLen > 0
-                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen).ToArray()
-                : [];
-            physicalities.Add(new PhysicalityRow(
-                Id: ph.Id, EntityId: ph.EntityId, SourceId: _sourceId,
-                Type: PhysicalityType.Content,
-                CoordX: ph.Coord0, CoordY: ph.Coord1, CoordZ: ph.Coord2, CoordM: ph.Coord3,
-                HilbertIndex: ph.Hilbert, TrajectoryXyzm: traj,
-                NConstituents: (int)ph.NConstituents.ToUInt64(),
-                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: nowUs));
+            fixed (byte* bitmap = existingBitmap)
+                rc = NativeInterop.ComposeDrainIntoStage(ActiveResult,
+                    stage.DangerousNativeHandle, &source, nowUs, witnessWeight,
+                    bitmap, checked((nuint)existingBitmap.Length * 8));
         }
-
-        nuint nPrec = NativeInterop.ComposePrecedesCount(ActiveResult);
-        for (nuint i = 0; i < nPrec; i++)
-        {
-            NativeInterop.ComposePrecedesNative pr;
-            NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
-            long sumScore = checked(pr.Games * Glicko2.FpScale);
-            precedes.Add(NativeAttestation.Aggregated(
-                pr.SubjectId, PrecedesTypeId, pr.ObjectId,
-                _sourceId, contextId: null,
-                games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
-        }
-
-        return (entities.ToImmutable(), physicalities.ToImmutable(),
-                precedes.ToImmutable(), NativeInterop.ComposeRootId(ActiveResult));
+        else
+            rc = NativeInterop.ComposeDrainIntoStage(ActiveResult,
+                stage.DangerousNativeHandle, &source, nowUs, witnessWeight, null, 0);
+        if (rc != 0)
+            throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
+        return NativeInterop.ComposeRootId(ActiveResult);
     }
 
     public Hash128 DrainInto(
@@ -340,56 +300,13 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         IntentStage stage, double witnessWeight, long nowUs,
         ImmutableArray<AttestationRow>.Builder precedesOut, byte[]? existingBitmap)
     {
-        EnsureComposed(existingBitmap);
         ArgumentNullException.ThrowIfNull(stage);
         ArgumentNullException.ThrowIfNull(precedesOut);
-        var filter = ComputeFilter(existingBitmap);
+        EnsureComposed(existingBitmap);
         int firstPhysicality = stage.PhysicalityCount;
-
-        nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
-        for (nuint i = 0; i < nEnt; i++)
-        {
-            if (!filter.EntityNovel(i)) continue;
-            NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
-            // THIRD copy of this drain (native laplace_compose_drain_into_stage,
-            // Materialize, and here). GrammarRowComposerDrainParityTests exists
-            // precisely because they must agree, and it caught this one.
-            if (e.Packaging != 0) continue;
-            stage.AddEntity(e.Id, e.Tier, e.TypeId);
-        }
-
-        nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);
-        Span<double> coord = stackalloc double[4];
-        for (nuint i = 0; i < nPhys; i++)
-        {
-            NativeInterop.ComposePhysicalityNative ph;
-            NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
-            coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
-            int trajLen = (int)ph.TrajectoryN.ToUInt64();
-            var traj = trajLen > 0
-                ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen)
-                : ReadOnlySpan<double>.Empty;
-            stage.AddPhysicality(
-                ph.Id, ph.EntityId, (short)PhysicalityType.Content,
-                coord, ph.Hilbert, traj, (int)ph.NConstituents.ToUInt64(),
-                alignmentResidual: null, sourceDim: null, observedAtUnixUs: nowUs);
-        }
-
-        nuint nPrec = NativeInterop.ComposePrecedesCount(ActiveResult);
-        for (nuint i = 0; i < nPrec; i++)
-        {
-            NativeInterop.ComposePrecedesNative pr;
-            NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
-            long sumScore = checked(pr.Games * Glicko2.FpScale);
-            precedesOut.Add(NativeAttestation.Aggregated(
-                pr.SubjectId, PrecedesTypeId, pr.ObjectId,
-                _sourceId, contextId: null,
-                games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
-        }
-
+        Hash128 root = EmitNativeStage(stage, witnessWeight, nowUs, existingBitmap);
         stage.RecordPhysicalitySourceSince(firstPhysicality, _sourceId);
-        return NativeInterop.ComposeRootId(ActiveResult);
+        return root;
     }
 
     public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight)
@@ -406,29 +323,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         var stage = builder.ContentStage;
         int firstPhysicality = stage.PhysicalityCount;
 
-        unsafe
-        {
-            Hash128 src = _sourceId;
-            IntPtr active = ActiveResult;
-            if (existingBitmap is { Length: > 0 })
-            {
-                fixed (byte* bm = existingBitmap)
-                {
-                    int rc = NativeInterop.ComposeDrainIntoStage(
-                        active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight,
-                        bm, (nuint)existingBitmap.Length * 8);
-                    if (rc != 0)
-                        throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
-                }
-            }
-            else
-            {
-                int rc = NativeInterop.ComposeDrainIntoStage(
-                    active, stage.DangerousNativeHandle, &src, nowUs, witnessWeight, null, 0);
-                if (rc != 0)
-                    throw new InvalidOperationException($"laplace_compose_drain_into_stage returned {rc}");
-            }
-        }
+        EmitNativeStage(stage, witnessWeight, nowUs, existingBitmap);
 
         stage.RecordPhysicalitySourceSince(firstPhysicality, _sourceId);
 
@@ -461,51 +356,14 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         Hash128 rootId = NativeInterop.ComposeRootId(ActiveResult);
         if (rootId == default)
             throw new InvalidOperationException("grammar composition has no root");
-
-        if (_mode == GrammarCompositionMode.FullSource)
-        {
-            double* coord = stackalloc double[4];
-            byte sourceTier = 0, hasAtom = 0;
-            uint atom = 0;
-            int placementRc = NativeInterop.ComposeRootPlacement(
-                ActiveResult, coord, &sourceTier, &atom, &hasAtom);
-            if (placementRc != 0)
-                throw new InvalidOperationException($"full-source grammar root has no native placement ({placementRc})");
-            return new OrderedCompositionComponent(
-                rootId, sourceTier, coord[0], coord[1], coord[2], coord[3], atom, hasAtom != 0);
-        }
-
-        byte tier = 0;
-        bool foundEntity = false;
-        nuint entityCount = NativeInterop.ComposeEntityCount(ActiveResult);
-        for (nuint i = 0; i < entityCount; i++)
-        {
-            NativeInterop.ComposeEntityNative entity;
-            if (NativeInterop.ComposeGetEntity(ActiveResult, i, &entity) != 0)
-                continue;
-            if (entity.Id != rootId) continue;
-            tier = entity.Tier;
-            foundEntity = true;
-            break;
-        }
-        if (!foundEntity)
-            throw new InvalidOperationException("grammar composition root has no entity");
-
-        nuint physicalityCount = NativeInterop.ComposePhysicalityCount(ActiveResult);
-        for (nuint i = 0; i < physicalityCount; i++)
-        {
-            NativeInterop.ComposePhysicalityNative physicality;
-            if (NativeInterop.ComposeGetPhysicality(ActiveResult, i, &physicality) != 0
-                || physicality.EntityId != rootId)
-                continue;
-            return new OrderedCompositionComponent(
-                rootId, tier,
-                physicality.Coord0, physicality.Coord1,
-                physicality.Coord2, physicality.Coord3);
-        }
-
-        throw new InvalidOperationException(
-            "grammar composition root has no realized placement for ordered composition");
+        double* coord = stackalloc double[4];
+        byte tier = 0, hasAtom = 0;
+        uint atom = 0;
+        int rc = NativeInterop.ComposeRootPlacement(ActiveResult, coord, &tier, &atom, &hasAtom);
+        if (rc != 0)
+            throw new InvalidOperationException($"grammar root has no native placement ({rc})");
+        return new OrderedCompositionComponent(rootId, tier,
+            coord[0], coord[1], coord[2], coord[3], atom, hasAtom != 0);
     }
 
     public bool TrySpanEntity(uint startByte, uint endByte, out Hash128 id)
