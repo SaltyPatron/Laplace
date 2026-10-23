@@ -76,27 +76,6 @@ public readonly struct PredicateMatrixSource : ISeedSource
     public static IngestSourceProfile Profile => IngestSourceProfile.PredicateMatrix;
 }
 
-public readonly struct MapNetSource : ISeedSource
-{
-    public static Hash128 SourceId { get; } =
-        SubstrateCanonicalIds.Source("MapNetDecomposer");
-
-    public static string SourceName => "MapNetDecomposer";
-
-    public static Hash128 TrustClass { get; } =
-        TrustClassRegistry.Id("AcademicCurated");
-
-    public static IReadOnlyList<string> Relations { get; } =
-        ["mapping_frame_synsets", "mapping_lus_synsets"];
-
-    public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["FrameNet_Frame", "FrameNet_LU"];
-
-    public static SourceLicense License => SourceLicense.Unknown;
-
-    public static IngestSourceProfile Profile => IngestSourceProfile.Default;
-}
-
 public readonly struct WordFrameNetSource : ISeedSource
 {
     public static Hash128 SourceId { get; } =
