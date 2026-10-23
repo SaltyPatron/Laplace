@@ -131,10 +131,11 @@ jobs:
           set -euo pipefail
           source scripts/lib/installation.sh
           export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
-          export LAPLACE_REUSE_INSTALLED_NATIVE=1
+          export LAPLACE_REUSE_INSTALLED_NATIVE=0
           export LAPLACE_RECIPES="$LAPLACE_RECIPE_ENGINE_SOURCE/recipes"
           export LAPLACE_TIER0="$LAPLACE_ENGINE_BUILD/core/perfcache/tier0.bin"
           export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
+          export LAPLACE_FLAGS="$LAPLACE_ENGINE_BUILD/core/perfcache/tier0.flags"
           export LAPLACE_HIGHWAY="$LAPLACE_ENGINE_BUILD/core/perfcache/highway.bin"
           results="$RUNNER_TEMP/native-recipe-results"
           for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do

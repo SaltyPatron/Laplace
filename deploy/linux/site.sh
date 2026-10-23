@@ -381,6 +381,8 @@ phase_app() {
   for cache in tier0 highway laplace_chess_position_perfcache; do
     cp "$SITE_BUILD/engine/core/perfcache/$cache.bin" "$stage/app/cli/share/laplace/"
   done
+  cp "$SITE_BUILD/engine/core/perfcache/tier0.flags" \
+     "$SITE_BUILD/engine/core/perfcache/tier0.flags.layout" "$stage/app/cli/share/laplace/"
   cp -a "$stage/app/third-party-licenses/zstd" "$stage/app/cli/third-party-licenses/"
   [[ -x "$stage/app/cli/Laplace.Cli" ]] || fail "CLI not staged"
   verify_cli_package "$stage/app/cli" || fail "staged CLI runtime verification failed"
@@ -605,6 +607,9 @@ verify_cli_package() {
   local cli="$1" cache
   for cache in tier0 highway laplace_chess_position_perfcache; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
+  done
+  for cache in tier0.flags tier0.flags.layout; do
+    [[ -s "$cli/share/laplace/$cache" ]] || { echo "CLI package is missing $cache" >&2; return 1; }
   done
   (cd "$SITE_WORK"; env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
     LD_LIBRARY_PATH="$cli" \
