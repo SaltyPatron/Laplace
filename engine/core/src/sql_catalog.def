@@ -6,6 +6,31 @@ SQL_QUERY("verify.blake3_transport", "public.blake3,public.blake3[]",
     "SELECT $1::public.blake3,$2::public.blake3[],public.blake3_send($1::public.blake3)")
 SQL_QUERY("verify.blake3_composition", "public.blake3[]",
     "SELECT public.laplace_compose($1::public.blake3[])")
+SQL_QUERY("write.canonical_recorded", "public.blake3[]",
+    "SELECT array_agg(e.id IS NOT NULL ORDER BY q.ordinality) "
+    "FROM unnest($1::public.blake3[]) WITH ORDINALITY q(id,ordinality) "
+    "LEFT JOIN public.entity e ON e.id=q.id")
+SQL_QUERY("write.canonical_stage_id", "",
+    "SELECT pg_current_xact_id()::text")
+SQL_QUERY("write.canonical_stage_create", "",
+    "SELECT public.laplace_ensure_stage();"
+    "CREATE UNLOGGED TABLE {entity_stage} (LIKE stage.entity INCLUDING DEFAULTS);"
+    "CREATE UNLOGGED TABLE {path_stage} (LIKE stage.physicality INCLUDING DEFAULTS)")
+SQL_QUERY("write.canonical_copy_entities", "",
+    "COPY {entity_stage} (id,tier,coord,hilbert,mask) FROM STDIN (FORMAT binary)")
+SQL_QUERY("write.canonical_copy_paths", "",
+    "COPY {path_stage} (entity,tier,hilbert,path,mask) FROM STDIN (FORMAT binary)")
+SQL_QUERY("write.canonical_merge", "text,text",
+    "SELECT * FROM public.laplace_merge_stage($1::regclass,$2::regclass)")
+SQL_QUERY("write.canonical_stage_drop", "",
+    "DROP TABLE {entity_stage},{path_stage}")
+SQL_QUERY("verify.canonical_staged_root", "public.blake3,text",
+    "SELECT e.id,e.tier,public.laplace_text(e.id),"
+    "public.ST_AsEWKB(e.coord)=public.laplace_text_coord_ewkb($2),"
+    "to_regclass('stage.lp_entity_'||pg_current_xact_id()::text) IS NULL "
+    "AND to_regclass('stage.lp_path_'||pg_current_xact_id()::text) IS NULL "
+    "FROM public.entity e JOIN public.physicality p ON p.entity=e.id WHERE e.id=$1")
+SQL_QUERY("verify.canonical_readonly", "", "SET TRANSACTION READ ONLY")
 SQL_QUERY("verify.native_source_witness", "text",
     "SELECT w.id::text FROM public.witness w JOIN public.physicality p ON p.entity=w.id "
     "WHERE public.laplace_path_starts(p.path,public.laplace_text_id($1)) ORDER BY w.id")

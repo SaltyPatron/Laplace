@@ -12,6 +12,11 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace {
 using Stage=std::unique_ptr<canonical_stage_t,decltype(&canonical_stage_free)>;
@@ -100,7 +105,13 @@ const lp_highway* bank_fixture() {
         lp_text_free(context);
         const char layout[]="records\t2\nedges-count\t0\nlist\tkind\tkind\t0\t2\nbank\tkind\tkind\tkind\tphysicality\t2\t62\tflags\n";
         const char keys[]="kind\tclaim\t0\nkind\trecord\t1\n";
-        std::string path=::testing::TempDir()+"canonical-stage-banks.bin";
+        const auto process=
+#ifdef _WIN32
+            _getpid();
+#else
+            getpid();
+#endif
+        std::string path=::testing::TempDir()+"canonical-stage-banks-"+std::to_string(process)+".bin";
         if(!lp_highway_write(path.c_str(),record,2,nullptr,0,layout,sizeof layout-1,keys,sizeof keys-1,identifiers.data(),identifiers.size()))
             throw std::runtime_error("write real bank cache");
         const lp_highway* result=lp_highway_map(path.c_str());
@@ -140,6 +151,40 @@ TEST(CanonicalStage, PresentTrunkAmputatesAllDescendants) {
     ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_finish(s.get()));
     EXPECT_TRUE(rows(s.get(),CANONICAL_STAGE_ENTITY).empty());
     EXPECT_TRUE(rows(s.get(),CANONICAL_STAGE_PHYSICALITY).empty());
+}
+
+TEST(CanonicalStage, HighwayMembershipDoesNotProveDatabaseContainment) {
+    Stage s=stage(1u<<20,bank_fixture());ASSERT_NE(nullptr,s);
+    auto root=text(s.get(),"claim");
+    lp_id native_id;std::memcpy(native_id.b,&root.id,16);
+    ASSERT_TRUE(lp_highway_contains(bank_fixture(),&native_id));
+    ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_begin(s.get(),&root.id,1));
+    size_t count;const hash128_t* frontier=canonical_stage_frontier(s.get(),&count);
+    ASSERT_EQ(1u,count);ASSERT_NE(nullptr,frontier);
+    EXPECT_EQ(key(root.id),key(frontier[0]));
+    novel(s.get());ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_finish(s.get()));
+    auto entity=rows(s.get(),CANONICAL_STAGE_ENTITY);
+    auto physicality=rows(s.get(),CANONICAL_STAGE_PHYSICALITY);
+    ASSERT_FALSE(entity.empty());ASSERT_EQ(entity.size(),physicality.size());
+    EXPECT_EQ("claim",realize(key(root.id),paths(physicality)));
+}
+
+TEST(CanonicalStage, RecordedHighwayReferenceStillPrunesItsSubtree) {
+    Stage original=stage();auto root=text(original.get(),"claim");
+    Stage recorded=stage(1u<<20,bank_fixture());
+    ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_reference(recorded.get(),&root));
+    ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_begin(recorded.get(),&root.id,1));
+    size_t count;canonical_stage_frontier(recorded.get(),&count);EXPECT_EQ(0u,count);
+    ASSERT_EQ(CANONICAL_STAGE_OK,canonical_stage_finish(recorded.get()));
+    EXPECT_TRUE(rows(recorded.get(),CANONICAL_STAGE_ENTITY).empty());
+    EXPECT_TRUE(rows(recorded.get(),CANONICAL_STAGE_PHYSICALITY).empty());
+}
+
+TEST(CanonicalStage, RecordedHighwayReferenceRejectsForeignCoordinates) {
+    Stage original=stage();auto root=text(original.get(),"claim"),other=text(original.get(),"record");
+    std::memcpy(root.coordinate,other.coordinate,sizeof root.coordinate);
+    Stage recorded=stage(1u<<20,bank_fixture());
+    EXPECT_EQ(CANONICAL_STAGE_CONFLICT,canonical_stage_reference(recorded.get(),&root));
 }
 
 TEST(CanonicalStage, StructuralSpinesAreNeverDatabaseFrontiers) {

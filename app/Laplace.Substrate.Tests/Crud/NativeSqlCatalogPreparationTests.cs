@@ -132,7 +132,11 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                         continue;
                     }
                     Assert.True(name.StartsWith("maintenance.vacuum_", StringComparison.Ordinal)
-                        || name.StartsWith("operation.", StringComparison.Ordinal),
+                        || name.StartsWith("operation.", StringComparison.Ordinal)
+                        // StagedSourceWriterTests executes these exact CREATE,
+                        // COPY and DROP templates in a caller-rolled-back transaction.
+                        || name is "write.canonical_stage_create" or "write.canonical_stage_drop"
+                            or "write.canonical_copy_entities" or "write.canonical_copy_paths",
                         $"No lifecycle verification owns template {name}.");
                     templates.Add(name);
                     continue;
