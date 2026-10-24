@@ -309,7 +309,7 @@ phase_extensions() {
   need_pg
   say "extensions in $LAPLACE_DBNAME"
   local ext avail installed
-  for ext in laplace_geom laplace_substrate; do
+  for ext in laplace laplace_geom laplace_substrate; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
     installed="$(sql -c "SELECT extversion FROM pg_extension WHERE extname = '$ext'")"
     [[ -n "$avail" ]] || fail "$ext is not available to $LAPLACE_DBNAME (extension_control_path)"

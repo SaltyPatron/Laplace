@@ -43,6 +43,8 @@ export interface IngestRun {
   entities: number | null;
   physicalities: number | null;
   attestations: number | null;
+  attestations_measured?: boolean;
+  file_counters_measured?: boolean;
   files_done: number | null;
   files_total: number | null;
   input_units_done: number | null;

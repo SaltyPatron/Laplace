@@ -93,6 +93,13 @@ ALTER TABLE ingest_run_journal
 ALTER TABLE ingest_run_journal
     ADD COLUMN IF NOT EXISTS throughput_status text NOT NULL DEFAULT 'not-measured';
 
+-- Native publishes containment evidence; it does not report a count of inserted
+-- legacy attestation rows. Preserve that distinction in operational receipts.
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS attestations_measured boolean NOT NULL DEFAULT true;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS file_counters_measured boolean NOT NULL DEFAULT true;
+
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);
 

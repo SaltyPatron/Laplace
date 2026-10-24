@@ -6,7 +6,7 @@ import { useAppStore } from '../store';
 export interface Pulse {
   at: number;
   entities: number;
-  attestations: number;
+  attestations: number | null;
   consensus: number;
   physicalities: number;
   last_flush_at?: number | null;
@@ -56,7 +56,7 @@ export function usePulse(intervalMs = 4000): PulseState {
       setFailure(null);
       const p = prev.current;
       if (p && next.at > p.at) {
-        const dAtt = next.attestations - p.attestations;
+        const dAtt = next.attestations == null || p.attestations == null ? 0 : next.attestations - p.attestations;
         const dt = next.at - p.at;
         setRate(dAtt > 0 ? dAtt / dt : 0);
       }

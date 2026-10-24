@@ -181,7 +181,7 @@ ingest() {
     t0_epoch=$(date +%s)
     local detail="$LOGDIR/laplace-ingest-${source}.log"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) >"$detail" 2>&1 || rc=$?
+        ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) 2>&1 | tee "$detail" || rc=$?
         if [[ "$rc" -ne 0 ]]; then
             if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == preempted ]]; then
                 preempted=1
