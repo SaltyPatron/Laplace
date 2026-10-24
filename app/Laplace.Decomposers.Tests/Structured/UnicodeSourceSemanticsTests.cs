@@ -1,9 +1,84 @@
+using Laplace.Decomposers.Abstractions;
 using Xunit;
 
 namespace Laplace.Decomposers.Tests.Structured;
 
 public sealed class UnicodeSourceSemanticsTests
 {
+    [Theory]
+    [InlineData(17, 1)]
+    [InlineData(17, 4)]
+    [InlineData(127, 1)]
+    [InlineData(127, 4)]
+    [InlineData(8388608, 1)]
+    [InlineData(8388608, 4)]
+    public async Task EmojiRecordsRetainProductAndReplaceInheritedHeaders(int window, int workers)
+    {
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("emoji-test.txt", """
+            # group: Smileys & Emotion
+            # subgroup: face-smiling
+            1F600 ; fully-qualified # 😀 E1.0 grinning face
+            1F601 ; fully-qualified # 😁 E0.6 beaming face with smiling eyes
+
+            # ordinary packaging comment
+            # subgroup: face-affection
+            1F642 ; unqualified # 🙂 E1.0 slightly smiling face
+            # group: People & Body
+            # subgroup: person-role
+            1F469 200D 1F4BB ; fully-qualified # 👩‍💻 E4.0 woman technologist
+            # group: Objects
+            1F4A1 ; fully-qualified # 💡 E0.6 light bulb
+            """);
+        var baseline = await EmojiClaims(fixture, path, 8388608, 1);
+        var actual = await EmojiClaims(fixture, path, window, workers);
+        Assert.Equal(baseline.Claims().Order(StringComparer.Ordinal), actual.Claims().Order(StringComparer.Ordinal));
+        string[] expected =
+        [
+            "😀\tSmileys & Emotion", "😀\tface-smiling", "😀\tfully-qualified", "😀\temoji name\tgrinning face", "😀\temoji version\tE1.0",
+            "😁\tSmileys & Emotion", "😁\tface-smiling", "😁\tfully-qualified", "😁\temoji name\tbeaming face with smiling eyes", "😁\temoji version\tE0.6",
+            "🙂\tSmileys & Emotion", "🙂\tface-affection", "🙂\tunqualified", "🙂\temoji name\tslightly smiling face", "🙂\temoji version\tE1.0",
+            "👩‍💻\tPeople & Body", "👩‍💻\tperson-role", "👩‍💻\tfully-qualified", "👩‍💻\temoji name\twoman technologist", "👩‍💻\temoji version\tE4.0",
+            "💡\tObjects", "💡\tfully-qualified", "💡\temoji name\tlight bulb", "💡\temoji version\tE0.6"
+        ];
+        Assert.Equal(expected.Select(claim => "claim\t0\t1\t" + claim).Order(StringComparer.Ordinal), actual.Claims().Order(StringComparer.Ordinal));
+        Assert.Equal(5, actual.Lines("record").Length);
+        // Same actual product records and Merkle identities, regardless of
+        // parser windows and parallel scheduling. Headers never become rows.
+        Assert.Equal(baseline.Lines("record").Order(StringComparer.Ordinal), actual.Lines("record").Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("1F600 ; bogus # 😀 E1.0 grinning face")]
+    [InlineData("1F600 ; fully-qualified # 😀 not-a-version grinning face")]
+    [InlineData("1F600 ; fully-qualified # 😀 E1.0")]
+    [InlineData("1F600 ; fully-qualified")]
+    public async Task EmojiMalformedProductRowsAreRejected(string row)
+    {
+        using var fixture = new NativeCorpus();
+        string path = fixture.Write("emoji-test.txt", "# group: Smileys & Emotion\n# subgroup: face-smiling\n" + row + "\n");
+        var result = await EmojiClaims(fixture, path, 17, 4);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("does not parse completely", result.Error, StringComparison.Ordinal);
+        Assert.Empty(result.Lines("claim"));
+    }
+
+    private static async Task<NativeCorpus.Result> EmojiClaims(NativeCorpus fixture, string path, int window, int workers)
+    {
+        // Set the child environment, not shared process-wide state. This uses
+        // the same request builder and Engine process as the installed caller.
+        var start = fixture.Execution.StartInfo(new(NativeRecipeMode.Claims, "unicode", [path],
+            "host=127.0.0.1 port=1 dbname=unavailable connect_timeout=1", workers));
+        start.Environment["LAPLACE_RECORD_WINDOW_BYTES"] = window.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        start.StandardOutputEncoding = System.Text.Encoding.UTF8;
+        start.StandardErrorEncoding = System.Text.Encoding.UTF8;
+        using var process = System.Diagnostics.Process.Start(start)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return new(process.ExitCode, await output, await error);
+    }
+
     [Theory]
     [InlineData("F900", "kCompatibilityVariant", "U+8C48", "canonical Decomposition_Mapping value for the ideograph", "8C48")]
     [InlineData("3400", "kSemanticVariant", "U+4E18", "semantic variant", "4E18")]
