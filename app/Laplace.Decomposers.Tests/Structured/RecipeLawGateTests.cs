@@ -25,7 +25,9 @@ public sealed class RecipeLawGateTests
     public void ThereIsNoSecondJsonRecipeLanguageOrRcpRuntime()
     {
         string root = SourceGenerationRegressionTests.RepositoryFile(".");
-        Assert.Empty(Directory.GetFiles(Path.Combine(root, "recipes"), "*.json", SearchOption.AllDirectories));
+        string retiredRecipes = Path.Combine(root, "recipes");
+        if (Directory.Exists(retiredRecipes))
+            Assert.Empty(Directory.GetFiles(retiredRecipes, "*.json", SearchOption.AllDirectories));
         Assert.False(File.Exists(Path.Combine(root, "engine/core/src/recipe_stream.cpp")));
         Assert.False(File.Exists(Path.Combine(root, "app/Laplace.Core/Core/NativeRecipeStream.cs")));
         string build = File.ReadAllText(Path.Combine(root, "engine/core/CMakeLists.txt"));
