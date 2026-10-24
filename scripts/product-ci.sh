@@ -80,6 +80,7 @@ run_ci_contract_checks() {
   ci_contract_check bash tests/site-application-migrations.sh
   ci_contract_check bash tests/database-application-maintenance.sh
   ci_contract_check bash tests/site-host-lock.sh
+  ci_contract_check bash tests/site-extension-upgrades.sh
   ci_contract_check bash tests/machine-config.sh
   ci_contract_check python3 tests/linux-configuration.py
   ci_contract_check python3 tests/configured-paths.py
