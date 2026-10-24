@@ -58,10 +58,14 @@ end() { echo "::endgroup::"; }
 
 fetch() {   # fetch <dir> <repository> <revision>
   local dir="$1" url="$2" rev="$3"
-  if [[ -d "$dir/.git" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$rev" ]]; then return 0; fi
+  if [[ -d "$dir/.git" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$rev" ]]; then
+    git -C "$dir" config remote.origin.url "$url"
+    return 0
+  fi
   rm -rf "$dir"; mkdir -p "$dir"
   git -C "$dir" init -q
-  git -C "$dir" fetch -q --depth 1 "$url" "$rev"
+  git -C "$dir" remote add origin "$url"
+  git -C "$dir" fetch -q --depth 1 origin "$rev"
   git -C "$dir" checkout -q FETCH_HEAD
 }
 
