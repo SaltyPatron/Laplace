@@ -85,10 +85,19 @@ export interface LeaderRow {
   witnesses: number;
 }
 
+export interface ClaimLeaderRow {
+  claim_id: string;
+  parts: { id: string; label: string | null; run: number }[];
+  confidence: number;
+  witnesses: number;
+  trajectory: string;
+}
+
 export interface BandLeaders {
   band: number;
   name: string;
   rows: LeaderRow[];
+  claims?: ClaimLeaderRow[];
 }
 
 export interface EntityRecord {

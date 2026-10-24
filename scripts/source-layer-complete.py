@@ -45,7 +45,7 @@ def main(argv: list[str]) -> int:
     else:
         witness = f"laplace.source_id({quote(decomposer)})"
         label = f"source={decomposer} layer={layer}"
-    print(f"ops.layer_completed({witness}, {int(layer)})\t{label}")
+    print(f"(ops.native_source_completed({quote(name)}) OR ops.layer_completed({witness}, {int(layer)}))\t{label}")
     return 0
 
 

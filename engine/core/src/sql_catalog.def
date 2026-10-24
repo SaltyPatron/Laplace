@@ -280,6 +280,13 @@ SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
     "WHERE c.type_id=$2 AND c.object_id=$3 "
     "ORDER BY c.rd DESC,c.subject_id LIMIT $4")
 
+SQL_QUERY("leaders.native_present", "",
+    "SELECT to_regclass('public.consensus') IS NOT NULL")
+SQL_QUERY("leaders.native_named", "int4[],int4",
+    "SELECT n.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory FROM ops.claim_leaders($1,$2) WITH ORDINALITY n JOIN converse.relation_band_catalog() b ON b.band=n.band ORDER BY n.band,n.ordinality")
+SQL_QUERY("leaders.native_page", "text[],int8,int4",
+    "WITH selectors AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT public.laplace_id(surface) FROM unnest($1::text[]) surface) AS ids\n), page AS MATERIALIZED (\n SELECT c.claim,p.path,public.laplace_confidence(c.rating,c.deviation,2) AS confidence\n FROM public.physicality p JOIN public.consensus c ON c.claim=p.entity CROSS JOIN selectors s\n WHERE p.path && s.ids AND public.laplace_middle_any(p.path,s.ids)\n AND public.laplace_confidence(c.rating,c.deviation,-2)>=0.5\n ORDER BY public.laplace_confidence(c.rating,c.deviation,2) DESC,c.claim LIMIT $2\n)\nSELECT $3::int4,decode(page.claim::text,'hex'),\n (SELECT jsonb_agg(jsonb_build_object('id',vertex.id::text,'label',public.laplace_text(vertex.id),'run',public.laplace_path_length(point.value)) ORDER BY ordinal)\n  FROM generate_series(1,ST_NPoints(page.path)) ordinal\n  CROSS JOIN LATERAL (SELECT ST_PointN(page.path,ordinal) AS value) point\n  CROSS JOIN LATERAL (SELECT (public.laplace_vertex_ids(point.value))[1] AS id) vertex),\n page.confidence,(SELECT count(*) FROM public.laplace_attribution(ARRAY[page.claim])),encode(ST_AsEWKB(page.path),'hex')\nFROM page ORDER BY page.confidence DESC,page.claim")
+
 SQL_QUERY("leaders.page", "int4[],int4",
     "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
     "FROM ops.band_leaders($1,$2)")

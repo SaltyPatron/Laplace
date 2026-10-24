@@ -17,12 +17,19 @@ internal sealed partial class SubstrateClient
     {
         var rows = await NpgsqlSubstrateReads.BandLeadersNamedAsync(
             _dataSource, bands, perBand, ct, TranslateSubstrateError).ConfigureAwait(false);
+        var claims = await NpgsqlSubstrateReads.ClaimLeadersNamedAsync(
+            _dataSource, bands, perBand, ct, TranslateSubstrateError).ConfigureAwait(false);
 
         return rows.GroupBy(r => new { r.Band, r.BandName })
             .OrderBy(g => g.Key.Band)
             .Select(g => new BandLeaders(g.Key.Band, g.Key.BandName,
                 [.. g.Where(r => r.Leader.HasValue).Select(r => r.Leader!.Value)
-                    .Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
+                    .Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))],
+                claims.Count == 0 ? null : [.. claims.Where(r => r.Band == g.Key.Band && r.ClaimId is not null)
+                    .Select(r => new ClaimLeaderRow(r.ClaimId!,
+                        System.Text.Json.JsonSerializer.Deserialize<ClaimLeaderPart[]>(r.Parts!)
+                            ?? throw new InvalidDataException("Claim leaders returned no ordered constituents."),
+                        r.Confidence!.Value, r.Witnesses!.Value, r.Trajectory!))]))
             .ToList();
     }
 
