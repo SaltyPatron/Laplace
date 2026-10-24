@@ -98,6 +98,53 @@ public sealed class NativeXmlRecipeTests
         finally { Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", previous); }
     }
 
+    [Theory]
+    [InlineData(17, 1)]
+    [InlineData(17, 4)]
+    [InlineData(8388608, 1)]
+    [InlineData(8388608, 4)]
+    public async Task NonScalarAddressesRetainTheirOwnIdentityAndUncachedProperties(int window, int threads)
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
+        string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
+            "ucd-surrogates", "ucd.all.flat.xml");
+        var document = XDocument.Load(path);
+        var expected = new List<string>();
+        foreach (XElement range in document.Descendants("surrogate"))
+        {
+            string subject = $"[{range.Attribute("first-cp")!.Value}, {range.Attribute("last-cp")!.Value}]";
+            foreach ((string attribute, string property) in new[]
+                { ("age", "Age"), ("blk", "Block"), ("gc", "General_Category"), ("lb", "Line_Break") })
+                expected.Add($"{subject}\t{property}\t{range.Attribute(attribute)!.Value}");
+        }
+        Assert.Equal(12, expected.Count);
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", window.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            string[] claims = await Claims("unicode", path, threads);
+            Assert.Equal(expected.Order(StringComparer.Ordinal), claims.Order(StringComparer.Ordinal));
+            Assert.DoesNotContain(claims, static claim => claim.Contains("type:#-1", StringComparison.Ordinal));
+        }
+        finally { Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", previous); }
+    }
+
+    [Theory]
+    [InlineData("ucd-invalid-atom")]
+    [InlineData("ucd-invalid-sequence")]
+    public async Task InvalidScalarProductsFailBeforeTheyCanBecomeZeroChildEntities(string fixture)
+    {
+        Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
+        string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
+            fixture, "ucd.all.flat.xml");
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await NativeRecipeExecution.Configured().ExecuteAsync(
+            new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path], Threads: 1), output, error);
+        Assert.NotEqual(0, code);
+        Assert.Contains("invalid scalar content", Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
+    }
+
     private static async Task<string[]> Claims(string source, string path, int threads)
     {
         using var output = new MemoryStream();

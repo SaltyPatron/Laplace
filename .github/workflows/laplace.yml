@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 8578dc9c44be406920a8e82839cbaf86518f0df2
+          ref: 709fe925ac2ee32ff717a0dba6db0e21de50ce6b
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -147,7 +147,7 @@ jobs:
           python3 - "$results" <<'PY'
           from pathlib import Path
           import sys, xml.etree.ElementTree as ET
-          for project, expected in [('Laplace.Decomposers.Tests', 76), ('Laplace.Substrate.Tests', 10)]:
+          for project, expected in [('Laplace.Decomposers.Tests', 76), ('Laplace.Substrate.Tests', 16)]:
               path = Path(sys.argv[1]) / (project + '.trx')
               counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
               if int(counters['passed']) != expected or int(counters['total']) != expected:
@@ -279,7 +279,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 8578dc9c44be406920a8e82839cbaf86518f0df2
+          ref: 709fe925ac2ee32ff717a0dba6db0e21de50ce6b
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
