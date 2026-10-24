@@ -79,7 +79,13 @@ jobs:
             exec 8>&9
           else
             source deploy/linux/host-lock.sh
-            host_lock_hold exclusive 8 "$host_lock"
+            # Status reads the installed database and can run alongside ingest.
+            # Schema-changing operations still exclude other host operations.
+            if [[ "$LAPLACE_DB_OPERATION" == status ]]; then
+              host_lock_hold shared 8 "$host_lock"
+            else
+              host_lock_hold exclusive 8 "$host_lock"
+            fi
           fi
 
           health() {
