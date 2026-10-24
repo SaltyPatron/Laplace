@@ -5,11 +5,13 @@ SET client_min_messages = warning;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
 SET LOCAL search_path = public,laplace;
-CREATE TEMP TABLE claim_words AS SELECT unnest(ARRAY['canine','hypernym','qualify','animal','antonym','source','file','fixture','@','~']) content;
+CREATE TEMP TABLE claim_words AS
+SELECT content,laplace_id(content) AS id,laplace_tier(content) AS tier,laplace_coord(content) AS coord
+FROM unnest(ARRAY['canine','hypernym','qualify','animal','antonym','source','file','fixture','@','~']) content;
 INSERT INTO public.entity(id,tier,coord,hilbert)
-SELECT laplace_id(content),laplace_tier(content),laplace_coord(content),laplace_hilbert(content) FROM claim_words ON CONFLICT DO NOTHING;
+SELECT id,tier,coord,laplace_hilbert(content) FROM claim_words WHERE tier>0 ON CONFLICT DO NOTHING;
 INSERT INTO public.physicality(entity,tier,hilbert,path)
-SELECT laplace_id(content),laplace_tier(content),laplace_hilbert(content),laplace_path(laplace_parts(content)) FROM claim_words ON CONFLICT DO NOTHING;
+SELECT id,tier,laplace_hilbert(content),laplace_path(laplace_parts(content)) FROM claim_words WHERE tier>0 ON CONFLICT DO NOTHING;
 
 -- Native's real canonical composition/containment fixture, with no synthesized
 -- hashes or copied standings. The reader must preserve all four operands.
@@ -18,8 +20,12 @@ LANGUAGE plpgsql AS $$
 DECLARE id blake3=laplace_compose(parts); coord geometry; altitude smallint; h bigint;
         path geometry=laplace_path(parts); point geometry; i integer;
 BEGIN
-  SELECT ST_GeomFromEWKB(laplace_centroid4d_ewkb(e.coord)),(max(e.tier)+1)::smallint INTO coord,altitude
-  FROM unnest(parts) part JOIN public.entity e ON e.id=part;
+  -- Tier-0 pointer symbols use the same cached coordinates without storing
+  -- self-referencing entity/path rows for the virtual leaf floor.
+  SELECT ST_GeomFromEWKB(laplace_centroid4d_ewkb(coalesce(e.coord,w.coord))),
+         (max(coalesce(e.tier,w.tier))+1)::smallint INTO coord,altitude
+  FROM unnest(parts) part LEFT JOIN public.entity e ON e.id=part
+  LEFT JOIN claim_words w ON w.id=part;
   h=laplace_hilbert4(coord) # '-9223372036854775808'::bigint;
   IF metadata IS NOT NULL THEN
     IF cardinality(metadata)<>ST_NPoints(path) THEN RAISE EXCEPTION 'fixture metadata does not match runs'; END IF;
