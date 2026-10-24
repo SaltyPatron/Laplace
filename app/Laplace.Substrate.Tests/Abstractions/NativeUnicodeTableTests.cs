@@ -63,8 +63,12 @@ public sealed class NativeUnicodeTableTests
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
         string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
             "unicode-tables", name);
-        static string Characters(string range) => string.Concat(range.Split("..", StringSplitOptions.None)
-            .Select(static hex => char.ConvertFromUtf32(Convert.ToInt32(hex, 16))));
+        static string Characters(string range)
+        {
+            string[] endpoints = range.Split("..", StringSplitOptions.None)
+                .Select(static hex => char.ConvertFromUtf32(Convert.ToInt32(hex, 16))).ToArray();
+            return endpoints.Length == 1 ? endpoints[0] : $"[{string.Join(", ", endpoints)}]";
+        }
         var expected = File.ReadLines(path).Select(static line => line.Split('#', 2)[0].Trim())
             .Where(static line => line.Length > 0).Select(line =>
             {
