@@ -198,9 +198,8 @@ public sealed class NativeRecipeExecution
             string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
                 ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
                 ?? throw new InvalidOperationException("Native progress requires the declared work directory.");
-            string directory = Path.Combine(work, "ingest-progress");
-            Directory.CreateDirectory(directory);
-            progressPath = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".jsonl");
+            if (!Directory.Exists(work)) throw new DirectoryNotFoundException($"The declared work directory is not available: {work}");
+            progressPath = Path.Combine(work, "ingest-progress-" + Guid.NewGuid().ToString("N") + ".jsonl");
             using (File.Create(progressPath)) { }
             process.StartInfo.Environment["LAPLACE_INGEST_PROGRESS_PATH"] = progressPath;
         }

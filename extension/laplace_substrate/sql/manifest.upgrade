@@ -408,8 +408,8 @@ functions/geometry/entity_container_degree.sql.in
 functions/highway/laplace_highway_match.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/consensus_band_edges.sql.in
-functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_runs.sql.in
+functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_files.sql.in
 functions/ops/modality_counts.sql.in
 functions/ops/source_roster.sql.in
