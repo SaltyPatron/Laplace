@@ -49,25 +49,17 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 213f52527675ae749d3b6c29fdb22d52e65b197a
+          ref: 8f3809c5a938f7556db5a222555a685a392a6a3e
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract
         run: |
           set -euo pipefail
           source=/repos/src/Laplace-Operations
-          # File identities are pinned to Operations c5c6a18c125cb4c624b22c5554aa4c9d7553ae13.
-          # This needs the declared build contract, not a private cross-repository checkout token
-          # or an unrelated commit object in the host's source checkout.
-          while read -r blob path; do
-            [[ -z "$blob" || "$blob" == \#* ]] && continue
-            destination="$LAPLACE_CI_OPERATIONS_SOURCE/$path"
-            mkdir -p "$(dirname "$destination")"
-            cp "$source/$path" "$destination"
-            actual=$(git hash-object --no-filters "$destination")
-            [[ "$actual" == "$blob" ]] || { echo "::error::Operations contract differs from its pin: $path"; exit 1; }
-          done < scripts/ci/operations-build-contract.tsv
-          echo "Operations build contract: c5c6a18c125cb4c624b22c5554aa4c9d7553ae13"
+          # File identities are pinned to Operations 680b135ad061e895a546a1cdd75410ea440163cd.
+          # Read pinned Git blobs so local edits cannot alter the build inputs.
+          bash scripts/ci/materialize-operations-contract.sh "$source" "$LAPLACE_CI_OPERATIONS_SOURCE"
+          echo "Operations build contract: 680b135ad061e895a546a1cdd75410ea440163cd"
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
