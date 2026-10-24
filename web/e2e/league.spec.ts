@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import nativeClaims from './fixtures/native-claim-leaders.json';
+import nativeClaims from './fixtures/native-claim-leaders.json' with { type: 'json' };
 
 // The unified shell: every surface is a route, and the header nav is identical
 // everywhere — no page hides another. Previously entering Explore dropped the
