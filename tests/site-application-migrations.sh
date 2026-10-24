@@ -49,6 +49,9 @@ mkdir -p "$work/bundle/app/cli/share/laplace"
 for cache in tier0 highway laplace_chess_position_perfcache; do
   printf fixture > "$work/bundle/app/cli/share/laplace/$cache.bin"
 done
+for cache in tier0.flags tier0.flags.layout; do
+  printf fixture > "$work/bundle/app/cli/share/laplace/$cache"
+done
 printf '#!/bin/sh\nexit 0\n' > "$work/bundle/app/cli/Laplace.Cli"
 chmod 755 "$work/bundle/app/cli/Laplace.Cli"
 printf new > "$work/bundle/share/laplace/cache"

@@ -28,15 +28,21 @@ public sealed class StagedSourceWriterTests
         Assert.True(first.Entities > 0);
         Assert.Equal(first.Entities, first.Physicalities);
         await using (var read = NpgsqlCatalog.Command(connection, transaction,
-            "verify.canonical_staged_root", root.Id, text))
+            "verify.canonical_staged_root", root.Id))
         await using (var reader = await read.ExecuteReaderAsync())
         {
             Assert.True(await reader.ReadAsync());
             Assert.Equal(root.Id, reader.GetFieldValue<Hash128>(0));
             Assert.Equal(root.Tier, reader.GetInt16(1));
             Assert.Equal(text, reader.GetString(2));
-            Assert.True(reader.GetBoolean(3));
-            Assert.True(reader.GetBoolean(4));
+            // Native composes this root through the UAX #29 tiers. A flat
+            // codepoint composition has a different coordinate. Verify exact
+            // transport of all four fixed-point coordinates Native emitted.
+            Assert.Equal(Math.ScaleB(root.X, -53), reader.GetDouble(3));
+            Assert.Equal(Math.ScaleB(root.Y, -53), reader.GetDouble(4));
+            Assert.Equal(Math.ScaleB(root.Z, -53), reader.GetDouble(5));
+            Assert.Equal(Math.ScaleB(root.W, -53), reader.GetDouble(6));
+            Assert.True(reader.GetBoolean(7));
         }
         using var again = new StagedSourceWriter(10000, 100000, 1 << 24);
         var sameRoot = again.Text(bytes);

@@ -9,6 +9,23 @@ cat "$root/deploy/linux/host-lock.sh" >> "$work/functions"
 export LAPLACE_LOCKS=$work FUNCTIONS=$work/functions
 fail(){ echo "$*" >&2; exit 1; }
 source "$FUNCTIONS"
+# An operator's restrictive umask must not create a lock that excludes the runner.
+original_mask=$(umask)
+umask 077
+host_lock_hold exclusive 8 "$work/restrictive.lock" 0
+[[ $(stat -c %a "$work/restrictive.lock") == 664 ]]
+[[ $(stat -c %a "$work/restrictive.lock.turnstile") == 664 ]]
+[[ $(umask) == 0077 ]]
+exec 8>&-
+umask "$original_mask"
+echo 'PASS restrictive caller umask does not exclude other lock users'
+# An open error is a permission/path error, never a contention deadline.
+rc=0
+host_lock_hold exclusive 8 "$work/missing/host.lock" 3600 >"$work/open-error" 2>&1 || rc=$?
+[[ $rc == 1 ]]
+grep -q 'cannot open host lock:' "$work/open-error"
+if grep -q 'deadline expired' "$work/open-error"; then echo 'open error reported as contention'; exit 1; fi
+echo 'PASS failed lock open returns immediately with the actual error'
 exec 9>>"$work/host-resource.lock"
 flock -s 9
 if bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock' 9>&- > "$work/result" 2>&1; then echo 'accepted deployment during ingest'; exit 1; fi
