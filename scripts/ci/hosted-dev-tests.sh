@@ -59,7 +59,11 @@ end() { echo "::endgroup::"; }
 fetch() {   # fetch <dir> <repository> <revision>
   local dir="$1" url="$2" rev="$3"
   if [[ -d "$dir/.git" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$rev" ]]; then
-    git -C "$dir" config remote.origin.url "$url"
+    local origin
+    origin=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+    if [[ -z "$origin" ]]; then git -C "$dir" remote add origin "$url"
+    elif [[ "$origin" != "$url" ]]; then echo "Dependency origin differs from its pin: $dir" >&2; return 1
+    fi
     return 0
   fi
   rm -rf "$dir"; mkdir -p "$dir"
