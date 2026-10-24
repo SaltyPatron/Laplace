@@ -75,14 +75,18 @@ jobs:
           export LAPLACE_DB_HEALTH_SCOPE=installed
           source scripts/ci-environment.sh
           host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCK_ROOT:-$workspace_lock_root}/host-resource.lock}"
-          if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+          if [[ "$LAPLACE_DB_OPERATION" == status ]]; then
+            # Observability must remain available while host work is running.
+            # These catalog/health reads do not alter installed artifacts.
+            :
+          elif [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
             exec 8>&9
           else
             source deploy/linux/host-lock.sh
-            # Status and explicit database replacement use installed artifacts.
+            # Explicit database replacement uses installed artifacts.
             # PostgreSQL owns the target database cutover; unrelated ingests
             # need not drain. Shared locking still excludes binary deployment.
-            if [[ "$LAPLACE_DB_OPERATION" == status || "$LAPLACE_DB_OPERATION" == recreate ]]; then
+            if [[ "$LAPLACE_DB_OPERATION" == recreate ]]; then
               host_lock_hold shared 8 "$host_lock"
             else
               host_lock_hold exclusive 8 "$host_lock"
