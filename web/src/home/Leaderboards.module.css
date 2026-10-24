@@ -24,6 +24,13 @@
     font-size: var(--text-sm);
   }
 
+  .claim {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

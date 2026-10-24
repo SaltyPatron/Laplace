@@ -1,6 +1,7 @@
 import { Link as RouterLink } from 'react-router-dom';
 import { Muted, ReadStatus, useReadResource } from '@ui';
 import { queryHomeLeaders } from '../query/api';
+import type { ClaimLeaderRow } from '../query/types';
 import { useAppStore } from '../store';
 import styles from './Leaderboards.module.css';
 
@@ -35,9 +36,11 @@ export function Leaderboards() {
         {(bands ?? (leaders.busy ? HOME_BANDS.map(() => null) : [])).map((band, i) => (
           <div key={band?.band ?? i} className={styles.arena}>
             <div className={styles.arenaName}>{band ? band.name.replace(/_/g, ' ') : ' '}</div>
-            {band?.rows.length === 0 ? (
+            {band?.rows.length === 0 && !band.claims?.length ? (
               <Muted>No eligible consensus edges in this arena.</Muted>
             ) : band ? (
+              <>
+              <ClaimRows claims={band.claims ?? []} />
               <ol className={styles.rows}>
                 {band.rows.map((row, rank) => (
                   <li key={`${row.subject_id}-${rank}`} className={styles.row}>
@@ -69,6 +72,7 @@ export function Leaderboards() {
                   </li>
                 ))}
               </ol>
+              </>
             ) : (
               <div className={styles.loading} aria-hidden="true" />
             )}
@@ -76,5 +80,34 @@ export function Leaderboards() {
         ))}
       </div>
     </section>
+  );
+}
+
+const confidenceFormat = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 });
+
+function ClaimRows({ claims }: { claims: ClaimLeaderRow[] }) {
+  if (!claims.length) return null;
+  return (
+    <ol className={styles.rows} aria-label="Claim consensus">
+      {claims.map((claim, rank) => (
+        <li key={claim.claim_id} className={styles.row} data-claim-id={claim.claim_id}>
+          <span className={styles.rank}>{rank + 1}</span>
+          <span className={styles.claim} title={claim.claim_id}>
+            {claim.parts.map((part, ordinal) => (
+              <span key={ordinal} title={part.id}>
+                {ordinal > 0 && <span aria-hidden="true"> · </span>}
+                {part.label || part.id}{part.run > 1 ? ` × ${part.run.toLocaleString()}` : ''}
+              </span>
+            ))}
+          </span>
+          <span className={styles.stat}>
+            <span className={styles.mu} title="Confidence from the stored consensus rating and deviation">
+              {confidenceFormat.format(claim.confidence)}
+            </span>
+            <span className={styles.wit} title="Contributing witnesses">{claim.witnesses.toLocaleString()} wit</span>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }

@@ -1,0 +1,6 @@
+-- Native claims retain their full ordered, counted path and original identity.
+CREATE OR REPLACE FUNCTION ops.claim_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5)
+    RETURNS TABLE(band int, claim_id bytea, parts jsonb, confidence double precision,
+                  witnesses bigint, trajectory text)
+    AS 'MODULE_PATHNAME', 'pg_laplace_claim_leaders'
+    LANGUAGE C STABLE;
