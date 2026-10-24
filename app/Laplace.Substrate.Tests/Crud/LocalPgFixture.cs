@@ -145,8 +145,8 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static SubstrateChange NativeByteBasis()
     {
         // These are raw bytes 0x80..0xff, not their UTF-8 text encodings.
-        // Use the same native basis and exact atomic Content body as UnicodeDecomposer.
-        var source = UnicodeDecomposer.Source;
+        // The fixture's raw-byte authority is independent of corpus parsing.
+        var source = UnicodeSource.SourceId;
         var builder = new SubstrateChangeBuilder(source, "test-foundation/native-byte-basis/v1")
             .DeclareSourcePrior(SourceTrust.StandardsDerived)
             .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId);
@@ -197,7 +197,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
         verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, rows.Select(p => p.CoordM).ToArray());
         verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(p => p.HilbertIndex.ToByteArray()).ToArray());
         verify.Parameters.AddWithValue(ByteAtoms.TypeId.ToBytes());
-        verify.Parameters.AddWithValue(UnicodeDecomposer.Source.ToBytes());
+        verify.Parameters.AddWithValue(UnicodeSource.SourceId.ToBytes());
         if (await verify.ExecuteScalarAsync() is not long count || count != ByteAtoms.Count)
             throw new InvalidOperationException("Fixture byte basis did not retain every exact native entity and Content body");
     }
