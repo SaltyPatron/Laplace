@@ -44,10 +44,12 @@ public sealed class NativeRecipeExecution
             Path.Combine(AppContext.BaseDirectory, "native", "recipe-engine", "bin", name),
             Path.Combine(AppContext.BaseDirectory, name),
         };
-        var prefix = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_INSTALL_PREFIX");
-        if (!string.IsNullOrWhiteSpace(prefix)) candidates.Add(Path.Combine(prefix, "bin", name));
+        // Pre-install checks use the selected build. An app-local bundle above
+        // remains authoritative for a published application.
         var build = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_ENGINE_BUILD");
         if (!string.IsNullOrWhiteSpace(build)) candidates.Add(Path.Combine(build, "core", "recipe_engine", "runtime", "bin", name));
+        var prefix = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_INSTALL_PREFIX");
+        if (!string.IsNullOrWhiteSpace(prefix)) candidates.Add(Path.Combine(prefix, "bin", name));
         return candidates.FirstOrDefault(File.Exists)
             ?? throw new FileNotFoundException("The canonical Native recipe Engine is not installed or built.");
     }

@@ -77,6 +77,9 @@ public sealed class NativeXmlRecipeTests
                     string id = $"[{frame}, {Attr(unit, "name")}]";
                     Assert.Contains($"{frame}\tlexical unit\t{id}", claims);
                     Assert.Contains($"{id}\t{Attr(unit, "POS")}", claims);
+                    XElement lexeme = Assert.Single(unit.Elements(), node => node.Name.LocalName == "lexeme");
+                    Assert.Contains(string.Join('\t', id, Attr(lexeme, "name"), Attr(lexeme, "POS"),
+                        Attr(lexeme, "breakBefore"), Attr(lexeme, "headword")), claims);
                 }
             }
             else
@@ -103,16 +106,7 @@ public sealed class NativeXmlRecipeTests
             new NativeRecipeRequest(NativeRecipeMode.Claims, source, [path], Threads: threads), output, error);
         string stdout = Encoding.UTF8.GetString(output.ToArray());
         Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + stdout);
-        if (source == "framenet")
-        {
-            // These ten attributes were recovered, not lost by the XML parser.
-            // The canonical recipe explicitly leaves their semantic wording
-            // unresolved; do not invent relation verbs to hide that distinction.
-            Assert.Contains("unresolved obligations: 10", stdout, StringComparison.Ordinal);
-            Assert.Matches(@"attest breakBefore\s+5(?:\r?\n|$)", stdout);
-            Assert.Matches(@"attest headword\s+5(?:\r?\n|$)", stdout);
-        }
-        else Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
+        Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
         return stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
             .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal))
             .Select(static line => line.Split('\t', 4)[3]).ToArray();

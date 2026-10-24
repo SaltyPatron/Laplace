@@ -318,7 +318,35 @@ endif()
 # Perfcache emit is an explicit target, not part of the default build:
 #   ninja laplace_t0_perfcache laplace_highway_perfcache
 # then cmake --install. Tier-0 is a mapped Native floor, never database seed rows.
-add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
+set(LAPLACE_FLAGS_BIN "${LAPLACE_PERFCACHE_DIR}/tier0.flags")
+set(_native_flags_input "${LAPLACE_FLAGS}")
+if(NOT _native_flags_input)
+    set(_native_flags_input "$ENV{LAPLACE_FLAGS}")
+endif()
+if(NOT _native_flags_input)
+    get_filename_component(_native_tier0_dir "${LAPLACE_TIER0}" DIRECTORY)
+    set(_native_flags_input "${_native_tier0_dir}/tier0.flags")
+endif()
+if(EXISTS "${_native_flags_input}" AND EXISTS "${_native_flags_input}.layout"
+   AND NOT "${_native_flags_input}" STREQUAL "${LAPLACE_FLAGS_BIN}")
+    add_custom_command(OUTPUT "${LAPLACE_FLAGS_BIN}" "${LAPLACE_FLAGS_BIN}.layout"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_native_flags_input}" "${LAPLACE_FLAGS_BIN}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_native_flags_input}.layout" "${LAPLACE_FLAGS_BIN}.layout"
+        DEPENDS "${_native_flags_input}" "${_native_flags_input}.layout"
+        COMMENT "Package canonical Native Unicode flags and their layout" VERBATIM)
+else()
+    add_custom_command(OUTPUT "${LAPLACE_FLAGS_BIN}" "${LAPLACE_FLAGS_BIN}.layout"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "LAPLACE_TIER0=${LAPLACE_PERFCACHE_BIN}"
+                $<TARGET_FILE:laplace_engine> flags -u "${LAPLACE_UCD_PATH}" -o "${LAPLACE_FLAGS_BIN}"
+        DEPENDS laplace_engine "${LAPLACE_UCD_PATH}/ucd/PropertyAliases.txt"
+                "${LAPLACE_UCD_PATH}/ucd/PropertyValueAliases.txt"
+                "${LAPLACE_UCD_PATH}/ucdxml/ucd.all.flat.xml"
+        COMMENT "Generate Native Unicode flags from the local Unicode estate" VERBATIM)
+endif()
+add_custom_target(laplace_t0_perfcache DEPENDS "${LAPLACE_PERFCACHE_BIN}"
+    "${LAPLACE_FLAGS_BIN}" "${LAPLACE_FLAGS_BIN}.layout")
 if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}"
    AND NOT "$ENV{LAPLACE_HIGHWAY}" STREQUAL "${LAPLACE_HIGHWAY_BIN}")
     add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
@@ -678,6 +706,11 @@ endif()
 install(FILES ${LAPLACE_PERFCACHE_BIN}
     DESTINATION share/laplace
     RENAME "tier0.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
+
+install(FILES "${LAPLACE_FLAGS_BIN}" "${LAPLACE_FLAGS_BIN}.layout"
+    DESTINATION share/laplace
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
