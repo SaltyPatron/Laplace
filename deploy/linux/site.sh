@@ -315,7 +315,11 @@ phase_extensions() {
     [[ -n "$avail" ]] || fail "$ext is not available to $LAPLACE_DBNAME (extension_control_path)"
     if [[ -z "$installed" ]]; then installed="none yet: the migrations make it at $avail"
     elif [[ "$installed" != "$avail" ]]; then
-      install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+      # Native ships a normal versioned upgrade chain in PostgreSQL's share
+      # directory. Only the monorepo extensions need the generated hash bridge.
+      if [[ "$ext" != laplace ]]; then
+        install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+      fi
       PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
       installed="$installed -> $avail"
     fi
