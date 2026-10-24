@@ -56,10 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           source=/repos/src/Laplace-Operations
-          # File identities are pinned to Operations 680b135ad061e895a546a1cdd75410ea440163cd.
+          # File identities are pinned to Operations 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4.
           # Read pinned Git blobs so local edits cannot alter the build inputs.
           bash scripts/ci/materialize-operations-contract.sh "$source" "$LAPLACE_CI_OPERATIONS_SOURCE"
-          echo "Operations build contract: 680b135ad061e895a546a1cdd75410ea440163cd"
+          echo "Operations build contract: 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4"
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
