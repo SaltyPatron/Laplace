@@ -2574,6 +2574,149 @@ canonical = "HAS_DOMAIN"
 flip = true
 qualifier = "domain/usage"
 
+# Princeton WordNet 3.0 WNDB pointer_symbol inventory: doc/man/wninput.5,
+# Pointers. These source surfaces select the same declared arenas as WN-LMF;
+# Native claims retain their literal constituents and canonical identities.
+# Backslash is POS-dependent (pertainym or derived-from-adjective), so it is
+# deliberately not declared as a context-free alias.
+
+[[alias]]
+surface = "!"
+canonical = "IS_ANTONYM_OF"
+flip = false
+
+[[alias]]
+surface = "@"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "@i"
+canonical = "IS_INSTANCE_OF"
+flip = false
+
+[[alias]]
+surface = "~"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "~i"
+canonical = "IS_INSTANCE_OF"
+flip = true
+
+[[alias]]
+surface = "#m"
+canonical = "HAS_PART"
+flip = true
+qualifier = "meronymy/member"
+
+[[alias]]
+surface = "#s"
+canonical = "HAS_PART"
+flip = true
+qualifier = "meronymy/substance"
+
+[[alias]]
+surface = "#p"
+canonical = "HAS_PART"
+flip = true
+qualifier = "meronymy/part"
+
+[[alias]]
+surface = "%m"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/member"
+
+[[alias]]
+surface = "%s"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/substance"
+
+[[alias]]
+surface = "%p"
+canonical = "HAS_PART"
+flip = false
+qualifier = "meronymy/part"
+
+[[alias]]
+surface = "="
+canonical = "HAS_ATTRIBUTE"
+flip = false
+
+[[alias]]
+surface = "+"
+canonical = "DERIVATIONALLY_RELATED"
+flip = false
+
+[[alias]]
+surface = ";c"
+canonical = "HAS_DOMAIN"
+flip = false
+qualifier = "domain/topic"
+
+[[alias]]
+surface = "-c"
+canonical = "HAS_DOMAIN"
+flip = true
+qualifier = "domain/topic"
+
+[[alias]]
+surface = ";r"
+canonical = "HAS_DOMAIN"
+flip = false
+qualifier = "domain/region"
+
+[[alias]]
+surface = "-r"
+canonical = "HAS_DOMAIN"
+flip = true
+qualifier = "domain/region"
+
+[[alias]]
+surface = ";u"
+canonical = "HAS_DOMAIN"
+flip = false
+qualifier = "domain/usage"
+
+[[alias]]
+surface = "-u"
+canonical = "HAS_DOMAIN"
+flip = true
+qualifier = "domain/usage"
+
+[[alias]]
+surface = "*"
+canonical = "ENTAILS"
+flip = false
+
+[[alias]]
+surface = ">"
+canonical = "CAUSES"
+flip = false
+
+[[alias]]
+surface = "^"
+canonical = "ALSO_SEE"
+flip = false
+
+[[alias]]
+surface = "&"
+canonical = "IS_SIMILAR_TO"
+flip = false
+
+[[alias]]
+surface = "<"
+canonical = "IS_PARTICIPLE_OF"
+flip = false
+
+[[alias]]
+surface = "$"
+canonical = "IN_VERB_GROUP_WITH"
+flip = false
+
 # FrameNet frame-to-frame relation types (frRelation.xml / frame/*.xml frameRelation@type).
 
 [[alias]]
