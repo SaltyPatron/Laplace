@@ -20,8 +20,9 @@ BEGIN ATOMIC
                CASE WHEN native THEN to_regclass('public.consensus') ELSE to_regclass('laplace.consensus') END, 4 FROM storage
     )
     -- Containment evidence has no legacy attestation row counter. Omit that
-    -- measurement instead of reporting a false zero. Live tuple estimates
-    -- include committed COPY windows between ANALYZE runs, without count(*).
+    -- measurement instead of reporting a false zero. pg_stat_all_tables live
+    -- tuple estimates include committed COPY windows between ANALYZE runs;
+    -- pg_class.reltuples is the planner fallback. Neither is an exact count(*).
     SELECT t.metric, COALESCE(sum(COALESCE(s.n_live_tup, GREATEST(c.reltuples, 0)::bigint)), 0)::bigint
     FROM targets t
     CROSS JOIN LATERAL pg_partition_tree(t.relid) p
