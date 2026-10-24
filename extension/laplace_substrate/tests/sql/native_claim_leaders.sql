@@ -33,6 +33,7 @@ BEGIN
   RETURN id;
 END $$;
 CREATE TEMP TABLE leader_claims(name text,id blake3);
+CREATE TEMP TABLE leader_witness(id blake3);
 DO $$
 DECLARE a blake3; b blake3; other blake3; rec blake3; fm blake3; ft blake3; sm blake3; witness_id blake3;
 BEGIN
@@ -47,6 +48,38 @@ BEGIN
   sm=pg_temp.claim_node(ARRAY[laplace_id('source'),laplace_id('fixture')],'tuple');
   witness_id=pg_temp.claim_node(ARRAY[sm,ft],'file',ARRAY[4294967296,5368709120]::bigint[]);
   INSERT INTO public.witness VALUES(witness_id,NULL,0.85);
+  INSERT INTO leader_witness VALUES(witness_id);
+END $$;
+DO $$
+DECLARE receipt uuid=gen_random_uuid(); published bytea;
+BEGIN
+  SELECT decode(id::text,'hex') INTO published FROM leader_witness;
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'missing Native receipt completed a source';
+  END IF;
+  INSERT INTO laplace.ingest_run_journal(run_id,source_name,source_id,layer,status,ended_at,files_done,files_total,attestations_measured)
+  VALUES(receipt,'native-completion-fixture',published,0,'ok',clock_timestamp(),1,1,false);
+  IF NOT ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'published Native witness and completed receipt were ignored';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET source_id=(SELECT decode(id::text,'hex') FROM leader_claims WHERE name='four') WHERE run_id=receipt;
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'an unregistered claim was accepted as a published source witness';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET source_id=NULL WHERE run_id=receipt;
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'a partial-file receipt completed a source';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET source_id=published,files_done=0 WHERE run_id=receipt;
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'incomplete file inventory completed a source';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET files_done=1 WHERE run_id=receipt;
+  INSERT INTO laplace.ingest_run_journal(run_id,source_name,source_id,layer,status,started_at,attestations_measured)
+  VALUES(gen_random_uuid(),'native-completion-fixture',published,0,'failed',clock_timestamp()+interval '1 second',false);
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'an older success concealed a newer failed Native ingest';
+  END IF;
 END $$;
 CREATE UNLOGGED TABLE stage.leader_pending (claim blake3,witness blake3,lineage blake3,games bigint,score double precision,trust double precision);
 DO $$ BEGIN PERFORM public.laplace_attest_series('stage.leader_pending',ARRAY(SELECT id FROM leader_claims)); END $$;
