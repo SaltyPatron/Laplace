@@ -1,27 +1,25 @@
-using System.Text.Json;
 using System.Text.RegularExpressions;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Unicode;
 using Xunit;
 
 namespace Laplace.Decomposers.Tests.Structured;
 
 /// <summary>
-/// The Unicode source is named by its recipe (recipes/unicode/UCD/17.0.0/unicode.source.json),
+/// The Unicode corpus is named by its canonical Native source declaration,
 /// not by a C# class (#1877). Layer completion, the journal, the CLI status probe, the gates and
 /// the seed scripts all key on that one name; a second spelling would split layer 0 in two.
 /// </summary>
 public sealed class UnicodeSourceNameGateTests
 {
-    private const string RecipeName = "Unicode";
+    private const string RecipeName = "unicode";
 
     [Fact]
     public void Unicode_recipe_and_source_share_one_name()
     {
-        using var doc = JsonDocument.Parse(File.ReadAllText(
-            SourceGenerationRegressionTests.RepositoryFile("recipes/unicode/UCD/17.0.0/unicode.source.json")));
-        Assert.Equal(RecipeName, doc.RootElement.GetProperty("sourceName").GetString());
-        Assert.Equal(RecipeName, UnicodeSource.SourceName);
-        Assert.Equal(Laplace.Engine.Core.SubstrateCanonicalIds.Source(RecipeName), UnicodeSource.SourceId);
+        Assert.Equal(RecipeName, EtlManifest.Catalog.Resolve(UnicodeSource.SourceName));
+        Assert.Equal(RecipeName, EtlManifest.Catalog.Resolve("ucd"));
+        Assert.Equal(RecipeName, EtlManifest.Catalog.Resolve("uca"));
     }
 
     // A source-name use of the old spelling: a quoted literal, a source_id() argument, a CLI
@@ -56,6 +54,6 @@ public sealed class UnicodeSourceNameGateTests
             }
         }
         Assert.True(offenders.Count == 0,
-            "The Unicode source is named 'Unicode' (its recipe); old name still used in:\n  " + string.Join("\n  ", offenders));
+            "The Unicode corpus uses its Native source name; old class name still used in:\n  " + string.Join("\n  ", offenders));
     }
 }
