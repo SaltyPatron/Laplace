@@ -172,6 +172,9 @@ phase_build() {
   local operations_contract="$SITE_BUILD/operations-build-contract"
   bash "$ROOT/scripts/ci/materialize-operations-contract.sh" "$operations_source" "$operations_contract"
   export LAPLACE_OPERATIONS="$operations_contract"
+  local grammar_source="${LAPLACE_GRAMMAR_SRC:-$LAPLACE_EXTERNAL/tree-sitter-grammars}"
+  grammar_source=$(cd "$grammar_source" && pwd -P)
+  LAPLACE_GRAMMAR_SRC="$grammar_source" \
   LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
     bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
   cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
