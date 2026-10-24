@@ -118,6 +118,15 @@ public sealed class NativeXmlRecipeTests
                 expected.Add($"{subject}\t{property}\t{range.Attribute(attribute)!.Value}");
         }
         Assert.Equal(12, expected.Count);
+        foreach (XElement block in document.Descendants("block"))
+        {
+            string subject = block.Attribute("name")!.Value;
+            string first = block.Attribute("first-cp")!.Value;
+            string last = block.Attribute("last-cp")!.Value;
+            expected.Add($"{subject}\tStart Code\t{(first == "0000" ? "\0" : first)}");
+            expected.Add($"{subject}\tEnd Code\t{(last == "007F" ? "\u007f" : last)}");
+        }
+        Assert.Equal(20, expected.Count);
         string? previous = Environment.GetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES");
         try
         {
@@ -143,6 +152,7 @@ public sealed class NativeXmlRecipeTests
             new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path], Threads: 1), output, error);
         Assert.NotEqual(0, code);
         Assert.Contains("invalid scalar content", Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
+        Assert.Contains(Path.GetFileName(path), Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
     }
 
     private static async Task<string[]> Claims(string source, string path, int threads)
