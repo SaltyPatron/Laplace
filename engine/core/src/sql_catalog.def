@@ -1602,6 +1602,14 @@ SQL_QUERY("journal.reconcile_orphans", "",
     "SELECT * FROM ops.ingest_reconcile_orphans(interval '90 seconds')")
 SQL_QUERY("journal.run_progress", "uuid,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8",
     "UPDATE laplace.ingest_run_journal SET units_attempted = $2, units_applied = $3, units_failed = $4, entities = $5, physicalities = $6, attestations = $7, files_done = $8, input_units_done = $9, consensus_backend_ms = $10, highway_mask_backend_ms = $11, consensus_calls = $12, highway_mask_calls = $13, highway_mask_pairs = $14 WHERE run_id = $1")
+SQL_QUERY("journal.native_inventory", "uuid,int8",
+    "UPDATE laplace.ingest_run_journal SET files_total=$2,input_units_total=$2 WHERE run_id=$1")
+SQL_QUERY("journal.native_source", "uuid,bytea",
+    "UPDATE laplace.ingest_run_journal SET source_id=$2 WHERE run_id=$1")
+SQL_QUERY("journal.native_files_finished", "uuid,text",
+    "UPDATE laplace.ingest_file_journal SET status=$2,ended_at=clock_timestamp() WHERE run_id=$1 AND status IN ('running','composed')")
+SQL_QUERY("journal.run_start_unidentified", "uuid,text,int4,int8,int8,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id,source_name,source_id,layer,status,files_total,input_units_total,evidence_persisted,attestations_measured,file_counters_measured) VALUES ($1,$2,NULL,$3,'running',$4,$5,$6,false,false)")
 SQL_QUERY("journal.run_phase", "uuid,text",
     "UPDATE laplace.ingest_run_journal SET phase = $2 WHERE run_id = $1")
 SQL_QUERY("journal.run_completion", "uuid,int8,int8,int8,int8,int8,int8,int8,int8",

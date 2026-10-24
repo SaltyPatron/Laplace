@@ -27,6 +27,9 @@ if not "%RELKIND%"=="p" (
   exit /b 1
 )
 
+rem Native owns the canonical public schema and has a normal versioned upgrade chain.
+psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -v ON_ERROR_STOP=1 -c "SET lock_timeout='20s'; ALTER EXTENSION laplace UPDATE;" || exit /b 1
+
 rem The installed extension brought to the version the host has (pipeline.sh does the same on
 rem Linux): a migration only creates a missing extension, so without this a rebuilt
 rem extension never reaches a database that already has one. The version is a content hash

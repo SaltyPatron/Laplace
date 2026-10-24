@@ -19,14 +19,14 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary><c>ops.substrate_pulse()</c> — the live scoreboard, one row.</summary>
-    public static async Task<(long Entities, long Attestations, long Consensus, long Physicalities,
+    public static async Task<(long Entities, long? Attestations, long Consensus, long Physicalities,
         long? LastFlushUnix, long FlushesLastMin, bool Folding)?> SubstratePulseAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("ops.substrate_pulse"),
             static r => (
                 r.IsDBNull(0) ? 0L : r.GetInt64(0),
-                r.IsDBNull(1) ? 0L : r.GetInt64(1),
+                r.IsDBNull(1) ? (long?)null : r.GetInt64(1),
                 r.IsDBNull(2) ? 0L : r.GetInt64(2),
                 r.IsDBNull(3) ? 0L : r.GetInt64(3),
                 r.IsDBNull(4) ? (long?)null : r.GetInt64(4),

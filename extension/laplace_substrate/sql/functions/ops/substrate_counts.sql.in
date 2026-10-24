@@ -1,24 +1,32 @@
--- Row-count census of the four substrate relations.
+-- Row estimates from the storage selected by the installed Native schema.
 DROP FUNCTION IF EXISTS laplace.substrate_counts();
 
 CREATE OR REPLACE FUNCTION ops.substrate_counts()
     RETURNS TABLE(metric text, value bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Planner estimates (pg_class.reltuples summed over leaves), never count(*):
-    -- a partitioned parent can keep reltuples = -1 while its leaves hold rows.
-    -- ANALYZE bounds the error; ops.evidence_count() gives exact per-source counts.
-    WITH targets(metric, relid, ordinal) AS (
-        VALUES
-            ('entities(ESTIMATE)'::text,      'laplace.entities'::regclass,      1),
-            ('physicalities(ESTIMATE)'::text, 'laplace.physicalities'::regclass, 2),
-            ('attestations(ESTIMATE)'::text,  'laplace.attestations'::regclass,  3),
-            ('consensus(ESTIMATE)'::text,     'laplace.consensus'::regclass,     4)
+    WITH storage AS (
+        SELECT to_regclass('public.entity') IS NOT NULL AS native
+    ), targets(metric, relid, ordinal) AS (
+        SELECT 'entities(ESTIMATE)'::text,
+               CASE WHEN native THEN to_regclass('public.entity') ELSE to_regclass('laplace.entities') END, 1 FROM storage
+        UNION ALL
+        SELECT 'physicalities(ESTIMATE)',
+               CASE WHEN native THEN to_regclass('public.physicality') ELSE to_regclass('laplace.physicalities') END, 2 FROM storage
+        UNION ALL
+        SELECT 'attestations(ESTIMATE)', to_regclass('laplace.attestations'), 3 FROM storage WHERE NOT native
+        UNION ALL
+        SELECT 'consensus(ESTIMATE)',
+               CASE WHEN native THEN to_regclass('public.consensus') ELSE to_regclass('laplace.consensus') END, 4 FROM storage
     )
-    SELECT t.metric, COALESCE(sum(GREATEST(c.reltuples, 0)::bigint), 0)::bigint
+    -- Containment evidence has no legacy attestation row counter. Omit that
+    -- measurement instead of reporting a false zero. Live tuple estimates
+    -- include committed COPY windows between ANALYZE runs, without count(*).
+    SELECT t.metric, COALESCE(sum(COALESCE(s.n_live_tup, GREATEST(c.reltuples, 0)::bigint)), 0)::bigint
     FROM targets t
     CROSS JOIN LATERAL pg_partition_tree(t.relid) p
     JOIN pg_class c ON c.oid = p.relid
+    LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
     WHERE p.isleaf
     GROUP BY t.metric, t.ordinal
     ORDER BY t.ordinal;

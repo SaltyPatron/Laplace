@@ -18,8 +18,8 @@ export function Scoreboard() {
       </div>
       <div className={styles.counts}>
         <Count value={pulse?.entities ?? null} label="Entities" hint="deduplicated content" />
-        <Count value={pulse?.attestations ?? null} label="Attestations" hint="witnessed assertions" live />
-        <Count value={pulse?.consensus ?? null} label="Consensus edges" hint="folded ratings" live />
+        <Count value={pulse?.attestations ?? null} label="Attestations" hint={pulse && pulse.attestations == null ? "count not available" : "witnessed assertions"} live />
+        <Count value={pulse?.consensus ?? null} label="Consensus" hint="folded ratings" live />
         <Count value={pulse?.physicalities ?? null} label="Physicalities" hint="typed realizations of content" />
       </div>
     </section>
@@ -39,13 +39,13 @@ function StatusPill({ folding, reachable, rate, lastFlushAt, failure }: {
     return (
       <span className={`${styles.pill} ${styles.live}`}>
         <span className={`${styles.dot} ${styles.pulse}`} />
-        folding{rate > 0 ? ` · ${formatRate(rate)}/s` : ''}
+        ingesting{rate > 0 ? ` · ${formatRate(rate)}/s` : ''}
       </span>
     );
   }
   return (
     <span className={`${styles.pill} ${styles.idle}`}>
-      <span className={styles.dot} /> idle{lastFlushAt ? ` · last fold ${ago(lastFlushAt)}` : ''}
+      <span className={styles.dot} /> idle{lastFlushAt ? ` · last write ${ago(lastFlushAt)}` : ''}
     </span>
   );
 }

@@ -129,8 +129,8 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
         <div className={styles.outputCounts}>
           <span><strong>{countText(run.entities)}</strong><small>entities inserted</small></span>
           <span><strong>{countText(run.physicalities)}</strong><small>physicalities inserted</small></span>
-          <span><strong>{countText(run.attestations)}</strong><small>attestations inserted</small></span>
-          {run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <em>No new rows reported</em>}
+          <span><strong>{run.attestations_measured === false ? 'Not measured' : countText(run.attestations)}</strong><small>attestations inserted</small></span>
+          {run.attestations_measured !== false && run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <em>No new rows reported</em>}
         </div>
       ),
     },
@@ -219,6 +219,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
           runId={expandedRun}
           tenant={tenant}
           live={live}
+          countersMeasured={runsRead.data?.rows.find((run) => run.run_id === expandedRun)?.file_counters_measured !== false}
           onClose={() => setParam('run', null)}
         />
       )}
@@ -247,7 +248,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
   );
 }
 
-function RunFiles({ runId, tenant, live, onClose }: { runId: string; tenant: string; live: boolean; onClose: () => void }) {
+function RunFiles({ runId, tenant, live, countersMeasured, onClose }: { runId: string; tenant: string; live: boolean; countersMeasured: boolean; onClose: () => void }) {
   const [limit, setLimit] = useState(250);
   const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId);
   const filesRead = useReadResource({
@@ -267,10 +268,10 @@ function RunFiles({ runId, tenant, live, onClose }: { runId: string; tenant: str
   const columns: ResultColumn<IngestFile>[] = [
     { key: 'status', label: 'Disposition', render: (file) => <Status value={file.status} /> },
     { key: 'file_label', label: 'File' },
-    { key: 'records', label: 'Records' },
-    { key: 'entities', label: 'Staged entities' },
-    { key: 'physicalities', label: 'Staged physicalities' },
-    { key: 'attestations', label: 'Staged attestations' },
+    { key: 'records', label: 'Records', render: (file) => countersMeasured ? countText(file.records) : 'Not measured' },
+    { key: 'entities', label: 'Staged entities', render: (file) => countersMeasured ? countText(file.entities) : 'Not measured' },
+    { key: 'physicalities', label: 'Staged physicalities', render: (file) => countersMeasured ? countText(file.physicalities) : 'Not measured' },
+    { key: 'attestations', label: 'Staged attestations', render: (file) => countersMeasured ? countText(file.attestations) : 'Not measured' },
     { key: 'bytes', label: 'Bytes' },
     { key: 'error', label: 'Error' },
   ];

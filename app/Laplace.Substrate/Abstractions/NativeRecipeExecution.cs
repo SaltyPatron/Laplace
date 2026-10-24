@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using Laplace.Engine.Core;
 using Npgsql;
 
@@ -148,8 +150,13 @@ public sealed class NativeRecipeExecution
     }
 
     public Task<int> ExecuteAsync(NativeRecipeRequest request,
-        Stream standardOutput, Stream standardError, CancellationToken ct = default)
-        => ExecuteAsync(StartInfo(request), standardOutput, standardError, ct);
+        Stream standardOutput, Stream standardError, CancellationToken ct = default,
+        Action<NativeRecipeProgress>? progress = null)
+    {
+        if (progress is not null && request.Mode != NativeRecipeMode.Ingest)
+            throw new ArgumentException("Run receipts observe an actual ingest.", nameof(request));
+        return ExecuteAsync(StartInfo(request), standardOutput, standardError, ct, progress);
+    }
 
     // Database inventory shares the same Native operation and selected target
     // as laplace status. It does not require recipes or grammar bundles.
@@ -178,30 +185,91 @@ public sealed class NativeRecipeExecution
     }
 
     private static async Task<int> ExecuteAsync(ProcessStartInfo start,
-        Stream standardOutput, Stream standardError, CancellationToken ct = default)
+        Stream standardOutput, Stream standardError, CancellationToken ct = default,
+        Action<NativeRecipeProgress>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
         ct.ThrowIfCancellationRequested();
         using var process = new Process { StartInfo = start };
-        if (!process.Start()) throw new InvalidOperationException("The Native recipe Engine did not start.");
-        using var cancellation = ct.Register(() => Stop(process));
-        Task output = PumpAsync(process.StandardOutput.BaseStream, standardOutput, process, ct);
-        Task error = PumpAsync(process.StandardError.BaseStream, standardError, process, ct);
+        string? progressPath = null;
+        if (progress is not null)
+        {
+            string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
+                ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+                ?? throw new InvalidOperationException("Native progress requires the declared work directory.");
+            string directory = Path.Combine(work, "ingest-progress");
+            Directory.CreateDirectory(directory);
+            progressPath = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".jsonl");
+            using (File.Create(progressPath)) { }
+            process.StartInfo.Environment["LAPLACE_INGEST_PROGRESS_PATH"] = progressPath;
+        }
+        Task output = Task.CompletedTask, error = Task.CompletedTask, observations = Task.CompletedTask;
         try
         {
+            if (!process.Start()) throw new InvalidOperationException("The Native recipe Engine did not start.");
+            using var cancellation = ct.Register(() => Stop(process));
+            output = PumpAsync(process.StandardOutput.BaseStream, standardOutput, process, ct);
+            error = PumpAsync(process.StandardError.BaseStream, standardError, process, ct);
+            observations = progressPath is null ? Task.CompletedTask
+                : ObserveAsync(progressPath, progress!, process, ct);
             await process.WaitForExitAsync(ct).ConfigureAwait(false);
-            await Task.WhenAll(output, error).ConfigureAwait(false);
+            await Task.WhenAll(output, error, observations).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             return process.ExitCode;
         }
         catch
         {
             Stop(process);
-            try { await Task.WhenAll(output, error).ConfigureAwait(false); }
+            try { await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (InvalidOperationException) { /* Process start itself failed. */ }
+            try { await Task.WhenAll(output, error, observations).ConfigureAwait(false); }
             catch { /* Retain the original process, cancellation or stream failure. */ }
             throw;
         }
+        finally
+        {
+            if (progressPath is not null) File.Delete(progressPath);
+        }
+    }
+
+    private static async Task ObserveAsync(string path, Action<NativeRecipeProgress> progress,
+        Process process, CancellationToken ct)
+    {
+        try
+        {
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            using var pending = new MemoryStream();
+            var buffer = new byte[4096];
+            while (true)
+            {
+                int count = await file.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+                for (int i = 0; i < count; i++)
+                {
+                    if (buffer[i] != (byte)'\n') { pending.WriteByte(buffer[i]); continue; }
+                    var observation = JsonSerializer.Deserialize<NativeRecipeProgress>(pending.GetBuffer().AsSpan(0, checked((int)pending.Length)), options)
+                        ?? throw new InvalidDataException("Native progress contained no observation.");
+                    pending.SetLength(0);
+                    if (observation.FilesTotal < 0 || observation.FilesDone < 0
+                        || observation.FilesDone > observation.FilesTotal || observation.Entities < 0
+                        || observation.Physicalities < 0 || observation.BytesDone < 0)
+                        throw new InvalidDataException("Native progress contained invalid counters.");
+                    if (observation.Event is not ("inventory" or "file-start" or "file-known" or "file-composed" or "progress" or "complete"))
+                        throw new InvalidDataException("Native progress contained an unknown event.");
+                    progress(observation);
+                }
+                if (count != 0) continue;
+                if (process.HasExited)
+                {
+                    if (pending.Length != 0) throw new InvalidDataException("Native progress ended inside an observation.");
+                    return;
+                }
+                await Task.Delay(200, ct).ConfigureAwait(false);
+            }
+        }
+        catch { Stop(process); throw; }
     }
 
     private static async Task PumpAsync(Stream input, Stream output, Process process, CancellationToken ct)

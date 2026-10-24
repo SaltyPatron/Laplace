@@ -156,7 +156,7 @@ try {
             if((Query "SELECT count(*) FROM pg_roles WHERE rolname='$requiredRole';") -ne '1'){throw "Declared role $requiredRole is missing; configure the installation roles before database maintenance."}
         }
         if($Database -eq 'substrate'){
-            foreach($extension in 'postgis','laplace_geom','laplace_substrate','file_fdw','pg_stat_statements'){
+            foreach($extension in 'postgis','laplace','laplace_geom','laplace_substrate','file_fdw','pg_stat_statements'){
                 if((Query "SELECT count(*) FROM pg_available_extensions WHERE name='$extension';") -ne '1'){throw "Required substrate extension $extension is unavailable in this PostgreSQL installation."}
             }
         }
@@ -177,7 +177,7 @@ try {
         if(-not(Test-Path -LiteralPath $deployExtDir -PathType Container)){
             $deployExtDir=Join-Path $deployRoot 'pgsql-18/share/extension'
         }
-        foreach($ext in 'laplace_geom','laplace_substrate'){
+        foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
             $installed=(Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected)
             $avail=(Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected)
             if($installed -and $avail -and $installed -cne $avail){
