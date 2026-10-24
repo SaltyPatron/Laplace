@@ -31,6 +31,7 @@ SQL_QUERY("verify.canonical_staged_root", "public.blake3,text",
     "AND to_regclass('stage.lp_path_'||pg_current_xact_id()::text) IS NULL "
     "FROM public.entity e JOIN public.physicality p ON p.entity=e.id WHERE e.id=$1")
 SQL_QUERY("verify.canonical_readonly", "", "SET TRANSACTION READ ONLY")
+SQL_QUERY("verify.unseeded_scalar_floor", "", "SELECT count(*) FROM public.entity WHERE tier=0")
 SQL_QUERY("verify.native_source_witness", "text",
     "SELECT w.id::text FROM public.witness w JOIN public.physicality p ON p.entity=w.id "
     "WHERE public.laplace_path_starts(p.path,public.laplace_text_id($1)) ORDER BY w.id")

@@ -141,13 +141,13 @@ jobs:
           for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do
             dotnet test "app/$project/$project.csproj" -c Release --nologo \
               -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
-              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests' \
+              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests|FullyQualifiedName~UnicodeDecomposerTests|FullyQualifiedName~UcdNormalizationQcTests|FullyQualifiedName~NativeRecipeConcurrencyTests|FullyQualifiedName~RecipeLawGateTests|FullyQualifiedName~SelectedRecipeSemanticsTests|FullyQualifiedName~SourceGenerationRegressionTests|FullyQualifiedName~UnicodeSourceNameGateTests|FullyQualifiedName~NativeUnicodeTableTests|FullyQualifiedName~CorpusParsingHasNoManagedJsonCompilerOrUnicodeParser' \
               --logger "trx;LogFileName=$project.trx" --results-directory "$results"
           done
           python3 - "$results" <<'PY'
           from pathlib import Path
           import sys, xml.etree.ElementTree as ET
-          for project, expected in [('Laplace.Decomposers.Tests', 49), ('Laplace.Substrate.Tests', 3)]:
+          for project, expected in [('Laplace.Decomposers.Tests', 76), ('Laplace.Substrate.Tests', 10)]:
               path = Path(sys.argv[1]) / (project + '.trx')
               counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
               if int(counters['passed']) != expected or int(counters['total']) != expected:

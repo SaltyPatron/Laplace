@@ -53,15 +53,9 @@ public sealed class DecomposerArchitectureGateTests
     /// Sources whose structure is recovered in ordered phases, through
     /// <see cref="DecomposerMultiPhase"/> with nested ComposeDecomposerPhase types.
     /// </summary>
-    // The generic decomposer itself: every recipe source runs through it, so the gates that
-    // route decomposers to it do not apply to its own definition.
-    private const string GenericDecomposer = "Laplace.Decomposers/Structured/Decomposer.cs";
-
     private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
-        GenericDecomposer,
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
-        "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
     };
 
     /// <summary>*Decomposer.cs files permitted to call IngestBatchPipeline directly.</summary>
@@ -220,10 +214,6 @@ public sealed class DecomposerArchitectureGateTests
         {
             "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
             "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",
-            // Laplace's own source-generation manifests (*.source.json): the install
-            // configuration that selects what is ingested, not source content.
-            "app/Laplace.Decomposers/Composition/SourceGenerationCatalog.cs",
-            "app/Laplace.Decomposers/Structured/SourceGenerationRecipe.cs",
             "app/Laplace.Decomposers/Model/ModelConfigReader.cs",
             "app/Laplace.Decomposers/Model/RecipeDescriptor.cs",
             "app/Laplace.Decomposers/Model/RecipeExtractor.cs",
@@ -616,7 +606,7 @@ public sealed class DecomposerArchitectureGateTests
             {
                 if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
-                if (HandBuilderAllowlist.Contains(rel) || $"{projectRel}/{rel}" == GenericDecomposer) continue;
+                if (HandBuilderAllowlist.Contains(rel)) continue;
 
                 var text = File.ReadAllText(file);
                 if (!text.Contains("DecomposeAsync", StringComparison.Ordinal)) continue;
@@ -725,7 +715,6 @@ public sealed class DecomposerArchitectureGateTests
             {
                 if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
-                if ($"{projectRel}/{rel}" == GenericDecomposer) continue;
                 var text = File.ReadAllText(file);
                 // A decomposer type declaring ": IDecomposer" first, without a base class. A
                 // phase nested inside a multi-phase decomposer is that decomposer's part.
@@ -823,7 +812,6 @@ public sealed class DecomposerArchitectureGateTests
 
         foreach (var rel in MultiPhaseAllowlist)
         {
-            if (rel == GenericDecomposer) continue;
             var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
             Assert.True(File.Exists(path), $"missing MultiPhaseAllowlist entry: {rel}");
             var text = File.ReadAllText(path);
@@ -855,30 +843,34 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
-    public void UnicodeDecomposer_HasNoHandBuilderOrWriterApply()
+    public void CorpusParsingHasNoManagedJsonCompilerOrUnicodeParser()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var path = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs");
-        var text = File.ReadAllText(path);
-        Assert.DoesNotContain("new SubstrateChangeBuilder", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Writer.ApplyAsync", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("IntentStage.ResetContentBank", text, StringComparison.Ordinal);
-        Assert.Contains("RunPhaseAsync", text, StringComparison.Ordinal);
-        Assert.Contains("ComposeDecomposerPhase", text, StringComparison.Ordinal);
+        foreach (string retired in new[]
+        {
+            "Laplace.Decomposers/Unicode/UnicodeDecomposer.cs",
+            "Laplace.Decomposers/Unicode/UnicodePhysicalArtifactParser.cs",
+            "Laplace.Decomposers/Unicode/UcdProperties.cs",
+            "Laplace.Decomposers/Structured/NativeSourceRecipe.cs",
+            "Laplace.Substrate/Abstractions/NativeRecipeCompiler.cs",
+            "Laplace.Substrate/Abstractions/LaplaceCookbookJson.cs",
+        })
+            Assert.False(File.Exists(Path.Combine(repoRoot, "app", retired)), retired);
+        var execution = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate",
+            "Abstractions", "NativeRecipeExecution.cs"));
+        Assert.Contains("start.ArgumentList.Add(\"ingest\")", execution, StringComparison.Ordinal);
+        Assert.Contains("process.WaitForExitAsync(ct)", execution, StringComparison.Ordinal);
+        Assert.Contains("process.Kill(entireProcessTree: true)", execution, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void UnicodeArtifacts_UseSharedBoundedFileWorkers()
+    public void RemainingManagedArtifactsUseSharedBoundedFileWorkers()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var unicode = File.ReadAllText(Path.Combine(
-            repoRoot, "app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs"));
         var artifactBase = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Substrate", "Abstractions",
             "ArtifactDecomposerMultiPhase.cs"));
 
-        Assert.Contains("RunArtifactPhasesAsync(", unicode, StringComparison.Ordinal);
-        Assert.DoesNotContain("foreach (ArtifactJob job in jobs)", unicode, StringComparison.Ordinal);
         Assert.Contains("ParallelIngestWork.RunAsync(", artifactBase, StringComparison.Ordinal);
         Assert.Contains("IngestTopology.Current.FileWorkers", artifactBase, StringComparison.Ordinal);
         Assert.Contains("options.MaxInputUnits > 0", artifactBase, StringComparison.Ordinal);
@@ -896,7 +888,6 @@ public sealed class DecomposerArchitectureGateTests
             Path.Combine("scripts", "ci-deps.sh"),
             Path.Combine("scripts", "win", "build-engine.cmd"),
             Path.Combine("scripts", "win", "build-engine-asan.cmd"),
-            Path.Combine("app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs"),
         ];
 
         foreach (string relative in activePaths)
