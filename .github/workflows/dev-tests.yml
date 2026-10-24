@@ -1,7 +1,7 @@
 name: Policy — dev tests
 
 # The dev test profile (scripts/test-parallel.sh dev): native ctest without the regress label, every managed test
-# project's Tier!=db/live/perf tests on the candidate native build and its perf caches, the UCI handshake, and the
+# project's canonical dev-category tests on the candidate native build and its perf caches, the UCI handshake, and the
 # browser suites. It runs on hart-server's runner because the build pins MKL's CNR branch to its ISA
 # (engine/CMakeLists.txt: LAPLACE_TARGET_ISA AVX2 -> LAPLACE_MKL_CBWR_AVX2; engine/dynamics/src/init.cpp:
 # mkl_cbwr_set(MKL_CBWR_AVX2)), a branch MKL offers only on Intel CPUs, and the GitHub-hosted ubuntu-24.04 runners are
@@ -28,10 +28,50 @@ jobs:
     timeout-minutes: 120
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      LAPLACE_CI_NATIVE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_CI_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
+      LAPLACE_CI_OPERATIONS_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
+      LAPLACE_CI_ICU_DIR: /repos/deps/icu78
+      LAPLACE_CI_ISO639_ARCHIVE: /vault/Data/ISO639/iso-639-3_Code_Tables_20260415.zip
+      LAPLACE_CI_UCD_FLAT_ARCHIVE: /vault/Data/UCD/Public/UCD/latest/ucdxml/ucd.all.flat.zip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Check out the canonical Native implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Native
+          ref: 6d949651f2909b6ae9336f7c0e194d6d888acf32
+          path: .ci-dependencies/Laplace-Native
+          persist-credentials: false
+      - name: Check out the canonical recipe Engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Engine
+          ref: 213f52527675ae749d3b6c29fdb22d52e65b197a
+          path: .ci-dependencies/Laplace-Engine
+          persist-credentials: false
+      - name: Materialize the verified Operations build contract
+        run: |
+          set -euo pipefail
+          source=/repos/src/Laplace-Operations
+          # File identities are pinned to Operations c5c6a18c125cb4c624b22c5554aa4c9d7553ae13.
+          # This needs the declared build contract, not a private cross-repository checkout token
+          # or an unrelated commit object in the host's source checkout.
+          while read -r blob path; do
+            [[ -z "$blob" || "$blob" == \#* ]] && continue
+            destination="$LAPLACE_CI_OPERATIONS_SOURCE/$path"
+            mkdir -p "$(dirname "$destination")"
+            cp "$source/$path" "$destination"
+            actual=$(git hash-object --no-filters "$destination")
+            [[ "$actual" == "$blob" ]] || { echo "::error::Operations contract differs from its pin: $path"; exit 1; }
+          done < scripts/ci/operations-build-contract.tsv
+          echo "Operations build contract: c5c6a18c125cb4c624b22c5554aa4c9d7553ae13"
+      - name: Provide the pinned Rust compiler for the Tree-sitter generator
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.90.0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         env:
           # The runner account cannot write the default /usr/share/dotnet; the SDK goes in the runner's tool cache.
