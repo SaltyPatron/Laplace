@@ -168,6 +168,10 @@ phase_build() {
   local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}"
   local recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
+  local operations_source="${LAPLACE_OPERATIONS:-$LAPLACE_DEPSRC/Laplace-Operations}"
+  local operations_contract="$SITE_BUILD/operations-build-contract"
+  bash "$ROOT/scripts/ci/materialize-operations-contract.sh" "$operations_source" "$operations_contract"
+  export LAPLACE_OPERATIONS="$operations_contract"
   LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
     bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
   cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -178,6 +182,7 @@ phase_build() {
     -DICU_ROOT="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
     -DLAPLACE_NATIVE="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}" \
+    -DLAPLACE_OPERATIONS="$operations_contract" \
     -DLAPLACE_RECIPE_ENGINE_SOURCE="$recipe_engine" \
     -DLAPLACE_GRAMMARS="$grammars" \
     -DLAPLACE_EIGEN_DIR="$LAPLACE_EXTERNAL/eigen" \
