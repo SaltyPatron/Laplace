@@ -317,6 +317,13 @@ public sealed class HttpTransportTests
         Assert.Equal("string", (string?)embedTool["inputSchema"]?["properties"]?["inputs"]?["items"]?["type"]);
         Assert.Equal("string", (string?)rerankTool["inputSchema"]?["properties"]?["documents"]?["items"]?["type"]);
         Assert.Contains(catalog, t => (string?)t?["name"] == "code_search");
+        Assert.Contains(catalog, t => (string?)t?["name"] == "reindex");
+
+        var (reindexJson, reindexErr) = tools.Call("reindex", new JsonObject { ["force"] = false });
+        Assert.False(reindexErr, reindexJson);
+        var reindexNode = JsonNode.Parse(reindexJson)!;
+        Assert.True((int?)reindexNode["rows"]?[0]?["indexed_files"] > 0, reindexJson);
+        Assert.True((int?)reindexNode["rows"]?[0]?["indexed_chunks"] > 0, reindexJson);
 
         var (embedJson, embedErr) = tools.Call("embeddings", new JsonObject
         {
