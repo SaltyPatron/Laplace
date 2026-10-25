@@ -26,10 +26,12 @@ def run_block(step_name: str) -> str:
 
 
 class WorkflowOwnership(unittest.TestCase):
-    def test_product_push_does_not_run_for_docs_or_workflow_only_changes(self):
+    def test_product_push_ignores_documentation_and_delivers_workflow_changes(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("branches: [main]", text)
-        self.assertIn('- ".github/**"', text)
+        self.assertIn('- ".github/ISSUE_TEMPLATE/**"', text)
+        self.assertIn('- ".github/PULL_REQUEST_TEMPLATE*"', text)
+        self.assertNotIn('- ".github/**"', text)
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
@@ -223,7 +225,7 @@ class FoundationCompletion(unittest.TestCase):
         self.root = Path(self.temporary.name)
         scripts = self.root / "scripts"
         (scripts / "win").mkdir(parents=True)
-        for name in ("ensure-foundation.sh", "source-layer-complete.py", "decomposer-gates.json",
+        for name in ("ensure-foundation.sh", "source-layer-complete.py", "decomposer-gates.json", "ingest_catalog.py",
                      "win/witness-manifest.json"):
             shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         self.state = self.root / "state.json"

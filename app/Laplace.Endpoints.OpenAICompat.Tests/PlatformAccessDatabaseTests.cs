@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
+[Trait("Category", "RequiresDatabase")]
 public sealed class PlatformAccessDatabaseTests : IClassFixture<GoldenFactory>
 {
     private readonly GoldenFactory factory;

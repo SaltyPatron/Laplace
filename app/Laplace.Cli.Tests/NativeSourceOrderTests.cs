@@ -30,6 +30,21 @@ public sealed class NativeSourceOrderTests
         Assert.Throws<InvalidDataException>(() => EtlManifest.ReadSourceOrder(estate.Root));
     }
 
+    [Fact]
+    public void CatalogIncludesUnscheduledSourcesAndResolvesDeclaredAliases()
+    {
+        using var estate = new Estate();
+        estate.Source("base", "name base\naliases b\nroot $LAPLACE_DATA/Base\n");
+        estate.Source("dependent", "name dependent\nafter base\n");
+        estate.Order("base\n");
+        var catalog = NativeIngestCatalog.Read(estate.Root);
+        Assert.Equal(new[] { "base", "dependent" }, catalog.Sources.Select(source => source.Name));
+        Assert.Equal("base", catalog.Resolve("B"));
+        Assert.Equal("$LAPLACE_DATA/Base", Assert.Single(catalog.Sources[0].Roots));
+        estate.Source("dependent", "name dependent\naliases b\nafter base\n");
+        Assert.Throws<InvalidDataException>(() => NativeIngestCatalog.Read(estate.Root));
+    }
+
     private sealed class Estate : IDisposable
     {
         public string Root { get; } = Directory.CreateTempSubdirectory("laplace-source-order-").FullName;

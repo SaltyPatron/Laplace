@@ -1,0 +1,52 @@
+name: Runtime — installed database health
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/check-database-health.sh
+      - .github/workflows/installed-database-health.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installed-database-health-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-database-health:
+    name: Installed database maintenance with candidate health implementation
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, laplace, Laplace, staging]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select changes to the installed-database health implementation
+        id: health
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || ! git diff --quiet HEAD^1 HEAD -- scripts/check-database-health.sh; then
+            echo needed=true >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run installed database status and read-only health verification
+        if: steps.health.outputs.needed == 'true'
+        shell: bash
+        env:
+          LAPLACE_SETUP_USE_CMAKE: 'false'
+          LAPLACE_SETUP_REQUIRE_BUILT_REVISION: 'false'
+          LAPLACE_DB_HEALTH_SCOPE: installed
+          LAPLACE_DBNAME: laplace-mono
+          PGDATABASE: laplace-mono
+        run: |
+          set -euo pipefail
+          source scripts/ci-environment.sh
+          source deploy/linux/host-lock.sh
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-${LAPLACE_WORK:?Runner must declare LAPLACE_WORK}}"
+          host_lock_hold shared 8 "${LAPLACE_HOST_LOCK:-${LAPLACE_LOCK_ROOT:-$workspace_lock_root}/host-resource.lock}"
+          bash scripts/db-migrations.sh status
+          bash scripts/check-database-health.sh --installed-runtime "$PGDATABASE"

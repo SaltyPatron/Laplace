@@ -94,7 +94,11 @@ host_lock() {
   case "$mode" in shared|exclusive) ;; *) fail "invalid host lock mode: $mode" ;; esac
   [[ -d "$(dirname "$path")" ]] || fail "missing shared host lock directory: $path"
   host_lock_hold "$mode" 8 "$path" "$wait" || rc=$?      # through the turnstile: a waiting deployment is not overtaken
-  [[ $rc == 0 ]] || fail "host lock deadline expired: $path; no deployment phase ran"
+  case $rc in
+    0) ;;
+    3) fail "host lock deadline expired: $path; no deployment phase ran" ;;
+    *) fail "host lock could not be acquired (status $rc): $path; no deployment phase ran" ;;
+  esac
 }
 revision() {
   local app="$1" rev web
@@ -164,6 +168,13 @@ phase_build() {
   local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}"
   local recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
+  local operations_source="${LAPLACE_OPERATIONS:-$LAPLACE_DEPSRC/Laplace-Operations}"
+  local operations_contract="$SITE_BUILD/operations-build-contract"
+  bash "$ROOT/scripts/ci/materialize-operations-contract.sh" "$operations_source" "$operations_contract"
+  export LAPLACE_OPERATIONS="$operations_contract"
+  local grammar_source="${LAPLACE_GRAMMAR_SRC:-$LAPLACE_EXTERNAL/tree-sitter-grammars}"
+  grammar_source=$(cd "$grammar_source" && pwd -P)
+  LAPLACE_GRAMMAR_SRC="$grammar_source" \
   LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
     bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
   cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -174,6 +185,7 @@ phase_build() {
     -DICU_ROOT="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
     -DLAPLACE_NATIVE="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}" \
+    -DLAPLACE_OPERATIONS="$operations_contract" \
     -DLAPLACE_RECIPE_ENGINE_SOURCE="$recipe_engine" \
     -DLAPLACE_GRAMMARS="$grammars" \
     -DLAPLACE_EIGEN_DIR="$LAPLACE_EXTERNAL/eigen" \
@@ -305,13 +317,17 @@ phase_extensions() {
   need_pg
   say "extensions in $LAPLACE_DBNAME"
   local ext avail installed
-  for ext in laplace_geom laplace_substrate; do
+  for ext in laplace laplace_geom laplace_substrate; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
     installed="$(sql -c "SELECT extversion FROM pg_extension WHERE extname = '$ext'")"
     [[ -n "$avail" ]] || fail "$ext is not available to $LAPLACE_DBNAME (extension_control_path)"
     if [[ -z "$installed" ]]; then installed="none yet: the migrations make it at $avail"
     elif [[ "$installed" != "$avail" ]]; then
-      install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+      # Native ships a normal versioned upgrade chain in PostgreSQL's share
+      # directory. Only the monorepo extensions need the generated hash bridge.
+      if [[ "$ext" != laplace ]]; then
+        install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+      fi
       PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
       installed="$installed -> $avail"
     fi

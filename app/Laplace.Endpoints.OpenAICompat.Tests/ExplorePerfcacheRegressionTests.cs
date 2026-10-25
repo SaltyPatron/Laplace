@@ -49,8 +49,10 @@ public sealed class ExplorePerfcacheRegressionTests
         CodepointPerfcache.LoadDefault();
         var result = new ExploreDecomposeService().Decompose("MagnusCarlsen");
 
-        Assert.Single(result.Nodes, n => n.IdHex == result.RootIdHex);
-        Assert.DoesNotContain(result.Nodes, n => n.Tier is 1 or 3 or 4);
+        using var native = TextDecomposer.Run("MagnusCarlsen");
+        var root = Assert.Single(result.Nodes, n => n.IdHex == result.RootIdHex);
+        Assert.Equal(native.GetNode(native.NaturalUnitIndex()).Tier, root.Tier);
+        Assert.All(result.Nodes, n => Assert.True(n.Tier == 0 || native.ShouldEmitCompositional(n.Ordinal)));
         Assert.Equal(14, result.Nodes.Count); // 13 codepoints + one emitted word root
     }
 

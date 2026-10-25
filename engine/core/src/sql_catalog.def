@@ -24,9 +24,9 @@ SQL_QUERY("write.canonical_merge", "text,text",
     "SELECT * FROM public.laplace_merge_stage($1::regclass,$2::regclass)")
 SQL_QUERY("write.canonical_stage_drop", "",
     "DROP TABLE {entity_stage},{path_stage}")
-SQL_QUERY("verify.canonical_staged_root", "public.blake3,text",
+SQL_QUERY("verify.canonical_staged_root", "public.blake3",
     "SELECT e.id,e.tier,public.laplace_text(e.id),"
-    "public.ST_AsEWKB(e.coord)=public.laplace_text_coord_ewkb($2),"
+    "public.ST_X(e.coord),public.ST_Y(e.coord),public.ST_Z(e.coord),public.ST_M(e.coord),"
     "to_regclass('stage.lp_entity_'||pg_current_xact_id()::text) IS NULL "
     "AND to_regclass('stage.lp_path_'||pg_current_xact_id()::text) IS NULL "
     "FROM public.entity e JOIN public.physicality p ON p.entity=e.id WHERE e.id=$1")
@@ -279,6 +279,13 @@ SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
     "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
     "WHERE c.type_id=$2 AND c.object_id=$3 "
     "ORDER BY c.rd DESC,c.subject_id LIMIT $4")
+
+SQL_QUERY("leaders.native_present", "",
+    "SELECT to_regclass('public.consensus') IS NOT NULL")
+SQL_QUERY("leaders.native_named", "int4[],int4",
+    "SELECT n.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory FROM ops.claim_leaders($1,$2) WITH ORDINALITY n JOIN converse.relation_band_catalog() b ON b.band=n.band ORDER BY n.band,n.ordinality")
+SQL_QUERY("leaders.native_page", "text[],int8,int4",
+    "WITH selectors AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT public.laplace_id(surface) FROM unnest($1::text[]) surface) AS ids\n), page AS MATERIALIZED (\n SELECT c.claim,p.path,public.laplace_confidence(c.rating,c.deviation,2) AS confidence\n FROM public.physicality p JOIN public.consensus c ON c.claim=p.entity CROSS JOIN selectors s\n WHERE p.path && s.ids AND public.laplace_middle_any(p.path,s.ids)\n AND public.laplace_confidence(c.rating,c.deviation,-2)>=0.5\n ORDER BY public.laplace_confidence(c.rating,c.deviation,2) DESC,c.claim LIMIT $2\n)\nSELECT $3::int4,decode(page.claim::text,'hex'),\n (SELECT jsonb_agg(jsonb_build_object('id',vertex.id::text,'label',public.laplace_text(vertex.id),'run',public.laplace_path_length(point.value)) ORDER BY ordinal)\n  FROM generate_series(1,ST_NPoints(page.path)) ordinal\n  CROSS JOIN LATERAL (SELECT ST_PointN(page.path,ordinal) AS value) point\n  CROSS JOIN LATERAL (SELECT (public.laplace_vertex_ids(point.value))[1] AS id) vertex),\n page.confidence,(SELECT count(*) FROM public.laplace_attribution(ARRAY[page.claim])),encode(ST_AsEWKB(page.path),'hex')\nFROM page ORDER BY page.confidence DESC,page.claim")
 
 SQL_QUERY("leaders.page", "int4[],int4",
     "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
@@ -1602,6 +1609,14 @@ SQL_QUERY("journal.reconcile_orphans", "",
     "SELECT * FROM ops.ingest_reconcile_orphans(interval '90 seconds')")
 SQL_QUERY("journal.run_progress", "uuid,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8,int8",
     "UPDATE laplace.ingest_run_journal SET units_attempted = $2, units_applied = $3, units_failed = $4, entities = $5, physicalities = $6, attestations = $7, files_done = $8, input_units_done = $9, consensus_backend_ms = $10, highway_mask_backend_ms = $11, consensus_calls = $12, highway_mask_calls = $13, highway_mask_pairs = $14 WHERE run_id = $1")
+SQL_QUERY("journal.native_inventory", "uuid,int8",
+    "UPDATE laplace.ingest_run_journal SET files_total=$2,input_units_total=$2 WHERE run_id=$1")
+SQL_QUERY("journal.native_source", "uuid,bytea",
+    "UPDATE laplace.ingest_run_journal SET source_id=$2 WHERE run_id=$1")
+SQL_QUERY("journal.native_files_finished", "uuid,text",
+    "UPDATE laplace.ingest_file_journal SET status=$2,ended_at=clock_timestamp() WHERE run_id=$1 AND status IN ('running','composed')")
+SQL_QUERY("journal.run_start_unidentified", "uuid,text,int4,int8,int8,bool",
+    "INSERT INTO laplace.ingest_run_journal (run_id,source_name,source_id,layer,status,files_total,input_units_total,evidence_persisted,attestations_measured,file_counters_measured) VALUES ($1,$2,NULL,$3,'running',$4,$5,$6,false,false)")
 SQL_QUERY("journal.run_phase", "uuid,text",
     "UPDATE laplace.ingest_run_journal SET phase = $2 WHERE run_id = $1")
 SQL_QUERY("journal.run_completion", "uuid,int8,int8,int8,int8,int8,int8,int8,int8",
@@ -1681,12 +1696,17 @@ SQL_QUERY("migration.app_tables_present", "",
     "SELECT bool_and(to_regclass(name) IS NOT NULL) "
     "FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',"
     "'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)")
-/* Run transactionally after DbUp, including already-journaled databases. */
+/* Run transactionally after DbUp, including already-journaled databases.
+ * Existing managed connections prefer laplace,public. Native SPI must not
+ * accidentally read laplace.consensus instead of public.consensus.
+ * Cache paths are server-side installed paths, not paths from the invoking client.
+ * Pure byte operators never resolve SQL names; a per-call scope would enter
+ * a GUC stack for every B-tree comparison and hash key in Native loops. */
 SQL_QUERY("migration.canonical_substrate", "",
     "SET LOCAL search_path = public, pg_temp; "
     "CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public; "
     "ALTER EXTENSION laplace UPDATE; "
-    "DO $canonical$ DECLARE function_signature text; cache record; cache_path text; BEGIN "
+    "DO $canonical$ DECLARE native_function record; cache record; cache_path text; BEGIN "
     "IF NOT EXISTS (SELECT FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace "
     "WHERE e.extname='laplace' AND n.nspname='public') THEN "
     "RAISE EXCEPTION 'The canonical laplace extension must own the public substrate'; END IF; "
@@ -1695,16 +1715,19 @@ SQL_QUERY("migration.canonical_substrate", "",
     "WHERE t.oid=to_regtype('public.blake3') AND t.typlen=16 AND e.extname='laplace' AND d.deptype='e') "
     "OR to_regtype('public.blake3[]') IS NULL THEN "
     "RAISE EXCEPTION 'Canonical fixed-width blake3 identity type is not installed'; END IF; "
-    /* Existing managed connections prefer laplace,public. Native SPI must not
-       accidentally read laplace.consensus instead of public.consensus. */
-    "FOR function_signature IN SELECT format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)) "
-    "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+    "FOR native_function IN SELECT format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)) AS signature, "
+    "l.lanname='c' AND p.prosrc=ANY(ARRAY['blake3_in','blake3_out','blake3_recv','blake3_send',"
+    "'blake3_eq','blake3_ne','blake3_lt','blake3_le','blake3_gt','blake3_ge','blake3_cmp',"
+    "'blake3_hash','blake3_hash_extended']) AS bytes_only, p.proconfig "
+    "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_language l ON l.oid=p.prolang "
     "JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass "
     "JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass "
-    "WHERE e.extname='laplace' AND d.deptype='e' AND p.prokind='f' "
-    "AND NOT COALESCE(p.proconfig @> ARRAY['search_path=public, pg_temp'],false) LOOP "
-    "EXECUTE 'ALTER FUNCTION '||function_signature||' SET search_path = public, pg_temp'; END LOOP; "
-    /* These are server-side installed paths, not paths from the invoking client. */
+    "WHERE e.extname='laplace' AND d.deptype='e' AND p.prokind='f' LOOP "
+    "IF native_function.bytes_only THEN "
+    "IF EXISTS(SELECT FROM unnest(native_function.proconfig) setting WHERE setting LIKE 'search_path=%') THEN "
+    "EXECUTE 'ALTER FUNCTION '||native_function.signature||' RESET search_path'; END IF; "
+    "ELSIF NOT COALESCE(native_function.proconfig @> ARRAY['search_path=public, pg_temp'],false) THEN "
+    "EXECUTE 'ALTER FUNCTION '||native_function.signature||' SET search_path = public, pg_temp'; END IF; END LOOP; "
     "FOR cache IN SELECT * FROM (VALUES ('laplace.tier0','laplace_substrate.perfcache_path'), "
     "('laplace.highway','laplace_substrate.highway_perfcache_path')) AS paths(native_setting,installed_setting) LOOP "
     "cache_path := NULLIF(current_setting(cache.installed_setting,true),''); "
@@ -1713,7 +1736,12 @@ SQL_QUERY("migration.canonical_substrate", "",
     "EXECUTE format('ALTER DATABASE %I SET %s = %L',current_database(),cache.native_setting,cache_path); "
     "END IF; END LOOP; "
     "PERFORM public.laplace_fingerprint(); PERFORM public.laplace_highway_fingerprint(); "
-    "PERFORM public.laplace_ensure_stage(); END $canonical$;")
+    "PERFORM public.laplace_ensure_stage(); "
+    "IF to_regprocedure('laplace.source_id(text)') IS NOT NULL THEN "
+    "EXECUTE $source$CREATE OR REPLACE FUNCTION laplace.source_id(p_name text) RETURNS bytea "
+    "LANGUAGE sql IMMUTABLE PARALLEL SAFE BEGIN ATOMIC "
+    "SELECT decode(public.laplace_id('substrate/source/' || p_name || '/v1')::text,'hex'); END;$source$; "
+    "END IF; END $canonical$;")
 SQL_QUERY("migration.canonical_substrate_status", "",
     "SELECT current_database(),extversion,public.laplace_fingerprint(),public.laplace_highway_fingerprint() "
     "FROM pg_extension WHERE extname='laplace'")

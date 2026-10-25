@@ -67,7 +67,21 @@ def parse_simple_toml(path: Path) -> dict:
     pending = None   # accumulating a multi-line array value
 
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
+        # A hash inside a quoted source token (WordNet "#m", "#s", "#p")
+        # is content. Only an unquoted hash begins a manifest comment.
+        quoted = False
+        escaped = False
+        for offset, char in enumerate(raw):
+            if escaped:
+                escaped = False
+            elif quoted and char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = not quoted
+            elif char == "#" and not quoted:
+                raw = raw[:offset]
+                break
+        line = raw.strip()
         # MULTI-LINE ARRAYS. A declared set is a list of relation names, and forcing 13
         # of them onto one line makes the manifest — the single source of truth for 78
         # IS_A declaration sites — unreadable at exactly the place it must be read.
@@ -212,6 +226,8 @@ def emit_relation_law(rel: dict) -> None:
 
     alias_entries = []
     for a in sorted(aliases, key=lambda x: x["surface"]):
+        if not a.get("surface"):
+            raise SystemExit("relation alias surface must not be empty")
         canon = a["canonical"]
         if canon not in name_to_idx:
             continue

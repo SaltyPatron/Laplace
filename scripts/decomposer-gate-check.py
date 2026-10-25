@@ -10,6 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from ingest_catalog import canonical_source
 
 ROOT = Path(__file__).resolve().parent.parent
 GATES = ROOT / "scripts" / "decomposer-gates.json"
@@ -44,6 +45,7 @@ def check_source(
     user: str,
     allow_health_tier: bool,
 ) -> dict:
+    source = canonical_source(source)
     spec = load_gates()
     src = spec["sources"].get(source)
     if not src:

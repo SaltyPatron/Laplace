@@ -18,7 +18,8 @@ public sealed class RelationRegistryInitializationTests
         {
             Hash128 id = surface ? RelationTypeRegistry.Resolve(name).Id : RelationTypeRegistry.RelationTypeId(name);
             Assert.NotEqual(default, id);
-            Assert.True(CodepointPerfcache.IsLoaded);
+            // Native owns the text floor and may already hold its own mapping.
+            // A managed view need not be published to resolve a content identity.
             Assert.Equal(ContentEmitter.RootId(name)!.Value, id);
             Assert.Equal(id, RelationTypeRegistry.RelationTypeId(name));
             Assert.Equal(id, RelationTypeRegistry.Resolve(name).Id);

@@ -1,4 +1,4 @@
-# The tree-sitter grammars engine/core/grammars compiles, at the revisions the build host's TreeSitter tree holds.
+# Locked grammar source revisions. Required inputs come from Native recipes and core grammar declarations.
 # name	revision	repository
 tree-sitter-python	26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64	https://github.com/tree-sitter/tree-sitter-python
 tree-sitter-c	b780e47fc780ddc8da13afa35a3f4ed5c157823d	https://github.com/tree-sitter/tree-sitter-c
@@ -31,3 +31,8 @@ tree-sitter-mlir	f234edcdab9a10ee7444c172f19f41a8d4afba56	https://github.com/art
 tree-sitter-cmake	c7b2a71e7f8ecb167fad4c97227c838439280175	https://github.com/uyha/tree-sitter-cmake
 tree-sitter-ispc	ba1bb38ac8ddfa6aa7571cbfe9b4d029f7f77447	https://github.com/fab4100/tree-sitter-ispc
 tree-sitter-zig	6479aa13f32f701c383083d8b28360ebd682fb7d	https://github.com/tree-sitter-grammars/tree-sitter-zig
+tree-sitter-css	dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f	https://github.com/tree-sitter/tree-sitter-css
+tree-sitter-dockerfile	971acdd908568b4531b0ba28a445bf0bb720aba5	https://github.com/camdencheek/tree-sitter-dockerfile
+tree-sitter-html	73a3947324f6efddf9e17c0ea58d454843590cc0	https://github.com/tree-sitter/tree-sitter-html
+tree-sitter-make	a4b9187417d6be349ee5fd4b6e77b4172c6827dd	https://github.com/alemuller/tree-sitter-make
+tree-sitter-powershell	d398441825243b00e317e87e1829b9d6a3e54ce0	https://github.com/airbus-cert/tree-sitter-powershell

@@ -73,6 +73,27 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// <summary>The ingest_run_journal key of the current run; <see cref="Guid.Empty"/> before OnRunStart.</summary>
     public Guid RunId => _runId;
 
+    public void OnNativeRunStart(string sourceName, int layerOrder) =>
+        StartRun(sourceName, null, layerOrder, null, null, unidentified: true);
+
+    public void OnNativeInventory(int files) => Execute("journal.native_inventory", cmd =>
+    {
+        cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+        cmd.Add(new NpgsqlParameter { Value = (long)files });
+    });
+
+    public void OnNativeSourceIdentified(Hash128 sourceId) => Execute("journal.native_source", cmd =>
+    {
+        cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+        cmd.Add(new NpgsqlParameter { Value = sourceId.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
+    });
+
+    public void OnNativeFilesFinished(string status) => Execute("journal.native_files_finished", cmd =>
+    {
+        cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+        cmd.Add(new NpgsqlParameter { Value = status });
+    });
+
     public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true, ILogger? logger = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
@@ -167,7 +188,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         byte[]? sourceId,
         int layerOrder,
         IngestInventory? inventory,
-        IngestArtifactGraph? artifactGraph)
+        IngestArtifactGraph? artifactGraph,
+        bool unidentified = false)
     {
         _runId = Guid.NewGuid();
         _active = true;
@@ -178,7 +200,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         // canonical substrate/source/<name>/v1 envelope, which is a different entity
         // from the [authority, release] witness attestations are filed under.
         bool journaled = Execute(
-            sourceId is null ? "journal.run_start_named" : "journal.run_start_identified",
+            unidentified ? "journal.run_start_unidentified"
+                : sourceId is null ? "journal.run_start_named" : "journal.run_start_identified",
             cmd =>
             {
                 cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
@@ -354,10 +377,16 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     public void OnIntentFailed(string sourceName, IngestFailure failure) { }
 
     public void OnProgress(IngestProgress progress)
+        => WriteProgress(progress, force: false);
+
+    public void OnNativeProgress(IngestProgress progress, bool force = false)
+        => WriteProgress(progress, force);
+
+    private void WriteProgress(IngestProgress progress, bool force)
     {
         if (!_active) return;
         var now = DateTime.UtcNow;
-        if (now - _lastProgressUtc < ProgressInterval) return;
+        if (!force && now - _lastProgressUtc < ProgressInterval) return;
         _lastProgressUtc = now;
         Execute(
             "journal.run_progress",

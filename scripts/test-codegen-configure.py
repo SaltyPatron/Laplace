@@ -94,6 +94,13 @@ class ConfigureGeneration(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotEqual(version.read_text(), before)
 
+    def test_quoted_wordnet_pointers_survive_generation(self):
+        self.configure()
+        law = (self.root / "engine/core/src/generated/relation_law.c").read_text()
+        for pointer in ("#m", "#s", "#p", "%m", "%s", "%p"):
+            self.assertIn('{ "' + pointer + '", ', law)
+        self.assertNotIn('{ "", ', law)
+
     def test_generator_failure_fails_configuration(self):
         (self.root / "scripts/codegen-attestation-law.py").write_text(
             'raise SystemExit("controlled generator failure")\n')

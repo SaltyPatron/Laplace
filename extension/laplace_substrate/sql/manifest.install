@@ -405,8 +405,8 @@ functions/geometry/entity_container_degree.sql.in
 functions/highway/laplace_highway_match.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/consensus_band_edges.sql.in
-functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_runs.sql.in
+functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_files.sql.in
 functions/ops/modality_counts.sql.in
 functions/ops/source_roster.sql.in
@@ -416,6 +416,7 @@ functions/ops/source_status.sql.in
 functions/structural/mesh_position.sql.in
 functions/taxonomy/taxonomy_tree.sql.in
 functions/ops/band_leaders.sql.in
+functions/ops/claim_leaders.sql.in
 functions/ops/entity_record.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/chess/laplace_chess_position_ready.sql.in

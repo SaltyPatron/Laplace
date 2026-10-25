@@ -2,6 +2,34 @@
 -- operational state that answers "has this witness finished admitting", never
 -- "is this true".
 
+-- A Native source completes under its actual published trunk, not the legacy
+-- authority/release hash. A partial-file receipt has no source ID and cannot
+-- complete a source. A newer failed/running receipt supersedes an older success.
+CREATE OR REPLACE FUNCTION ops.native_source_completed(p_source text)
+    RETURNS boolean
+    LANGUAGE plpgsql STABLE
+AS $$
+DECLARE complete boolean;
+BEGIN
+    IF to_regclass('public.witness') IS NULL THEN RETURN false; END IF;
+    EXECUTE $read$
+        WITH latest AS (
+            SELECT * FROM laplace.ingest_run_journal
+            WHERE source_name = $1 ORDER BY started_at DESC LIMIT 1
+        )
+        SELECT EXISTS (
+            SELECT FROM latest j
+            JOIN public.witness w ON w.id::text = encode(j.source_id, 'hex')
+            JOIN public.physicality p ON p.entity = w.id
+            WHERE NOT j.attestations_measured AND j.status = 'ok'
+              AND j.ended_at IS NOT NULL
+              AND j.files_total > 0 AND j.files_done = j.files_total
+        )
+    $read$ INTO complete USING p_source;
+    RETURN complete;
+END;
+$$;
+
 -- Has the witness completed the layer? NULL witness asks whether any witness has.
 CREATE OR REPLACE FUNCTION ops.layer_completed(p_witness bytea, p_layer int)
     RETURNS boolean

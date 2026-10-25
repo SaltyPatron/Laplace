@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from ingest_catalog import canonical_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,10 +22,10 @@ class IngestExitTests(unittest.TestCase):
         (scripts / "lib").mkdir(parents=True)
         (scripts / "win").mkdir()
         for name in ("ingest-source.sh", "classify-ingest-exit.sh", "machine-env.py", "lib/storage.sh", "lib/installation.sh",
-                     "win/witness-manifest.json"):
+                     "win/witness-manifest.json", "ingest_catalog.py"):
             shutil.copy2(ROOT / "scripts" / name, scripts / name)
         (scripts / "lib/fp.sh").write_text("fp_compute() { echo fixture; }\nfp_check() { return 1; }\nfp_record() { :; }\n")
-        (scripts / "decomposer-gates.json").write_text('{"sources":{"wordnet":{"decomposer":"fixture"}}}')
+        (scripts / "decomposer-gates.json").write_text('{"sources":{"princeton-wordnet":{"decomposer":"fixture"}}}')
         (scripts / "verify-ingest-journal.sh").write_text('echo checked >> "$PROOF"\nexit "${PROOF_RC:-0}"\n')
         cli = self.root / "app/Laplace.Cli/bin/Release/net10.0"
         cli.mkdir(parents=True)
@@ -48,8 +49,8 @@ class IngestExitTests(unittest.TestCase):
 if [[ "$1" == build ]]; then exit 0; fi
 printf '%s\\n' "$CLI_MESSAGE"
 if [[ "${BREAK_LOG:-0}" == 1 ]]; then
-    rm "$INGEST_LOGDIR/laplace-ingest-wordnet.log"
-    mkdir "$INGEST_LOGDIR/laplace-ingest-wordnet.log"
+    rm "$INGEST_LOGDIR/laplace-ingest-princeton-wordnet.log"
+    mkdir "$INGEST_LOGDIR/laplace-ingest-princeton-wordnet.log"
 fi
 exit "$CLI_RC"
 ''')
@@ -135,8 +136,8 @@ fi
         result = self.run_ingest(PROOF_RC="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / "proof").exists())
-        self.assertIn("INGEST_TIMING source=wordnet", result.stdout)
-        self.assertIn("rc=0", (self.root / "logs/laplace-ingest-wordnet.log").read_text())
+        self.assertIn("INGEST_TIMING source=princeton-wordnet", result.stdout)
+        self.assertIn("rc=0", (self.root / "logs/laplace-ingest-princeton-wordnet.log").read_text())
 
     def test_output_failure_does_not_replace_process_failure(self):
         result = self.run_ingest(CLI_RC="23", GITHUB_OUTPUT=str(self.root))
@@ -146,7 +147,7 @@ fi
     def test_timing_failure_does_not_replace_process_failure(self):
         result = self.run_ingest(CLI_RC="23", BREAK_LOG="1")
         self.assertEqual(result.returncode, 23, result.stderr)
-        (self.root / "logs/laplace-ingest-wordnet.log").rmdir()
+        (self.root / "logs/laplace-ingest-princeton-wordnet.log").rmdir()
         self.assertNotEqual(self.run_ingest(BREAK_LOG="1").returncode, 0)
 
     def test_default_logs_use_build_drive(self):
@@ -163,7 +164,7 @@ fi
         result = subprocess.run(["bash", str(self.root / "scripts/ingest-source.sh"), "wordnet"],
                                 env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((scratch / "laplace-ingest/laplace-ingest-wordnet.log").is_file())
+        self.assertTrue((scratch / "laplace-ingest/laplace-ingest-princeton-wordnet.log").is_file())
         self.assertTrue((self.root / "prefix/ingest/logs").is_dir())
         self.assertTrue((self.root / "prefix/ingest/current").is_symlink())
 
@@ -172,13 +173,13 @@ fi
         manifest = json.loads((ROOT / "scripts/win/witness-manifest.json").read_text(encoding="utf-8"))
         ladder = [src["cli"] for stage in manifest["cadence"]
                   if stage["stage"] in ("floor", "relations", "usage") for src in stage["sources"]]
-        self.assertIn("uca", ladder)
+        self.assertNotIn("uca", ladder)  # collation tables are already read by unicode
         self.assertIn("verbnet-gl", ladder)
         for source in ladder:
             result = subprocess.run(["bash", str(self.root / "scripts/ingest-source.sh"), source],
                                     env=self.env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{source}: {result.stderr}")
-            self.assertIn(f"INGEST_TIMING source={source} ", result.stdout)
+            self.assertIn(f"INGEST_TIMING source={canonical_source(source)} ", result.stdout)
 
     def test_os_temp_log_path_is_rejected_before_ingest(self):
         self.assertEqual(self.run_ingest(INGEST_LOGDIR="/tmp/laplace-forbidden").returncode, 2)

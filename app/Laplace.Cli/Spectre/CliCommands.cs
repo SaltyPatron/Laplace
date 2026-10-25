@@ -41,6 +41,9 @@ internal sealed class IngestCommand : ForwardCommand<IngestCommand.Settings>
         [CommandOption("--force")][Description("Rebuild content already proven present; existing witness identities remain unchanged.")] public bool Force { get; init; }
         [CommandOption("--no-analyze")][Description("chess: record game-grain only; defer derivation to chess-analyze.")] public bool NoAnalyze { get; init; }
         [CommandOption("--register-only")][Description("Register canonical ids only; no fold.")] public bool RegisterOnly { get; init; }
+        [CommandOption("--catalog")][Description("List all recipe sources and decomposers as JSON without connecting to the database.")] public bool Catalog { get; init; }
+        [CommandOption("--list-sources")][Description("List all canonical recipe source names.")] public bool ListSources { get; init; }
+        [CommandOption("--json")][Description("Print the ingestion catalog as JSON.")] public bool Json { get; init; }
         [CommandOption("--plan")][Description("Inspect the canonical Native recipe plan without loading records.")] public bool Plan { get; init; }
         [CommandOption("--claims")][Description("Show claims from explicitly selected inputs without loading them.")] public bool Claims { get; init; }
         [CommandOption("--no-load")][Description("Execute Native parsing and validation without database writes.")] public bool NoLoad { get; init; }

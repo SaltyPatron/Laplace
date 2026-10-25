@@ -159,7 +159,7 @@ internal static class IngestDispatchTable
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {
         string canonical = CanonicalSourceName(sourceKey);
-        if (EtlManifest.SourceOrder.Contains(canonical, StringComparer.Ordinal))
+        if (EtlManifest.Catalog.Sources.Any(source => source.Name == canonical))
         {
             task = IngestCommands.IngestNativeRecipeAsync(canonical, cli);
             return true;
@@ -186,7 +186,7 @@ internal static class IngestDispatchTable
     internal static string CanonicalSourceName(string sourceKey) => EtlManifest.CanonicalSourceName(sourceKey);
 
     /// <summary>The corpus inventory is exactly the Native directory declaration.</summary>
-    internal static IReadOnlyCollection<string> CanonicalSourceKeys => EtlManifest.SourceOrder;
+    internal static IReadOnlyCollection<string> CanonicalSourceKeys => EtlManifest.Catalog.Sources.Select(source => source.Name).ToArray();
 
     /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
     private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
@@ -200,4 +200,17 @@ internal static class IngestDispatchTable
               .Concat(ModelAliases)
               .Distinct(StringComparer.OrdinalIgnoreCase)
               .ToArray();
+
+    internal static IReadOnlyCollection<string> DisplayKeys
+    {
+        get
+        {
+            var catalog = EtlManifest.Catalog;
+            var nativeNames = catalog.Sources.Select(source => source.Name).ToHashSet(StringComparer.Ordinal);
+            return catalog.Sources.Select(source => source.Aliases.FirstOrDefault() ?? source.Name)
+                .Concat(Routes.Keys.Where(key => !nativeNames.Contains(catalog.Resolve(key))))
+                .Append("safetensors")
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
+        }
+    }
 }

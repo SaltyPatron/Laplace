@@ -1134,48 +1134,11 @@ internal static class WorkspaceCodeIndex
         if (WordCache.TryGetValue(token, out var cached))
             return cached;
 
-        Span<Hash128> cpIds = stackalloc Hash128[Math.Min(64, token.Length)];
-        Span<double> cpCoords = stackalloc double[cpIds.Length * 4];
-        var count = 0;
-
-        foreach (var rune in token.EnumerateRunes())
-        {
-            if (count >= cpIds.Length)
-                break;
-            var cp = (uint)rune.Value;
-            if (CodepointPerfcache.TryLookupScalar(cp, out var r))
-            {
-                cpIds[count] = r.Hash;
-                cpCoords[count * 4] = r.CoordX;
-                cpCoords[count * 4 + 1] = r.CoordY;
-                cpCoords[count * 4 + 2] = r.CoordZ;
-                cpCoords[count * 4 + 3] = r.CoordM;
-                count++;
-            }
-        }
-
-        if (count == 0)
-            return default;
-
-        Span<double> outCoord = stackalloc double[4];
-        var (id, _) = HashComposer.ComposeNode(
-            (byte)EntityTier.Word,
-            cpIds[..count],
-            cpCoords[..(count * 4)],
-            outCoord);
-
-        var x = outCoord[0];
-        var y = outCoord[1];
-        var z = outCoord[2];
-        var m = outCoord[3];
-        var radius = Math.Sqrt(x * x + y * y + z * z + m * m);
-        if (radius > 1e-12)
-        {
-            x /= radius;
-            y /= radius;
-            z /= radius;
-            m /= radius;
-        }
+        using var tree = TextDecomposer.Run(token);
+        var root = tree.GetNode(tree.NaturalUnitIndex());
+        var id = root.Id;
+        double x, y, z, m;
+        unsafe { x = root.Coord[0]; y = root.Coord[1]; z = root.Coord[2]; m = root.Coord[3]; }
 
         var weight = StopWords.Contains(token) || token.Length < 2
             ? 0.12

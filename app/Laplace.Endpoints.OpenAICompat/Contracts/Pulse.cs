@@ -10,7 +10,7 @@ public sealed record PulseResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("at")] long At,
     [property: JsonPropertyName("entities")] long Entities,
-    [property: JsonPropertyName("attestations")] long Attestations,
+    [property: JsonPropertyName("attestations")] long? Attestations,
     [property: JsonPropertyName("consensus")] long Consensus,
     [property: JsonPropertyName("physicalities")] long Physicalities,
     // Flushes are working-set applies; recent ones mean a source is being folded.

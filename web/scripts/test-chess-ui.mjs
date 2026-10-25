@@ -13,7 +13,7 @@ try {
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
       'node_modules/@playwright/test/cli.js', 'test',
-      '--grep', 'gauntlet accepts non-default|replay stepping never steals page scroll|billing cents', `--output=${output}`,
+      '--grep', 'gauntlet accepts non-default|replay stepping never steals page scroll|billing cents|Home preserves ordered Native claims', `--output=${output}`,
     ], { stdio: 'inherit', env: { ...process.env, LAPLACE_E2E_URL: server.resolvedUrls.local[0] } });
     child.once('error', reject);
     child.once('exit', (code) => resolve(code ?? 1));

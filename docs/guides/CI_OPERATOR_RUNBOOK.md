@@ -23,6 +23,15 @@ This is the operator-facing inventory. The Actions page should read like a contr
 | **Policy — CI contract** | Normally automatic on CI/policy changes; manual dispatch is only for policy verification. | None. | Nothing. | GitHub-hosted; never consumes the Laplace self-hosted runner. | Fast static workflow/lifecycle/operator contract result. |
 | **Policy — dev tests** | Automatic on every pull request to main from this repository (never a fork's); manual dispatch for any ref. | None. | Nothing. | hart-server's self-hosted runner (Intel i7-6850K): the build pins MKL's CNR branch to AVX2, which MKL takes only on Intel, and the GitHub-hosted runners are AMD EPYC. Queues with deliveries on that runner. | The dev test profile: native ctest (no regress label), every managed test project's dev tier, the UCI handshake and the browser suites, every test included. |
 
+| **Runtime — installed database health** | Automatic when the installed database health verifier changes; manual dispatch for readback. | None. | Nothing. | Trusted repository revisions only, staging runner, shared host lock, five-minute limit. | Installed migration status and read-only PostgreSQL health with candidate verifier. |
+
+The complete available ingestion inventory comes from the Engine recipe estate. Use
+`laplace-ops sources`, `laplace ingest --catalog`, or
+`laplace-mono ingest catalog --json` to see every source, short alias, content
+location, recipe, grammar, filename pattern, and prerequisite. Seed workflow
+summaries include the same catalog. An available source is distinct from a corpus
+installed on the host or a witness already recorded in PostgreSQL.
+
 ## Internal workflows
 
 **Internal — product stage** is shared by full and competitive qualification. It checks out the exact selected revision in the normal staging runner workspace and calls `deploy/linux/site.sh qualification` or `competitive`. It neither creates per-revision Git worktrees nor injects provider/billing secrets. Competitive live checks obtain a temporary API key from the installed deployment identity and revoke it afterward.

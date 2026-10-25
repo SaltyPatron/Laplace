@@ -49,7 +49,8 @@ internal static partial class IngestCommands
         long AnalyzeNodes = 0,
         string? GitCorpusSelection = null,
         string? GitCorpusReceipt = null,
-        NativeRecipeMode NativeMode = NativeRecipeMode.Ingest);
+        NativeRecipeMode NativeMode = NativeRecipeMode.Ingest,
+        bool NativeExpandPrerequisites = true);
 
     internal static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
@@ -191,7 +192,8 @@ internal static partial class IngestCommands
     }
 
     /// <summary>
-    /// Sequential multi-source ingest in one process: each spec is a complete
+    /// Explicitly sequenced source jobs in one process; Native entries do not
+    /// start nested prerequisite campaigns. Each spec is a complete
     /// `ingest` argument vector ("wordnet", "document D:\\data\\text",
     /// "wiktionary --langs en"). Runtime accelerators are loaded only when their
     /// prerequisite foundation has been admitted.
@@ -208,7 +210,9 @@ internal static partial class IngestCommands
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))).ToArray();
         for (int i = 0; i < specs.Length; i++)
         {
-            var cli = parsed[i];
+            // The caller supplied this sequence; do not start a second
+            // prerequisite campaign inside each of its Native source jobs.
+            var cli = parsed[i] with { NativeExpandPrerequisites = false };
             if (string.IsNullOrEmpty(cli.Source))
                 return Fail($"ingest chain: spec {i + 1} is empty");
             Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");

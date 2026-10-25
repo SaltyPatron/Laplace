@@ -34,7 +34,9 @@ public sealed class WiktionaryNativeRecipeTests
         AddSense("first/third-person singular present subjunctive",
             ["first-person", "form-of", "present", "singular", "subjunctive", "third-person"]);
         AddSense("third-person singular imperative", ["form-of", "imperative", "singular", "third-person"]);
-        Assert.Equal(expected.Order(StringComparer.Ordinal), actual.Select(Product).Order(StringComparer.Ordinal));
+        var products = actual.Select(Product).Order(StringComparer.Ordinal).ToArray();
+        Assert.True(expected.Order(StringComparer.Ordinal).SequenceEqual(products),
+            "Actual Native products:\n" + string.Join('\n', actual));
 
         void AddSense(string detail, string[] tags)
         {

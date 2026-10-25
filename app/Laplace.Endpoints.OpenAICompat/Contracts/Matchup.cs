@@ -12,10 +12,23 @@ public sealed record LeaderRow(
     [property: JsonPropertyName("eff_mu")] decimal EffMu,
     [property: JsonPropertyName("witnesses")] long Witnesses);
 
+public sealed record ClaimLeaderPart(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("label")] string? Label,
+    [property: JsonPropertyName("run")] long Run);
+
+public sealed record ClaimLeaderRow(
+    [property: JsonPropertyName("claim_id")] string ClaimId,
+    [property: JsonPropertyName("parts")] IReadOnlyList<ClaimLeaderPart> Parts,
+    [property: JsonPropertyName("confidence")] double Confidence,
+    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("trajectory")] string Trajectory);
+
 public sealed record BandLeaders(
     [property: JsonPropertyName("band")] int Band,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("rows")] IReadOnlyList<LeaderRow> Rows);
+    [property: JsonPropertyName("rows")] IReadOnlyList<LeaderRow> Rows,
+    [property: JsonPropertyName("claims"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ClaimLeaderRow>? Claims = null);
 
 public sealed record LeadersResponse(
     [property: JsonPropertyName("object")] string Object,

@@ -11,6 +11,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Select the ABI before Laplace-Native first creates MKL::MKL. Eigen's LAPACKE
+# pivot arrays use 32-bit integers; selecting LP64 later in dynamics cannot
+# change an imported target that already carries MKL_ILP64.
+set(MKL_INTERFACE lp64)
+set(MKL_THREADING tbb_thread)
+
 if(WIN32)
     # The managed interop consumes the public C ABI from all three libraries.
     # A fresh build must export it without relying on an old cache option.
