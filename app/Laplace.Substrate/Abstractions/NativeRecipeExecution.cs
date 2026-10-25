@@ -11,7 +11,7 @@ public enum NativeRecipeMode { Ingest, Plan, Claims, NoLoad }
 
 public sealed record NativeRecipeRequest(
     NativeRecipeMode Mode, string? Source, IReadOnlyList<string> Paths,
-    string? ConnectionInfo = null, int Threads = 0);
+    string? ConnectionInfo = null, int Threads = 0, bool ExpandPrerequisites = true);
 
 /// <summary>
 /// Executes the canonical Engine compiler and record pipeline. Managed code passes
@@ -120,9 +120,11 @@ public sealed class NativeRecipeExecution
         start.ArgumentList.Add("ingest");
         start.ArgumentList.Add("-r"); start.ArgumentList.Add(Recipes);
         start.ArgumentList.Add("-t"); start.ArgumentList.Add(Tier0);
-        // This is a new root request. Only the Engine's own dependency-order
-        // coordinator may mark a subsequent child as an individual source job.
+        // A root request owns prerequisite expansion. An entry in an explicit
+        // source sequence is the same source job the Native coordinator starts.
+        // Ambient child markers never change the scope of a root request.
         start.Environment.Remove("LAPLACE_INGEST_ONE");
+        if (!request.ExpandPrerequisites) start.Environment["LAPLACE_INGEST_ONE"] = "1";
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
         start.Environment["LAPLACE_GRAMMARS"] = Grammars;
         // Share the host resource plan with the Native working window. File

@@ -20,7 +20,8 @@ internal static partial class IngestCommands
         var execution = NativeRecipeExecution.Configured();
         string[] paths = string.IsNullOrWhiteSpace(cli.Path) ? [] : [cli.Path];
         var request = new NativeRecipeRequest(cli.NativeMode, source, paths,
-            ConnectionInfo: NativeConnectionInfo(CliRuntime.ConnString), Threads: CpuTopology.ResolveCpuBoundWorkers());
+            ConnectionInfo: NativeConnectionInfo(CliRuntime.ConnString), Threads: CpuTopology.ResolveCpuBoundWorkers(),
+            ExpandPrerequisites: cli.NativeExpandPrerequisites);
         using var output = Console.OpenStandardOutput();
         using var error = Console.OpenStandardError();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
