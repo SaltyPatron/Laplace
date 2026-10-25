@@ -5,8 +5,8 @@ set "DEPLOY=%LAPLACE_DEPLOY%"
 set "PSQL=%PGBIN%\psql.exe"
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
-set "T0_DST=%DEPLOY%\share\laplace_t0_perfcache.bin"
-set "HW_DST=%DEPLOY%\share\laplace_highway_perfcache.bin"
+set "T0_DST=%DEPLOY%\share\tier0.bin"
+set "HW_DST=%DEPLOY%\share\highway.bin"
 
 echo === Laplace local deploy verification ===
 echo deploy root: %DEPLOY%
@@ -92,11 +92,11 @@ for /f "delims=" %%G in ('psql -h localhost -U postgres -d postgres -tAc "SHOW l
 for /f "delims=" %%G in ('psql -h localhost -U postgres -d postgres -tAc "SHOW laplace_substrate.highway_perfcache_path;"') do set "GUC_HW=%%G"
 echo   laplace_substrate.perfcache_path = %GUC_T0%
 echo   laplace_substrate.highway_perfcache_path = %GUC_HW%
-if /i not "%GUC_T0%"=="%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin" (
+if /i not "%GUC_T0%"=="%LAPLACE_DEPLOY_PG%/share/tier0.bin" (
   echo STALE GUC: T0 path does not match deploy tree — run install-extensions.cmd
   set "OK=0"
 )
-if /i not "%GUC_HW%"=="%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin" (
+if /i not "%GUC_HW%"=="%LAPLACE_DEPLOY_PG%/share/highway.bin" (
   echo STALE GUC: highway path does not match deploy tree — run install-extensions.cmd
   set "OK=0"
 )

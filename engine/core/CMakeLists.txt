@@ -345,28 +345,21 @@ else()
 endif()
 add_custom_target(laplace_t0_perfcache DEPENDS "${LAPLACE_PERFCACHE_BIN}"
     "${LAPLACE_FLAGS_BIN}" "${LAPLACE_FLAGS_BIN}.layout")
-if(DEFINED ENV{LAPLACE_HIGHWAY} AND EXISTS "$ENV{LAPLACE_HIGHWAY}"
-   AND NOT "$ENV{LAPLACE_HIGHWAY}" STREQUAL "${LAPLACE_HIGHWAY_BIN}")
-    add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$ENV{LAPLACE_HIGHWAY}" "${LAPLACE_HIGHWAY_BIN}"
-        DEPENDS "$ENV{LAPLACE_HIGHWAY}" VERBATIM)
-    add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
-else()
-    file(GLOB_RECURSE _native_highway_manifests CONFIGURE_DEPENDS
-        "${LAPLACE_NATIVE}/manifest/*.tsv")
-    add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E env
-                "LAPLACE_TIER0=${LAPLACE_PERFCACHE_BIN}"
-                "LAPLACE_HIGHWAY=${LAPLACE_HIGHWAY_BIN}"
-                "LAPLACE_MANIFEST=${LAPLACE_NATIVE}/manifest"
-                $<TARGET_FILE:laplace_engine> highway -o "${LAPLACE_HIGHWAY_BIN}"
-        DEPENDS laplace_engine laplace_t0_perfcache ${_native_highway_manifests}
-        COMMENT "Generate canonical Native highway from frozen identifier manifests"
-        VERBATIM)
-    add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
-endif()
+# A caller's installed highway may use an older binary layout. Generate with the
+# selected Engine/Native pair so publication cannot copy a stale ambient cache.
+file(GLOB_RECURSE _native_highway_manifests CONFIGURE_DEPENDS
+    "${LAPLACE_NATIVE}/manifest/*.tsv")
+add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E env
+            "LAPLACE_TIER0=${LAPLACE_PERFCACHE_BIN}"
+            "LAPLACE_HIGHWAY=${LAPLACE_HIGHWAY_BIN}"
+            "LAPLACE_MANIFEST=${LAPLACE_NATIVE}/manifest"
+            $<TARGET_FILE:laplace_engine> highway -o "${LAPLACE_HIGHWAY_BIN}"
+    DEPENDS laplace_engine laplace_t0_perfcache ${_native_highway_manifests}
+    COMMENT "Generate canonical Native highway from frozen identifier manifests"
+    VERBATIM)
+add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
 
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
