@@ -91,6 +91,41 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CanonicalMigrationKeepsByteOperatorsDirectAndScopesNativeSpi()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        // Exercise recovery of an installation carrying the previous guard.
+        await using (var previous = new NpgsqlCommand(
+            "ALTER FUNCTION public.blake3_cmp(public.blake3,public.blake3) SET search_path=public,pg_temp",
+            connection, transaction)) await previous.ExecuteNonQueryAsync();
+        await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
+            await migrate.ExecuteNonQueryAsync();
+        await using (var audit = new NpgsqlCommand("""
+            SELECT count(*) FROM pg_opclass oc
+            JOIN pg_amproc a ON a.amprocfamily=oc.opcfamily
+            JOIN pg_proc p ON p.oid=a.amproc
+            WHERE oc.opcintype='public.blake3'::regtype
+              AND EXISTS(SELECT FROM unnest(p.proconfig) setting WHERE setting LIKE 'search_path=%')
+            """, connection, transaction))
+            Assert.Equal(0L, await audit.ExecuteScalarAsync());
+        await using (var scoped = new NpgsqlCommand("""
+            SELECT bool_and(coalesce(p.proconfig @> ARRAY['search_path=public, pg_temp'],false))
+            FROM pg_proc p WHERE p.proname='laplace_contained_series'
+              AND p.pronamespace='public'::regnamespace
+            """, connection, transaction))
+            Assert.Equal(true, await scoped.ExecuteScalarAsync());
+        await using (var probe = new NpgsqlCommand("""
+            SET LOCAL search_path=pg_catalog,pg_temp;
+            SELECT public.blake3_cmp(public.laplace_cp_id(65),public.laplace_cp_id(65))=0
+              AND public.blake3_eq(public.laplace_cp_id(65),public.laplace_cp_id(65))
+              AND public.blake3_hash(public.laplace_cp_id(65))=public.blake3_hash(public.laplace_cp_id(65))
+            """, connection, transaction))
+            Assert.Equal(true, await probe.ExecuteScalarAsync());
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task EveryFixedStatementPreparesAgainstTheInstalledSchema()
     {
         await using var connection = await _source.OpenConnectionAsync();
