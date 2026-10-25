@@ -274,8 +274,7 @@ SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
     "WHERE c.type_id=$2 AND c.object_id=$3 "
     "ORDER BY c.rd DESC,c.subject_id LIMIT $4")
 
-SQL_QUERY("leaders.native_present", "",
-    "SELECT to_regclass('public.consensus') IS NOT NULL")
+
 SQL_QUERY("leaders.native_named", "int4[],int4",
     "WITH leaders AS MATERIALIZED (SELECT * FROM ops.claim_leaders($1,$2) WITH ORDINALITY)\nSELECT b.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory\nFROM converse.relation_band_catalog() b LEFT JOIN leaders n ON n.band=b.band\nWHERE b.band=ANY($1) ORDER BY b.band,n.ordinality")
 

@@ -226,7 +226,7 @@ export interface ExploreRealizedVertexRow {
   radius: number;
 }
 export interface LabeledEvidenceItem {
-  type_id: string;
+  type_id: string | null;
   type_label: string;
   object_id: string;
   object_label: string;

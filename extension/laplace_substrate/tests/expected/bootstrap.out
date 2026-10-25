@@ -15,4 +15,3 @@ SELECT count(*) AS attestations FROM laplace.attestations;
 --------------
             0
 (1 row)
-
