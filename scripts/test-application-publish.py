@@ -417,7 +417,7 @@ class DeploymentReadinessTests(unittest.TestCase):
         with patch.object(self.verify, "request", side_effect=fake_request), \
              patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}), \
              patch.object(self.verify, "verify_stockfish") as stockfish:
-            self.assertEqual((False, False), self.verify.verify("http://unit"))
+            self.assertEqual((False, False), self.verify.verify("http://unit", chess_controller=True))
         stockfish.assert_called_once_with()
         self.assertEqual(
             ["/health/ready", "/", "/v1/op", "/v1/explore/storage-proof", "/v1/explore/decompose", "/chess/lichess/control"],
@@ -444,6 +444,19 @@ class DeploymentReadinessTests(unittest.TestCase):
         with patch.object(self.verify, "request", return_value=(200, "application/json", b'{"available":false}')), \
                 patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}):
             self.assertFalse(self.verify.verify_chess_controller("http://unit"))
+
+    def test_application_delivery_does_not_depend_on_a_remote_controller_before_promotion(self):
+        checks = {}
+        with patch.object(self.verify, "wait_for_readiness", return_value=(False, False)), \
+                patch.object(self.verify, "verify_spa"), \
+                patch.object(self.verify, "verify_typed_operation"), \
+                patch.object(self.verify, "verify_storage_proof"), \
+                patch.object(self.verify, "verify_stockfish", return_value=False), \
+                patch.object(self.verify, "verify_chess_controller") as controller, \
+                patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}):
+            self.verify.verify("http://unit", checks=checks)
+        controller.assert_not_called()
+        self.assertEqual("not_requested", checks["lichess_controller"])
 
     def test_storage_proof_rejects_failed_invariants_and_mixed_loaded_artifacts(self):
         for update in ({"perfcache_aligned": False}, {"database_perfcache_receipt_hex": "old"},

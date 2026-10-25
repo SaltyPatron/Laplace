@@ -695,8 +695,12 @@ phase_smoke() {
   fi
   # An empty substrate database is valid; unavailable SQL, authentication, native execution or
   # incompatible loaded artifacts are deployment failures and block promotion.
+  local controller_checks=()
+  if [[ -f "${LAPLACE_CHESS_DEPLOYMENT_CONFIG:-/etc/laplace-mono/chess/deployment.json}" ]]; then
+    controller_checks+=(--chess-controller)
+  fi
   if python3 "$ROOT/scripts/verify-application-release.py" --base "${LAPLACE_PUBLIC_BASE_URL:-$LAPLACE_API_URL}" \
-      --state-file "${LAPLACE_VERIFICATION_STATE:-$LAPLACE_APP_DIR/logs/application-verification.json}"; then
+      --state-file "${LAPLACE_VERIFICATION_STATE:-$LAPLACE_APP_DIR/logs/application-verification.json}" "${controller_checks[@]}"; then
     echo '| Authenticated SQL, native storage proof and installed dependencies | passed |' >> "$SUMMARY"
   else
     echo '| Authenticated installed runtime | FAILED |' >> "$SUMMARY"
