@@ -1025,7 +1025,11 @@ verify_installed_product() (
   check_t0_perfcache_runtime
   # This verifies the application process. The managed-host owner separately
   # verifies the public HTTP->HTTPS redirect, certificate, and reverse proxy.
-  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
+  local controller_checks=()
+  if [[ -f "${LAPLACE_CHESS_DEPLOYMENT_CONFIG:-/etc/laplace-mono/chess/deployment.json}" ]]; then
+    controller_checks+=(--chess-controller)
+  fi
+  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60 "${controller_checks[@]}"
 )
 
 verify_current_installed_product() {

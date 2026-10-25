@@ -282,7 +282,8 @@ def wait_for_readiness(base: str, timeout_seconds: float = 60.0,
 
 
 def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.0,
-           retry_seconds: float = 1.0, checks: dict | None = None) -> tuple[bool, bool]:
+           retry_seconds: float = 1.0, checks: dict | None = None,
+           chess_controller: bool = False) -> tuple[bool, bool]:
     checks = checks if checks is not None else {}
     has_data, product_ready = wait_for_readiness(base, timeout_seconds, retry_seconds)
     checks["readiness"] = "verified"
@@ -291,7 +292,11 @@ def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.
         with verification_credential(base):
             verify_typed_operation(base)
             verify_storage_proof(base)
-            checks["lichess_controller"] = "verified" if verify_chess_controller(base) else "not_configured"
+            checks["lichess_controller"] = "not_requested"
+            if chess_controller:
+                if not verify_chess_controller(base):
+                    raise ValueError("The declared Lichess controller is not configured in this application")
+                checks["lichess_controller"] = "verified"
         checks.update(spa="verified", authenticated_sql="verified", native_storage="verified")
         checks["stockfish"] = "verified" if verify_stockfish() else "not_configured"
     print(
@@ -328,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:5187")
     parser.add_argument("--readiness-only", action="store_true")
+    parser.add_argument("--chess-controller", action="store_true",
+                        help="Require controller readback on its declared owning host after activation")
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--timeout-seconds", type=float, default=60.0)
@@ -336,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     checks: dict[str, str] = {}
     has_data, product_ready = verify(
         args.base.rstrip("/"), args.readiness_only,
-        args.timeout_seconds, args.retry_seconds, checks,
+        args.timeout_seconds, args.retry_seconds, checks, args.chess_controller,
     )
     write_state(args.state_file, has_data, product_ready, checks)
     if args.github_output is not None:
