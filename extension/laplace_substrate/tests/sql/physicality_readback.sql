@@ -136,8 +136,8 @@ SELECT public.laplace_hash128_blake3(u.entity_id || u.unit_id),u.entity_id,9,u.c
 FROM physicality_readback_fixture.unavailable_source u;
 CREATE TABLE physicality_readback_fixture.unavailable_warm AS
 SELECT * FROM structural.physicality_descriptor_read(
-    ARRAY[public.laplace_hash128_blake3(u.entity_id || u.unit_id)
-          FROM physicality_readback_fixture.unavailable_source u],268435456,2048,10000000);
+    ARRAY(SELECT public.laplace_hash128_blake3(u.entity_id || u.unit_id)
+          FROM physicality_readback_fixture.unavailable_source u),268435456,2048,10000000);
 -- A legacy Content-placement fallback body for the same anchor entity.
 CREATE TABLE physicality_readback_fixture.legacy_frames AS
 SELECT u.entity_id, u.anchor_id AS node0, u.ab_id AS node1,
