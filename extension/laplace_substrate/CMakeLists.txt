@@ -44,6 +44,12 @@ file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h")
 set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.def)
+if(WIN32)
+    get_target_property(_core_archive laplace_core IMPORTED_LOCATION)
+    get_target_property(_dynamics_archive laplace_dynamics IMPORTED_LOCATION)
+    list(APPEND _execution_inputs "${_core_archive}" "${_dynamics_archive}"
+        ${LAPLACE_CORE_STATIC_DEPENDENCIES})
+endif()
 list(SORT _execution_inputs)
 set(_execution_hashes "testing=${BUILD_TESTING};${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
 foreach(_input IN LISTS _execution_inputs)

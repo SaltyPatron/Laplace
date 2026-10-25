@@ -64,6 +64,11 @@ int g_mkl_num_threads = -1;
 int g_runtime_host = -1;
 
 int initialize_mkl_threading() {
+#ifdef LAPLACE_MKL_STATIC_SEQUENTIAL
+    // PostgreSQL links mkl_sequential directly; SDL's layer selector is neither
+    // available nor needed in this archive.
+    return 0;
+#else
 #if defined(__linux__)
     // Managed hosts load the app-local engine with RTLD_LOCAL. MKL's SDL
     // subsequently opens its threading plugin, whose OpenMP references need
@@ -82,6 +87,7 @@ int initialize_mkl_threading() {
     if (mkl_set_threading_layer(MKL_THREADING_INTEL) != MKL_THREADING_INTEL)
         return -4;
     return 0;
+#endif
 }
 
 }

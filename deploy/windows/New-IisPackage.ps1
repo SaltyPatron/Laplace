@@ -7,7 +7,7 @@ foreach($component in @('','cli','uci')) {
     & "$PSScriptRoot/Test-NativeSqlCatalog.ps1" -Library (Join-Path (Join-Path $Published $component) 'laplace_core.dll')
 }
 if(Test-Path -LiteralPath $Destination){throw 'Choose a new package directory; existing packages are immutable.'}
-Test-IisChessCacheClosure $Published
+Test-IisCacheClosure $Published
 $null=New-Item -ItemType Directory -Path $Destination
 $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Name -NotIn @('web.config','iis-package.json','verify-application-release.py') | ForEach-Object {
     $relative=[IO.Path]::GetRelativePath($Published,$_.FullName)
