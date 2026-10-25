@@ -107,4 +107,44 @@ public sealed class NativeRecipeExecutionTests
         Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExplicitSourceJobDoesNotStartANestedPrerequisiteCampaign()
+    {
+        var configured = NativeRecipeExecution.Configured();
+        string root = Path.Combine(Path.GetTempPath(), "native-source-scope-" + Guid.NewGuid().ToString("N"));
+        string recipes = Path.Combine(root, "recipes");
+        Directory.CreateDirectory(recipes);
+        try
+        {
+            File.WriteAllText(Path.Combine(recipes, "order"), "scope-parent\nscope-child\n");
+            foreach (string name in new[] { "scope-parent", "scope-child" })
+            {
+                string definition = Path.Combine(recipes, name), data = Path.Combine(root, name);
+                Directory.CreateDirectory(definition); Directory.CreateDirectory(data);
+                File.WriteAllText(Path.Combine(data, "content.txt"), "actual Native plan input\n");
+                File.WriteAllText(Path.Combine(definition, "source"),
+                    $"name {name}\nwitness {name}\nclass UserCuratedResource\nroot {data.Replace('\\', '/')}\n"
+                    + (name == "scope-child" ? "after scope-parent\n" : ""));
+                File.WriteAllText(Path.Combine(definition, "content.recipe"),
+                    $"name {name}-content\nmatch *.txt\ngrammar text\n");
+            }
+            var execution = new NativeRecipeExecution(configured.Executable, recipes, configured.Grammars,
+                configured.Tier0, configured.Highway);
+            async Task<string> Plan(bool expand)
+            {
+                using var output = new MemoryStream(); using var error = new MemoryStream();
+                int code = await execution.ExecuteAsync(new NativeRecipeRequest(NativeRecipeMode.Plan,
+                    "scope-child", [], ConnectionInfo: "host=127.0.0.1 port=1 dbname=unavailable", Threads: 2,
+                    ExpandPrerequisites: expand), output, error);
+                Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + Encoding.UTF8.GetString(output.ToArray()));
+                return Encoding.UTF8.GetString(output.ToArray());
+            }
+            string rootPlan = await Plan(true), sourcePlan = await Plan(false);
+            Assert.Contains("scope-parent", rootPlan, StringComparison.Ordinal);
+            Assert.DoesNotContain("scope-parent", sourcePlan, StringComparison.Ordinal);
+            Assert.Contains("scope-child-content", sourcePlan, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
 }
