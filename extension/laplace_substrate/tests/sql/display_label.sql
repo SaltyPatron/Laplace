@@ -25,7 +25,7 @@ BEGIN
 END $$;
 DO $test$
 DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.laplace_id('λ');
- row_id public.blake3; nested public.blake3; opaque public.blake3; absent public.blake3=public.laplace_id('native-display-absent'); labels text[];
+ row_id public.blake3; nested public.blake3; opaque public.blake3; absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
  row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
  nested=pg_temp.display_tuple(ARRAY[row_id,dog,dog],'tuple');
@@ -35,6 +35,13 @@ BEGIN
  decode(dog::text,'hex'),decode(scalar::text,'hex'),decode(opaque::text,'hex'),decode(absent::text,'hex')]) WITH ORDINALITY d(id,label,tier,ordinal);
  IF labels IS DISTINCT FROM ARRAY['dog','[dog · λ · 中]','[[dog · λ · 中] · dog × 2]','dog','λ',opaque::text,absent::text] THEN
   RAISE EXCEPTION 'Native display lost selected identities, order, runs or Unicode: %',labels;
+ END IF;
+ shifted=array_fill(NULL::bytea,ARRAY[2],ARRAY[0]);
+ shifted[0]=decode(dog::text,'hex'); shifted[1]=decode(scalar::text,'hex');
+ SELECT array_agg(d.id ORDER BY d.ordinal) INTO got
+ FROM realize.display_label_batch(shifted) WITH ORDINALITY d(id,label,tier,ordinal);
+ IF got IS DISTINCT FROM ARRAY[decode(dog::text,'hex'),decode(scalar::text,'hex')] THEN
+  RAISE EXCEPTION 'Native display changed IDs for a non-default array lower bound';
  END IF;
  IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=1 AND type_id IS NULL) THEN
   RAISE EXCEPTION 'Native facet guessed a semantic type';
