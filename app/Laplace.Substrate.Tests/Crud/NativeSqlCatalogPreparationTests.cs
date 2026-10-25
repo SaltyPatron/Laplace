@@ -84,6 +84,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var command = _source.CreateCommand(await File.ReadAllTextAsync(migration));
             await command.ExecuteNonQueryAsync();
         }
+        await using (var native = NpgsqlCatalog.Command(_source, "migration.canonical_substrate"))
+            await native.ExecuteNonQueryAsync();
     }
 
     public async Task DisposeAsync()
