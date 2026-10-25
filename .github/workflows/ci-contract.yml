@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.402'
       - name: Provide pinned grammar queries for managed build
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -166,7 +166,7 @@ jobs:
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.402'
       - name: Provide pinned grammar queries for the managed maintenance build
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -203,7 +203,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.402'
       - name: Provide pinned grammar queries for managed build
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

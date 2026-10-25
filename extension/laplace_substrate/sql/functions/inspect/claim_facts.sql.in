@@ -1,3 +1,20 @@
+-- The canonical migration created these helpers outside extension ownership.
+-- Adopt that known predecessor before replacing its implementation in place.
+DO $adopt_native_helpers$
+DECLARE signature text; function_oid oid; owner_extension oid;
+BEGIN
+ FOREACH signature IN ARRAY ARRAY['ops.claim_label(public.blake3)','ops.claim_facts(bytea,integer)'] LOOP
+  function_oid=to_regprocedure(signature);
+  IF function_oid IS NULL THEN CONTINUE; END IF;
+  SELECT d.refobjid INTO owner_extension FROM pg_depend d
+  WHERE d.classid='pg_proc'::regclass AND d.objid=function_oid AND d.refclassid='pg_extension'::regclass AND d.deptype='e';
+  IF owner_extension IS NULL THEN
+   EXECUTE 'ALTER EXTENSION laplace_substrate ADD FUNCTION '||signature;
+  ELSIF owner_extension<>(SELECT oid FROM pg_extension WHERE extname='laplace_substrate') THEN
+   RAISE EXCEPTION 'Native read helper % belongs to another extension',signature;
+  END IF;
+ END LOOP;
+END $adopt_native_helpers$;
 CREATE OR REPLACE FUNCTION ops.claim_label(p_id public.blake3) RETURNS text
 LANGUAGE sql STABLE PARALLEL SAFE SET search_path=public,pg_temp AS $label$
  SELECT content FROM public.laplace_labels(ARRAY[p_id])
