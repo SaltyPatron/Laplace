@@ -231,8 +231,9 @@ public static class LaplaceInstall
 
     public static string ResolveT0Perfcache()
     {
-        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_TIER0")
-            ?? TryGetProcessOrMachineSetting("LAPLACE_PERFCACHE_BIN");
+        // LAPLACE_PERFCACHE_BIN belongs to the former LPPC image format. It
+        // cannot select the Native scalar floor shipped by current runtimes.
+        var fromEnv = TryGetProcessOrMachineSetting("LAPLACE_TIER0");
         if (!string.IsNullOrWhiteSpace(fromEnv))
         {
             var selected = Path.GetFullPath(fromEnv.Trim());

@@ -62,8 +62,21 @@ public sealed class LaplaceInstallPathTests : IDisposable
         File.WriteAllBytes(artifact, [1]);
         Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", _root);
         Assert.Equal(artifact, LaplaceInstall.ResolveT0Perfcache());
-        Environment.SetEnvironmentVariable("LAPLACE_PERFCACHE_BIN", Path.Combine(_root, "missing.bin"));
+        Environment.SetEnvironmentVariable("LAPLACE_TIER0", Path.Combine(_root, "missing.bin"));
         Assert.Throws<FileNotFoundException>(() => LaplaceInstall.ResolveT0Perfcache());
+    }
+
+    [Fact]
+    public void LegacyPerfcacheSettingCannotOverrideTheInstalledNativeFloor()
+    {
+        var share = Directory.CreateDirectory(Path.Combine(_root, "share", "laplace")).FullName;
+        var native = Path.Combine(share, "tier0.bin");
+        var legacy = Path.Combine(_root, "laplace_t0_perfcache_17.0.0.bin");
+        File.WriteAllBytes(native, [1]);
+        File.WriteAllBytes(legacy, [2]);
+        Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", _root);
+        Environment.SetEnvironmentVariable("LAPLACE_PERFCACHE_BIN", legacy);
+        Assert.Equal(native, LaplaceInstall.ResolveT0Perfcache());
     }
 
     [Fact]
