@@ -585,6 +585,64 @@ internal static class InferenceEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/v1/code/search", async (
+            HttpRequest request,
+            ISubstrateClient substrate,
+            IBillingOrchestrator billing,
+            CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<CodeSearchRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+            if (string.IsNullOrWhiteSpace(payload.Query))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'query' must be a non-empty string.");
+
+            var gate = await QuoteGate.RequireQuoteAsync(request, billing, "embeddings", ct);
+            if (!gate.Allowed)
+                return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null
+                    ? new QuoteServiceDetail("embeddings")
+                    : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
+            if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            Laplace.Endpoints.Mcp.WorkspaceCodeIndex.TraceResult queryTrace;
+            try
+            {
+                queryTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(payload.Query);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("code_search_unavailable", ex.Message);
+            }
+
+            var limit = Math.Clamp(payload.Limit ?? 20, 1, 200);
+            var offset = Math.Max(0, payload.Offset ?? 0);
+            var semanticPeers = await substrate.ResolveSemanticPeersAsync(queryTrace.WordIds, ct);
+            var rows = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.Search(
+                payload.Query,
+                payload.Path,
+                limit,
+                offset,
+                payload.Reindex,
+                out var indexedChunks,
+                out var indexedFiles,
+                semanticPeers);
+
+            return Results.Json(new
+            {
+                @object = "list",
+                query_entity_id = queryTrace.RootIdHex,
+                indexed_files = indexedFiles,
+                indexed_chunks = indexedChunks,
+                rows,
+            });
+        })
+        .WithTags("openai", "code")
+        .Accepts<CodeSearchRequest>("application/json")
+        .Produces(StatusCodes.Status200OK)
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapReportEndpoints();
         app.MapExploreEndpoints();
     }
