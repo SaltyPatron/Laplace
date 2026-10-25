@@ -175,7 +175,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var xc = window.Compose([x, predicate, value], 2, 1, 1);
         var yc = window.Compose([y, predicate, value], 2, 1, 1);
         // LP_SAID_CLAIM: the source actually asserts these Native claim carriers.
-        xc.Said = yc.Said = 1;
+        xc.Said = 2; // LP_SAID_RECORD: repeated asserted records carry three games.
+        yc.Said = 1;
         var language = window.Text("eng"u8);
         var context = window.Text("context"u8);
         // LP_KIND_TUPLE (bit 2): actual Native structural responders for each word.
@@ -201,12 +202,18 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var standing = new NpgsqlCommand("""
                 INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
                 SELECT $1,s.rating,s.deviation,s.volatility,s.matches
-                FROM public.laplace_series(ARRAY[$2]::public.blake3[],ARRAY[1]::bigint[],
+                FROM public.laplace_series(ARRAY[$2]::public.blake3[],ARRAY[$3]::bigint[],
                     ARRAY[1.0]::double precision[],ARRAY[1.0]::double precision[]) s
                 """, connection, transaction);
             standing.Parameters.AddWithValue(claim.Id);
             standing.Parameters.AddWithValue(witness.Id);
+            standing.Parameters.AddWithValue(claim.Id == xc.Id ? 3L : 1L);
             await standing.ExecuteNonQueryAsync();
+        }
+        await using (var games = new NpgsqlCommand("SELECT matches FROM public.consensus WHERE claim=$1", connection, transaction))
+        {
+            games.Parameters.AddWithValue(xc.Id);
+            Assert.Equal(3L, await games.ExecuteScalarAsync());
         }
         // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
         await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.entity_evidence_count", x.Id.ToBytes()))
