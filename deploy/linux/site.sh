@@ -393,12 +393,17 @@ phase_app() {
   # depend on a runner checkout or an old in-repository build directory.
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
-  mkdir -p "$stage/app/cli/share/laplace" "$stage/app/cli/third-party-licenses"
-  for cache in tier0 highway laplace_chess_position_perfcache; do
-    cp "$SITE_BUILD/engine/core/perfcache/$cache.bin" "$stage/app/cli/share/laplace/"
+  # Each entry point can compose identities during assembly initialization,
+  # before its host reads environment files. Ship its canonical floor alongside
+  # the native libraries; the promotion bundle deduplicates identical files.
+  local component cache
+  for component in . cli mcp-runtime uci lichess-runtime; do
+    mkdir -p "$stage/app/$component/share/laplace"
+    for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin laplace_chess_position_perfcache.bin; do
+      cp "$SITE_BUILD/engine/core/perfcache/$cache" "$stage/app/$component/share/laplace/"
+    done
   done
-  cp "$SITE_BUILD/engine/core/perfcache/tier0.flags" \
-     "$SITE_BUILD/engine/core/perfcache/tier0.flags.layout" "$stage/app/cli/share/laplace/"
+  mkdir -p "$stage/app/cli/third-party-licenses"
   cp -a "$stage/app/third-party-licenses/zstd" "$stage/app/cli/third-party-licenses/"
   [[ -x "$stage/app/cli/Laplace.Cli" ]] || fail "CLI not staged"
   verify_cli_package "$stage/app/cli" || fail "staged CLI runtime verification failed"

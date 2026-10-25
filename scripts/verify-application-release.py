@@ -219,6 +219,20 @@ def verify_storage_proof(base: str) -> None:
         raise ValueError("decomposition and storage proof disagree on canonical identity")
 
 
+def verify_chess_controller(base: str) -> bool:
+    status, _, response = request("GET", base + "/chess/lichess/control", headers={
+        "Authorization": "Bearer " + os.environ["LAPLACE_API_KEY"],
+    })
+    if status != 200:
+        raise ValueError(f"Lichess controller verification returned HTTP {status}")
+    value = json_object(response, "Lichess controller")
+    if type(value.get("available")) is not bool:
+        raise ValueError("Lichess controller omitted its availability contract")
+    if value["available"] and not isinstance(value.get("control"), dict):
+        raise ValueError("Lichess controller omitted its installed status")
+    return value["available"]
+
+
 def stockfish_declared(prefix: Path) -> bool:
     names = {"LAPLACE_STOCKFISH", "LAPLACE_STOCKFISH_SOURCE"}
     if any(os.environ.get(name, "").strip() for name in names):
@@ -277,6 +291,7 @@ def verify(base: str, readiness_only: bool = False, timeout_seconds: float = 60.
         with verification_credential(base):
             verify_typed_operation(base)
             verify_storage_proof(base)
+            checks["lichess_controller"] = "verified" if verify_chess_controller(base) else "not_configured"
         checks.update(spa="verified", authenticated_sql="verified", native_storage="verified")
         checks["stockfish"] = "verified" if verify_stockfish() else "not_configured"
     print(
