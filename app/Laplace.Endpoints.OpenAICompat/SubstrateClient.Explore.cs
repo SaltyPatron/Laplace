@@ -136,7 +136,8 @@ internal sealed partial class SubstrateClient
                     var resolvedHex = Convert.ToHexStringLower(value.Id);
                     return new ExploreResolveResponse(
                         IdHex: resolvedHex,
-                        Label: PreferredDisplayLabel(display?.Label, resolvedHex),
+                        Label: PreferredDisplayLabel(display is { } d && !IsGenericUnrealizedLabel(d.Label)
+                            ? d.Label : value.Label, resolvedHex),
                         RefKind: value.RefKind,
                         Exists: true,
                         PreviewFacts: facts);

@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.Text;
+using Laplace.Ingestion;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Laplace.SubstrateCRUD;
@@ -82,6 +84,11 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var command = _source.CreateCommand(await File.ReadAllTextAsync(migration));
             await command.ExecuteNonQueryAsync();
         }
+        await using var nativeConnection = await _source.OpenConnectionAsync();
+        await using var nativeTransaction = await nativeConnection.BeginTransactionAsync();
+        await using (var native = NpgsqlCatalog.Command(nativeConnection, nativeTransaction, "migration.canonical_substrate"))
+            await native.ExecuteNonQueryAsync();
+        await nativeTransaction.CommitAsync();
     }
 
     public async Task DisposeAsync()
@@ -147,6 +154,126 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await using (var complete = new NpgsqlCommand(
             "SELECT ops.layer_completed(laplace.source_id('OperationalDecomposer'),2)", connection, transaction))
             Assert.Equal(true, await complete.ExecuteScalarAsync());
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task CompareReadsNativeClaimsWhenCompatibilityEntitiesAreAbsent()
+    {
+        await using var native = LaplaceDataSource.Create(SubstrateAccess.Ingest, _source.ConnectionString);
+        await using var connection = await native.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
+            await migrate.ExecuteNonQueryAsync();
+        using var window = new StagedSourceWriter(10000, 100000, 1 << 24);
+        string xName = "comparex" + Guid.NewGuid().ToString("N");
+        string yName = "comparey" + Guid.NewGuid().ToString("N");
+        var x = window.Text(Encoding.UTF8.GetBytes(xName));
+        var y = window.Text(Encoding.UTF8.GetBytes(yName));
+        var predicate = window.Text("!"u8);
+        var value = window.Text("shared"u8);
+        var xc = window.Compose([x, predicate, value], 2, 1, 1);
+        var yc = window.Compose([y, predicate, value], 2, 1, 1);
+        // LP_SAID_CLAIM: the source actually asserts these Native claim carriers.
+        xc.Said = 2; // LP_SAID_RECORD: repeated asserted records carry three games.
+        yc.Said = 1;
+        var language = window.Text("eng"u8);
+        var context = window.Text("context"u8);
+        // LP_KIND_TUPLE (bit 2): actual Native structural responders for each word.
+        var xsense = window.Compose([x, language, context], 2, 4, 4);
+        var ysense = window.Compose([y, language, context], 2, 4, 4);
+        var link = window.Compose([xsense, predicate, ysense], 3, 1, 1);
+        link.Said = 1;
+        var witness = window.Compose([xc, xc, xc, yc, link], 4);
+        var writer = new NpgsqlSubstrateWriter(native);
+        await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
+        await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
+        {
+            absent.Parameters.AddWithValue(new[] { x.Id.ToBytes(), y.Id.ToBytes() });
+            Assert.Equal(0L, await absent.ExecuteScalarAsync());
+        }
+        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
+        {
+            register.Parameters.AddWithValue(witness.Id);
+            await register.ExecuteNonQueryAsync();
+        }
+        foreach (var claim in new[] { xc, yc, link })
+        {
+            await using var standing = new NpgsqlCommand("""
+                INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
+                SELECT $1,s.rating,s.deviation,s.volatility,s.matches
+                FROM public.laplace_series(ARRAY[$2]::public.blake3[],ARRAY[$3]::bigint[],
+                    ARRAY[1.0]::double precision[],ARRAY[1.0]::double precision[]) s
+                """, connection, transaction);
+            standing.Parameters.AddWithValue(claim.Id);
+            standing.Parameters.AddWithValue(witness.Id);
+            standing.Parameters.AddWithValue(claim.Id == xc.Id ? 3L : 1L);
+            await standing.ExecuteNonQueryAsync();
+        }
+        await using (var games = new NpgsqlCommand("SELECT matches FROM public.consensus WHERE claim=$1", connection, transaction))
+        {
+            games.Parameters.AddWithValue(xc.Id);
+            Assert.Equal(3L, await games.ExecuteScalarAsync());
+        }
+        // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
+        await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.entity_evidence_count", x.Id.ToBytes()))
+            Assert.Equal(1L, await evidence.ExecuteScalarAsync());
+        await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.evidence_counts_batch", new[] { x.Id.ToBytes(), y.Id.ToBytes() }))
+        await using (var read = await evidence.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.Equal(1L, read.GetInt64(1));
+            Assert.True(await read.ReadAsync()); Assert.Equal(1L, read.GetInt64(1));
+            Assert.False(await read.ReadAsync());
+        }
+        await using (var resolve = NpgsqlCatalog.Command(connection, transaction, "inspection.explore_resolve", xName))
+        await using (var read = await resolve.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.True(read.GetBoolean(3));
+            Assert.Equal(x.Id.ToBytes(), read.GetFieldValue<byte[]>(0));
+        }
+        await using (var receipt = NpgsqlCatalog.Command(connection, transaction, "ops.evidence_receipt", x.Id.ToBytes(), 6))
+        await using (var read = await receipt.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.Equal("IS_ANTONYM_OF", read.GetString(1));
+            Assert.Equal(Convert.ToHexStringLower(witness.Id.ToBytes()), read.GetString(4)); Assert.Equal(1L, read.GetInt64(5));
+        }
+        await using (var couple = NpgsqlCatalog.Command(connection, transaction, "conversation.couple_topics", x.Id.ToBytes(), y.Id.ToBytes()))
+        await using (var read = await couple.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync());
+            Assert.Equal(xsense.Id.ToBytes(), read.GetFieldValue<byte[]>(0));
+            Assert.Equal(ysense.Id.ToBytes(), read.GetFieldValue<byte[]>(1));
+        }
+        foreach (var (name, id) in new[] { (xName, x.Id), (yName, y.Id), (Convert.ToHexString(x.Id.ToBytes()), x.Id) })
+        {
+            await using var resolve = NpgsqlCatalog.Command(connection, transaction, "conversation.resolve_ref_with_label", name);
+            await using var read = await resolve.ExecuteReaderAsync();
+            Assert.True(await read.ReadAsync());
+            Assert.Equal(id.ToBytes(), read.GetFieldValue<byte[]>(0));
+        }
+        await using (var record = NpgsqlCatalog.Command(connection, transaction, "ops.entity_record", x.Id.ToBytes()))
+        await using (var read = await record.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync());
+            Assert.Equal(1L, Enumerable.Range(0, 4).Sum(read.GetInt64));
+        }
+        await using (var facts = NpgsqlCatalog.Command(connection, transaction, "consensus.salient_facts_rendered", x.Id.ToBytes(), 6))
+        await using (var read = await facts.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync());
+            Assert.Equal("IS_ANTONYM_OF", read.GetString(0));
+            Assert.Equal("shared", read.GetString(1));
+            Assert.Equal(1L, read.GetInt64(3));
+        }
+        await using (var tape = NpgsqlCatalog.Command(connection, transaction, "converse.contrast", x.Id.ToBytes(), y.Id.ToBytes(), 60))
+        await using (var read = await tape.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync());
+            Assert.Equal("both", read.GetString(0));
+            Assert.Equal("IS_ANTONYM_OF", read.GetString(1));
+            Assert.Equal("shared", read.GetString(2));
+            Assert.False(await read.ReadAsync());
+        }
         await transaction.RollbackAsync();
     }
 

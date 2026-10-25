@@ -53,6 +53,10 @@ internal sealed partial class SubstrateClient
         var x = xTask.Result;
         var y = yTask.Result;
         if (x is null || y is null) return null;
+        var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
+            _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);
+        x = (coupled.X, coupled.XContext is null ? x.Value.Label : x.Value.Label + " — " + coupled.XContext);
+        y = (coupled.Y, coupled.YContext is null ? y.Value.Label : y.Value.Label + " — " + coupled.YContext);
 
         var xHex = Convert.ToHexString(x.Value.Id).ToLowerInvariant();
         var yHex = Convert.ToHexString(y.Value.Id).ToLowerInvariant();
@@ -224,6 +228,10 @@ internal sealed partial class SubstrateClient
         var x = xTask.Result;
         var y = yTask.Result;
         if (x is null || y is null) return null;
+        var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
+            _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);
+        x = (coupled.X, coupled.XContext is null ? x.Value.Label : x.Value.Label + " — " + coupled.XContext);
+        y = (coupled.Y, coupled.YContext is null ? y.Value.Label : y.Value.Label + " — " + coupled.YContext);
 
         var xChessTask = IsChessPlayerAsync(x.Value.Id, ct);
         var yChessTask = IsChessPlayerAsync(y.Value.Id, ct);

@@ -179,7 +179,7 @@ function Rec({ n, label, tone }: { n: number; label: string; tone?: 'confirm' | 
 
 function Verdict({ verdict, error }: { verdict: MatchupVerdict | null; error: string | null }) {
   if (error) return <ErrorText className={styles.verdictPending}>no verdict — {error}</ErrorText>;
-  if (verdict === null) return <Muted className={styles.verdictPending}>weighing the path…</Muted>;
+  if (verdict === null) return <Muted className={styles.verdictPending}>reading witnessed claims…</Muted>;
   if (!verdict.verdict) return <Muted className={styles.verdictPending}>no verdict</Muted>;
   return (
     <div className={styles.verdict}>

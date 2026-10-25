@@ -358,3 +358,28 @@ Still-open proof/implementation obligations include:
 - #1561: query/cognition preflight-vs-actual work receipts in hops/fanout/responders/resources.
 
 These are implementation obligations. They do not redefine the invention downward.
+
+## Native substrate reader integration
+
+The canonical recipe writer retains content in public.entity, public.physicality,
+public.consensus and public.witness. A presence check against laplace.entities
+cannot establish absence from that Native world. Native paths must be decoded
+with Native accessors; the older trajectory codec is a different carrier.
+
+The shared reference resolver, Compare cards, selected claim facts, Explore
+resolution and evidence readers now use Native identities and paths. Evidence
+counts count distinct (claim, registered witness) pairs through Native containment
+provenance; reported games and independent informative dependence roots remain
+separate quantities. Receipt source identities are the registered witness trunks.
+
+Compare jointly binds its two requested topics through witnessed tuple responders
+and discloses the selected ordered structures. It does not infer a concept from
+a tuple's last constituent, assume a language, or rewrite the source's claim.
+This constrained operator is not the whole forward program. Translation and pull
+retain their firmware and recipe-declared lexicalization/gloss roles.
+
+This integration does not certify the remaining legacy forward, geometric,
+continuation, label and inspection readers against the Native substrate. Those
+readers require their Native operators and carrier contracts; aliasing the old
+tables to the new ones would decode the paths incorrectly. An aggregate count of
+Native matches is not an attestation census.
