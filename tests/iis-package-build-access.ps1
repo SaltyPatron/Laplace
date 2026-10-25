@@ -11,6 +11,7 @@ Set-Content -LiteralPath (Join-Path $scripts 'laplace-paths.ps1') -Value 'functi
 Set-Content -LiteralPath (Join-Path $deploy 'iis-runtime.ps1') -Value 'function Read-IisInstallation { throw "fixture: installation read" }'
 Set-Content -LiteralPath (Join-Path $scripts 'build-engine.cmd') -Encoding Ascii -Value "@exit /b 73`r`n"
 $names=@('VSCMD_VER','SETVARS_COMPLETED','LAPLACE_IIS_INSTALLATION','LAPLACE_API_KEY','LAPLACE_ENGINE_BUILD','LAPLACE_ROOT',
+    'LAPLACE_DEVELOPMENT_INSTALLATION','LAPLACE_OPERATOR_TOKEN',
     'LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER','LAPLACE_TEST_CHECK_FILE','PGSERVICE','PGHOSTADDR','PGOPTIONS','PGPASSWORD',
     'PGSSLMODE','PGSSLROOTCERT','PGREQUIREAUTH','PGCONNECT_TIMEOUT','PGBIN')
 $saved=@{}
@@ -29,7 +30,8 @@ function Expect-Failure([hashtable]$Arguments,[string]$Expected){
 try {
     $env:VSCMD_VER='fixture';$env:SETVARS_COMPLETED='1'
     $env:LAPLACE_ENGINE_BUILD=Join-Path $work 'native'
-    Remove-Item Env:LAPLACE_IIS_INSTALLATION,Env:LAPLACE_API_KEY -ErrorAction SilentlyContinue
+    $env:LAPLACE_DEVELOPMENT_INSTALLATION=Join-Path $work 'unconfigured/installation.json'
+    Remove-Item Env:LAPLACE_IIS_INSTALLATION,Env:LAPLACE_API_KEY,Env:LAPLACE_OPERATOR_TOKEN -ErrorAction SilentlyContinue
     $buildBoundary='Native runtime build failed; no application package was created.'
     Expect-Failure @{} $buildBoundary
     $env:LAPLACE_IIS_INSTALLATION=Join-Path $work 'protected/installation.json'

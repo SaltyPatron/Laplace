@@ -407,6 +407,7 @@ class DeploymentReadinessTests(unittest.TestCase):
             (200, "application/json", b'{"object":"op.result","name":"ops.substrate_counts"}'),
             (200, "application/json", json.dumps(self.storage_proof()).encode()),
             (200, "application/json", b'{"root_id_hex":"canonical-root"}'),
+            (200, "application/json", b'{"available":true,"control":{"phase":"off"}}'),
         ]
 
         def fake_request(method, url, body=None, headers=None):
@@ -419,10 +420,10 @@ class DeploymentReadinessTests(unittest.TestCase):
             self.assertEqual((False, False), self.verify.verify("http://unit"))
         stockfish.assert_called_once_with()
         self.assertEqual(
-            ["/health/ready", "/", "/v1/op", "/v1/explore/storage-proof", "/v1/explore/decompose"],
+            ["/health/ready", "/", "/v1/op", "/v1/explore/storage-proof", "/v1/explore/decompose", "/chess/lichess/control"],
             [call[1].removeprefix("http://unit") for call in calls],
         )
-        self.assertEqual("POST", calls[-1][0])
+        self.assertEqual("GET", calls[-1][0])
         self.assertIn(b"ops.substrate_counts", calls[2][2])
         self.assertEqual("Bearer unit-key", calls[-1][3]["Authorization"])
 
@@ -432,6 +433,17 @@ class DeploymentReadinessTests(unittest.TestCase):
                 "perfcache_receipt_hex": "receipt", "database_perfcache_receipt_hex": "receipt",
                 "invariants": [{"key": name, "passed": True} for name in
                                ("tier0_rom", "merkle_recomposition", "trajectory_roundtrip")]}
+
+    def test_unavailable_configured_controller_fails_delivery(self):
+        with patch.object(self.verify, "request", return_value=(503, "application/json", b'{"upstreamStatus":502}')), \
+                patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}):
+            with self.assertRaisesRegex(ValueError, "Lichess controller verification returned HTTP 503"):
+                self.verify.verify_chess_controller("http://unit")
+
+    def test_unconfigured_controller_is_reported_separately(self):
+        with patch.object(self.verify, "request", return_value=(200, "application/json", b'{"available":false}')), \
+                patch.dict(os.environ, {"LAPLACE_API_KEY": "unit-key"}):
+            self.assertFalse(self.verify.verify_chess_controller("http://unit"))
 
     def test_storage_proof_rejects_failed_invariants_and_mixed_loaded_artifacts(self):
         for update in ({"perfcache_aligned": False}, {"database_perfcache_receipt_hex": "old"},

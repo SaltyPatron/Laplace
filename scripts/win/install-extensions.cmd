@@ -33,11 +33,12 @@ if "%FILES_ONLY%"=="0" (
 if "%CHECK_CONNECTION%"=="1" exit /b 0
 
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
+for %%F in ("%T0_SRC%") do set "FLAGS_SRC=%%~dpnF.flags"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
 set "CHESS_SRC=%LAPLACE_CHESS_POSITION_PERFCACHE_BIN%"
 set "TRANSITION_SRC=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_chess_transition_perfcache.bin"
-set "T0_DST=%DEPLOY%\share\laplace_t0_perfcache.bin"
-set "HW_DST=%DEPLOY%\share\laplace_highway_perfcache.bin"
+set "T0_DST=%DEPLOY%\share\tier0.bin"
+set "HW_DST=%DEPLOY%\share\highway.bin"
 set "CHESS_DST=%DEPLOY%\share\laplace_chess_position_perfcache.bin"
 
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
@@ -55,6 +56,10 @@ powershell -NoProfile -Command ^
 if not exist "%T0_SRC%" (
   echo ERROR: T0 perfcache missing at %T0_SRC%
   echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_t0_perfcache
+  exit /b 1
+)
+for %%F in ("%FLAGS_SRC%" "%FLAGS_SRC%.layout") do if not exist "%%~F" (
+  echo ERROR: Tier-0 flags missing at %%~F
   exit /b 1
 )
 if not exist "%HW_SRC%" (
@@ -111,6 +116,8 @@ call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" "%PGRT%" || exit /
 call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" "%PGRT%" || exit /b 1
 rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
+call :swapcopy "%FLAGS_SRC%" "%DEPLOY%\share" || exit /b 1
+call :swapcopy "%FLAGS_SRC%.layout" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%TRANSITION_SRC%" "%DEPLOY%\share" || exit /b 1
@@ -133,8 +140,11 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
 > "%GUC_SQL%" (
   echo ALTER SYSTEM SET extension_control_path = '%LAPLACE_DEPLOY_PG%/share;$system';
   echo ALTER SYSTEM SET dynamic_library_path = '%LAPLACE_DEPLOY_PG%/lib;$libdir';
-  echo ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin';
-  echo ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin';
+  echo ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/tier0.bin';
+  echo ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/highway.bin';
+  echo ALTER SYSTEM SET laplace.tier0 = '%LAPLACE_DEPLOY_PG%/share/tier0.bin';
+  echo ALTER SYSTEM SET laplace.flags = '%LAPLACE_DEPLOY_PG%/share/tier0.flags';
+  echo ALTER SYSTEM SET laplace.highway = '%LAPLACE_DEPLOY_PG%/share/highway.bin';
   echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';
   rem laplace_substrate joins whatever the server already preloads (observability modules on a shared server), never replaces it
   echo SELECT CASE WHEN current_setting^('shared_preload_libraries'^) ~ '\mlaplace_substrate\M' THEN current_setting^('shared_preload_libraries'^) WHEN current_setting^('shared_preload_libraries'^) = '' THEN 'laplace_substrate' ELSE current_setting^('shared_preload_libraries'^) ^|^| ',laplace_substrate' END AS spl \gset
@@ -183,6 +193,10 @@ for %%P in (
 if "%OK%"=="0" exit /b 1
 fc /b "%T0_SRC%" "%T0_DST%" >nul 2>&1 || (
   echo ERROR: deployed T0 perfcache does not match build output
+  exit /b 1
+)
+for %%F in ("%FLAGS_SRC%" "%FLAGS_SRC%.layout") do fc /b "%%~F" "%DEPLOY%\share\%%~nxF" >nul 2>&1 || (
+  echo ERROR: deployed Tier-0 flags do not match build output
   exit /b 1
 )
 fc /b "%HW_SRC%" "%HW_DST%" >nul 2>&1 || (

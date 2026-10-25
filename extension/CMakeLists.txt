@@ -75,10 +75,12 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         "$ENV{MKLROOT}/lib/mkl_core.lib")
 
     add_library(laplace_core STATIC IMPORTED GLOBAL)
+    include("${LAPLACE_ENGINE_BUILD}/laplace-core-static-dependencies.cmake")
     set_target_properties(laplace_core PROPERTIES
         IMPORTED_LOCATION "${LAPLACE_ENGINE_BUILD}/core/laplace_core_static.lib"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../engine/core/include"
-        INTERFACE_LINK_LIBRARIES "${LAPLACE_ENGINE_BUILD}/_deps/blake3/blake3.lib;${LAPLACE_ENGINE_BUILD}/tree_sitter_rt.lib")   # the core's private tree-sitter runtime, which a static library does not carry
+        INTERFACE_LINK_LIBRARIES "${LAPLACE_CORE_STATIC_DEPENDENCIES}"
+        INTERFACE_LINK_OPTIONS "${LAPLACE_CORE_STATIC_LINK_OPTIONS}")
 
     add_library(laplace_dynamics STATIC IMPORTED GLOBAL)
     set_target_properties(laplace_dynamics PROPERTIES

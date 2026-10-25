@@ -10,6 +10,7 @@ internal static class NativeTextIdentity
     internal static unsafe Hash128 OfText(string text)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
+        CodepointPerfcache.LoadDefault();
         int length = Utf8.GetByteCount(text);
         byte[]? rented = null;
         Span<byte> bytes = length <= 1024

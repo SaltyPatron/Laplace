@@ -105,8 +105,8 @@ if not defined CTEST_PARALLEL_LEVEL (
     if defined CMAKE_BUILD_PARALLEL_LEVEL set "CTEST_PARALLEL_LEVEL=%CMAKE_BUILD_PARALLEL_LEVEL%"
   )
 )
-if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_t0_perfcache.bin"
-if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_highway_perfcache.bin"
+if not defined LAPLACE_PERFCACHE_BIN set "LAPLACE_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\tier0.bin"
+if not defined LAPLACE_HIGHWAY_PERFCACHE_BIN set "LAPLACE_HIGHWAY_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\highway.bin"
 if not defined LAPLACE_CHESS_POSITION_PERFCACHE_BIN set "LAPLACE_CHESS_POSITION_PERFCACHE_BIN=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_chess_position_perfcache.bin"
 rem Extension deploy MUST stay outside PGDATA (fsync/sharing-violation if under D:\Data\Postgres\laplace).
 if not defined LAPLACE_PGDATA set "LAPLACE_PGDATA=%LAPLACE_WORK%\pgdata"
