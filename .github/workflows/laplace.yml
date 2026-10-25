@@ -103,14 +103,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 6d949651f2909b6ae9336f7c0e194d6d888acf32
+          ref: 46bd825a93a4530087006a51eb1e1cffb80cb80b
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: ef71a18ba7ac8eae10825a290144b8cb73ce1291
+          ref: d757f896aa8d1cc2b26548e590c764c27f0fe377
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -272,14 +272,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 6d949651f2909b6ae9336f7c0e194d6d888acf32
+          ref: 46bd825a93a4530087006a51eb1e1cffb80cb80b
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: ef71a18ba7ac8eae10825a290144b8cb73ce1291
+          ref: d757f896aa8d1cc2b26548e590c764c27f0fe377
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
