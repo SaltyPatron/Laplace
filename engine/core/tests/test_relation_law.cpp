@@ -52,12 +52,23 @@ TEST(LaplaceRelationLaw, InverseSurfaceIsAFlipAndRetiredNameFailsClosed) {
 
     hash128_t earlier = hash_path("flip/earlier"), later = hash_path("flip/later"), src = hash_path("flip/src");
     laplace_attestation_staged_t via_surface{}, direct{}, via_retired{};
-    ASSERT_EQ(0, laplace_attestation_categorical_build(
-        "isAfter", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_surface));
+    // Source-token builders preserve the predicate bytes. Governed inverse
+    // surfaces are resolved and oriented explicitly before the resolved API.
+    ASSERT_EQ(0, laplace_relation_resolve_surface("isAfter", &tid, &rank, &sym, &flip, &parent));
+    hash128_t oriented_subject = later, oriented_object = earlier;
+    uint8_t object_null = 0;
+    ASSERT_EQ(0, laplace_attestation_orient(&tid, flip, sym, &oriented_subject, &oriented_object, &object_null));
+    ASSERT_EQ(0, laplace_attestation_resolved_build(
+        &oriented_subject, &tid, &oriented_object, object_null, &src, NULL, 1, 1.0, 1, 1, 0, &via_surface));
     ASSERT_EQ(0, laplace_attestation_categorical_build(
         "IS_BEFORE", &earlier, &later, 0, &src, NULL, 1, 1.0, 1, 1, 0, &direct));
     EXPECT_TRUE(hash128_equals(&via_surface.id, &direct.id));
     EXPECT_TRUE(hash128_equals(&via_surface.subject_id, &earlier));
+    laplace_attestation_staged_t source_token{};
+    ASSERT_EQ(0, laplace_attestation_categorical_build(
+        "isAfter", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &source_token));
+    EXPECT_TRUE(hash128_equals(&source_token.subject_id, &later));
+    EXPECT_FALSE(hash128_equals(&source_token.id, &direct.id));
     EXPECT_NE(0, laplace_attestation_categorical_build(
         "IS_AFTER", &later, &earlier, 0, &src, NULL, 1, 1.0, 1, 1, 0, &via_retired));
 }
@@ -237,8 +248,13 @@ TEST(LaplaceAttestationEngine, FlipHypernymCollapsesArena) {
     hash128_t dog    = hash_path("e/dog");
 
     laplace_attestation_staged_t flipped, direct;
-    ASSERT_EQ(0, laplace_attestation_categorical_build(
-        "HAS_HYPONYM", &animal, &dog, 0, &src, NULL, 1, 1.0, 1, 1, 0, &flipped));
+    hash128_t type, parent, subject = animal, object = dog;
+    laplace_rel_symmetry_t symmetry;
+    uint8_t flip = 0, object_null = 0;
+    ASSERT_EQ(0, laplace_relation_resolve_surface("HAS_HYPONYM", &type, NULL, &symmetry, &flip, &parent));
+    ASSERT_EQ(0, laplace_attestation_orient(&type, flip, symmetry, &subject, &object, &object_null));
+    ASSERT_EQ(0, laplace_attestation_resolved_build(
+        &subject, &type, &object, object_null, &src, NULL, 1, 1.0, 1, 1, 0, &flipped));
     ASSERT_EQ(0, laplace_attestation_categorical_build(
         "IS_A", &dog, &animal, 0, &src, NULL, 1, 1.0, 1, 1, 0, &direct));
 

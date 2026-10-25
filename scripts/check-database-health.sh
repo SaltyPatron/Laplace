@@ -94,14 +94,32 @@ FROM required
 WHERE to_regclass(name) IS NULL;")
 [[ -z "$missing" ]] || fail "required substrate relations missing: $missing"
 
-# relation_bands() reads band membership from the relation registry and row estimates
-# from planner statistics; it must never aggregate the consensus tree on a request.
-relation_bands_def=$("${PSQL[@]}" -d "$DB" -tAc \
-  "SELECT pg_get_functiondef('converse.relation_bands()'::regprocedure);")
-[[ "$relation_bands_def" == *"relation_registry"* ]] || \
-  fail "converse.relation_bands() is stale and does not read the relation registry"
-[[ "$relation_bands_def" != *"FROM laplace.consensus"* ]] || \
-  fail "converse.relation_bands() still performs a full consensus-tree read"
+# Parsed SQL dependencies preserve the registry contract through helper functions.
+# The current relation_bands() delegates its exact counts to the shared operator
+# census; inspecting only its source text falsely rejects a freshly created DB.
+band_dependencies=$("${PSQL[@]}" -d "$DB" -tAc "
+WITH RECURSIVE functions(oid) AS (
+  SELECT 'converse.relation_bands()'::regprocedure::oid
+  UNION
+  SELECT d.refobjid
+  FROM functions f
+  JOIN pg_depend d ON d.classid='pg_proc'::regclass AND d.objid=f.oid
+  WHERE d.refclassid='pg_proc'::regclass
+)
+SELECT EXISTS (SELECT 1 FROM functions WHERE oid=to_regprocedure('laplace.relation_registry()'))
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_depend d
+         WHERE d.classid='pg_proc'::regclass
+           AND d.objid='converse.relation_bands()'::regprocedure
+           AND d.refclassid='pg_class'::regclass
+           AND d.refobjid='laplace.consensus'::regclass
+       );")
+[[ "$band_dependencies" == "t" ]] || \
+  fail "converse.relation_bands() is stale: its dependency graph must reach the relation registry without a direct consensus-tree read"
+if ! "${PSQL[@]}" -d "$DB" -tAc \
+  "SELECT band, name, rank, relation_types, consensus_rows FROM converse.relation_bands() WHERE false;" >/dev/null; then
+  fail "converse.relation_bands() does not expose the required query columns"
+fi
 
 # Bind the native attestation COPY surface without reading or writing evidence.
 # Table existence and an extension version alone do not prove an upgrade applied
@@ -174,4 +192,4 @@ if [[ "${op_invalid:-0}" != "0" ]]; then
   fail "ops.index_health reports $op_invalid invalid index(es)"
 fi
 
-echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext artifact_scope=$artifact_scope relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"
+echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext artifact_scope=$artifact_scope relation_bands=registry_dependency required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"

@@ -76,6 +76,35 @@ endif()
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 
+# The fast hosted job checks composition without a scalar ROM. The same
+# vectors check the text/label entry point against this build's actual core
+# and scalar floor here; failure to load the floor must fail the test.
+set(_identity_vectors_source "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+set(_identity_vectors_cs "${_identity_vectors_source}/app/Laplace.Core.Tests/Core/IdentityLawVectorTests.cs")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_identity_vectors_cs}")
+file(STRINGS "${_identity_vectors_cs}" _identity_rows REGEX "\\[InlineData\\(")
+set(_identity_vectors "")
+set(_identity_count 0)
+foreach(_row IN LISTS _identity_rows)
+    if(_row MATCHES "\\[InlineData\\(\"([^\"]+)\", \"([0-9a-f]+)\"\\)\\]")
+        string(APPEND _identity_vectors "${CMAKE_MATCH_1}\t${CMAKE_MATCH_2}\n")
+        math(EXPR _identity_count "${_identity_count} + 1")
+    endif()
+endforeach()
+if(_identity_count LESS 7)
+    message(FATAL_ERROR "Identity-law vector input has fewer than seven vectors")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/identity-law.tsv" "${_identity_vectors}")
+add_executable(laplace_identity_law_vectors "${_identity_vectors_source}/tests/identity-law/vectors.c")
+target_compile_definitions(laplace_identity_law_vectors PRIVATE LAPLACE_IDENTITY_WITH_TEXT _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(laplace_identity_law_vectors PRIVATE laplace_core laplace_text)
+add_dependencies(laplace_identity_law_vectors laplace_t0_perfcache)
+add_dependencies(laplace_core_tests laplace_identity_law_vectors)
+add_test(NAME laplace_identity_law_vectors
+    COMMAND laplace_identity_law_vectors "${CMAKE_CURRENT_BINARY_DIR}/identity-law.tsv")
+set_tests_properties(laplace_identity_law_vectors PROPERTIES
+    ENVIRONMENT "LAPLACE_TIER0=${LAPLACE_PERFCACHE_BIN}" TIMEOUT 60)
+
 # The same production decoder is also testable with plain C and no perfcache
 # fixture: ParseStructure already contains exact IDs and schema delimiters.
 add_executable(laplace_ud_parse_tests test_ud_parse.c)

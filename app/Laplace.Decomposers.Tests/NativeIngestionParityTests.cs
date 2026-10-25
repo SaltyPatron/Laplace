@@ -24,11 +24,11 @@ public sealed class NativeIngestionParityTests
         string receipt = Required("LAPLACE_PARITY_RECEIPT");
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
         string fixture = Path.Combine(repository, "app", "Laplace.Decomposers.Tests", "Fixtures", "NativeRecipes");
-        string workspace = Directory.GetParent(repository)!.FullName;
+        string engineRoot = Directory.GetParent(EtlManifest.RecipesRoot)!.FullName;
         var inputs = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["cili"] = Path.Combine(workspace, "Laplace-Engine", "tests", "fixtures", "highway-identities", "cili"),
-            ["propbank"] = Path.Combine(workspace, "Laplace-Engine", "tests", "fixtures", "highway-identities", "propbank"),
+            ["cili"] = Path.Combine(engineRoot, "tests", "fixtures", "highway-identities", "cili"),
+            ["propbank"] = Path.Combine(engineRoot, "tests", "fixtures", "highway-identities", "propbank"),
             ["princeton-wordnet"] = Path.Combine(fixture, "wordnet"),
             ["conceptnet"] = Path.Combine(fixture, "conceptnet"),
             ["tatoeba"] = Path.Combine(fixture, "tatoeba"),

@@ -642,23 +642,6 @@
         "VerbNet-GL",
         "3.4"
       ]
-    },
-    "uca": {
-      "decomposer": "UnicodeCollation",
-      "layer": 0,
-      "prerequisites": [
-        "unicode"
-      ],
-      "consensus_gates": [
-        {
-          "relation": "DECOMPOSES_TO",
-          "min": 1000
-        }
-      ],
-      "witness": [
-        "Unicode/UCA",
-        "17.0.0"
-      ]
     }
   }
 }

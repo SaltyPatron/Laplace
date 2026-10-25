@@ -133,6 +133,7 @@ public sealed class IngestRosterParityTests
 
     [Theory]
     [InlineData("ucd", "unicode")]
+    [InlineData("uca", "unicode")]
     [InlineData("iso639", "iso-639")]
     [InlineData("OEWN", "open-english-wordnet")]
     [InlineData("omw", "open-multilingual-wordnet")]

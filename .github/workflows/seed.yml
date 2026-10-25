@@ -221,6 +221,8 @@ jobs:
           fi
 
           {
+            python3 scripts/ingest_catalog.py --format markdown
+            echo
             echo "## Ingest plan"
             echo
             echo "- Revision: $current_sha"

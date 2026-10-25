@@ -37,17 +37,15 @@ internal static class IngestDataPaths
 
     public static IReadOnlyList<string> ResolveRoots(string cliSource)
     {
-        var source = Path.Combine(EtlManifest.RecipesRoot, cliSource, "source");
-        if (!EtlManifest.SourceOrder.Contains(cliSource, StringComparer.Ordinal))
-            throw new InvalidOperationException($"Unknown canonical ingest source '{cliSource}'. Read recipes/order.");
-        var lines = File.ReadLines(source).Select(line => line.Trim()).ToArray();
-        var roots = lines.Where(line => line.StartsWith("root ", StringComparison.Ordinal))
-            .Select(line => ExpandRoot(line[5..].Trim())).ToArray();
+        var catalog = EtlManifest.Catalog;
+        string name = catalog.Resolve(cliSource);
+        var source = catalog.Sources.FirstOrDefault(source => source.Name == name)
+            ?? throw new InvalidOperationException($"Unknown ingest source '{cliSource}'. Read ingest catalog.");
+        var roots = source.Roots.Select(ExpandRoot).ToArray();
         // A file-only source (tokenizers) declares its roots through absolute
         // file patterns. The stable prefix is configuration, not a corpus scan.
         if (roots.Length == 0)
-            roots = lines.Where(line => line.StartsWith("files ", StringComparison.Ordinal))
-                .Select(line => FilePatternRoot(ExpandRoot(line[6..].Trim()))).ToArray();
+            roots = source.Files.Select(line => FilePatternRoot(ExpandRoot(line))).ToArray();
         return roots
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .ToArray();
