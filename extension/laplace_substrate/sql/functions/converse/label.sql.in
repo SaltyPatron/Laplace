@@ -7,7 +7,7 @@ AS 'EXECUTION_LIBRARY','pg_laplace_label' LANGUAGE C STABLE PARALLEL SAFE;
 -- adapter preserves the existing transport shape, not the old reader/codec.
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
 RETURNS TABLE(id bytea,label text,tier smallint)
-LANGUAGE sql STABLE STRICT SUPPORT @extschema@.array_length_rows_support
+LANGUAGE sql STABLE STRICT PARALLEL SAFE SUPPORT @extschema@.array_length_rows_support
 AS $native$
 SELECT p_ids[d.i],d.content,coalesce(e.tier,CASE WHEN public.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
 FROM public.laplace_labels(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest(p_ids) u(id))) d

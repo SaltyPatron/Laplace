@@ -399,6 +399,8 @@ lookup keys. Unknown stored semantic types remain unknown.
 claims and distinct registered claim/witness pairs. Reported games are not evidence counts.
 Non-ternary claims retain their identity and complete ordered, counted constituents.
 Leaderboards use one Native claim read and batch-realize elected constituents.
+Explore uses labels returned by these owners directly, retaining complete n-ary
+previews rather than running a second display selection over them.
 
 These inspection operations are components of the read contract above. They do not
 replace the routed forward program, recipe-declared lexicalization, or geometric coupling.
