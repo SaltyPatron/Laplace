@@ -125,6 +125,10 @@ public sealed class NativeRecipeExecution
         start.Environment.Remove("LAPLACE_INGEST_ONE");
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
         start.Environment["LAPLACE_GRAMMARS"] = Grammars;
+        // Share the host resource plan with the Native working window. File
+        // boundaries and parser feed sizes do not own persistence budgets.
+        start.Environment["LAPLACE_WORKING_SET_BYTES"] = MemoryTopology.WorkingSetFlushEnvelopeBytes
+            .ToString(CultureInfo.InvariantCulture);
         if (request.Threads > 0)
         {
             start.ArgumentList.Add("-j");
