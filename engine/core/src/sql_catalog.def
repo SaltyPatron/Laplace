@@ -1736,7 +1736,12 @@ SQL_QUERY("migration.canonical_substrate", "",
     "EXECUTE format('ALTER DATABASE %I SET %s = %L',current_database(),cache.native_setting,cache_path); "
     "END IF; END LOOP; "
     "PERFORM public.laplace_fingerprint(); PERFORM public.laplace_highway_fingerprint(); "
-    "PERFORM public.laplace_ensure_stage(); END $canonical$;")
+    "PERFORM public.laplace_ensure_stage(); "
+    "IF to_regprocedure('laplace.source_id(text)') IS NOT NULL THEN "
+    "EXECUTE $source$CREATE OR REPLACE FUNCTION laplace.source_id(p_name text) RETURNS bytea "
+    "LANGUAGE sql IMMUTABLE PARALLEL SAFE BEGIN ATOMIC "
+    "SELECT decode(public.laplace_id('substrate/source/' || p_name || '/v1')::text,'hex'); END;$source$; "
+    "END IF; END $canonical$;")
 SQL_QUERY("migration.canonical_substrate_status", "",
     "SELECT current_database(),extversion,public.laplace_fingerprint(),public.laplace_highway_fingerprint() "
     "FROM pg_extension WHERE extname='laplace'")

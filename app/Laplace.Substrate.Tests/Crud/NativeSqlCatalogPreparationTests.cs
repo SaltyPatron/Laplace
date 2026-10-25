@@ -126,6 +126,31 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CanonicalMigrationMakesSourceCompletionUseTheManagedNativeIdentity()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
+            await migrate.ExecuteNonQueryAsync();
+        var source = SubstrateCanonicalIds.Source("OperationalDecomposer");
+        await using (var identity = new NpgsqlCommand(
+            "SELECT laplace.source_id('OperationalDecomposer')", connection, transaction))
+            Assert.Equal(source.ToBytes(), Assert.IsType<byte[]>(await identity.ExecuteScalarAsync()));
+        await using (var record = new NpgsqlCommand("""
+            INSERT INTO laplace.ingest_layer_completion(witness_id,layer)
+            VALUES ($1,2) ON CONFLICT (witness_id,layer) DO NOTHING
+            """, connection, transaction))
+        {
+            record.Parameters.AddWithValue(source.ToBytes());
+            await record.ExecuteNonQueryAsync();
+        }
+        await using (var complete = new NpgsqlCommand(
+            "SELECT ops.layer_completed(laplace.source_id('OperationalDecomposer'),2)", connection, transaction))
+            Assert.Equal(true, await complete.ExecuteScalarAsync());
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task EveryFixedStatementPreparesAgainstTheInstalledSchema()
     {
         await using var connection = await _source.OpenConnectionAsync();
