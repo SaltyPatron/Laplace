@@ -29,11 +29,22 @@ dotnet test "$root/app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" \
   -c Release --nologo -p:LAPLACE_BUILD_ROOT="$output" \
   --filter 'FullyQualifiedName~WriterCompletionTests' \
   --logger 'trx;LogFileName=completion.trx' --results-directory "$results" 8>&- 9>&-
+# Exercise Native reader contracts through the installed migration and real COPY/merge pipeline.
+dotnet test "$root/app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" \
+  -c Release --nologo --no-build -p:LAPLACE_BUILD_ROOT="$output" \
+  --filter 'FullyQualifiedName~NativeSqlCatalogPreparationTests.CompareReadsNativeClaimsWhenCompatibilityEntitiesAreAbsent' \
+  --logger 'trx;LogFileName=native-reads.trx' --results-directory "$results" 8>&- 9>&-
 python3 - "$results/completion.trx" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 counters = root.find('.//{*}Counters')
 if counters is None or int(counters.attrib['passed']) != 2 or int(counters.attrib['total']) != 2:
     raise SystemExit('Both completion tests must execute and pass.')
+PY
+python3 - "$results/native-reads.trx" <<'PY'
+import sys, xml.etree.ElementTree as ET
+c = ET.parse(sys.argv[1]).getroot().find('.//{*}Counters')
+if c is None or int(c.attrib['passed']) != 1 or int(c.attrib['total']) != 1:
+    raise SystemExit('The installed Native reader regression must execute and pass.')
 PY
 [[ "$(psql -X -Atq -d postgres -c "SELECT count(*) FROM pg_database WHERE datname='laplace_substratecrud_test'")" == 0 ]]

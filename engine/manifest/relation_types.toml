@@ -2870,3 +2870,10 @@ surface = "Black"
 canonical = "HAS_PLAYER"
 flip = false
 qualifier = "side/black"
+
+# Princeton WordNet wndb.5, the literal predicate emitted by wordnet-data.
+# Read-time arena selection keeps the source claim and its constituent IDs intact.
+[[alias]]
+surface = "a definition, one or more example sentences, or both"
+canonical = "HAS_DEFINITION"
+flip = false
