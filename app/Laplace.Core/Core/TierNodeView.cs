@@ -6,8 +6,8 @@ namespace Laplace.Engine.Core;
 public unsafe struct TierNodeView
 {
     public byte Tier;
-
-    private fixed byte _pad[3];
+    public byte Role;
+    private fixed byte _pad[2];
 
     public uint ParentIdx;
 

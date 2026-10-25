@@ -26,7 +26,8 @@ extern "C" {
 /* RGBA channel count in packaging recovery order (R, G, B, A). */
 #define LAPLACE_IMAGE_CHANNEL_COUNT 4u
 
-/* Image ladder tiers above the shared codepoint floor. */
+/* Provider ladder roles, not canonical heights. The composed tree retains these
+ * in node.role; node.tier is the actual constituent height (unary roles collapse). */
 #define LAPLACE_IMAGE_TIER_CODEPOINT 0u
 #define LAPLACE_IMAGE_TIER_NUMBER    1u
 #define LAPLACE_IMAGE_TIER_CHANNEL   2u
@@ -36,7 +37,7 @@ extern "C" {
 #define LAPLACE_IMAGE_TIER_IMAGE     6u
 
 /*
- * Image ladder:
+ * Image provider ladder (the numbers below are role ordinals):
  *   tier 0 Codepoint — decimal digit chars of each channel byte (U+0030..U+0039)
  *   tier 1 Number    — ordered digits of one channel value (no leading zeros; "0" for zero)
  *   tier 2 Channel   — wraps one Number (R then G then B then A)

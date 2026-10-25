@@ -14,7 +14,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class AudioTierSpine
 {
-    /// <summary>Highest audio ladder tier (0=Codepoint … 5=Track).</summary>
+    /// <summary>Highest provider role ordinal (0=Codepoint … 5=Track), not canonical height.</summary>
     public const int MaxAudioTiers = 5;
     public const int MaxExistenceRounds = MaxAudioTiers + 1;
 

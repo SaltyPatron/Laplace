@@ -28,10 +28,11 @@ extern "C" {
  * integer sample is the same composition of codepoint atoms that spells that number
  * anywhere else (modality_decimal).
  *
- * Tier labels (laplace_modality_tier_type_id AUDIO):
+ * Provider roles (laplace_modality_tier_type_id AUDIO), retained in node.role:
  *   0 Codepoint, 1 Sample, 2 Window, 3 OnsetSegment, 4 Phrase, 5 Track
  *
- * MaxAudioTiers / existence-round counts in C# must cover tiers 0..5.
+ * node.tier is canonical constituent height, including the shared scalar's own
+ * grammar. It is not this provider role number.
  */
 
 /* Fixed hop sizes. Segment boundaries are fixed window groups, not detected onsets. */
@@ -40,7 +41,7 @@ extern "C" {
 #define LAPLACE_AUDIO_PHRASE_SEGMENTS  8u
 
 /*
- * Audio ladder:
+ * Audio provider ladder (the numbers below are role ordinals):
  *   tier 0 Codepoint  — canonical scalar spelling constituents
  *   tier 1 Sample     — reusable scalar/number composed from those codepoints
  * Repeating a sample value reuses this scalar content; sample occurrences carry

@@ -9,6 +9,7 @@ struct tier_tree {
     int native_text;
 
     uint8_t*      tier;
+    uint8_t*      role;
     uint32_t*     parent_idx;
     uint32_t*     first_child_idx;
     uint32_t*     child_count;
@@ -29,7 +30,7 @@ struct tier_tree {
 size_t tier_tree_resident_bytes(const tier_tree_t* t) {
     if (!t) return 0;
     return sizeof(*t) + t->text_len + t->capacity *
-        (sizeof(uint8_t) + 6 * sizeof(uint32_t) + sizeof(hash128_t)
+        (sizeof(uint8_t) * (t->role ? 2 : 1) + 6 * sizeof(uint32_t) + sizeof(hash128_t)
          + 4 * sizeof(double) + sizeof(hilbert128_t));
 }
 
@@ -43,6 +44,7 @@ static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     }
 
     uint8_t*      new_tier            = (uint8_t*)     realloc(t->tier,            new_cap * sizeof(uint8_t));
+    uint8_t*      new_role            = t->role ? (uint8_t*)realloc(t->role, new_cap) : NULL;
     uint32_t*     new_parent_idx      = (uint32_t*)    realloc(t->parent_idx,      new_cap * sizeof(uint32_t));
     uint32_t*     new_first_child_idx = (uint32_t*)    realloc(t->first_child_idx, new_cap * sizeof(uint32_t));
     uint32_t*     new_child_count     = (uint32_t*)    realloc(t->child_count,     new_cap * sizeof(uint32_t));
@@ -53,10 +55,11 @@ static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     double*       new_coord           = (double*)      realloc(t->coord,           new_cap * 4 * sizeof(double));
     hilbert128_t* new_hilbert         = (hilbert128_t*)realloc(t->hilbert,         new_cap * sizeof(hilbert128_t));
 
-    if (!new_tier || !new_parent_idx || !new_first_child_idx || !new_child_count
+    if (!new_tier || (t->role && !new_role) || !new_parent_idx || !new_first_child_idx || !new_child_count
         || !new_text_range_off || !new_text_range_len || !new_atom
         || !new_id || !new_coord || !new_hilbert) {
         if (new_tier)            t->tier            = new_tier;
+        if (new_role)            t->role            = new_role;
         if (new_parent_idx)      t->parent_idx      = new_parent_idx;
         if (new_first_child_idx) t->first_child_idx = new_first_child_idx;
         if (new_child_count)     t->child_count     = new_child_count;
@@ -74,6 +77,7 @@ static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     memset(new_hilbert + t->capacity, 0, (new_cap - t->capacity) * sizeof(hilbert128_t));
 
     t->tier            = new_tier;
+    t->role            = new_role;
     t->parent_idx      = new_parent_idx;
     t->first_child_idx = new_first_child_idx;
     t->child_count     = new_child_count;
@@ -102,6 +106,7 @@ tier_tree_t* tier_tree_new(size_t capacity_hint) {
 void tier_tree_free(tier_tree_t* tree) {
     if (!tree) return;
     free(tree->tier);
+    free(tree->role);
     free(tree->parent_idx);
     free(tree->first_child_idx);
     free(tree->child_count);
@@ -155,6 +160,7 @@ static uint32_t tier_tree_append(
     const uint32_t idx = (uint32_t)tree->count;
     tree->native_text = 0;
     tree->tier[idx]            = tier;
+    if (tree->role) tree->role[idx] = tier;
     tree->parent_idx[idx]      = TIER_TREE_INVALID;
     tree->first_child_idx[idx] = first_child_idx;
     tree->child_count[idx]     = child_count;
@@ -215,6 +221,7 @@ int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* 
     if (!tree || !out || idx >= tree->count) return -1;
     memset(out, 0, sizeof(*out));
     out->tier             = tree->tier[idx];
+    out->role             = tree->role ? tree->role[idx] : tree->tier[idx];
     out->parent_idx       = tree->parent_idx[idx];
     out->first_child_idx  = tree->first_child_idx[idx];
     out->child_count      = tree->child_count[idx];
@@ -227,6 +234,23 @@ int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* 
     out->coord[2]         = tree->coord[idx * 4 + 2];
     out->coord[3]         = tree->coord[idx * 4 + 3];
     out->hilbert          = tree->hilbert[idx];
+    return 0;
+}
+
+int tier_tree_preserve_roles(tier_tree_t* tree) {
+    if (!tree) return -1;
+    if (tree->role) return 0;
+    uint8_t* role = (uint8_t*)malloc(tree->capacity ? tree->capacity : 1);
+    if (!role) return -1;
+    if (tree->count) memcpy(role, tree->tier, tree->count);
+    tree->role = role;
+    return 0;
+}
+
+int tier_tree_set_tier(tier_tree_t* tree, uint32_t idx, uint8_t tier) {
+    if (!tree || idx >= tree->count) return -1;
+    tree->native_text = 0;
+    tree->tier[idx] = tier;
     return 0;
 }
 
@@ -266,6 +290,7 @@ void tier_tree_mark_native_text(tier_tree_t* tree) { if (tree) tree->native_text
 int tier_tree_is_native_text(const tier_tree_t* tree) { return tree && tree->native_text; }
 
 const uint8_t*      tier_tree_tier_array(const tier_tree_t* tree)            { return tree ? tree->tier            : NULL; }
+const uint8_t*      tier_tree_role_array(const tier_tree_t* tree)            { return tree ? (tree->role ? tree->role : tree->tier) : NULL; }
 const uint32_t*     tier_tree_first_child_idx_array(const tier_tree_t* tree) { return tree ? tree->first_child_idx : NULL; }
 const uint32_t*     tier_tree_child_count_array(const tier_tree_t* tree)     { return tree ? tree->child_count     : NULL; }
 const uint32_t*     tier_tree_parent_idx_array(const tier_tree_t* tree)      { return tree ? tree->parent_idx      : NULL; }
