@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 /*
- * Entity-type labels for the image/audio ladder.
+ * Entity-type labels for image/audio provider roles, independent of DAG height.
  * Image: Codepoint/Number/Channel/Pixel/Patch/Region/Image.
  * Audio: Codepoint/Sample/Window/OnsetSegment/Phrase/Track.
  *

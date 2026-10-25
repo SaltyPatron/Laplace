@@ -16,7 +16,8 @@ typedef struct tier_tree tier_tree_t;
 
 typedef struct {
     uint8_t      tier;
-    uint8_t      _pad[3];
+    uint8_t      role; /* provider ladder role; independent of canonical DAG height */
+    uint8_t      _pad[2];
     uint32_t     parent_idx;
     uint32_t     first_child_idx;
     uint32_t     child_count;
@@ -67,12 +68,16 @@ int            tier_tree_set_text(tier_tree_t* tree, uint8_t* text_owned, size_t
 const uint8_t* tier_tree_text(const tier_tree_t* tree, size_t* out_len);
 
 int tier_tree_set_id(tier_tree_t* tree, uint32_t idx, const hash128_t* id);
+/* Preserve the provider's ladder before replacing its heights during composition. */
+int tier_tree_preserve_roles(tier_tree_t* tree);
+int tier_tree_set_tier(tier_tree_t* tree, uint32_t idx, uint8_t tier);
 int tier_tree_set_coord(tier_tree_t* tree, uint32_t idx, const double coord[4]);
 int tier_tree_set_hilbert(tier_tree_t* tree, uint32_t idx, const hilbert128_t* hilbert);
 
 int tier_tree_set_parent(tier_tree_t* tree, uint32_t idx, uint32_t parent_idx);
 
 const uint8_t*      tier_tree_tier_array(const tier_tree_t* tree);
+const uint8_t*      tier_tree_role_array(const tier_tree_t* tree);
 const uint32_t*     tier_tree_first_child_idx_array(const tier_tree_t* tree);
 const uint32_t*     tier_tree_child_count_array(const tier_tree_t* tree);
 const uint32_t*     tier_tree_parent_idx_array(const tier_tree_t* tree);

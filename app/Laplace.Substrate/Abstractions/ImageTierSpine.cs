@@ -14,7 +14,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class ImageTierSpine
 {
-    /// <summary>Highest image ladder tier (0=codepoint … 6=Image).</summary>
+    /// <summary>Highest provider role ordinal (0=Codepoint … 6=Image), not canonical height.</summary>
     public const int MaxImageTiers = 6;
     public const int MaxExistenceRounds = MaxImageTiers + 1;
 

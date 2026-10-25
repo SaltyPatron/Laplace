@@ -16,6 +16,24 @@
 #include "laplace/core/modality_decimal.h"
 #include "laplace/core/modality_number_table.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/text_identity.h"
+#include "laplace/laplace.h"
+
+/* Scalar identity, placement and height all come from the same Native text
+ * composition. Reuse its thread-local arena instead of allocating a text tree
+ * for every signed sample. A provider role is never a substitute for height. */
+static int resolve_scalar_content_node(
+    const uint8_t* bytes, size_t length, tier_node_view_t* out_node) {
+    lp_text* context = text_identity_thread_context();
+    if (!context || !bytes || !length || !out_node) return -6;
+    const lp_ref scalar = lp_text_decompose(context, bytes, length, NULL, NULL);
+    memset(out_node, 0, sizeof *out_node);
+    memcpy(&out_node->id, &scalar.id, sizeof scalar.id);
+    out_node->tier = scalar.tier;
+    lp_coord_xyzm(&scalar.c, out_node->coord);
+    hilbert4d_encode(out_node->coord, &out_node->hilbert);
+    return 0;
+}
 
 /* Parse ASCII digit bytes to 0..255 for modality_number_perfcache O(1). */
 static int parse_u8_digits(const uint8_t* buf, size_t n, uint32_t* out) {
@@ -32,37 +50,41 @@ static int parse_u8_digits(const uint8_t* buf, size_t n, uint32_t* out) {
 
 /*
  * Number/Sample id: prefer modality_number ROM (0..255) when loaded; else
- * ScalarId content_root of the digit UTF-8. Geometry always from child centroid
- * when falling back; ROM path uses precomputed geom when available.
+ * the Native scalar composition, including its canonical height and placement.
  */
 static int resolve_number_id(
     const uint8_t* buf, size_t n,
-    const double* child_coords, size_t child_n,
-    hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb) {
+    hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb, uint8_t* out_tier) {
     uint32_t v = 0;
     if (parse_u8_digits(buf, n, &v) == 0
         && modality_number_table_is_loaded()) {
         if (modality_number_table_lookup_geom(
-                v, out_id, out_coord, out_hb, NULL, NULL) == 0) {
+                v, out_id, out_coord, out_hb, NULL, out_tier) == 0) {
             return 0;
         }
     }
-    if (laplace_content_root_id(buf, n, out_id) != 0) return -6;
-    math4d_centroid(child_coords, child_n, out_coord);
-    hilbert4d_encode(out_coord, out_hb);
+    tier_node_view_t scalar;
+    if (resolve_scalar_content_node(buf, n, &scalar) != 0) return -6;
+    *out_id = scalar.id;
+    memcpy(out_coord, scalar.coord, sizeof scalar.coord);
+    *out_hb = scalar.hilbert;
+    *out_tier = scalar.tier;
     return 0;
 }
 
-/* Signed scalar content reuses the shared canonical content ladder. Its UAX ladder may have an
- * intermediate digit word, so both identity and placement come from the exact
- * natural content node rather than a flat sign/digit centroid. */
-static int resolve_scalar_content_node(
-    const uint8_t* bytes, size_t length, tier_node_view_t* out_node) {
-    tier_tree_t* scalar = NULL;
-    if (content_witness_tree_build(bytes, length, &scalar) != 0 || !scalar) return -6;
-    const int rc = content_witness_tree_root_node(scalar, out_node);
-    tier_tree_free(scalar);
-    return rc == 0 ? 0 : -6;
+static int compose_modality_node(tier_tree_t* tree, size_t index, uint32_t first, uint32_t count,
+                                 hash128_t* ids, double* coords, hilbert128_t* hbs) {
+    const uint8_t* tiers = tier_tree_tier_array(tree);
+    uint8_t height = 0;
+    for (uint32_t k = 0; k < count; ++k)
+        if (tiers[first + k] > height) height = tiers[first + k];
+    if (count > 1u) {
+        if (height == UINT8_MAX) return -6;
+        ++height;
+    }
+    if (tier_tree_set_tier(tree, (uint32_t)index, height) != 0) return -6;
+    return hash_composer_compose_node(height, &ids[first], &coords[(size_t)first * 4], count,
+                                      &ids[index], &coords[index * 4], &hbs[index]);
 }
 
 #ifdef _WIN32
@@ -120,18 +142,19 @@ int laplace_modality_hash_composer_resolver(
 static int compose_image_tree(tier_tree_t* tree) {
     if (!tree) return -1;
     if (!codepoint_table_is_loaded()) return -3;
+    if (tier_tree_preserve_roles(tree) != 0) return -6;
 
     const size_t count = tier_tree_node_count(tree);
     if (count == 0) return 0;
 
-    const uint8_t*  tiers  = tier_tree_tier_array(tree);
+    const uint8_t*  roles  = tier_tree_role_array(tree);
     const uint32_t* fci    = tier_tree_first_child_idx_array(tree);
     const uint32_t* cc     = tier_tree_child_count_array(tree);
     const uint32_t* atoms  = tier_tree_atom_array(tree);
     hash128_t*      ids    = tier_tree_id_array_mut(tree);
     double*         coords = tier_tree_coord_array_mut(tree);
     hilbert128_t*   hbs    = tier_tree_hilbert_array_mut(tree);
-    if (!tiers || !fci || !cc || !atoms || !ids || !coords || !hbs) return -1;
+    if (!roles || !fci || !cc || !atoms || !ids || !coords || !hbs) return -1;
 
     for (size_t i = 0; i < count; ++i) {
         const uint32_t first = fci[i];
@@ -159,7 +182,7 @@ static int compose_image_tree(tier_tree_t* tree) {
         if ((size_t)first >= count || (size_t)first + (size_t)cnt > count)
             return -1;
 
-        if (tiers[i] == LAPLACE_IMAGE_TIER_NUMBER) {
+        if (roles[i] == LAPLACE_IMAGE_TIER_NUMBER) {
             /* Digit codepoints are ASCII '0'..'9' — UTF-8 is one byte each. */
             if (cnt == 0 || cnt > 3u) return -1;
             uint8_t buf[3];
@@ -168,16 +191,15 @@ static int compose_image_tree(tier_tree_t* tree) {
                 if (cp < (uint32_t)'0' || cp > (uint32_t)'9') return -1;
                 buf[k] = (uint8_t)cp;
             }
+            uint8_t height;
             if (resolve_number_id(buf, (size_t)cnt,
-                                  &coords[(size_t)first * 4], (size_t)cnt,
-                                  &ids[i], &coords[i * 4], &hbs[i]) != 0)
+                                  &ids[i], &coords[i * 4], &hbs[i], &height) != 0
+                || tier_tree_set_tier(tree, (uint32_t)i, height) != 0)
                 return -6;
             continue;
         }
 
-        if (hash_composer_compose_node(tiers[i], &ids[first],
-                                   &coords[(size_t)first * 4], (size_t)cnt,
-                                   &ids[i], &coords[i * 4], &hbs[i]) != 0) return -6;
+        if (compose_modality_node(tree, i, first, cnt, ids, coords, hbs) != 0) return -6;
     }
     return 0;
 }
@@ -190,18 +212,19 @@ static int compose_image_tree(tier_tree_t* tree) {
 static int compose_audio_tree(tier_tree_t* tree) {
     if (!tree) return -1;
     if (!codepoint_table_is_loaded()) return -3;
+    if (tier_tree_preserve_roles(tree) != 0) return -6;
 
     const size_t count = tier_tree_node_count(tree);
     if (count == 0) return 0;
 
-    const uint8_t*  tiers  = tier_tree_tier_array(tree);
+    const uint8_t*  roles  = tier_tree_role_array(tree);
     const uint32_t* fci    = tier_tree_first_child_idx_array(tree);
     const uint32_t* cc     = tier_tree_child_count_array(tree);
     const uint32_t* atoms  = tier_tree_atom_array(tree);
     hash128_t*      ids    = tier_tree_id_array_mut(tree);
     double*         coords = tier_tree_coord_array_mut(tree);
     hilbert128_t*   hbs    = tier_tree_hilbert_array_mut(tree);
-    if (!tiers || !fci || !cc || !atoms || !ids || !coords || !hbs) return -1;
+    if (!roles || !fci || !cc || !atoms || !ids || !coords || !hbs) return -1;
 
     for (size_t i = 0; i < count; ++i) {
         const uint32_t first = fci[i];
@@ -229,7 +252,7 @@ static int compose_audio_tree(tier_tree_t* tree) {
         if ((size_t)first >= count || (size_t)first + (size_t)cnt > count)
             return -1;
 
-        if (tiers[i] == 1u) { /* Sample = Number */
+        if (roles[i] == 1u) { /* Sample = Number */
             if (cnt == 0 || cnt > LAPLACE_DECIMAL_MAX_CPS) return -1;
             uint8_t buf[LAPLACE_DECIMAL_MAX_CPS];
             int signed_neg = 0;
@@ -244,10 +267,11 @@ static int compose_audio_tree(tier_tree_t* tree) {
                 buf[k] = (uint8_t)cp;
             }
             /* u8 ROM covers unsigned 0..255 only; signed/out-of-range → content_root. */
+            uint8_t height;
             if (!signed_neg
                 && resolve_number_id(buf, (size_t)cnt,
-                                     &coords[(size_t)first * 4], (size_t)cnt,
-                                     &ids[i], &coords[i * 4], &hbs[i]) == 0) {
+                                     &ids[i], &coords[i * 4], &hbs[i], &height) == 0) {
+                if (tier_tree_set_tier(tree, (uint32_t)i, height) != 0) return -6;
                 continue;
             }
             tier_node_view_t scalar;
@@ -255,12 +279,11 @@ static int compose_audio_tree(tier_tree_t* tree) {
             ids[i] = scalar.id;
             memcpy(&coords[i * 4], scalar.coord, sizeof(scalar.coord));
             hbs[i] = scalar.hilbert;
+            if (tier_tree_set_tier(tree, (uint32_t)i, scalar.tier) != 0) return -6;
             continue;
         }
 
-        if (hash_composer_compose_node(tiers[i], &ids[first],
-                                   &coords[(size_t)first * 4], (size_t)cnt,
-                                   &ids[i], &coords[i * 4], &hbs[i]) != 0) return -6;
+        if (compose_modality_node(tree, i, first, cnt, ids, coords, hbs) != 0) return -6;
     }
     return 0;
 }
@@ -304,7 +327,7 @@ static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
         if (tier_tree_get_node(tree, idx, &node) != 0) break;
-        if (node.tier == 0 || node.child_count != 1) break;
+        if (node.child_count != 1) break;
         tier_node_view_t child;
         if (tier_tree_get_node(tree, node.first_child_idx, &child) != 0) break;
         /* Audio scaffold spans use different units at successive tiers.
@@ -348,7 +371,7 @@ static int emit_node(
     /* A signed Sample is the text composition "-digits": its content id, its entity and
      * its composition physicality (over ['-', digits]) are the content ladder's, so the
      * content path stages them, once per stage like any content. */
-    if (modality == LAPLACE_MODALITY_AUDIO && node.tier == 1u
+    if (modality == LAPLACE_MODALITY_AUDIO && node.role == 1u
         && node.child_count > 1u) {
         tier_node_view_t first;
         if (tier_tree_get_node(tree, node.first_child_idx, &first) != 0) return -2;
@@ -375,7 +398,7 @@ static int emit_node(
     laplace_physicality_id_compute(node.id, 1, &phys_id);
     if (intent_stage_witness_seen(stage, &phys_id)) return 0;
     if (emit_entity && !intent_stage_witness_seen(stage, &node.id)) {
-        hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
+        hash128_t type_id = laplace_modality_tier_type_id(modality, node.role);
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0
             || intent_stage_witness_record(stage, &node.id) != 0)
             return -2;
