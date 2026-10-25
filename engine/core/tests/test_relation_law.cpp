@@ -118,6 +118,26 @@ TEST(LaplaceRelationLaw, MeronymyIsHasPartWithAQualifier) {
     EXPECT_STREQ("HAS_PART", successor);
 }
 
+// Quoted WordNet pointer bytes survive manifest comments and keep their
+// governed direction/qualifier. An empty selector must never resolve.
+TEST(LaplaceRelationLaw, WordNetHashPointersPreserveTheirSurfaces) {
+    hash128_t has_part = relation_type_id("HAS_PART"), tid, parent;
+    double rank = 0;
+    laplace_rel_symmetry_t sym;
+    uint8_t flip = 9;
+    const char* surfaces[] = {"#m", "#s", "#p", "%m", "%s", "%p"};
+    const char* qualifiers[] = {"member", "substance", "part"};
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_EQ(0, laplace_relation_resolve_surface(surfaces[i], &tid, &rank, &sym, &flip, &parent)) << surfaces[i];
+        EXPECT_TRUE(hash128_equals(&has_part, &tid)) << surfaces[i];
+        EXPECT_EQ(i < 3 ? 1 : 0, flip) << surfaces[i];
+        EXPECT_EQ(laplace_qualifier_bit("meronymy", qualifiers[i % 3]), laplace_relation_surface_qualifier(surfaces[i]));
+    }
+    EXPECT_NE(0, laplace_relation_resolve_surface("", &tid, &rank, &sym, &flip, &parent));
+    for (size_t i = 0; i < laplace_relation_alias_table_count; ++i)
+        EXPECT_NE('\0', laplace_relation_alias_table[i].surface[0]);
+}
+
 // How a word descends and which subevent an event states are qualifiers of one element.
 TEST(LaplaceRelationLaw, EtymologyAndSubeventKindsAreQualifiers) {
     hash128_t tid, parent;

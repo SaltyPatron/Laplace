@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
 SET LOCAL search_path = public,laplace;
 CREATE TEMP TABLE claim_words AS
 SELECT content,laplace_id(content) AS id,laplace_tier(content) AS tier,laplace_coord(content) AS coord
-FROM unnest(ARRAY['canine','hypernym','qualify','animal','antonym','source','file','fixture','@','~']) content;
+FROM unnest(ARRAY['canine','hypernym','qualify','animal','antonym','source','file','fixture','@','~','#m','%s']) content;
 INSERT INTO public.entity(id,tier,coord,hilbert)
 SELECT id,tier,coord,laplace_hilbert(content) FROM claim_words WHERE tier>0 ON CONFLICT DO NOTHING;
 INSERT INTO public.physicality(entity,tier,hilbert,path)
@@ -41,16 +41,19 @@ END $$;
 CREATE TEMP TABLE leader_claims(name text,id blake3);
 CREATE TEMP TABLE leader_witness(id blake3);
 DO $$
-DECLARE a blake3; b blake3; other blake3; pointer blake3; inverse blake3; rec blake3; fm blake3; ft blake3; sm blake3; witness_id blake3;
+DECLARE a blake3; b blake3; other blake3; pointer blake3; inverse blake3; holo blake3; mero blake3; rec blake3; fm blake3; ft blake3; sm blake3; witness_id blake3;
 BEGIN
   a=pg_temp.claim_node(ARRAY[laplace_id('canine'),laplace_id('hypernym'),laplace_id('qualify'),laplace_id('animal')],'claim');
   b=pg_temp.claim_node(ARRAY[laplace_id('canine'),laplace_id('hypernym'),laplace_id('hypernym'),laplace_id('animal')],'claim');
   other=pg_temp.claim_node(ARRAY[laplace_id('canine'),laplace_id('antonym'),laplace_id('animal')],'claim');
   pointer=pg_temp.claim_node(ARRAY[laplace_id('canine'),laplace_id('@'),laplace_id('animal')],'claim');
   inverse=pg_temp.claim_node(ARRAY[laplace_id('animal'),laplace_id('~'),laplace_id('canine')],'claim');
+  holo=pg_temp.claim_node(ARRAY[laplace_id('canine'),laplace_id('#m'),laplace_id('animal')],'claim');
+  mero=pg_temp.claim_node(ARRAY[laplace_id('animal'),laplace_id('%s'),laplace_id('canine')],'claim');
+  INSERT INTO leader_claims VALUES('holo',holo),('mero',mero);
   INSERT INTO leader_claims VALUES('four',a),('run',b),('other',other),('wndb',pointer),('wndb-inverse',inverse);
-  rec=pg_temp.claim_node(array_fill(a,ARRAY[1000])||array_fill(b,ARRAY[1000])||array_fill(other,ARRAY[1000])||array_fill(pointer,ARRAY[1000])||array_fill(inverse,ARRAY[1000])||ARRAY[laplace_id('fixture')],
-                        'record',ARRAY[2147483648,2147483648,2147483648,2147483648,2147483648,0]::bigint[]);
+  rec=pg_temp.claim_node(array_fill(a,ARRAY[1000])||array_fill(b,ARRAY[1000])||array_fill(other,ARRAY[1000])||array_fill(pointer,ARRAY[1000])||array_fill(inverse,ARRAY[1000])||array_fill(holo,ARRAY[1000])||array_fill(mero,ARRAY[1000])||ARRAY[laplace_id('fixture')],
+                        'record',ARRAY[2147483648,2147483648,2147483648,2147483648,2147483648,2147483648,2147483648,0]::bigint[]);
   fm=pg_temp.claim_node(ARRAY[laplace_id('file'),laplace_id('fixture')],'tuple');
   ft=pg_temp.claim_node(ARRAY[fm,rec],'file',ARRAY[4294967296,5368709120]::bigint[]);
   sm=pg_temp.claim_node(ARRAY[laplace_id('source'),laplace_id('fixture')],'tuple');
@@ -118,5 +121,21 @@ BEGIN
     RAISE EXCEPTION 'an alias from another declared arena entered the selected band';
   END IF;
 END $$;
+-- The actual League request spans several bands. Exercise every declared band
+-- and require the partitive page to retain both source pointer trajectories.
+CREATE TEMP TABLE all_band_leaders AS
+SELECT * FROM ops.claim_leaders(ARRAY(SELECT band::int FROM converse.relation_band_catalog()),20);
+DO $
+BEGIN
+  IF (SELECT count(DISTINCT band) FROM all_band_leaders)<>
+     (SELECT count(*) FROM converse.relation_band_catalog()) THEN
+    RAISE EXCEPTION 'the League read omitted a declared band';
+  END IF;
+  IF (SELECT count(*) FROM all_band_leaders p JOIN leader_claims c ON encode(p.claim_id,'hex')=c.id::text
+      WHERE c.name IN ('holo','mero') AND p.band=4 AND p.witnesses=1
+      AND p.parts->1->>'label'=CASE c.name WHEN 'holo' THEN '#m' ELSE '%s' END)<>2 THEN
+    RAISE EXCEPTION 'partitive pointer claims lost their identity, surface or attribution';
+  END IF;
+END $;
 SELECT 'native_claim_leaders: declared aliases, full arity, runs and real attribution passed';
 ROLLBACK;
