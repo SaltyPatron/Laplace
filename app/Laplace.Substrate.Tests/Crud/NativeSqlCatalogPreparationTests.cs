@@ -84,8 +84,11 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var command = _source.CreateCommand(await File.ReadAllTextAsync(migration));
             await command.ExecuteNonQueryAsync();
         }
-        await using (var native = NpgsqlCatalog.Command(_source, "migration.canonical_substrate"))
+        await using var nativeConnection = await _source.OpenConnectionAsync();
+        await using var nativeTransaction = await nativeConnection.BeginTransactionAsync();
+        await using (var native = NpgsqlCatalog.Command(nativeConnection, nativeTransaction, "migration.canonical_substrate"))
             await native.ExecuteNonQueryAsync();
+        await nativeTransaction.CommitAsync();
     }
 
     public async Task DisposeAsync()
@@ -173,7 +176,14 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var yc = window.Compose([y, predicate, value], 2, 1, 1);
         // LP_SAID_CLAIM: the source actually asserts these Native claim carriers.
         xc.Said = yc.Said = 1;
-        var witness = window.Compose([xc, yc], 3);
+        var language = window.Text("eng"u8);
+        var context = window.Text("context"u8);
+        // LP_KIND_TUPLE (bit 2): actual Native structural responders for each word.
+        var xsense = window.Compose([x, language, context], 2, 4, 4);
+        var ysense = window.Compose([y, language, context], 2, 4, 4);
+        var link = window.Compose([xsense, predicate, ysense], 3, 1, 1);
+        link.Said = 1;
+        var witness = window.Compose([xc, yc, link], 4);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
         await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
@@ -186,7 +196,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             register.Parameters.AddWithValue(witness.Id);
             await register.ExecuteNonQueryAsync();
         }
-        foreach (var claim in new[] { xc, yc })
+        foreach (var claim in new[] { xc, yc, link })
         {
             await using var standing = new NpgsqlCommand("""
                 INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
@@ -197,6 +207,13 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             standing.Parameters.AddWithValue(claim.Id);
             standing.Parameters.AddWithValue(witness.Id);
             await standing.ExecuteNonQueryAsync();
+        }
+        await using (var couple = NpgsqlCatalog.Command(connection, transaction, "conversation.couple_topics", x.Id.ToBytes(), y.Id.ToBytes()))
+        await using (var read = await couple.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync());
+            Assert.Equal(xsense.Id.ToBytes(), read.GetFieldValue<byte[]>(0));
+            Assert.Equal(ysense.Id.ToBytes(), read.GetFieldValue<byte[]>(1));
         }
         foreach (var (name, id) in new[] { (xName, x.Id), (yName, y.Id), (Convert.ToHexString(x.Id.ToBytes()), x.Id) })
         {
@@ -215,7 +232,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await using (var read = await facts.ExecuteReaderAsync())
         {
             Assert.True(await read.ReadAsync());
-            Assert.Equal("!", read.GetString(0));
+            Assert.Equal("IS_ANTONYM_OF", read.GetString(0));
             Assert.Equal("shared", read.GetString(1));
             Assert.Equal(1L, read.GetInt64(3));
         }
@@ -224,7 +241,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         {
             Assert.True(await read.ReadAsync());
             Assert.Equal("both", read.GetString(0));
-            Assert.Equal("!", read.GetString(1));
+            Assert.Equal("IS_ANTONYM_OF", read.GetString(1));
             Assert.Equal("shared", read.GetString(2));
             Assert.False(await read.ReadAsync());
         }

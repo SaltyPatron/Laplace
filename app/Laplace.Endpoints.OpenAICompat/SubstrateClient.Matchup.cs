@@ -53,6 +53,10 @@ internal sealed partial class SubstrateClient
         var x = xTask.Result;
         var y = yTask.Result;
         if (x is null || y is null) return null;
+        var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
+            _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);
+        x = (coupled.X, x.Value.Label);
+        y = (coupled.Y, y.Value.Label);
 
         var xHex = Convert.ToHexString(x.Value.Id).ToLowerInvariant();
         var yHex = Convert.ToHexString(y.Value.Id).ToLowerInvariant();
@@ -224,6 +228,10 @@ internal sealed partial class SubstrateClient
         var x = xTask.Result;
         var y = yTask.Result;
         if (x is null || y is null) return null;
+        var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
+            _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);
+        x = (coupled.X, x.Value.Label);
+        y = (coupled.Y, y.Value.Label);
 
         var xChessTask = IsChessPlayerAsync(x.Value.Id, ct);
         var yChessTask = IsChessPlayerAsync(y.Value.Id, ct);
