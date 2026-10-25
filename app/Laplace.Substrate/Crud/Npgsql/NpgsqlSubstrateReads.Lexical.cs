@@ -57,13 +57,10 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "laplace_translations", onError: onError);
 
     /// <summary><c>converse.resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
-    public static Task<byte[]?> ResolveRefAsync(
-        NpgsqlDataSource dataSource, string reference, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource,
-            SqlCatalog.Get("converse.resolve_ref"),
-            p => p.AddWithValue("ref", reference),
-            ct: ct, label: "resolve_ref", onError: onError);
+    public static async Task<byte[]?> ResolveRefAsync(
+        NpgsqlDataSource dataSource,string reference,CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError=null)
+        => (await ResolveRefWithLabelAsync(dataSource,reference,ct,onError).ConfigureAwait(false))?.Id;
 
     /// <summary><c>laplace.word_id(surface)</c> — surface spelling → word entity id.</summary>
     public static Task<byte[]?> WordIdAsync(

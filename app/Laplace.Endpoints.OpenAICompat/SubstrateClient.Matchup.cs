@@ -15,22 +15,14 @@ internal sealed partial class SubstrateClient
     /// <summary>Top consensus edges per salience band, fully labeled.</summary>
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.BandLeadersNamedAsync(
-            _dataSource, bands, perBand, ct, TranslateSubstrateError).ConfigureAwait(false);
         var claims = await NpgsqlSubstrateReads.ClaimLeadersNamedAsync(
             _dataSource, bands, perBand, ct, TranslateSubstrateError).ConfigureAwait(false);
-
-        return rows.GroupBy(r => new { r.Band, r.BandName })
-            .OrderBy(g => g.Key.Band)
-            .Select(g => new BandLeaders(g.Key.Band, g.Key.BandName,
-                [.. g.Where(r => r.Leader.HasValue).Select(r => r.Leader!.Value)
-                    .Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))],
-                claims.Count == 0 ? null : [.. claims.Where(r => r.Band == g.Key.Band && r.ClaimId is not null)
-                    .Select(r => new ClaimLeaderRow(r.ClaimId!,
-                        System.Text.Json.JsonSerializer.Deserialize<ClaimLeaderPart[]>(r.Parts!)
-                            ?? throw new InvalidDataException("Claim leaders returned no ordered constituents."),
-                        r.Confidence!.Value, r.Witnesses!.Value, r.Trajectory!))]))
-            .ToList();
+        return claims.GroupBy(r => new { r.Band, r.BandName }).OrderBy(g => g.Key.Band)
+            .Select(g => new BandLeaders(g.Key.Band, g.Key.BandName, [],
+                [.. g.Where(r => r.ClaimId is not null).Select(r => new ClaimLeaderRow(r.ClaimId!,
+                    System.Text.Json.JsonSerializer.Deserialize<ClaimLeaderPart[]>(r.Parts!)
+                        ?? throw new InvalidDataException("Claim leaders returned no ordered constituents."),
+                    r.Confidence!.Value, r.Witnesses!.Value, r.Trajectory!))])).ToList();
     }
 
     /// <summary>
@@ -47,11 +39,9 @@ internal sealed partial class SubstrateClient
     /// <summary>The fast half of a matchup: both cards plus a type-appropriate tape.</summary>
     public async Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct)
     {
-        var xTask = ResolveTopicAsync(xRef, ct);
-        var yTask = ResolveTopicAsync(yRef, ct);
-        await Task.WhenAll(xTask, yTask).ConfigureAwait(false);
-        var x = xTask.Result;
-        var y = yTask.Result;
+        var resolved = await ResolveTopicsAsync([xRef, yRef], ct).ConfigureAwait(false);
+        var x = resolved[0];
+        var y = resolved[1];
         if (x is null || y is null) return null;
         var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
             _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);
@@ -222,11 +212,9 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct)
     {
-        var xTask = ResolveTopicAsync(xRef, ct);
-        var yTask = ResolveTopicAsync(yRef, ct);
-        await Task.WhenAll(xTask, yTask).ConfigureAwait(false);
-        var x = xTask.Result;
-        var y = yTask.Result;
+        var resolved = await ResolveTopicsAsync([xRef, yRef], ct).ConfigureAwait(false);
+        var x = resolved[0];
+        var y = resolved[1];
         if (x is null || y is null) return null;
         var coupled = await NpgsqlSubstrateReads.CoupleTopicsAsync(
             _dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError).ConfigureAwait(false);

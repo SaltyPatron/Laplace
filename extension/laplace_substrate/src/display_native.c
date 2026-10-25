@@ -1,545 +1,70 @@
+/* Native display acquisition/realization lives in Laplace-postgres. This file
+ * projects compiled registry metadata only; it never reads a content table. */
 #include "postgres.h"
-#include "miscadmin.h"
 #include "funcapi.h"
 #include "utils/array.h"
 #include "utils/hsearch.h"
-#include "utils/timestamp.h"
-#include "lib/stringinfo.h"
-#include "laplace/core/attestation_engine.h"
-#include "laplace/core/entity_type_law.h"
-#include "laplace/core/mantissa.h"
-#include "laplace/core/sql_catalog.h"
+#include "utils/memutils.h"
 #include "spi_common.h"
-#include "spi_nested.h"
-#include "trajectory_wkb.h"
-#include "opaque_surface.h"
-#include "perfcache_native.h"
+#include "laplace/core/relation_law.h"
+#include "laplace/core/text_identity.h"
 
-/* Labels a set of ids for REALIZE. Stages run in a fixed order as set reads;
- * an id leaves once a stage gives it a non-opaque label, so only unlabeled ids
- * reach the next stage: a text-typed entity's own surface at or below sentence
- * tier, then a record's parts, then the words a source binds to it (lexicalization),
- * then any other entity's own surface, then names. Text (a Word, a
- * Sentence) is shown as itself and never relabelled as a lemma a source binds
- * to it; an opaque surface (an ILI, an offset) never labels anything before
- * its lexicalization has been tried. A composition above
- * sentence tier of word-grain parts is shown as its parts; one of sentences
- * previews its first-child spine through trajectory head vertices; siblings
- * are never expanded and no document is rendered whole. */
 typedef struct {
-    hash128_t id, type, target, chosen_evidence;
-    int16 tier, target_tier;
-    bool exists, has_type, has_target, record, text;
-    bool content_checked, content_present; /* this call's statement snapshot only */
-    int64 chosen_time;
-    char *label;
-} DisplayItem;
+    hash128_t surface,canonical;
+    const char *name;
+    bool inverse;
+    int16 qualifier;
+} RelationMetadata;
+static HTAB *relation_metadata;
 
-static const char *query_keys[] = {
-    "display.facets", "display.names", "display.text", "display.metadata_labels",
-    "display.file_metadata", "display.definition_types", "display.definitions",
-    "display.definition_owners", "display.heads", "entity.facets", "display.lexical", "display.parts",
-    "entity.stored_facets"
-};
-static SPIPlanPtr plans[lengthof(query_keys)];
-enum { FACETS,NAMES,TEXT,METADATA,FILE_META,DEF_TYPES,DEF_OWNED,DEF_INVERSE,HEADS,NODE_TIERS,LEXICAL,PARTS,STORED_FACETS };
-
-static int
-run_query(int which, ArrayType *ids, ArrayType *types)
+static HTAB *metadata(void)
 {
-    int n = which == DEF_TYPES ? 0 : which == DEF_OWNED || which == DEF_INVERSE ? 2 : 1;
-    Oid oids[] = {BYTEAARRAYOID,BYTEAARRAYOID};
-    if (plans[which] == NULL) {
-        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(query_keys[which]),n,oids,CURSOR_OPT_PARALLEL_OK);
-        if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
-            elog(ERROR,"display: cannot retain %s",query_keys[which]);
-    }
-    Datum args[] = {PointerGetDatum(ids),PointerGetDatum(types)};
-    int rc = SPI_execute_plan(plans[which],args,NULL,true,0);
-    if (rc != SPI_OK_SELECT) elog(ERROR,"display: read failed for %s",query_keys[which]);
-    return rc;
-}
-
-static ArrayType *
-item_ids(DisplayItem **items, int n, bool targets)
-{
-    Datum *values = palloc(Max(n,1)*sizeof(Datum));
-    for (int i=0;i<n;++i) values[i]=hash128_to_datum(targets?&items[i]->target:&items[i]->id);
-    return construct_array(values,n,BYTEAOID,-1,false,TYPALIGN_INT);
-}
-
-/* The Unicode floor is recorded in the native cache, not necessarily in an
- * entity partition. Facets and display must agree with existence and rendering
- * on that floor. Stored rows retain their structural/attested type semantics. */
-static void
-read_facets(int which, DisplayItem **items, int n, HTAB *lookup)
-{
-    run_query(which,item_ids(items,n,false),NULL);
-    for(uint64 i=0;i<SPI_processed;++i) {
-        bool isnull;HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;
-        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-        DisplayItem *item=hash_search(lookup,&id,HASH_FIND,NULL);
-        if(!item)continue;
-        item->exists=true;item->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
-        Datum type=SPI_getbinval(t,d,3,&isnull);
-        item->has_type=!isnull;if(!isnull)item->type=datum_to_hash128(type);
-        if(which==FACETS) {
-            Datum name=SPI_getbinval(t,d,4,&isnull);
-            if(!isnull){char *s=TextDatumGetCString(name);if(*s)item->label=s;}
+    if(relation_metadata)return relation_metadata;
+    size_t n=laplace_relation_table_count+laplace_relation_alias_table_count;
+    MemoryContext owner=AllocSetContextCreate(TopMemoryContext,"Native relation metadata",ALLOCSET_DEFAULT_SIZES);
+    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RelationMetadata);ctl.hcxt=owner;
+    HTAB *next=hash_create("Native relation metadata",Max(n,1),&ctl,HASH_ELEM|HASH_BLOBS|HASH_CONTEXT);
+    PG_TRY();{
+      for(size_t i=0;i<n;i++){
+        const char *surface;const laplace_relation_def_t *def;bool inverse=false;int16 qualifier=-1;
+        if(i<laplace_relation_table_count){def=laplace_relation_table+i;surface=def->canonical;}
+        else{
+          const laplace_relation_alias_t *alias=laplace_relation_alias_table+i-laplace_relation_table_count;
+          if(alias->canon_idx<0 || (size_t)alias->canon_idx>=laplace_relation_table_count)
+            elog(ERROR,"relation metadata: invalid declared alias target");
+          def=laplace_relation_table+alias->canon_idx;surface=alias->surface;
+          inverse=alias->flip!=0;qualifier=alias->qualifier_bit;
         }
-    }
-    SPI_freetuptable(SPI_tuptable);
-    for(int i=0;i<n;++i) {
-        DisplayItem *item=items[i];uint32_t cp;
-        if(!item->exists && laplace_perfcache_codepoint_for_id((const uint8_t*)&item->id,&cp)) {
-            if(laplace_entity_type_id("Codepoint",&item->type)!=0)
-                elog(ERROR,"facets: Codepoint type is not registered");
-            item->exists=true;item->tier=0;item->has_type=true;
-        }
-        item->record=item->exists && item->has_type && item->tier>=2 && laplace_entity_type_is_text(&item->type)==0;
-        item->text=item->exists && item->has_type && laplace_entity_type_is_text(&item->type)==1;
-    }
+        hash128_t id,canonical;
+        if(hash128_text((const uint8_t *)surface,strlen(surface),&id)!=0
+           || laplace_relation_type_id(def->canonical,&canonical)!=0)
+          elog(ERROR,"relation metadata: Native identity unavailable");
+        bool found;RelationMetadata *entry=hash_search(next,&id,HASH_ENTER,&found);
+        if(found && (memcmp(&entry->canonical,&canonical,sizeof canonical)
+                     || entry->inverse!=inverse || entry->qualifier!=qualifier))
+          elog(ERROR,"relation metadata: conflicting declarations for one Native identity");
+        *entry=(RelationMetadata){id,canonical,def->canonical,inverse,qualifier};
+      }
+    }PG_CATCH();{MemoryContextDelete(owner);PG_RE_THROW();}PG_END_TRY();
+    relation_metadata=next;return relation_metadata;
 }
 
-static int
-facet_id_compare(const void *a,const void *b)
+PG_FUNCTION_INFO_V1(pg_relation_metadata);
+Datum pg_relation_metadata(PG_FUNCTION_ARGS)
 {
-    const DisplayItem *left=*(DisplayItem *const*)a,*right=*(DisplayItem *const*)b;
-    return memcmp(&left->id,&right->id,sizeof(hash128_t));
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_entity_facets_batch);
-Datum
-pg_laplace_entity_facets_batch(PG_FUNCTION_ARGS)
-{
-    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo*)fcinfo->resultinfo;
+    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo *)fcinfo->resultinfo;
     if(PG_ARGISNULL(0))return (Datum)0;
     Datum *ids;bool *nulls;int n;
     deconstruct_array(PG_GETARG_ARRAYTYPE_P(0),BYTEAOID,-1,false,TYPALIGN_INT,&ids,&nulls,&n);
-    if(n==0)return (Datum)0;
-    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(DisplayItem);
-    HTAB *lookup=hash_create("entity facet items",n,&ctl,HASH_ELEM|HASH_BLOBS);
-    DisplayItem **items=palloc(n*sizeof(DisplayItem*));int unique=0;
-    for(int i=0;i<n;++i) {
-        if(nulls[i])continue;
-        hash128_t id=datum_to_hash128(ids[i]);bool found;
-        DisplayItem *item=hash_search(lookup,&id,HASH_ENTER,&found);
-        if(!found){memset(item,0,sizeof(*item));item->id=id;items[unique++]=item;}
+    if(!n)return (Datum)0;
+    HTAB *lookup=metadata();
+    for(int i=0;i<n;i++){
+      if(nulls[i])continue;hash128_t id=datum_to_hash128(ids[i]);
+      RelationMetadata *entry=hash_search(lookup,&id,HASH_FIND,NULL);if(!entry)continue;
+      Datum values[]={ids[i],hash128_to_datum(&entry->canonical),CStringGetTextDatum(entry->name),
+                      BoolGetDatum(entry->inverse),Int16GetDatum(entry->qualifier)};
+      bool missing[]={false,false,false,false,false};
+      tuplestore_putvalues(r->setResult,r->setDesc,values,missing);
     }
-    bool spi_top=false;
-    if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT)elog(ERROR,"facets: SPI connect failed");
-    read_facets(STORED_FACETS,items,unique,lookup);
-    qsort(items,unique,sizeof(DisplayItem*),facet_id_compare);
-    for(int i=0;i<unique;++i) {
-        DisplayItem *item=items[i];if(!item->exists)continue;
-        Datum values[]={hash128_to_datum(&item->id),Int16GetDatum(item->tier),hash128_to_datum(&item->type)};
-        bool out_nulls[]={false,false,!item->has_type};
-        tuplestore_putvalues(r->setResult,r->setDesc,values,out_nulls);
-    }
-    hash_destroy(lookup);laplace_spi_finish(spi_top);return (Datum)0;
-}
-
-static char **
-batch_text(int which, DisplayItem **items, int n, bool targets)
-{
-    char **out = palloc0(Max(n,1)*sizeof(char*));
-    if (n==0) return out;
-    run_query(which,item_ids(items,n,targets),NULL);
-    if (SPI_processed != 1) elog(ERROR,"display: batch renderer returned no array");
-    bool isnull;
-    Datum array=SPI_getbinval(SPI_tuptable->vals[0],SPI_tuptable->tupdesc,1,&isnull);
-    if (!isnull) {
-        Datum *values; bool *nulls; int count;
-        deconstruct_array(DatumGetArrayTypeP(array),TEXTOID,-1,false,TYPALIGN_INT,&values,&nulls,&count);
-        if (count!=n) elog(ERROR,"display: batch renderer lost positional alignment");
-        for(int i=0;i<n;++i) if(!nulls[i]) out[i]=TextDatumGetCString(values[i]);
-    }
-    SPI_freetuptable(SPI_tuptable);
-    return out;
-}
-
-#define opaque_name laplace_opaque_surface
-
-static char *
-short_identity(const hash128_t *id)
-{
-    bytea *b = DatumGetByteaP(hash128_to_datum(id));
-    const unsigned char *d = (const unsigned char *) VARDATA(b);
-    static const char digits[] = "0123456789abcdef";
-    char *hex = palloc(13);
-
-    for (int i = 0; i < 6; ++i)
-    {
-        hex[i * 2] = digits[d[i] >> 4];
-        hex[i * 2 + 1] = digits[d[i] & 0x0f];
-    }
-    hex[12] = '\0';
-    return hex;
-}
-
-static int
-pending(DisplayItem **all,int n,DisplayItem **out,int mode)
-{
-    int count=0;
-    for(int i=0;i<n;++i) if(all[i]->label==NULL &&
-        (mode==0 || (mode==1 && all[i]->exists && all[i]->tier<=3) ||
-         (mode==3 && all[i]->exists && all[i]->text && all[i]->tier<=3) ||
-         (mode==2 && !all[i]->has_target))) out[count++]=all[i];
-    return count;
-}
-
-static void
-choose_targets(int which,DisplayItem **items,int n,ArrayType *definition_types,HTAB *lookup)
-{
-    if(n==0) return;
-    run_query(which,item_ids(items,n,false),definition_types);
-    for(uint64 i=0;i<SPI_processed;++i) {
-        HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;bool isnull;
-        hash128_t owner=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-        DisplayItem *item=hash_search(lookup,&owner,HASH_FIND,NULL);
-        if(item==NULL || item->label!=NULL) continue;
-        int64 time=DatumGetTimestampTz(SPI_getbinval(t,d,3,&isnull));
-        hash128_t evidence=datum_to_hash128(SPI_getbinval(t,d,4,&isnull));
-        if(!item->has_target || time>item->chosen_time || (time==item->chosen_time &&
-            memcmp(&evidence,&item->chosen_evidence,sizeof(hash128_t))<0)) {
-            item->target=datum_to_hash128(SPI_getbinval(t,d,2,&isnull));
-            item->has_target=true;item->chosen_time=time;item->chosen_evidence=evidence;
-        }
-    }
-    SPI_freetuptable(SPI_tuptable);
-}
-
-/* A record (an entity of a governed type that is not text, entity_types.toml) is shown as
- * its parts: each part's own label in order, joined by " · "; a part that is itself a
- * record of several parts is bracketed; a run of one part is "part ×n". The record's bytes
- * run together are not its name: a FrameNet lexical unit's are "NegationnotADV", its parts
- * are the frame Negation, the word not and the part of speech ADV. A record whose parts are
- * all code points or graphemes is one string (a frame named by its own text) and stays
- * text. Parts are labelled by this same batch, nested at most RECORD_DEPTH deep; past that
- * a part keeps what the other stages give it. */
-#define RECORD_DEPTH 3
-#define RECORD_PARTS 12
-static int record_depth = 0;
-
-typedef struct {hash128_t id;int at;} RecordSlot;
-typedef struct {hash128_t id;char *label;} PartLabel;
-
-static void
-record_labels(DisplayItem **items,int n,bool shallow_only)
-{
-    if(n==0 || record_depth>=RECORD_DEPTH) return;
-    int eligible=0;
-    for(int i=0;i<n;++i)
-        if(!items[i]->content_checked || items[i]->content_present)
-            items[eligible++]=items[i];
-    n=eligible;
-    if(n==0) return;
-    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RecordSlot);
-    HTAB *slots=hash_create("display record items",n,&ctl,HASH_ELEM|HASH_BLOBS);
-    for(int i=0;i<n;++i){bool found;RecordSlot *s=hash_search(slots,&items[i]->id,HASH_ENTER,&found);s->at=i;}
-    hash128_t **kids=palloc0(n*sizeof(hash128_t*));uint16 **runs=palloc0(n*sizeof(uint16*));
-    int *nk=palloc0(n*sizeof(int));bool *more=palloc0(n*sizeof(bool));
-    int total=0;
-    for(int i=0;i<n;++i){items[i]->content_checked=true;items[i]->content_present=false;}
-    run_query(PARTS,item_ids(items,n,false),NULL);
-    for(uint64 r=0;r<SPI_processed;++r) {
-        bool isnull;HeapTuple t=SPI_tuptable->vals[r];TupleDesc d=SPI_tuptable->tupdesc;
-        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-        RecordSlot *s=hash_search(slots,&id,HASH_FIND,NULL);if(s==NULL)continue;
-        items[s->at]->content_present=true;
-        Datum wkb=SPI_getbinval(t,d,2,&isnull);if(isnull)continue;
-        uint32 points;const unsigned char *p=laplace_trajectory_wkb_points(DatumGetByteaPP(wkb),&points);
-        int keep=points>RECORD_PARTS?RECORD_PARTS:(int)points;bool text=true,deep=false;
-        kids[s->at]=palloc(Max(keep,1)*sizeof(hash128_t));runs[s->at]=palloc(Max(keep,1)*sizeof(uint16));
-        for(uint32 j=0;j<points;++j) {
-            double vertex[4];mantissa_payload_t pl;memcpy(vertex,p+(Size)j*4*sizeof(double),sizeof(vertex));mantissa_unpack(vertex,&pl);
-            if(laplace_vflag_has_atom(pl.flags)==0 && laplace_vflag_tier(pl.flags)>1) text=false;
-            if(laplace_vflag_has_atom(pl.flags)==0 && laplace_vflag_tier(pl.flags)>2) deep=true;
-            if((int)j<keep){kids[s->at][j]=pl.entity_id;runs[s->at][j]=pl.run_length?pl.run_length:1;}
-        }
-        if(text){items[s->at]->record=false;continue;}             /* one string: its bytes are its name */
-        if(shallow_only && (deep || points<2)) continue;           /* prose: previewed by its spine */
-        nk[s->at]=keep;more[s->at]=points>(uint32)keep;total+=keep;
-    }
-    SPI_freetuptable(SPI_tuptable);
-    hash_destroy(slots);
-    if(total==0) return;
-    /* every part once, labelled by this batch one level down */
-    HASHCTL pctl={0};pctl.keysize=sizeof(hash128_t);pctl.entrysize=sizeof(PartLabel);
-    HTAB *parts=hash_create("display record parts",total,&pctl,HASH_ELEM|HASH_BLOBS);
-    Datum *values=palloc(total*sizeof(Datum));int unique=0;
-    for(int i=0;i<n;++i) for(int k=0;k<nk[i];++k) {
-        bool found;PartLabel *pl=hash_search(parts,&kids[i][k],HASH_ENTER,&found);
-        if(!found){pl->label=NULL;values[unique++]=hash128_to_datum(&kids[i][k]);}
-    }
-    static SPIPlanPtr record_parts_plan=NULL;
-    Oid argtypes[1]={BYTEAARRAYOID};
-    Datum args[1]={PointerGetDatum(construct_array(values,unique,BYTEAOID,-1,false,TYPALIGN_INT))};
-    volatile int rc=0;
-    record_depth++;
-    PG_TRY();
-    {
-        rc=SPI_execute_plan(spi_common_ensure_plan(&record_parts_plan,"SELECT id,label FROM realize.display_label_batch($1)",1,argtypes),args,NULL,true,0);
-    }
-    PG_FINALLY();
-    {
-        record_depth--;
-    }
-    PG_END_TRY();
-    if(rc!=SPI_OK_SELECT) elog(ERROR,"display: record parts could not be labelled");
-    for(uint64 r=0;r<SPI_processed;++r) {
-        bool isnull;HeapTuple t=SPI_tuptable->vals[r];TupleDesc d=SPI_tuptable->tupdesc;
-        Datum idd=SPI_getbinval(t,d,1,&isnull);if(isnull)continue;
-        hash128_t id=datum_to_hash128(idd);PartLabel *pl=hash_search(parts,&id,HASH_FIND,NULL);
-        Datum lab=SPI_getbinval(t,d,2,&isnull);if(pl&&!isnull)pl->label=TextDatumGetCString(lab);
-    }
-    SPI_freetuptable(SPI_tuptable);
-    for(int i=0;i<n;++i) {
-        if(nk[i]==0) continue;
-        StringInfoData buf;initStringInfo(&buf);int written=0;
-        for(int k=0;k<nk[i];++k) {
-            PartLabel *pl=hash_search(parts,&kids[i][k],HASH_FIND,NULL);
-            const char *s=pl?pl->label:NULL;if(s==NULL||*s=='\0')continue;
-            if(written++)appendStringInfoString(&buf," · ");
-            if(nk[i]>1 && strstr(s," · ")) appendStringInfo(&buf,"(%s)",s); else appendStringInfoString(&buf,s);
-            if(runs[i][k]>1) appendStringInfo(&buf," ×%u",(unsigned)runs[i][k]);
-        }
-        if(more[i]&&written) appendStringInfoString(&buf," · …");
-        if(written) items[i]->label=buf.data;
-    }
-    hash_destroy(parts);
-}
-
-typedef struct {hash128_t id,physicality,child;int16 tier;bool found;} SpineHead;
-
-static void
-preview(DisplayItem **items,int n)
-{
-    if(n==0) return;
-    /* A missing own Content manifest was already proved by the parts read.
-     * A different (for example definition) target still needs its own lookup. */
-    int eligible=0;
-    for(int i=0;i<n;++i)
-        if(!items[i]->content_checked || items[i]->content_present ||
-           memcmp(&items[i]->target,&items[i]->id,sizeof(hash128_t))!=0)
-            items[eligible++]=items[i];
-    n=eligible;
-    if(n==0) return;
-    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(SpineHead);
-    HTAB *nodes=hash_create("display preview nodes",n,&ctl,HASH_ELEM|HASH_BLOBS);
-    for(int i=0;i<n;++i) {
-        bool found;SpineHead *node=hash_search(nodes,&items[i]->target,HASH_ENTER,&found);
-        if(!found) {node->tier=INT16_MAX;node->found=false;}
-    }
-    run_query(NODE_TIERS,item_ids(items,n,true),NULL);
-    for(uint64 i=0;i<SPI_processed;++i) {
-        bool isnull;HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;
-        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-        SpineHead *node=hash_search(nodes,&id,HASH_FIND,NULL);
-        if(node) node->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
-    }
-    SPI_freetuptable(SPI_tuptable);
-    for(int i=0;i<n;++i) {
-        SpineHead *node=hash_search(nodes,&items[i]->target,HASH_FIND,NULL);
-        items[i]->target_tier=node->tier;
-    }
-    hash_destroy(nodes);
-    DisplayItem **active=palloc(n*sizeof(DisplayItem*));
-    for(int depth=0;depth<32;++depth) {
-        CHECK_FOR_INTERRUPTS();
-        int count=0;
-        for(int i=0;i<n;++i) if(items[i]->has_target && items[i]->target_tier>3) active[count++]=items[i];
-        if(count==0) break;
-        nodes=hash_create("display preview frontier",count,&ctl,HASH_ELEM|HASH_BLOBS);
-        for(int i=0;i<count;++i) {
-            bool found;SpineHead *node=hash_search(nodes,&active[i]->target,HASH_ENTER,&found);
-            if(!found) node->found=false;
-        }
-        run_query(HEADS,item_ids(active,count,true),NULL);
-        for(uint64 i=0;i<SPI_processed;++i) {
-            bool isnull;HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;
-            hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-            hash128_t physicality=datum_to_hash128(SPI_getbinval(t,d,2,&isnull));
-            SpineHead *node=hash_search(nodes,&id,HASH_FIND,NULL);
-            if(node==NULL || (node->found && memcmp(&node->physicality,&physicality,sizeof(hash128_t))<=0)) continue;
-            Datum wkb=SPI_getbinval(t,d,3,&isnull);if(isnull)continue;
-            uint32 points;const unsigned char *point=laplace_trajectory_wkb_points(DatumGetByteaPP(wkb),&points);
-            if(points==0)continue;
-            double vertex[4];mantissa_payload_t payload;memcpy(vertex,point,sizeof(vertex));mantissa_unpack(vertex,&payload);
-            node->child=payload.entity_id;node->tier=laplace_vflag_tier(payload.flags);node->physicality=physicality;node->found=true;
-        }
-        SPI_freetuptable(SPI_tuptable);
-        for(int i=0;i<count;++i) {
-            SpineHead *node=hash_search(nodes,&active[i]->target,HASH_FIND,NULL);
-            if(node && node->found) {active[i]->target=node->child;active[i]->target_tier=node->tier;}
-            else active[i]->has_target=false;
-        }
-        hash_destroy(nodes);
-    }
-    int count=0;
-    for(int i=0;i<n;++i) if(items[i]->has_target && items[i]->target_tier<=3) active[count++]=items[i];
-    char **labels=batch_text(TEXT,active,count,true);
-    for(int i=0;i<count;++i) if(labels[i] && *labels[i]) {
-        /* Collapse display-only ASCII whitespace without touching UTF-8 bytes. */
-        char *s=labels[i],*out=s;bool space=false;
-        for(char *p=s;*p;++p) {
-            if(*p==' '||*p=='\n'||*p=='\r'||*p=='\t'||*p=='\f'||*p=='\v') {
-                if(!space)*out++=' ';space=true;
-            } else {*out++=*p;space=false;}
-        }
-        *out='\0';active[i]->label=s;
-    }
-}
-
-/* Labels type and source operands: entities at tier <= 3 render whole,
- * compositions through the bounded first-child preview. */
-static char **
-metadata_labels(DisplayItem **items, int n)
-{
-    char **labels = palloc0(Max(n, 1) * sizeof(char *));
-    if (n == 0) return labels;
-    DisplayItem **unresolved = palloc(n * sizeof(DisplayItem *));
-    int unresolved_count = 0;
-    for (int i = 0; i < n; ++i) {
-        const char *canonical = laplace_relation_canonical_for_type_id(&items[i]->id);
-        if (canonical == NULL && laplace_entity_type_lookup(&items[i]->id, &canonical) != 0)
-            canonical = NULL;
-        if (canonical != NULL) labels[i] = pstrdup(canonical);
-        else unresolved[unresolved_count++] = items[i];
-    }
-    /* Governed metadata is already realized by the native registry. Do not
-     * acquire entity facets or walk content for labels we will discard. */
-    if (unresolved_count == 0) return labels;
-    HASHCTL ctl = {0}; ctl.keysize = sizeof(hash128_t); ctl.entrysize = sizeof(SpineHead);
-    HTAB *tiers = hash_create("display metadata tiers", n, &ctl, HASH_ELEM | HASH_BLOBS);
-    run_query(NODE_TIERS, item_ids(unresolved,unresolved_count,false), NULL);
-    for (uint64 i=0; i<SPI_processed; ++i) {
-        bool isnull; HeapTuple t=SPI_tuptable->vals[i]; TupleDesc d=SPI_tuptable->tupdesc;
-        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-        SpineHead *node=hash_search(tiers,&id,HASH_ENTER,NULL);
-        node->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
-    }
-    SPI_freetuptable(SPI_tuptable);
-    DisplayItem **short_items=palloc(n*sizeof(DisplayItem*)); int *positions=palloc(n*sizeof(int));
-    DisplayItem **compositions=palloc(n*sizeof(DisplayItem*)); int short_count=0, composition_count=0;
-    for (int i=0; i<n; ++i) {
-        if (labels[i] != NULL) continue;
-        SpineHead *node=hash_search(tiers,&items[i]->id,HASH_FIND,NULL);
-        if (node && node->tier>3) {
-            items[i]->target=items[i]->id; items[i]->has_target=true;
-            compositions[composition_count++]=items[i];
-        } else {
-            short_items[short_count]=items[i]; positions[short_count++]=i;
-        }
-    }
-    char **short_labels=batch_text(METADATA,short_items,short_count,false);
-    for (int i=0; i<short_count; ++i) labels[positions[i]]=short_labels[i];
-    preview(compositions,composition_count);
-    for (int i=0; i<n; ++i) if (items[i]->label) labels[i]=items[i]->label;
-    hash_destroy(tiers);
-    return labels;
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_display_label_batch);
-Datum
-pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
-{
-    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo*)fcinfo->resultinfo;
-    if(PG_ARGISNULL(0))return (Datum)0;
-    Datum *ids;bool *nulls;int n;
-    deconstruct_array(PG_GETARG_ARRAYTYPE_P(0),BYTEAOID,-1,false,TYPALIGN_INT,&ids,&nulls,&n);
-    if(n==0)return (Datum)0;
-    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(DisplayItem);
-    HTAB *lookup=hash_create("display items",n,&ctl,HASH_ELEM|HASH_BLOBS);
-    DisplayItem **all=palloc(n*sizeof(DisplayItem*)),**work=palloc(n*sizeof(DisplayItem*));int unique=0;
-    for(int i=0;i<n;++i) {
-        if(nulls[i])continue;
-        hash128_t id=datum_to_hash128(ids[i]);bool found;
-        DisplayItem *item=hash_search(lookup,&id,HASH_ENTER,&found);
-        if(!found){memset(item,0,sizeof(*item));item->id=id;all[unique++]=item;}
-    }
-    bool spi_top=false;if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT)elog(ERROR,"display: SPI connect failed");
-    read_facets(FACETS,all,unique,lookup);
-    /* Text is its own surface: a Word or Sentence at or below sentence tier is
-     * shown as what it writes, before any stage relabels it as the lemma a
-     * source binds to it (word HAS_SENSE entity). An opaque surface (an ILI
-     * written as text) stays pending for its lexicalization. */
-    int count=pending(all,unique,work,3);char **labels=batch_text(TEXT,work,count,false);
-    for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
-    /* A record is shown as its parts, before any stage reads its bytes as text. */
-    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->record)work[count++]=all[i];
-    record_labels(work,count,false);
-    /* Anything else that is not text (an ILI, a concept, a lexicalization)
-     * realizes through the surfaces a source binds to it. */
-    count=pending(all,unique,work,0);labels=batch_text(LEXICAL,work,count,false);
-    for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
-    count=pending(all,unique,work,1);labels=batch_text(TEXT,work,count,false);
-    for(int i=0;i<count;++i)if(labels[i]&&*labels[i]&&!opaque_name(labels[i],true))work[i]->label=labels[i];
-    count=pending(all,unique,work,0);labels=batch_text(NAMES,work,count,false);
-    for(int i=0;i<count;++i)if(!opaque_name(labels[i],true))work[i]->label=labels[i];
-    count=pending(all,unique,work,0);choose_targets(FILE_META,work,count,NULL,lookup);
-    int selected=0;for(int i=0;i<count;++i)if(work[i]->has_target)work[selected++]=work[i];
-    labels=batch_text(TEXT,work,selected,true);
-    for(int i=0;i<selected;++i) {
-        char *s=labels[i];
-        while(s && *s) {
-            char *end=strchr(s,'\n');Size len=end?(Size)(end-s):strlen(s);
-            if(len>5 && strncmp(s,"name=",5)==0){work[i]->label=pnstrdup(s+5,len-5);break;}
-            s=end?end+1:NULL;
-        }
-    }
-    for(int i=0;i<unique;++i)all[i]->has_target=false;
-    /* A composition above sentence tier whose parts are all word grain or
-     * shallower (a table row: a lemma, its codes, its pointers) is shown as its
-     * parts. Only a composition holding sentence-tier or deeper parts (prose)
-     * previews its first-child spine, so a row is never shown as its first
-     * column and two rows that share a first column stay distinguishable. */
-    count=0;for(int i=0;i<unique;++i)if(all[i]->label==NULL&&all[i]->exists&&all[i]->tier>3)work[count++]=all[i];
-    record_labels(work,count,true);
-    count=pending(all,unique,work,0);
-    if(count>0) {
-        run_query(DEF_TYPES,NULL,NULL);
-        Datum *types=palloc(Max(SPI_processed,1)*sizeof(Datum));int ntypes=0;
-        for(uint64 i=0;i<SPI_processed;++i){bool isnull;types[ntypes++]=copy_bytea_datum(SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&isnull));}
-        ArrayType *type_array=construct_array(types,ntypes,BYTEAOID,-1,false,TYPALIGN_INT);SPI_freetuptable(SPI_tuptable);
-        choose_targets(DEF_OWNED,work,count,type_array,lookup);
-        count=pending(all,unique,work,2);choose_targets(DEF_INVERSE,work,count,type_array,lookup);
-        selected=0;for(int i=0;i<unique;++i)if(!all[i]->label&&all[i]->has_target)work[selected++]=all[i];
-        preview(work,selected);
-    }
-    /* A composition still unlabeled previews its own first-child spine. */
-    selected=0;
-    for(int i=0;i<unique;++i) if(!all[i]->label && all[i]->exists && all[i]->tier>3) {
-        all[i]->target=all[i]->id; all[i]->has_target=true; work[selected++]=all[i];
-    }
-    preview(work,selected);
-    count=pending(all,unique,work,0);
-    for(int i=0;i<count;++i) {
-        const laplace_relation_def_t *def=NULL;
-        if(laplace_relation_lookup(&work[i]->id,&def)==0 && def)work[i]->label=pstrdup(def->canonical);
-    }
-    count=pending(all,unique,work,0);
-    DisplayItem *meta=palloc0(Max(count,1)*sizeof(DisplayItem));DisplayItem **meta_ptr=palloc(Max(count,1)*sizeof(DisplayItem*));
-    int nmeta=0;int *type_slot=palloc(Max(count,1)*sizeof(int));
-    for(int i=0;i<count;++i) {
-        type_slot[i]=-1;
-        if(work[i]->has_type){type_slot[i]=nmeta;meta[nmeta].id=work[i]->type;meta_ptr[nmeta]=&meta[nmeta];++nmeta;}
-    }
-    labels=metadata_labels(meta_ptr,nmeta);
-    for(int i=0;i<count;++i) {
-        char *type=type_slot[i]>=0?labels[type_slot[i]]:NULL;
-        if(opaque_name(type,false))type=NULL;
-        if(type)for(char *p=type;*p;++p)if(*p=='_')*p=' ';
-        char *identity = short_identity(&work[i]->id);
-        if(type)work[i]->label=psprintf("%s · %s",type,identity);
-        else work[i]->label=psprintf("Entity · %s",identity);
-    }
-    for(int i=0;i<n;++i) {
-        hash128_t id;DisplayItem *item=NULL;
-        if(!nulls[i]){id=datum_to_hash128(ids[i]);item=hash_search(lookup,&id,HASH_FIND,NULL);}
-        const char *label = item && item->label ? item->label : "Entity";
-        Datum v[]={ids[i],CStringGetTextDatum(label),Int16GetDatum(item?item->tier:0)};
-        bool out_nulls[]={nulls[i],false,item==NULL||!item->exists};tuplestore_putvalues(r->setResult,r->setDesc,v,out_nulls);
-    }
-    hash_destroy(lookup);laplace_spi_finish(spi_top);return (Datum)0;
+    return (Datum)0;
 }

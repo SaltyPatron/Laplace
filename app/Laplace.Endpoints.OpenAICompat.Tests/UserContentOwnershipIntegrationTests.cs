@@ -569,6 +569,7 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
         await using var command = conn.CreateCommand();
         command.CommandText = """
             CREATE EXTENSION IF NOT EXISTS postgis;
+            CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
             CREATE EXTENSION IF NOT EXISTS laplace_geom;
             CREATE EXTENSION IF NOT EXISTS laplace_substrate;
             SET search_path TO laplace, public;

@@ -10,60 +10,31 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class ExploreDisplayLabelGateTests
 {
     [Fact]
-    public void DisplayLabels_AreInstalledSetWiseBoundedAndRetainIdentityAtTheFinalFallback()
+    public void DisplayLabels_DelegateToTheNativeBatchOwner()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
-        var sqlPath = Path.Combine(root, "extension", "laplace_substrate", "sql", "functions",
-            "converse", "label.sql.in");
-        var sql = File.ReadAllText(sqlPath);
-        var appPath = Path.Combine(root, "app", "Laplace.Substrate", "Crud", "Npgsql",
-            "NpgsqlDisplayLabels.cs");
-        var app = File.ReadAllText(appPath);
-
-        Assert.Contains("CREATE OR REPLACE FUNCTION realize.display_label_batch", sql, StringComparison.Ordinal);
-        var native = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
-        var catalog = File.ReadAllText(Path.Combine(root, "engine", "core", "src", "sql_catalog.def"));
-        Assert.Contains("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("WITH RECURSIVE", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("display.heads", native, StringComparison.Ordinal);
-        Assert.Contains("ST_PointN(trajectory,1)", catalog, StringComparison.Ordinal);
-        Assert.Contains("realize.resolve_name_batch($1)", catalog, StringComparison.Ordinal);
-        Assert.Contains("realize.render_text_batch($1)", catalog, StringComparison.Ordinal);
-        Assert.Contains("consensus.relation_family_members('HAS_DEFINITION')", catalog, StringComparison.Ordinal);
-        Assert.DoesNotContain("ST_DumpPoints", native, StringComparison.Ordinal);
-        Assert.DoesNotContain("constituents_closure", native, StringComparison.Ordinal);
-        Assert.Contains("SqlCatalog.Get(\"display.labels\")", app, StringComparison.Ordinal);
-        Assert.DoesNotContain("HAS_DEFINITION", app, StringComparison.Ordinal);
-        Assert.Contains("short_identity(", native, StringComparison.Ordinal);
-        Assert.Contains("Entity · %s", native, StringComparison.Ordinal);
-        Assert.DoesNotContain("item&&item->label?item->label:\"Unrealized entity\"", native, StringComparison.Ordinal);
+        var sql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
+            "functions", "converse", "label.sql.in"));
+        var adapter = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
+        Assert.Contains("FROM public.laplace_labels(", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("SPI_execute", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("batch_text", adapter, StringComparison.Ordinal);
+        Assert.Contains("pg_relation_metadata", adapter, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// Text is its own surface: a Word or Sentence is shown as what it writes before the
-    /// lexical stage (word HAS_SENSE entity) can relabel it as a lemma, and a composition
-    /// above sentence tier of word-grain parts (a table row) is shown as its parts, never
-    /// collapsed onto its first column. Regressing either order fails here; the behaviour
-    /// is proven against an installed extension by tests/sql/display_label.sql.
-    /// </summary>
     [Fact]
-    public void DisplayLabels_ShowTextAsItselfBeforeLexicalizationAndRowsAsTheirParts()
+    public void NativeDisplay_HasAnExecutableFixtureForOrderRunsUnicodeAndPresence()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
-        var native = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
-        var body = native[native.IndexOf("pg_laplace_display_label_batch(PG_FUNCTION_ARGS)", StringComparison.Ordinal)..];
-
-        int textFirst = body.IndexOf("pending(all,unique,work,3);char **labels=batch_text(TEXT", StringComparison.Ordinal);
-        int lexical = body.IndexOf("batch_text(LEXICAL", StringComparison.Ordinal);
-        int shallowRows = body.IndexOf("record_labels(work,count,true)", StringComparison.Ordinal);
-        int spine = body.IndexOf("A composition still unlabeled previews its own first-child spine", StringComparison.Ordinal);
-        Assert.True(textFirst >= 0, "display: text-typed self render stage missing");
-        Assert.True(lexical > textFirst, "display: lexicalization must run after a text entity's own surface");
-        Assert.True(shallowRows >= 0 && spine > shallowRows,
-            "display: word-grain rows must be labelled by their parts before the first-child spine preview");
-        Assert.Contains("item->text=item->exists && item->has_type && laplace_entity_type_is_text(&item->type)==1", native, StringComparison.Ordinal);
-        Assert.Contains("e2e_display_label_text_over_lemma", File.ReadAllText(Path.Combine(root,
-            "extension", "laplace_substrate", "tests", "sql", "display_label.sql")), StringComparison.Ordinal);
+        var fixture = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "tests", "sql", "display_label.sql"));
+        Assert.Contains("INSERT INTO public.entity", fixture, StringComparison.Ordinal);
+        Assert.Contains("realize.display_label_batch", fixture, StringComparison.Ordinal);
+        Assert.Contains("WITH ORDINALITY", fixture, StringComparison.Ordinal);
+        Assert.Contains("labels IS DISTINCT FROM", fixture, StringComparison.Ordinal);
+        Assert.Contains("[dog · λ · 中]", fixture, StringComparison.Ordinal);
+        Assert.Contains("type_id IS NULL", fixture, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSERT INTO laplace.entities", fixture, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -89,7 +60,7 @@ public sealed class ExploreDisplayLabelGateTests
     }
 
     [Fact]
-    public void EntityFacets_AndSynsetLemma_PreferAttestedSemanticTypeAndSingleWordLemmas()
+    public void EntityFacets_KeepUnknownTypesUnknown_AndLexicalizationRemainsSeparate()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
         var catalog = File.ReadAllText(Path.Combine(root, "engine", "core", "src", "sql_catalog.def"));
@@ -100,10 +71,10 @@ public sealed class ExploreDisplayLabelGateTests
         var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "realize", "realize_synset_lemma.sql.in"));
 
-        Assert.Contains("relation_family_ids('IS_TYPED_AS')", catalog, StringComparison.Ordinal);
-        Assert.Contains("pg_laplace_entity_facets_batch", facetsSql, StringComparison.Ordinal);
-        var display = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
-        Assert.Contains("\"entity.stored_facets\"", display, StringComparison.Ordinal);
+        Assert.Contains("public.entity e ON e.id=i.key", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("public.laplace_codepoint", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("ELSE NULL::bytea", facetsSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("laplace.entities", facetsSql, StringComparison.Ordinal);
         Assert.DoesNotContain("laplace.consensus", facetsSql, StringComparison.Ordinal);
         Assert.Contains("COALESCE(w.tier, 32767) ASC, cand.word_id", realizeBatch, StringComparison.Ordinal);
         Assert.Contains("realize.lexicalize_batch(ARRAY[p_id], p_lang)", synsetLemmaSql, StringComparison.Ordinal);

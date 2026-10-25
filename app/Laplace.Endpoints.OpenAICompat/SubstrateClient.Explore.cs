@@ -132,12 +132,10 @@ internal sealed partial class SubstrateClient
                 if (resolved is { Exists: true } value)
                 {
                     var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
-                    var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, value.Id, ct);
                     var resolvedHex = Convert.ToHexStringLower(value.Id);
                     return new ExploreResolveResponse(
                         IdHex: resolvedHex,
-                        Label: PreferredDisplayLabel(display is { } d && !IsGenericUnrealizedLabel(d.Label)
-                            ? d.Label : value.Label, resolvedHex),
+                        Label: value.Label,
                         RefKind: value.RefKind,
                         Exists: true,
                         PreviewFacts: facts);
@@ -164,14 +162,6 @@ internal sealed partial class SubstrateClient
             if (resolved is not { } unresolved) return null;
 
             var unresolvedLabel = unresolved.Label;
-            if (string.IsNullOrWhiteSpace(unresolvedLabel) || LooksLikeEntityHex(unresolvedLabel))
-            {
-                await using var conn = await _dataSource.OpenConnectionAsync(ct);
-                var unresolvedHex = Convert.ToHexStringLower(unresolved.Id);
-                unresolvedLabel = PreferredDisplayLabel(
-                    (await NpgsqlDisplayLabels.ReadOneAsync(conn, unresolved.Id, ct))?.Label,
-                    unresolvedHex);
-            }
 
             return new ExploreResolveResponse(
                 IdHex: Convert.ToHexStringLower(unresolved.Id),
@@ -944,13 +934,11 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.EvidenceReceiptAsync(conn, id, limit, ct);
-        var labels = await ReadDisplayLabelsAsync(
-            conn, rows.Select(r => r.ObjectIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
         var result = rows.Select(e => new LabeledEvidenceItem(
             TypeId: e.TypeIdHex,
             TypeLabel: e.TypeLabel,
             ObjectId: e.ObjectIdHex,
-            ObjectLabel: DisplayLabel(labels, e.ObjectIdHex, e.ObjectLabel),
+            ObjectLabel: e.ObjectLabel,
             SourceId: "",
             SourceLabel: e.SourceLabels ?? "",
             ContextId: null,

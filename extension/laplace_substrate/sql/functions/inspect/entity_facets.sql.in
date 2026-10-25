@@ -48,9 +48,15 @@ BEGIN
 END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_entity_facets_batch'
-    LANGUAGE C STABLE PARALLEL SAFE
-    SUPPORT @extschema@.array_length_rows_support;
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SUPPORT @extschema@.array_length_rows_support
+AS $native$
+WITH ids AS MATERIALIZED (SELECT DISTINCT id,encode(id,'hex')::public.blake3 AS key FROM unnest(p_ids) u(id) WHERE id IS NOT NULL),
+forms AS (SELECT i.id,e.tier,public.laplace_codepoint(i.key) AS scalar FROM ids i LEFT JOIN public.entity e ON e.id=i.key)
+SELECT id,coalesce(tier,0)::smallint,
+ CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') ELSE NULL::bytea END
+FROM forms WHERE tier IS NOT NULL OR scalar IS NOT NULL ORDER BY id
+$native$;
 
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)

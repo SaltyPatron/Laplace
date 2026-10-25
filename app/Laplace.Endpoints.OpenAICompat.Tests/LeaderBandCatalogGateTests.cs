@@ -5,7 +5,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
 /// Leaders read the bounded leaderboard and the immutable band-name catalog in one
-/// set-wise command (<c>leaders.named</c>); the live <c>converse.relation_bands()</c>
+/// set-wise command (<c>leaders.native_named</c>); the live <c>converse.relation_bands()</c>
 /// census is never on the request path.
 /// </summary>
 public sealed class LeaderBandCatalogGateTests
@@ -16,7 +16,7 @@ public sealed class LeaderBandCatalogGateTests
         var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs");
         var method = ExtractMethod(text, "public async Task<IReadOnlyList<BandLeaders>> LeadersAsync");
 
-        Assert.Contains("NpgsqlSubstrateReads.BandLeadersNamedAsync(", method);
+        Assert.Contains("NpgsqlSubstrateReads.ClaimLeadersNamedAsync(", method);
         Assert.DoesNotContain("NpgsqlSubstrateReads.BandLeadersAsync(", method);
         Assert.DoesNotContain("RelationBandsAsync(", method);
         Assert.DoesNotContain("Task.WhenAll", method);
@@ -27,15 +27,16 @@ public sealed class LeaderBandCatalogGateTests
     {
         var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.BandLeaders.cs");
         var catalog = Read("engine/core/src/sql_catalog.def");
-        Assert.Contains("SqlCatalog.Get(\"leaders.named\")", text);
+        Assert.Contains("SqlCatalog.Get(\"leaders.native_named\")", text);
         Assert.DoesNotContain("SELECT ", text);
-        Assert.Contains("SQL_QUERY(\"leaders.named\"", catalog);
-        int start = catalog.IndexOf("SQL_QUERY(\"leaders.named\"", StringComparison.Ordinal);
+        Assert.Contains("SQL_QUERY(\"leaders.native_named\"", catalog);
+        int start = catalog.IndexOf("SQL_QUERY(\"leaders.native_named\"", StringComparison.Ordinal);
         int end = catalog.IndexOf("\nSQL_", start + 1, StringComparison.Ordinal);
         string named = end < 0 ? catalog[start..] : catalog[start..end];
-        Assert.Contains("FROM ops.band_leaders($1,$2) WITH ORDINALITY", named);
-        Assert.Contains("FROM converse.relation_band_catalog() AS b", named);
-        Assert.Contains("LEFT JOIN leaders AS l ON l.band=b.band", named);
+        Assert.Contains("FROM ops.claim_leaders($1,$2) WITH ORDINALITY", named);
+        Assert.Contains("FROM converse.relation_band_catalog() b", named);
+        Assert.Contains("LEFT JOIN leaders n ON n.band=b.band", named);
+        Assert.DoesNotContain("BandLeadersNamedAsync(", Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs"));
         Assert.DoesNotContain("FROM converse.relation_bands()", named);
         Assert.DoesNotContain("JOIN converse.relation_bands()", named);
     }
