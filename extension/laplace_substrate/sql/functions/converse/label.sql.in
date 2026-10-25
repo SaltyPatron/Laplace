@@ -1,30 +1,15 @@
--- realize.label — GH #862 / #860. A label is a rendering decision, so it lives with
--- the realize family. No SET (it invalidates plan caching and this is per-row on the
--- realize.render path); real schema names.
+-- Semantic surface selection remains separate from selected-ID display.
 DROP FUNCTION IF EXISTS laplace.label(bytea);
-CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
-    RETURNS text
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_label'
-    LANGUAGE C STABLE PARALLEL SAFE;
+CREATE OR REPLACE FUNCTION realize.label(p_id bytea) RETURNS text
+AS 'EXECUTION_LIBRARY','pg_laplace_label' LANGUAGE C STABLE PARALLEL SAFE;
 
--- realize.display_label_batch — the FINAL bounded-display projection used by Explore.
---
--- This is intentionally NOT the semantic contract of realize.label(). `label` must abstain
--- when an entity has no name/surface. A product display still needs something intelligible
--- to paint after its candidate set has been elected. The display projection therefore adds
--- bounded, containment-owned previews and descriptive metadata while keeping the complete
--- identity in a separate id column. If friendly realization is exhausted, the display label
--- itself retains a short canonical id so a known entity is never replaced by a generic status.
---
--- GH #804: form is caller/containment-owned, not inferred from entity.type_id. Exact
--- self-rendering stops at sentence grain. Higher-tier text is previewed only when a
--- witnessed role or the entity's own Content physicality proves containment.
--- Provenance operands obey the same preview boundary; opaque content falls through to a name, relation,
--- type/source description plus short canonical identity rather than being silently
--- projected through a text lens or replaced by a generic unresolved placeholder.
+-- Selected Native IDs are realized together by the Native batch owner. This
+-- adapter preserves the existing transport shape, not the old reader/codec.
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
-    RETURNS TABLE(id bytea, label text, tier smallint)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_display_label_batch'
-    LANGUAGE C STABLE STRICT
-    SUPPORT @extschema@.array_length_rows_support
-    ROWS 100;
+RETURNS TABLE(id bytea,label text,tier smallint)
+LANGUAGE sql STABLE STRICT SUPPORT @extschema@.array_length_rows_support
+AS $native$
+SELECT p_ids[d.i],d.content,coalesce(e.tier,CASE WHEN public.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
+FROM public.laplace_labels(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest(p_ids) u(id))) d
+LEFT JOIN public.entity e ON e.id=d.entity ORDER BY d.i
+$native$;

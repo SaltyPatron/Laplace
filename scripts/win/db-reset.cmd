@@ -45,7 +45,7 @@ if "%RECYCLE%"=="1" (
 )
 
 echo ==== install extensions ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d "%LAPLACE_DBNAME%" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS postgis;" -c "CREATE EXTENSION IF NOT EXISTS laplace_geom;" -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate;" || exit /b 1
+"%PGBIN%\psql.exe" -h localhost -U postgres -d "%LAPLACE_DBNAME%" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS postgis;" -c "CREATE EXTENSION IF NOT EXISTS laplace_geom;" -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate CASCADE;" || exit /b 1
 
 echo ==== post-create identity health ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d "%LAPLACE_DBNAME%" -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1

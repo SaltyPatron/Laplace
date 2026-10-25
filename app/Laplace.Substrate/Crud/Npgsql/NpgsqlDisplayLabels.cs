@@ -15,7 +15,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static class NpgsqlDisplayLabels
 {
     public readonly record struct DisplayLabelRow(string IdHex, string Label, short? Tier);
-    public readonly record struct DisplayFacetRow(short Tier, string Type, bool Exists, byte[] TypeId);
+    public readonly record struct DisplayFacetRow(short Tier, string? Type, bool Exists, byte[]? TypeId);
 
     private static DisplayLabelRow MapDisplayLabel(NpgsqlDataReader r) => new(
         r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetInt16(2));
@@ -68,10 +68,11 @@ public static class NpgsqlDisplayLabels
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("entity.facets"),
-            static r => (Tier: r.GetInt16(1), Type: r.GetFieldValue<byte[]>(2)),
+            static r => (Tier: r.GetInt16(1), Type: r.IsDBNull(2) ? null : r.GetFieldValue<byte[]>(2)),
             p => p.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, new[] { id }),
             timeoutSeconds: 10, ct: ct, onError: onError).ConfigureAwait(false);
         if (rows.Count == 0) return null;
+        if(rows[0].Type is null)return new DisplayFacetRow(rows[0].Tier,null,true,null);
         var labels = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("types.labels"),
             static r => r.GetFieldValue<string[]>(0),
             p => p.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(r => r.Type).ToArray()),

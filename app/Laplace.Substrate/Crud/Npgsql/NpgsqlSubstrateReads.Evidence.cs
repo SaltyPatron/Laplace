@@ -59,7 +59,7 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "evidence_count", onError: onError);
 
     public readonly record struct EvidenceReceiptRow(
-        string TypeIdHex, string TypeLabel, string ObjectIdHex, string ObjectLabel,
+        string? TypeIdHex, string TypeLabel, string ObjectIdHex, string ObjectLabel,
         string? SourceLabels, long WitnessCount, decimal EffMu);
 
     /// <summary><c>ops.evidence_receipt(id, limit)</c>.</summary>
@@ -68,7 +68,7 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ops.evidence_receipt"),
             static r => new EvidenceReceiptRow(
-                r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+                r.IsDBNull(0) ? null : r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
                 r.IsDBNull(4) ? null : r.GetString(4), r.GetInt64(5), r.GetDecimal(6)),
             p =>
             {
@@ -160,7 +160,7 @@ public static partial class NpgsqlSubstrateReads
                 r.IsDBNull(8) ? null : r.GetDecimal(8)),
             p =>
             {
-                p.AddWithValue("target", target);
+                BindCanonicalReference(p, target);
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "evidence_for_target", onError: onError);
 

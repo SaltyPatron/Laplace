@@ -438,7 +438,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                     entityId = r.EntityId;
                     entityLabel = r.EntityLabel;
                 }
-                if (r.TypeIdHex is null)
+                if (r.ObjectIdHex is null)
                     continue; // anchor row with no evidence
                 items.Add(new Laplace.Api.Contracts.LabeledEvidenceItem(
                     TypeId: r.TypeIdHex,

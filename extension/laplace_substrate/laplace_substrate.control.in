@@ -7,4 +7,4 @@ module_pathname = '@EXT_MODULE_PATHNAME@'
 relocatable = false
 schema = 'laplace'
 trusted = true
-requires = 'laplace_geom'
+requires = 'laplace_geom,laplace'

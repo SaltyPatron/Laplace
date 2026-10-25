@@ -822,7 +822,7 @@ phase_sync_extension() (
   installed=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'" | tr -d '[:space:]')
   [[ -n "$avail" ]] || { echo "::error::laplace_substrate not available" >&2; return 1; }
   if [[ -z "$installed" ]]; then
-    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
+    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate CASCADE"
   elif [[ "$installed" != "$avail" ]]; then
     bridge="$LAPLACE_EXT_SHAREDIR/laplace_substrate--${installed}--${avail}.sql"
     install -m 664 "$LAPLACE_EXT_SHAREDIR/laplace_substrate_upgrade.sql" "$bridge"

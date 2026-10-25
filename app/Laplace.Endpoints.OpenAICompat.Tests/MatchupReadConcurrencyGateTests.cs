@@ -13,16 +13,14 @@ public sealed class MatchupReadConcurrencyGateTests
     [Theory]
     [InlineData("public async Task<MatchupResponse?> MatchupAsync")]
     [InlineData("public async Task<MatchupVerdictResponse?> MatchupVerdictAsync")]
-    public void IndependentTopicResolution_FansOutBeforeEitherResultIsConsumed(string signature)
+    public void IndependentTopicResolution_UsesOneBatch(string signature)
     {
         var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs");
         var method = ExtractMethod(text, signature);
 
-        Assert.Contains("var xTask = ResolveTopicAsync(xRef, ct);", method);
-        Assert.Contains("var yTask = ResolveTopicAsync(yRef, ct);", method);
-        Assert.Contains("await Task.WhenAll(xTask, yTask)", method);
-        Assert.DoesNotContain("var x = await ResolveTopicAsync", method);
-        Assert.DoesNotContain("var y = await ResolveTopicAsync", method);
+        Assert.Contains("ResolveTopicsAsync([xRef, yRef], ct)", method);
+        Assert.DoesNotContain("ResolveTopicAsync(xRef", method);
+        Assert.DoesNotContain("ResolveTopicAsync(yRef", method);
     }
 
     [Fact]

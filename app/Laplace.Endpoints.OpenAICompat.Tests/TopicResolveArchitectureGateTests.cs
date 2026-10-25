@@ -15,7 +15,7 @@ public sealed class TopicResolveArchitectureGateTests
         var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Query.cs");
         var method = ExtractMethod(text, "public async Task<(byte[] Id, string Label)?> ResolveTopicAsync");
 
-        Assert.Contains("NpgsqlSubstrateReads.ResolveRefWithLabelAsync(", method);
+        Assert.Contains("ResolveTopicsAsync([reference]", method);
         Assert.DoesNotContain("OpenConnectionAsync", method);
         Assert.DoesNotContain("ResolveRefAsync(", method);
         Assert.DoesNotContain("LabelOrHexAsync(", method);
@@ -26,12 +26,16 @@ public sealed class TopicResolveArchitectureGateTests
     {
         var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.Resolve.cs");
         var catalog = Read("engine/core/src/sql_catalog.def");
-        Assert.Contains("SqlCatalog.Get(\"conversation.resolve_ref_with_label\")", text);
+        Assert.Contains("SqlCatalog.Get(\"conversation.resolve_refs_with_labels\")", text);
+        Assert.Contains("Hash128.Text(reference)", text);
         Assert.DoesNotContain("SELECT ", text);
-        Assert.Contains("SQL_QUERY(\"conversation.resolve_ref_with_label\"", catalog);
-        Assert.Contains("SELECT converse.resolve_ref($1) AS id", catalog);
-        Assert.Contains("realize.render_text_fast(r.id,8)", catalog);
-        Assert.Contains("converse.label_or_hex(r.id)", catalog);
+        Assert.Contains("SQL_QUERY(\"conversation.resolve_refs_with_labels\"", catalog);
+        Assert.Contains("FROM ops.resolve_refs($1,$2)", catalog);
+        var owner = Read("extension/laplace_substrate/sql/functions/converse/resolve_ref.sql.in");
+        Assert.Contains("public.entity e ON e.id=k.key", owner);
+        Assert.Contains("public.laplace_labels", owner);
+        Assert.DoesNotContain("laplace.entities", owner);
+        Assert.DoesNotContain("render_text_fast", owner);
         Assert.DoesNotContain("OpenConnectionAsync", text);
     }
 

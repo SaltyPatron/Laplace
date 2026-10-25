@@ -1,3 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.relation_type_resolve(text);
 CREATE OR REPLACE FUNCTION consensus.relation_type_resolve(p_surface text) RETURNS bytea
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_resolve';
+
+-- Projection from original content IDs through declared metadata. Labels never
+-- become semantic lookup keys, and source claim identities are not rewritten.
+CREATE OR REPLACE FUNCTION consensus.relation_metadata(p_ids bytea[])
+RETURNS TABLE(surface_id bytea,canonical_id bytea,canonical text,inverse boolean,qualifier_bit smallint)
+AS 'EXECUTION_LIBRARY','pg_relation_metadata' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

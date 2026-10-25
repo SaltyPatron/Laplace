@@ -383,3 +383,24 @@ continuation, label and inspection readers against the Native substrate. Those
 readers require their Native operators and carrier contracts; aliasing the old
 tables to the new ones would decode the paths incorrectly. An aggregate count of
 Native matches is not an attestation census.
+
+## Native inspection readers
+
+Shared API reference preparation derives Native identities on the client; `ops.resolve_refs`
+preserves input positions and performs indexed presence checks against `public.entity`
+and the Tier-0 perf-cache. Hex references are batch-realized only after presence election.
+
+`realize.display_label_batch` delegates to Native `public.laplace_labels`. The former
+legacy display walker is removed. Compiled relation metadata is projected by original
+Native IDs through `consensus.relation_metadata`; rendered labels never become semantic
+lookup keys. Unknown stored semantic types remain unknown.
+
+`ops.claim_facts`, `ops.entity_evidence_counts` and `ops.evidence_receipt` read Native
+claims and distinct registered claim/witness pairs. Reported games are not evidence counts.
+Non-ternary claims retain their identity and complete ordered, counted constituents.
+Leaderboards use one Native claim read and batch-realize elected constituents.
+
+These inspection operations are components of the read contract above. They do not
+replace the routed forward program, recipe-declared lexicalization, or geometric coupling.
+The aggregate attestation census and migration of the remaining legacy operators are
+separate unfinished obligations.

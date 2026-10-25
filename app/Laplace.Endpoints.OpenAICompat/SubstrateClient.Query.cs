@@ -37,17 +37,30 @@ internal sealed partial class SubstrateClient
             row.PendingPairs, row.PendingRefreshes);
     }
 
-    /// <summary>Resolve a word or a 32-hex id to a content id, with its label.</summary>
+    /// <summary>Resolve Native identities and return labels in the same batch read.</summary>
     public async Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct)
-    {
-        // A FEN resolves as the id of its composed position, not as the id of its text.
-        if (ChessPositionRef.TryComposeId(reference, out var posId))
-            return (posId.ToBytes(), Convert.ToHexString(posId.ToBytes()).ToLowerInvariant());
+        => (await ResolveTopicsAsync([reference], ct).ConfigureAwait(false))[0];
 
-        // Resolution and display label come back from one server call on one connection.
-        var resolved = await NpgsqlSubstrateReads.ResolveRefWithLabelAsync(
-            _dataSource, reference, ct, TranslateReadError).ConfigureAwait(false);
-        return resolved is null ? null : (resolved.Id, resolved.Label);
+    private async Task<IReadOnlyList<(byte[] Id, string Label)?>> ResolveTopicsAsync(
+        IReadOnlyList<string> references, CancellationToken ct)
+    {
+        var result = new (byte[] Id, string Label)?[references.Count];
+        var stored = new List<string>();
+        var positions = new List<int>();
+        for (int i = 0; i < references.Count; i++)
+        {
+            if (ChessPositionRef.TryComposeId(references[i], out var position))
+            {
+                var id = position.ToBytes();
+                result[i] = (id, Convert.ToHexStringLower(id));
+            }
+            else { stored.Add(references[i]); positions.Add(i); }
+        }
+        var rows = await NpgsqlSubstrateReads.ResolveRefsWithLabelsAsync(
+            _dataSource, stored, ct, TranslateReadError).ConfigureAwait(false);
+        for (int i = 0; i < rows.Count; i++)
+            if (rows[i] is { } row) result[positions[i]] = (row.Id, row.Label);
+        return result;
     }
 
     /// <summary>
