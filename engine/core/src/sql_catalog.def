@@ -163,31 +163,17 @@ SQL_QUERY("generation.adjacency_manifests", "bytea[],int4",
     "SELECT entity_id,public.ST_AsBinary(trajectory) FROM laplace.physicalities "
     "WHERE type=1 AND trajectory IS NOT NULL "
     "AND public.laplace_trajectory_constituent_ids(trajectory) && $1 LIMIT $2")
-SQL_QUERY("display.facets", "bytea[]",
-    "SELECT e.id,e.tier,e.type_id,c.name FROM laplace.entities e "
-    "LEFT JOIN laplace.canonical_names c ON c.id=e.id WHERE e.id=ANY($1)")
-SQL_QUERY("display.names", "bytea[]", "SELECT realize.resolve_name_batch($1)")
-SQL_QUERY("display.lexical", "bytea[]", "SELECT realize.lexicalize_batch($1)")
-SQL_QUERY("display.text", "bytea[]", "SELECT realize.render_text_batch($1)")
-SQL_QUERY("display.metadata_labels", "bytea[]", "SELECT realize.label_batch($1)")
-SQL_QUERY("display.file_metadata", "bytea[]",
-    "SELECT subject_id,object_id,last_observed_at,id FROM laplace.attestations "
-    "WHERE subject_id=ANY($1) AND object_id IS NOT NULL AND type_id=realize.canonical_id("
-    "concat_ws('/','substrate','type','HasFileMetadata','v1'))")
-SQL_QUERY("display.definition_types", "", "SELECT id FROM consensus.relation_family_members('HAS_DEFINITION')")
-SQL_QUERY("display.definitions", "bytea[],bytea[]",
-    "SELECT subject_id,object_id,last_observed_at,id FROM laplace.attestations "
-    "WHERE subject_id=ANY($1) AND type_id=ANY($2) AND object_id IS NOT NULL")
-SQL_QUERY("display.definition_owners", "bytea[],bytea[]",
-    "SELECT object_id,object_id,last_observed_at,id FROM laplace.attestations "
-    "WHERE object_id=ANY($1) AND type_id=ANY($2)")
-SQL_QUERY("display.parts", "bytea[]",
-    "SELECT DISTINCT ON (entity_id) entity_id,public.ST_AsBinary(trajectory) "
-    "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL "
-    "ORDER BY entity_id,id")
-SQL_QUERY("display.heads", "bytea[]",
-    "SELECT entity_id,id,public.ST_AsBinary(public.ST_PointN(trajectory,1)) "
-    "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL")
+
+
+
+
+
+
+
+
+
+
+
 SQL_QUERY("chess.repair_normalize", "bytea[],bytea[]",
     "UPDATE laplace.attestations SET opponent_rating_fp1e9 = consensus.glicko2_neutral_mu() "
         "WHERE subject_id = ANY($1) AND type_id = ANY($2) "
