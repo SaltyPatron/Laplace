@@ -1699,7 +1699,9 @@ SQL_QUERY("migration.app_tables_present", "",
 /* Run transactionally after DbUp, including already-journaled databases.
  * Existing managed connections prefer laplace,public. Native SPI must not
  * accidentally read laplace.consensus instead of public.consensus.
- * Cache paths are server-side installed paths, not paths from the invoking client. */
+ * Cache paths are server-side installed paths, not paths from the invoking client.
+ * Pure byte operators never resolve SQL names; a per-call scope would enter
+ * a GUC stack for every B-tree comparison and hash key in Native loops. */
 SQL_QUERY("migration.canonical_substrate", "",
     "SET LOCAL search_path = public, pg_temp; "
     "CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public; "
@@ -1713,8 +1715,6 @@ SQL_QUERY("migration.canonical_substrate", "",
     "WHERE t.oid=to_regtype('public.blake3') AND t.typlen=16 AND e.extname='laplace' AND d.deptype='e') "
     "OR to_regtype('public.blake3[]') IS NULL THEN "
     "RAISE EXCEPTION 'Canonical fixed-width blake3 identity type is not installed'; END IF; "
-    /* Byte operators never resolve SQL names. Scoping them enters a GUC stack
-     * for every B-tree comparison and hash key, inside otherwise native loops. */
     "FOR native_function IN SELECT format('%I.%I(%s)',n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)) AS signature, "
     "l.lanname='c' AND p.prosrc=ANY(ARRAY['blake3_in','blake3_out','blake3_recv','blake3_send',"
     "'blake3_eq','blake3_ne','blake3_lt','blake3_le','blake3_gt','blake3_ge','blake3_cmp',"
