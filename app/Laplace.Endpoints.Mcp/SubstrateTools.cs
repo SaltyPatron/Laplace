@@ -466,16 +466,17 @@ internal sealed class SubstrateTools : IMcpTools
         var bands = bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(int.Parse).ToArray();
         var per = Int(args, "per_band", 5);
-        var rows = NpgsqlSubstrateReads.BandLeadersAsync(_dbReadOnly, bands, per, default)
+        var rows = NpgsqlSubstrateReads.ClaimLeadersNamedAsync(_dbReadOnly, bands, per, default)
             .GetAwaiter().GetResult();
-        return JsonRows(rows.Select(r => new JsonObject
+        return JsonRows(rows.Where(r => r.ClaimId is not null).Select(r => new JsonObject
         {
             ["band"] = r.Band,
-            ["subject"] = r.Subject,
-            ["relation"] = r.Relation,
-            ["object"] = r.Object,
-            ["eff_mu"] = r.EffMu,
+            ["name"] = r.BandName,
+            ["claim_id"] = r.ClaimId,
+            ["parts"] = JsonNode.Parse(r.Parts!),
+            ["confidence"] = r.Confidence,
             ["witnesses"] = r.Witnesses,
+            ["trajectory"] = r.Trajectory,
         }));
     }
 

@@ -1,39 +1,26 @@
--- One entity's verdict record: every direct subject-side consensus cell it
--- owns, grouped confirmed / contested / refuted / thin by the same thresholds
--- and structural exclusions as converse.epistemic_status_core. Unlike that
--- lexical operation it neither expands a word through its senses nor caps the
--- operand set: the record is subject-exact and complete.
+-- Subject-exact Native claim verdicts; the existing volatility rule is unchanged.
 DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
-
 CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
-    RETURNS TABLE(confirmed bigint, contested bigint, refuted bigint, thin bigint)
-    LANGUAGE sql STABLE
-
-BEGIN ATOMIC
-    WITH direct AS (
-        SELECT c.rating, c.rd, c.volatility, c.witness_count
-        FROM laplace.consensus c
-        WHERE c.subject_id = p_id
-          AND c.object_id IS NOT NULL
-          AND c.type_id NOT IN (
-              laplace.relation_type_id('HAS_SENSE'),
-              laplace.relation_type_id('IS_SENSE_OF'),
-              laplace.relation_type_id('HAS_LANGUAGE'))
-    ), verdicts AS (
-        SELECT CASE
-            WHEN consensus.refuted(d.rating, d.rd) THEN 'refuted'
-            WHEN consensus.eff_mu(d.rating, d.rd) > consensus.glicko2_neutral_mu()
-                THEN 'confirmed'
-            WHEN d.volatility::numeric > consensus.glicko2_initial_volatility() * 1.5
-                THEN 'contested'
-            ELSE 'thin'
-        END AS status
-        FROM direct d
-    )
-    SELECT count(*) FILTER (WHERE v.status = 'confirmed'),
-           count(*) FILTER (WHERE v.status = 'contested'),
-           count(*) FILTER (WHERE v.status = 'refuted'),
-           count(*) FILTER (WHERE v.status = 'thin')
-    FROM verdicts v
-;
-END;
+RETURNS TABLE(confirmed bigint,contested bigint,refuted bigint,thin bigint)
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $record$
+WITH subject AS (SELECT encode(p_id,'hex')::public.blake3 AS id), direct AS MATERIALIZED (
+ SELECT c.rating,c.deviation,c.volatility,
+ CASE WHEN public.laplace_path_length(c.path)=3 THEN
+  (public.laplace_vertex_ids(ST_PointN(c.path,CASE WHEN public.laplace_path_length(ST_PointN(c.path,1))>=2 THEN 1 ELSE 2 END)))[1] END AS predicate
+ FROM subject s CROSS JOIN LATERAL public.laplace_claims_each(ARRAY[s.id],NULL::bigint,
+ ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+ WHERE public.laplace_path_starts(c.path,s.id)
+), metadata AS MATERIALIZED (
+ SELECT * FROM consensus.relation_metadata(ARRAY(SELECT DISTINCT decode(predicate::text,'hex') FROM direct WHERE predicate IS NOT NULL))
+), initial AS (
+ SELECT volatility FROM public.laplace_series(ARRAY[]::public.blake3[],ARRAY[]::bigint[],ARRAY[]::double precision[],ARRAY[]::double precision[])
+), verdicts AS (
+ SELECT CASE WHEN public.laplace_confidence(d.rating,d.deviation,-2)<0.5 THEN 'refuted'
+ WHEN public.laplace_confidence(d.rating,d.deviation,2)>0.5 THEN 'confirmed'
+ WHEN d.volatility>initial.volatility*1.5 THEN 'contested' ELSE 'thin' END AS status
+ FROM direct d CROSS JOIN initial LEFT JOIN metadata m ON m.surface_id=decode(d.predicate::text,'hex')
+ WHERE m.canonical IS NULL OR m.canonical NOT IN ('HAS_SENSE','IS_SENSE_OF','HAS_LANGUAGE')
+)
+SELECT count(*) FILTER(WHERE status='confirmed'),count(*) FILTER(WHERE status='contested'),
+ count(*) FILTER(WHERE status='refuted'),count(*) FILTER(WHERE status='thin') FROM verdicts
+$record$;

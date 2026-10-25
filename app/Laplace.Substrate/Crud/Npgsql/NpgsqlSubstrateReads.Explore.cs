@@ -60,7 +60,7 @@ public static partial class NpgsqlSubstrateReads
         var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("inspection.explore_resolve"),
             static r => new ExploreResolveRow(
                 r.GetFieldValue<byte[]>(0), r.GetString(1), r.GetString(2), r.GetBoolean(3)),
-            p => p.AddWithValue("ref", reference.Trim()),
+            p => BindCanonicalReference(p, reference.Trim()),
             ct: ct, label: "explore_resolve", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
     }

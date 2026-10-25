@@ -1,358 +1,60 @@
--- Display identity and display text are different contracts. A graph node keeps its
--- exact content id. Friendly Unicode/name/description wins, but the final fallback must
--- retain a short canonical id instead of replacing a known entity with generic status text.
--- High-tier text preview is containment-owned (#804).
 \set ECHO none
+\set QUIET on
+\pset format unaligned
+\pset tuples_only on
 BEGIN;
--- Cache-resident atoms are usable without a duplicated entity row. Exercise the
--- same native operations as the entity API, including set and positional forms.
-DO $atom_floor$
-DECLARE
-    atom bytea := laplace.word_id('b');
-    absent bytea := public.laplace_hash128_blake3('test/display/absent-atom');
-    f record;
-    labels text[];
+SET LOCAL search_path=public,laplace;
+CREATE TEMP TABLE native_display_words AS
+SELECT s,public.laplace_id(s) AS id,public.laplace_tier(s) AS tier,public.laplace_coord(s) AS coord
+FROM unnest(ARRAY['dog','cat','λ','中']) s;
+INSERT INTO public.entity(id,tier,coord,hilbert)
+SELECT id,tier,coord,public.laplace_hilbert(s) FROM native_display_words WHERE tier>0 ON CONFLICT DO NOTHING;
+INSERT INTO public.physicality(entity,tier,hilbert,path)
+SELECT id,tier,public.laplace_hilbert(s),public.laplace_path(public.laplace_parts(s)) FROM native_display_words WHERE tier>0 ON CONFLICT DO NOTHING;
+CREATE FUNCTION pg_temp.display_tuple(parts public.blake3[],kind text) RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE id public.blake3=public.laplace_compose(parts); coord geometry; tier smallint; h bigint;
 BEGIN
-    DELETE FROM laplace.entities WHERE id = atom;
-    IF NOT consensus.entity_exists(atom) OR realize.render_text(atom) IS DISTINCT FROM 'b' THEN
-        RAISE EXCEPTION 'FAIL: atom fixture is unavailable in the native floor';
-    END IF;
-    SELECT * INTO f FROM ops.entity_facets(atom);
-    IF NOT FOUND OR f.tier IS DISTINCT FROM 0::smallint
-       OR f.type_id IS DISTINCT FROM laplace.entity_type_id('Codepoint') THEN
-        RAISE EXCEPTION 'FAIL: scalar facets lost a cache-resident atom';
-    END IF;
-    IF (SELECT count(*) FROM ops.entity_facets_batch(ARRAY[atom,NULL,atom,absent])) <> 1 THEN
-        RAISE EXCEPTION 'FAIL: facet set duplicated an atom or admitted an absent identity';
-    END IF;
-    IF EXISTS (SELECT FROM ops.entity_facets_batch(NULL))
-       OR EXISTS (SELECT FROM ops.entity_facets_batch('{}'::bytea[])) THEN
-        RAISE EXCEPTION 'FAIL: empty facet request returned entities';
-    END IF;
-    BEGIN
-        PERFORM ops.entity_facets(atom || decode('00','hex'));
-        RAISE EXCEPTION 'FAIL: oversized identity was silently truncated to an atom';
-    EXCEPTION WHEN invalid_parameter_value THEN
-        NULL;
-    END;
-    BEGIN
-        PERFORM realize.display_label_batch(ARRAY[substring(atom FROM 1 FOR 15)]);
-        RAISE EXCEPTION 'FAIL: undersized identity was accepted';
-    EXCEPTION WHEN invalid_parameter_value THEN
-        NULL;
-    END;
-    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
-    FROM realize.display_label_batch(ARRAY[atom,absent,atom])
-         WITH ORDINALITY d(id,label,tier,ord);
-    IF labels[1] IS DISTINCT FROM 'b' OR labels[3] IS DISTINCT FROM 'b'
-       OR labels[2] IS DISTINCT FROM ('Entity · ' || left(encode(absent,'hex'),12))
-       OR (SELECT d.tier FROM realize.display_label_batch(ARRAY[atom]) d) IS DISTINCT FROM 0::smallint THEN
-        RAISE EXCEPTION 'FAIL: display disagrees with cache-resident atom facets: %',labels;
-    END IF;
-END
-$atom_floor$;
-DO $display_label$
-DECLARE
-    src      bytea := public.laplace_hash128_blake3('test/display/source');
-    type_cp  bytea := public.laplace_hash128_blake3('test/display/type/codepoint');
-    type_s   bytea := public.laplace_hash128_blake3('test/display/type/sentence');
-    type_d   bytea := public.laplace_hash128_blake3('test/display/type/document');
-    type_b   bytea := public.laplace_hash128_blake3('test/display/type/book');
-    type_c   bytea := public.laplace_hash128_blake3('test/display/type/concept');
-    rel_meta bytea := laplace.entity_type_id('RelationType');
-    wolf     bytea := laplace.word_id('狼');
-    stop     bytea := laplace.word_id('。');
-    ending   bytea := laplace.word_id('終');
-    sent1    bytea := public.laplace_hash128_blake3('test/display/sentence/1');
-    sent2    bytea := public.laplace_hash128_blake3('test/display/sentence/2');
-    doc      bytea := public.laplace_hash128_blake3('test/display/document');
-    book     bytea := public.laplace_hash128_blake3('test/display/book');
-    concept  bytea := public.laplace_hash128_blake3('test/display/concept');
-    concept2 bytea := public.laplace_hash128_blake3('test/display/concept/nested');
-    opaque   bytea := public.laplace_hash128_blake3('test/display/opaque');
-    missing  bytea := public.laplace_hash128_blake3('test/display/missing');
-    defrel   bytea := laplace.relation_type_id('HAS_DEFINITION');
-    senserel bytea := laplace.relation_type_id('HAS_SENSE');
-    t_sent   bytea := laplace.entity_type_id('Sentence');
-    t_word   bytea := laplace.entity_type_id('Word');
-    t_doc    bytea := laplace.entity_type_id('Document');
-    keytext  bytea := public.laplace_hash128_blake3('test/display/text-with-lemma');
-    word_a   bytea := public.laplace_hash128_blake3('test/display/word/a');
-    word_b   bytea := public.laplace_hash128_blake3('test/display/word/b');
-    row_ab   bytea := public.laplace_hash128_blake3('test/display/row/ab');
-    row_ba   bytea := public.laplace_hash128_blake3('test/display/row/ba');
-    own      text;
-    lemma    text;
-    parts    text[];
-    labels   text[];
-    ids      bytea[];
+ SELECT ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,w.coord))),
+ (max(coalesce(e.tier,w.tier))+1)::smallint INTO coord,tier
+ FROM unnest(parts) part LEFT JOIN public.entity e ON e.id=part LEFT JOIN native_display_words w ON w.id=part;
+ h=public.laplace_hilbert4(coord) # '-9223372036854775808'::bigint;
+ INSERT INTO public.entity VALUES(id,tier,coord,h,public.laplace_mask_slot('kind',kind)) ON CONFLICT DO NOTHING;
+ INSERT INTO public.physicality VALUES(id,tier,h,public.laplace_path(parts),public.laplace_mask_slot('kind',kind)) ON CONFLICT DO NOTHING;
+ RETURN id;
+END $$;
+DO $test$
+DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.laplace_id('λ');
+ row_id public.blake3; nested public.blake3; opaque public.blake3; absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
-    -- relation_family_members enumerates the governed RelationType roster. A lawful
-    -- attestation fixture therefore declares the relation type it uses, exactly like
-    -- production source bootstrap does; inventing an evidence row without its governed
-    -- type entity would be testing an impossible partially-bootstrapped substrate.
-    INSERT INTO laplace.entities (id, tier, type_id) VALUES
-        (defrel, 0, rel_meta),
-        (wolf, 0, type_cp),
-        (stop, 0, type_cp),
-        (ending, 0, type_cp),
-        (sent1, 3, type_s),
-        (sent2, 3, type_s),
-        (doc, 4, type_d),
-        (book, 5, type_b),
-        (concept, 2, type_c),
-        (concept2, 2, type_c),
-        (opaque, 2, type_c)
-    ON CONFLICT DO NOTHING;
-
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    VALUES
-        (public.laplace_hash128_blake3('test/display/physicality/sentence/1'), sent1, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.1,0.1,0.1,0.1),0), decode(repeat('31',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(wolf,1,1,0),
-             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/sentence/2'), sent2, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.2,0.2,0.2,0.2),0), decode(repeat('32',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(ending,1,1,0),
-             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/document'), doc, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.3,0.3,0.3,0.3),0), decode(repeat('33',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             -- vertex flags carry the contextual constituent tier (tier << 1).
-             public.laplace_mantissa_pack(sent1,1,1,6),
-             public.laplace_mantissa_pack(sent2,2,1,6)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/book'), book, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.4,0.4,0.4,0.4),0), decode(repeat('34',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(doc,1,1,8)]), 1, now());
-
-    INSERT INTO laplace.attestations
-        (id, subject_id, type_id, object_id, source_id, context_id, outcome,
-         last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9)
-    VALUES
-        (public.laplace_hash128_blake3('test/display/definition-edge'),
-         concept, defrel, doc, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (public.laplace_hash128_blake3('test/display/definition-edge/nested'),
-         concept2, defrel, book, src, NULL, 2, now(), 1, 1000000000, 30000000000);
-
-    SELECT array_agg(d.id ORDER BY d.ord), array_agg(d.label ORDER BY d.ord)
-      INTO ids, labels
-    FROM realize.display_label_batch(ARRAY[concept, concept2, doc, sent1, wolf, opaque, missing])
-         WITH ORDINALITY d(id, label, tier, ord);
-
-    IF ids IS DISTINCT FROM ARRAY[concept, concept2, doc, sent1, wolf, opaque, missing] THEN
-        RAISE EXCEPTION 'FAIL: display label changed/reordered entity identity';
-    END IF;
-    IF labels[1] IS DISTINCT FROM '狼。' THEN
-        RAISE EXCEPTION 'FAIL: concept did not use its definition preview: %', labels[1];
-    END IF;
-    IF labels[2] IS DISTINCT FROM '狼。' THEN
-        RAISE EXCEPTION 'FAIL: nested high-tier definition did not descend one bounded spine: %', labels[2];
-    END IF;
-    IF labels[3] IS DISTINCT FROM '狼。' THEN
-        RAISE EXCEPTION 'FAIL: definition document did not use containment-proven first-sentence preview: %', labels[3];
-    END IF;
-    IF labels[4] IS DISTINCT FROM '狼。' THEN
-        RAISE EXCEPTION 'FAIL: sentence content did not render Unicode exactly: %', labels[4];
-    END IF;
-    IF labels[5] IS DISTINCT FROM '狼' THEN
-        RAISE EXCEPTION 'FAIL: tier-0 codepoint did not render Unicode exactly: %', labels[5];
-    END IF;
-
-    -- A source-defined relation is content rather than a registry enum. The
-    -- relation and object can share an id without multiplying the result set.
-    IF lexical.type_label(sent1) IS NOT NULL THEN
-        RAISE EXCEPTION 'FAIL: relation fixture unexpectedly belongs to the registry';
-    END IF;
-    INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,
-                                   rating,rd,volatility,witness_count,last_observed_at)
-    VALUES(laplace.consensus_id(missing,sent1,sent1),missing,sent1,sent1,
-           1700000000000,30000000000,60000000,1,now());
-    IF (SELECT count(*) FROM ops.consensus_out_labeled(missing,40)) <> 1
-       OR NOT EXISTS (SELECT FROM ops.consensus_out_labeled(missing,40) c
-           WHERE c.type_id=sent1 AND c.object_id=sent1
-             AND c.type_label='狼。' AND c.object_label='狼。') THEN
-        RAISE EXCEPTION 'FAIL: consensus inspection did not render source-defined relation content';
-    END IF;
-    IF labels[6] IS NULL OR btrim(labels[6]) = ''
-       OR strpos(labels[6], left(encode(opaque,'hex'),12)) = 0 THEN
-        RAISE EXCEPTION 'FAIL: unresolved opaque entity did not retain canonical identity: %', labels[6];
-    END IF;
-    IF labels[7] IS DISTINCT FROM ('Entity · ' || left(encode(missing,'hex'),12)) THEN
-        RAISE EXCEPTION 'FAIL: absent entity did not retain its requested canonical identity: %', labels[7];
-    END IF;
-    IF labels[6] IN ('Unrealized entity','Unresolved entity')
-       OR labels[7] IN ('Unrealized entity','Unresolved entity') THEN
-        RAISE EXCEPTION 'FAIL: generic unresolved status replaced canonical identity: %', labels;
-    END IF;
-
-    -- Final-result projection is aligned, including duplicates. A graph batch can contain
-    -- the same id at multiple positions; display must not sort/dedup labels out of alignment.
-    SELECT array_agg(d.label ORDER BY d.ord)
-      INTO labels
-    FROM realize.display_label_batch(ARRAY[concept2, opaque, concept2])
-         WITH ORDINALITY d(id, label, tier, ord);
-    IF cardinality(labels) <> 3 OR labels[1] IS DISTINCT FROM labels[3] THEN
-        RAISE EXCEPTION 'FAIL: display label batch lost duplicate positional alignment';
-    END IF;
-
-    -- Content roots can observe themselves. A provenance fallback must not
-    -- render the entire source, either directly or for an unrelated entity.
-    DELETE FROM laplace.attestations WHERE subject_id IN (concept,concept2);
-    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
-      FROM realize.display_label_batch(ARRAY[doc,book,opaque])
-           WITH ORDINALITY d(id,label,tier,ord);
-    IF labels[1] IS DISTINCT FROM '狼。' OR labels[2] IS DISTINCT FROM '狼。'
-       OR strpos(labels[3],'終') > 0 THEN
-        RAISE EXCEPTION 'FAIL: label fallback reconstructed an entire source: %',labels;
-    END IF;
-
-    -- e2e_display_label_text_over_lemma
-    -- Text is its own surface (#1871 audit): a text-typed entity that a source binds
-    -- to a word by HAS_SENSE (a sense key such as 'break%2:30:04::' ingested as a
-    -- Sentence) is shown as what it writes, never relabelled as that word.
-    INSERT INTO laplace.entities (id, tier, type_id) VALUES
-        (senserel, 0, rel_meta), (keytext, 3, t_sent),
-        (word_a, 2, t_word), (word_b, 2, t_word), (row_ab, 4, t_doc), (row_ba, 4, t_doc)
-    ON CONFLICT DO NOTHING;
-    PERFORM realize.register_canonical('HAS_SENSE');
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    VALUES
-        (public.laplace_hash128_blake3('test/display/physicality/text-with-lemma'), keytext, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.5,0.5,0.5,0.5),0), decode(repeat('35',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(wolf,1,1,0),
-             public.laplace_mantissa_pack(ending,2,1,0)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/word/a'), word_a, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.6,0.6,0.6,0.6),0), decode(repeat('36',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(wolf,1,1,0),
-             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/word/b'), word_b, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.7,0.7,0.7,0.7),0), decode(repeat('37',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(ending,1,1,0),
-             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
-        -- vertex flags carry the constituent tier (tier << 1): word grain = 4.
-        (public.laplace_hash128_blake3('test/display/physicality/row/ab'), row_ab, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.8,0.8,0.8,0.8),0), decode(repeat('38',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(word_a,1,1,4),
-             public.laplace_mantissa_pack(word_b,2,1,4)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/row/ba'), row_ba, 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.9,0.9,0.9,0.9),0), decode(repeat('39',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(word_a,1,1,4),
-             public.laplace_mantissa_pack(wolf,2,1,0)]), 2, now());
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                                   rating, rd, volatility, witness_count, last_observed_at)
-    VALUES (laplace.consensus_id(stop, senserel, keytext), stop, senserel, keytext,
-            1700000000000, 30000000000, 60000000, 3, now());
-
-    own := (realize.render_text_batch(ARRAY[keytext]))[1];
-    lemma := (realize.lexicalize_batch(ARRAY[keytext]))[1];
-    IF own IS NULL OR lemma IS NULL OR own = lemma THEN
-        RAISE EXCEPTION 'FAIL: fixture must give the text a distinct own surface and lemma: % / %', own, lemma;
-    END IF;
-    SELECT ARRAY[d.label] INTO labels FROM realize.display_label_batch(ARRAY[keytext]) d;
-    IF labels[1] IS DISTINCT FROM own THEN
-        RAISE EXCEPTION 'FAIL: lexicalization overrode a text entity''s own surface: % (own %, lemma %)',
-            labels[1], own, lemma;
-    END IF;
-
-    -- A composition above sentence tier of word-grain parts (a table row) is shown as
-    -- its parts, never as its first column: two rows sharing a first part differ.
-    parts := realize.render_text_batch(ARRAY[word_a, word_b, wolf]);
-    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
-      FROM realize.display_label_batch(ARRAY[row_ab, row_ba]) WITH ORDINALITY d(id,label,tier,ord);
-    IF labels[1] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[2])
-       OR labels[2] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[3]) THEN
-        RAISE EXCEPTION 'FAIL: a word-grain row collapsed to its first column: %', labels;
-    END IF;
-
-    UPDATE laplace.entities SET type_id = laplace.entity_type_id('WordNet_Sense') WHERE id = row_ab;
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                                   rating, rd, volatility, witness_count, last_observed_at)
-    VALUES (laplace.consensus_id(stop, senserel, row_ab), stop, senserel, row_ab,
-            1700000000000, 30000000000, 60000000, 3, now());
-    SELECT ARRAY[d.label] INTO labels FROM realize.display_label_batch(ARRAY[row_ab]) d;
-    IF labels[1] IS DISTINCT FROM (parts[1] || U&' \00B7 ' || parts[2]) THEN
-        RAISE EXCEPTION 'FAIL: lexicalization overrode a typed sense record''s parts: %', labels[1];
-    END IF;
-
-    -- A reference anchor (an ILI composed as a tier-2 Word with IS_TYPED_AS in consensus)
-    -- reports its attested semantic type in ops.entity_facets / ops.entity_facets_batch
-    -- and lexicalizes to a tier-2 Word lemma ahead of an equally rated tier-3 Sentence phrase,
-    -- even when the Sentence phrase has a lexicographically smaller bytea id.
-    INSERT INTO laplace.entities (id, tier, type_id) VALUES
-        (decode('00000000000000000000000000000001', 'hex'), 3, t_sent),
-        (decode('fffffffffffffffffffffffffffffffe', 'hex'), 2, t_word),
-        (decode('00023b79bc7914eb76187513d92f8f6d', 'hex'), 2, t_word),
-        (laplace.relation_type_id('IS_TYPED_AS'), 0, rel_meta)
-    ON CONFLICT DO NOTHING;
-    PERFORM realize.register_canonical('IS_TYPED_AS');
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    VALUES
-        (public.laplace_hash128_blake3('test/display/physicality/phrase-low-id'),
-         decode('00000000000000000000000000000001', 'hex'), 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.11,0.11,0.11,0.11),0), decode(repeat('3a',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(ending,1,1,0),
-             public.laplace_mantissa_pack(stop,2,1,0)]), 2, now()),
-        (public.laplace_hash128_blake3('test/display/physicality/word-high-id'),
-         decode('fffffffffffffffffffffffffffffffe', 'hex'), 1,
-         public.ST_SetSRID(public.ST_MakePoint(0.12,0.12,0.12,0.12),0), decode(repeat('3b',16),'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(wolf,1,1,0)]), 1, now());
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                                   rating, rd, volatility, witness_count, last_observed_at)
-    VALUES
-        (laplace.consensus_id(decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
-                              laplace.relation_type_id('IS_TYPED_AS'),
-                              laplace.entity_type_id('CILI_Instance')),
-         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
-         laplace.relation_type_id('IS_TYPED_AS'),
-         laplace.entity_type_id('CILI_Instance'),
-         1700000000000, 30000000000, 60000000, 1, now()),
-        (laplace.consensus_id(decode('00000000000000000000000000000001', 'hex'),
-                              senserel,
-                              decode('00023b79bc7914eb76187513d92f8f6d', 'hex')),
-         decode('00000000000000000000000000000001', 'hex'),
-         senserel,
-         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
-         1700000000000, 30000000000, 60000000, 1, now()),
-        (laplace.consensus_id(decode('fffffffffffffffffffffffffffffffe', 'hex'),
-                              senserel,
-                              decode('00023b79bc7914eb76187513d92f8f6d', 'hex')),
-         decode('fffffffffffffffffffffffffffffffe', 'hex'),
-         senserel,
-         decode('00023b79bc7914eb76187513d92f8f6d', 'hex'),
-         1700000000000, 30000000000, 60000000, 1, now());
-
-    IF (SELECT f.type_id FROM ops.entity_facets(decode('00023b79bc7914eb76187513d92f8f6d', 'hex')) f)
-       IS DISTINCT FROM laplace.entity_type_id('CILI_Instance') THEN
-        RAISE EXCEPTION 'FAIL: ops.entity_facets ignored IS_TYPED_AS semantic type';
-    END IF;
-    IF (SELECT f.type_id FROM ops.entity_facets_batch(ARRAY[decode('00023b79bc7914eb76187513d92f8f6d', 'hex')]) f)
-       IS DISTINCT FROM laplace.entity_type_id('CILI_Instance') THEN
-        RAISE EXCEPTION 'FAIL: ops.entity_facets_batch ignored IS_TYPED_AS semantic type';
-    END IF;
-    IF (realize.lexicalize_batch(ARRAY[decode('00023b79bc7914eb76187513d92f8f6d', 'hex')]))[1]
-       IS DISTINCT FROM '狼' THEN
-        RAISE EXCEPTION 'FAIL: lexicalize_batch preferred tier-3 phrase over tier-2 word lemma';
-    END IF;
-    IF realize._synset_lemma(decode('00023b79bc7914eb76187513d92f8f6d', 'hex'), NULL)
-       IS DISTINCT FROM '狼' THEN
-        RAISE EXCEPTION 'FAIL: _synset_lemma preferred tier-3 phrase over tier-2 word lemma';
-    END IF;
-
-    RAISE NOTICE 'display labels: Unicode exact, bounded containment preview, identity-bearing fallback';
-END
-$display_label$;
+ row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
+ nested=pg_temp.display_tuple(ARRAY[row_id,dog,dog],'tuple');
+ opaque=pg_temp.display_tuple(ARRAY[nested,row_id],'file');
+ SELECT array_agg(d.label ORDER BY d.ordinal) INTO labels
+ FROM realize.display_label_batch(ARRAY[decode(dog::text,'hex'),decode(row_id::text,'hex'),decode(nested::text,'hex'),
+ decode(dog::text,'hex'),decode(scalar::text,'hex'),decode(opaque::text,'hex'),decode(absent::text,'hex')]) WITH ORDINALITY d(id,label,tier,ordinal);
+ IF labels IS DISTINCT FROM ARRAY['dog','[dog · λ · 中]','[[dog · λ · 中] · dog × 2]','dog','λ',opaque::text,absent::text] THEN
+  RAISE EXCEPTION 'Native display lost selected identities, order, runs or Unicode: %',labels;
+ END IF;
+ shifted=array_fill(NULL::bytea,ARRAY[2],ARRAY[0]);
+ shifted[0]=decode(dog::text,'hex'); shifted[1]=decode(scalar::text,'hex');
+ SELECT array_agg(d.id ORDER BY d.ordinal) INTO got
+ FROM realize.display_label_batch(shifted) WITH ORDINALITY d(id,label,tier,ordinal);
+ IF got IS DISTINCT FROM ARRAY[decode(dog::text,'hex'),decode(scalar::text,'hex')] THEN
+  RAISE EXCEPTION 'Native display changed IDs for a non-default array lower bound';
+ END IF;
+ IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=1 AND type_id IS NULL) THEN
+  RAISE EXCEPTION 'Native facet guessed a semantic type';
+ END IF;
+ IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(scalar::text,'hex')]) WHERE tier=0 AND type_id IS NOT NULL) THEN
+  RAISE EXCEPTION 'Native facet lost the virtual scalar floor';
+ END IF;
+ IF EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(absent::text,'hex')])) THEN
+  RAISE EXCEPTION 'Native facet invented presence for an absent identity';
+ END IF;
+ IF (SELECT count(*) FROM consensus.relation_metadata(ARRAY[decode(public.laplace_id('~')::text,'hex')]) WHERE canonical='IS_A' AND inverse AND qualifier_bit=-1)<>1 THEN
+  RAISE EXCEPTION 'Native original-ID alias metadata lost inversion';
+ END IF;
+END $test$;
 ROLLBACK;
-\set ECHO all
+SELECT 'native_display_label: ok';

@@ -123,6 +123,7 @@ functions/converse/label_batch.sql.in
 functions/lexical/type_label_batch.sql.in
 functions/readback/register_canonicals.sql.in
 functions/inspect/entity_facets.sql.in
+functions/inspect/claim_facts.sql.in
 functions/inspect/entity_physicalities.sql.in
 functions/inspect/entity_physicality_coords.sql.in
 functions/inspect/attestations_out.sql.in

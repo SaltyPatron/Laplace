@@ -1,8 +1,22 @@
-CREATE OR REPLACE FUNCTION ops.entity_evidence_count(p_subject bytea)
-RETURNS bigint LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT count(*) FROM laplace.attestations a WHERE a.subject_id=p_subject;
-END;
+CREATE OR REPLACE FUNCTION ops.entity_evidence_counts(p_ids bytea[])
+RETURNS TABLE(ordinal bigint,evidence bigint)
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $evidence$
+WITH input AS MATERIALIZED (
+ SELECT u.ordinal,encode(u.id,'hex')::public.blake3 AS id FROM unnest(p_ids) WITH ORDINALITY u(id,ordinal)
+), claims AS MATERIALIZED (
+ SELECT c.i,c.entity FROM public.laplace_claims_each(ARRAY(SELECT id FROM input ORDER BY ordinal),
+   NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+ JOIN input u ON u.ordinal=c.i WHERE public.laplace_path_starts(c.path,u.id)
+), provenance AS MATERIALIZED (
+ SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT DISTINCT entity FROM claims),false) a WHERE a.witness
+) SELECT u.ordinal,count(p.trunk)::bigint FROM input u LEFT JOIN claims c ON c.i=u.ordinal
+LEFT JOIN provenance p ON p.claim=c.entity GROUP BY u.ordinal ORDER BY u.ordinal
+$evidence$;
 
-COMMENT ON FUNCTION ops.entity_evidence_count(bytea) IS
-'Exact subject-side attestation row count. Physical-form provenance is structural, not testimony.';
+CREATE OR REPLACE FUNCTION ops.entity_evidence_count(p_subject bytea) RETURNS bigint
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $count$
+ SELECT evidence FROM ops.entity_evidence_counts(ARRAY[p_subject])
+$count$;
+
+
+DROP FUNCTION IF EXISTS ops.native_evidence_counts(bytea[]);

@@ -537,6 +537,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
             CREATE EXTENSION IF NOT EXISTS postgis;
+            CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
             CREATE EXTENSION IF NOT EXISTS laplace_geom;
             CREATE EXTENSION IF NOT EXISTS laplace_substrate;
             SET search_path TO laplace, public;

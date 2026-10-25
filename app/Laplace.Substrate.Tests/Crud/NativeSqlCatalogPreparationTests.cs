@@ -172,8 +172,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var y = window.Text(Encoding.UTF8.GetBytes(yName));
         var predicate = window.Text("!"u8);
         var value = window.Text("shared"u8);
-        // Factoring a generated identifier can add Native DAG levels. Each
-        // structural parent must stand above its actual children.
+        // Parent tier follows the real Native DAG, including generated text levels.
         StagedReference Compose(StagedReference[] children, ulong mask = 0) =>
             window.Compose(children, checked((byte)(children.Max(c => c.Tier) + 1)), mask, mask);
         var xc = Compose([x, predicate, value], 1);
@@ -229,7 +228,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.True(await read.ReadAsync()); Assert.Equal(1L, read.GetInt64(1));
             Assert.False(await read.ReadAsync());
         }
-        await using (var resolve = NpgsqlCatalog.Command(connection, transaction, "inspection.explore_resolve", xName))
+        await using (var resolve = NpgsqlCatalog.Command(connection, transaction, "inspection.explore_resolve", x.Id.ToBytes(), xName))
         await using (var read = await resolve.ExecuteReaderAsync())
         {
             Assert.True(await read.ReadAsync()); Assert.True(read.GetBoolean(3));
@@ -248,12 +247,21 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.Equal(xsense.Id.ToBytes(), read.GetFieldValue<byte[]>(0));
             Assert.Equal(ysense.Id.ToBytes(), read.GetFieldValue<byte[]>(1));
         }
-        foreach (var (name, id) in new[] { (xName, x.Id), (yName, y.Id), (Convert.ToHexString(x.Id.ToBytes()), x.Id) })
+        var absentId = Hash128.Text("unwitnessed-" + Guid.NewGuid().ToString("N"));
+        await using (var resolve = NpgsqlCatalog.Command(connection, transaction, "conversation.resolve_refs_with_labels",
+            new[] { x.Id.ToBytes(), y.Id.ToBytes(), x.Id.ToBytes(), absentId.ToBytes() },
+            new string?[] { xName, yName, null, null }))
+        await using (var read = await resolve.ExecuteReaderAsync())
         {
-            await using var resolve = NpgsqlCatalog.Command(connection, transaction, "conversation.resolve_ref_with_label", name);
-            await using var read = await resolve.ExecuteReaderAsync();
-            Assert.True(await read.ReadAsync());
-            Assert.Equal(id.ToBytes(), read.GetFieldValue<byte[]>(0));
+            foreach (var expected in new[] { x.Id, y.Id, x.Id, absentId }.Select((id, i) => (id, i)))
+            {
+                Assert.True(await read.ReadAsync());
+                Assert.Equal(expected.i + 1L, read.GetInt64(0));
+                Assert.Equal(expected.id.ToBytes(), read.GetFieldValue<byte[]>(1));
+                Assert.Equal(expected.i != 3, read.GetBoolean(3));
+                if (expected.i == 2) Assert.Equal(xName, read.GetString(2));
+            }
+            Assert.False(await read.ReadAsync());
         }
         await using (var record = NpgsqlCatalog.Command(connection, transaction, "ops.entity_record", x.Id.ToBytes()))
         await using (var read = await record.ExecuteReaderAsync())

@@ -272,7 +272,7 @@ The existing surfaces have different contracts:
 | Reconstruct an entity's own Unicode content | `render_text_batch` / `render_bytes_batch`, one native UTF-8 kernel in `generate_walk.c`; byte output preserves Unicode NUL |
 | Choose a witnessed language surface as an identity | `taxonomy.bubble_down_batch`; its output remains `surface_id` until materialization |
 | Materialize completed forward selections | `realize.forward_text_batch`; surface selection precedes rendering, and successful slots do not enter compatibility fallbacks |
-| Present a bounded preview while retaining identity | `realize.display_label_batch` in `display_native.c` |
+| Present a bounded preview while retaining identity | `realize.display_label_batch` → Native `public.laplace_labels` |
 | Existing name/lexicalization compatibility policies | `realize_batch.c`; scalar adapters share their batch owner |
 
 CLI inspection uses the same display boundary for elected consensus and evidence
@@ -383,3 +383,26 @@ continuation, label and inspection readers against the Native substrate. Those
 readers require their Native operators and carrier contracts; aliasing the old
 tables to the new ones would decode the paths incorrectly. An aggregate count of
 Native matches is not an attestation census.
+
+## Native inspection readers
+
+Shared API reference preparation derives Native identities on the client; `ops.resolve_refs`
+preserves input positions and performs indexed presence checks against `public.entity`
+and the Tier-0 perf-cache. Hex references are batch-realized only after presence election.
+
+`realize.display_label_batch` delegates to Native `public.laplace_labels`. The former
+legacy display walker is removed. Compiled relation metadata is projected by original
+Native IDs through `consensus.relation_metadata`; rendered labels never become semantic
+lookup keys. Unknown stored semantic types remain unknown.
+
+`ops.claim_facts`, `ops.entity_evidence_counts` and `ops.evidence_receipt` read Native
+claims and distinct registered claim/witness pairs. Reported games are not evidence counts.
+Non-ternary claims retain their identity and complete ordered, counted constituents.
+Leaderboards use one Native claim read and batch-realize elected constituents.
+Explore uses labels returned by these owners directly, retaining complete n-ary
+previews rather than running a second display selection over them.
+
+These inspection operations are components of the read contract above. They do not
+replace the routed forward program, recipe-declared lexicalization, or geometric coupling.
+The aggregate attestation census and migration of the remaining legacy operators are
+separate unfinished obligations.

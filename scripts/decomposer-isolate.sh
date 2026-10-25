@@ -27,7 +27,7 @@ createdb -h "$PGHOST" -U "$PGUSER" -O "$PGUSER" "$DBNAME"
 "${PSQL[@]}" -d "$DBNAME" \
   -c "CREATE EXTENSION IF NOT EXISTS postgis;" \
   -c "CREATE EXTENSION IF NOT EXISTS laplace_geom;" \
-  -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate;"
+  -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate CASCADE;"
 
 "${PSQL[@]}" -d "$DBNAME" -P pager=off \
   -c "SET search_path = laplace, public; SELECT * FROM substrate_health();"

@@ -13,7 +13,7 @@ public sealed record EvidenceResponse(
 
 
 public sealed record LabeledEvidenceItem(
-    [property: JsonPropertyName("type_id")] string TypeId,
+    [property: JsonPropertyName("type_id")] string? TypeId,
     [property: JsonPropertyName("type_label")] string TypeLabel,
     [property: JsonPropertyName("object_id")] string ObjectId,
     [property: JsonPropertyName("object_label")] string ObjectLabel,

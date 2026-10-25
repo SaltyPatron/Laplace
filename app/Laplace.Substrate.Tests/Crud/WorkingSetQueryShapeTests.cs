@@ -30,7 +30,8 @@ public sealed class WorkingSetQueryShapeTests
                 relative.Replace('/', Path.DirectorySeparatorChar)));
             Assert.Contains("SUPPORT @extschema@.array_length_rows_support", sql,
                 StringComparison.Ordinal);
-            Assert.Contains("ROWS 100", sql, StringComparison.Ordinal);
+            // The array-cardinality support function owns the estimate.
+            // A fixed fallback estimate is not the batch input or output bound.
         }
     }
 

@@ -21,7 +21,7 @@ actual_data="$("$PG_PREFIX/bin/psql" -XAt -d postgres -v ON_ERROR_STOP=1 -c 'SHO
 "$PG_PREFIX/bin/psql" -X -d "$DB" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE EXTENSION postgis;
 CREATE EXTENSION laplace_geom;
-CREATE EXTENSION laplace_substrate;
+CREATE EXTENSION laplace_substrate CASCADE;
 SQL
 
 # Restart with an actually unavailable registry, not a fake readiness function.

@@ -35,12 +35,6 @@ pg_laplace_claim_leaders(PG_FUNCTION_ARGS)
     if (!count) return (Datum)0;
     bool top = false;
     if (laplace_spi_connect(&top) != SPI_OK_CONNECT) elog(ERROR, "claim leaders: SPI connect failed");
-    if (SPI_execute(laplace_sql_query_text("leaders.native_present"), true, 1) != SPI_OK_SELECT)
-        elog(ERROR, "claim leaders: cannot identify installed storage");
-    bool isnull;
-    bool native = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
-    SPI_freetuptable(SPI_tuptable);
-    if (!native) { laplace_spi_finish(top); return (Datum)0; }
     if (!laplace_highway_ready()) elog(ERROR, "claim leaders: declared relation selectors are not configured");
     size_t capacity = laplace_relation_table_count + laplace_relation_alias_table_count;
     if (capacity > MaxAllocSize / sizeof(Datum)) elog(ERROR, "claim leaders: relation selectors exceed allocation capacity");
