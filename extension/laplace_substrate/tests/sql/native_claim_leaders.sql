@@ -125,7 +125,7 @@ END $$;
 -- and require the partitive page to retain both source pointer trajectories.
 CREATE TEMP TABLE all_band_leaders AS
 SELECT * FROM ops.claim_leaders(ARRAY(SELECT band::int FROM converse.relation_band_catalog()),20);
-DO $
+DO $league$
 BEGIN
   IF (SELECT count(DISTINCT band) FROM all_band_leaders)<>
      (SELECT count(*) FROM converse.relation_band_catalog()) THEN
@@ -136,6 +136,6 @@ BEGIN
       AND p.parts->1->>'label'=CASE c.name WHEN 'holo' THEN '#m' ELSE '%s' END)<>2 THEN
     RAISE EXCEPTION 'partitive pointer claims lost their identity, surface or attribution';
   END IF;
-END $;
+END $league$;
 SELECT 'native_claim_leaders: declared aliases, full arity, runs and real attribution passed';
 ROLLBACK;
