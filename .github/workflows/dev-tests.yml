@@ -69,7 +69,7 @@ jobs:
           # The runner account cannot write the default /usr/share/dotnet; the SDK goes in the runner's tool cache.
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.402'
       - name: The runner's CPU takes the pinned MKL CNR branch (Intel with AVX2)
         run: |
           lscpu | grep -E '^(Vendor ID|Model name):'
