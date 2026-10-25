@@ -46,6 +46,7 @@ if(WIN32)
         MKL_LP64
         LAPLACE_HAS_MKL=1
         LAPLACE_RUNTIME_NO_TBB=1
+        LAPLACE_MKL_STATIC_SEQUENTIAL=1
     )
     target_include_directories(laplace_dynamics_pg_static SYSTEM PRIVATE "$ENV{MKLROOT}/include")
 endif()

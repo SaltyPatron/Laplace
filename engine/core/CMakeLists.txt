@@ -234,7 +234,7 @@ find_package(LibXml2 REQUIRED)
 if(NOT ICU_ROOT)
     set(ICU_ROOT "${LAPLACE_ICU_DIR}")
 endif()
-find_package(ICU 78 COMPONENTS uc REQUIRED)
+find_package(ICU 78 COMPONENTS uc i18n data REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 add_dependencies(laplace_core laplace_attestation_codegen)
@@ -251,6 +251,23 @@ if(WIN32)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
         PRIVATE laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
+    # The separate Windows extension build imports the static archive. Carry its
+    # Native and external dependencies from this graph instead of naming old
+    # archives in that consumer (notably the former _deps/blake3 directory).
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/laplace-core-static-dependencies.cmake"
+        CONTENT "set(LAPLACE_CORE_STATIC_DEPENDENCIES
+  \"$<TARGET_FILE:laplace_text>\"
+  \"$<TARGET_FILE:laplace_static>\"
+  \"$<TARGET_FILE:blake3>\"
+  \"$<TARGET_FILE:laplace_math>\"
+  \"$<TARGET_FILE:tree_sitter_rt>\"
+  \"$<TARGET_FILE:ZLIB::ZLIB>\"
+  \"$<TARGET_FILE:ICU::uc>\"
+  \"$<TARGET_FILE:ICU::i18n>\"
+  \"$<TARGET_FILE:ICU::data>\"
+  \"$<TARGET_FILE:LibXml2::LibXml2>\")
+set(LAPLACE_CORE_STATIC_LINK_OPTIONS \"${LAPLACE_ENGINE_FP_LINK_FLAGS}\")
+")
 endif()
 
 
