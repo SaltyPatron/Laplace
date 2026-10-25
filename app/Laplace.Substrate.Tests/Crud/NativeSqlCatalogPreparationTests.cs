@@ -183,7 +183,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var ysense = window.Compose([y, language, context], 2, 4, 4);
         var link = window.Compose([xsense, predicate, ysense], 3, 1, 1);
         link.Said = 1;
-        var witness = window.Compose([xc, yc, link], 4);
+        var witness = window.Compose([xc, xc, xc, yc, link], 4);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
         await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
@@ -207,6 +207,28 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             standing.Parameters.AddWithValue(claim.Id);
             standing.Parameters.AddWithValue(witness.Id);
             await standing.ExecuteNonQueryAsync();
+        }
+        // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
+        await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.entity_evidence_count", x.Id.ToBytes()))
+            Assert.Equal(1L, await evidence.ExecuteScalarAsync());
+        await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.evidence_counts_batch", new[] { x.Id.ToBytes(), y.Id.ToBytes() }))
+        await using (var read = await evidence.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.Equal(1L, read.GetInt64(1));
+            Assert.True(await read.ReadAsync()); Assert.Equal(1L, read.GetInt64(1));
+            Assert.False(await read.ReadAsync());
+        }
+        await using (var resolve = NpgsqlCatalog.Command(connection, transaction, "inspection.explore_resolve", xName))
+        await using (var read = await resolve.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.True(read.GetBoolean(3));
+            Assert.Equal(x.Id.ToBytes(), read.GetFieldValue<byte[]>(0));
+        }
+        await using (var receipt = NpgsqlCatalog.Command(connection, transaction, "ops.evidence_receipt", x.Id.ToBytes(), 6))
+        await using (var read = await receipt.ExecuteReaderAsync())
+        {
+            Assert.True(await read.ReadAsync()); Assert.Equal("IS_ANTONYM_OF", read.GetString(1));
+            Assert.Equal(Convert.ToHexStringLower(witness.Id.ToBytes()), read.GetString(4)); Assert.Equal(1L, read.GetInt64(5));
         }
         await using (var couple = NpgsqlCatalog.Command(connection, transaction, "conversation.couple_topics", x.Id.ToBytes(), y.Id.ToBytes()))
         await using (var read = await couple.ExecuteReaderAsync())
