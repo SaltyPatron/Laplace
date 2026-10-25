@@ -272,7 +272,7 @@ The existing surfaces have different contracts:
 | Reconstruct an entity's own Unicode content | `render_text_batch` / `render_bytes_batch`, one native UTF-8 kernel in `generate_walk.c`; byte output preserves Unicode NUL |
 | Choose a witnessed language surface as an identity | `taxonomy.bubble_down_batch`; its output remains `surface_id` until materialization |
 | Materialize completed forward selections | `realize.forward_text_batch`; surface selection precedes rendering, and successful slots do not enter compatibility fallbacks |
-| Present a bounded preview while retaining identity | `realize.display_label_batch` in `display_native.c` |
+| Present a bounded preview while retaining identity | `realize.display_label_batch` → Native `public.laplace_labels` |
 | Existing name/lexicalization compatibility policies | `realize_batch.c`; scalar adapters share their batch owner |
 
 CLI inspection uses the same display boundary for elected consensus and evidence
