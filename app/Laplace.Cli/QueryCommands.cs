@@ -379,12 +379,10 @@ internal static class QueryCommands
         var utf8Input = Encoding.UTF8.GetBytes(text);
         var wordSeen = new HashSet<Hash128>();
         var words = new List<(Hash128 Id, string Label)>();
-        for (uint i = 0; i < (uint)tree.NodeCount; i++)
+        foreach (var segment in TextDecomposer.WordSegments(utf8Input))
         {
-            var v = tree.GetNode(i);
-            if (v.Tier != EntityTier.Word) continue;
-            if (!wordSeen.Add(v.Id)) continue;
-            words.Add((v.Id, Encoding.UTF8.GetString(utf8Input, (int)v.TextRangeOff, (int)v.TextRangeLen)));
+            if (!wordSeen.Add(segment.Id)) continue;
+            words.Add((segment.Id, Encoding.UTF8.GetString(utf8Input, segment.Offset, segment.Length)));
         }
 
         if (!exists)

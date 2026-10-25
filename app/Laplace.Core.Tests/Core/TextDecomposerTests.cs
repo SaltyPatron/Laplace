@@ -10,6 +10,21 @@ public class TextDecomposerTests
 
 
     [Fact]
+    public void NativeWordSegmentsPreserveOffsetsAndDoNotInferRoleFromTier()
+    {
+        byte[] utf8 = System.Text.Encoding.UTF8.GetBytes("a mississippi e\u0301.");
+        var segments = TextDecomposer.WordSegments(utf8);
+        Assert.Equal(new[] { "a", "mississippi", "e\u0301", "." }, segments.Select(
+            s => System.Text.Encoding.UTF8.GetString(utf8, s.Offset, s.Length)).ToArray());
+        Assert.Equal(new[] { 0, 2, 14, 17 }, segments.Select(s => s.Offset).ToArray());
+        foreach (var segment in segments)
+            Assert.Equal(TextDecomposer.ContentRootId(utf8.AsSpan(segment.Offset, segment.Length)), segment.Id);
+        using var word = TextDecomposer.Run("mississippi");
+        Assert.Equal(1, word.GetNode(word.NaturalUnitIndex()).Tier);
+        Assert.Equal(word.GetNode(word.NaturalUnitIndex()).Id, segments[1].Id);
+    }
+
+    [Fact]
     public void EmptyString_DoesNotMintAnEntity()
     {
         using var t = TextDecomposer.Run("");

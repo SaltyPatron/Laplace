@@ -133,12 +133,10 @@ internal static class DecompositionCommands
         return match ? 0 : 1;
     }
 
-    private static readonly string[] TierName = { "CP", "GRAPHEME", "WORD", "SENTENCE", "DOC" };
-
     private static void PrintNode(TierTree tree, uint idx, int depth)
     {
         var v = tree.GetNode(idx);
-        string label = v.Tier < TierName.Length ? TierName[v.Tier] : $"T{v.Tier}";
+        string label = v.Tier == 0 ? "CP" : $"TIER {v.Tier}";
         string idHex = Hex(v.Id).Substring(0, 8);
         string text = RenderLeaves(tree, idx).Replace("\n", "\\n");
         Console.WriteLine($"{new string(' ', depth * 2)}{label,-9} [{idHex}] \"{text}\"");
