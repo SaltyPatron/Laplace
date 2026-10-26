@@ -38,7 +38,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     env:
-      LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || '3600' }}
+      LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || 'wait' }}
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '0' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '0' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '0' }}

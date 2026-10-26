@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""The shared hart-server host lock: a delivery phase waits for another repository's host operation (an Engine CI
-parity ingest, the MCP deploy) up to the declared deadline, and the deadline is the repository variable with the same
-default Laplace-Operations' delivery uses (Laplace-Operations#131), never a literal short enough to fail a delivery
-while an ingest holds the lock (runs 39029518051, 39033153778: "host lock deadline expired ... no deployment phase ran").
-Every job that runs deploy/linux/site.sh under the deadline gives itself time to wait the whole default deadline and still do its work."""
+"""CI queues for the shared host lock; interactive commands keep their immediate-refusal default.
+Repository variables can still declare a finite deadline, and site jobs have an overall timeout.
+Actual contention and writer preference are exercised by tests/site-host-lock.sh."""
 import pathlib
 import re
 import sys
@@ -11,8 +9,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
-DECLARED = "${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || '3600' }}"
-DEFAULT_SECONDS = 3600
+DECLARED = "${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || 'wait' }}"
 
 
 def jobs(text):
@@ -41,7 +38,7 @@ class HostLockWait(unittest.TestCase):
                     value = line.split(":", 1)[1].strip()
                     self.assertEqual(value, DECLARED, f"{wf.name}:{n}: the deadline is the repository variable, not {value}")
 
-    def test_site_jobs_outlast_the_deadline(self):
+    def test_site_jobs_have_an_overall_timeout(self):
         for wf in sorted(WORKFLOWS.glob("*.yml")):
             text = wf.read_text(encoding="utf-8")
             if "LAPLACE_HOST_LOCK_WAIT_SECONDS" not in text:
@@ -52,10 +49,9 @@ class HostLockWait(unittest.TestCase):
                     continue                                   # a job the deadline is not declared for refuses at once (0)
                 m = re.search(r"^    timeout-minutes:\s*(\d+)", body, re.M)
                 self.assertIsNotNone(m, f"{wf.name}: job {name} runs site.sh with no timeout")
-                self.assertGreater(int(m.group(1)) * 60, DEFAULT_SECONDS,
-                                   f"{wf.name}: job {name} ({m.group(1)} min) cannot wait the {DEFAULT_SECONDS}s default deadline")
+                self.assertGreater(int(m.group(1)), 0, f"{wf.name}: job {name} needs a finite overall timeout")
 
-    def test_site_sh_waits_then_refuses(self):
+    def test_site_sh_preserves_interactive_deadlines(self):
         site = (ROOT / "deploy" / "linux" / "site.sh").read_text(encoding="utf-8")
         self.assertIn('wait="${LAPLACE_HOST_LOCK_WAIT_SECONDS:-0}"', site)
         self.assertIn('host_lock_hold "$mode" 8 "$path" "$wait"', site)   # through the turnstile (deploy/linux/host-lock.sh, #1899)

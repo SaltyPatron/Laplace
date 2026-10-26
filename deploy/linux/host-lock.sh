@@ -10,12 +10,13 @@
 #   source deploy/linux/host-lock.sh
 #   host_lock_hold shared|exclusive FD PATH [WAIT]
 #     FD the descriptor that holds the lock after (opened on PATH unless it is already); WAIT seconds, 0 for an
-#     immediate refusal, none to wait as long as it takes. 0 held; 3 the deadline expired, nothing held; 2 misused.
+#     immediate refusal, wait (or none) to wait as long as it takes. 0 held; 3 the deadline expired, nothing held; 2 misused.
 host_lock_hold() {
   local mode=$1 fd=$2 path=$3 wait=${4:-} flag mask start said=
   case "$mode" in shared) flag=-s ;; exclusive) flag=-x ;; *) echo "host_lock_hold: invalid host lock mode: $mode" >&2; return 2 ;; esac
   [[ "$fd" =~ ^[0-9]+$ && "$fd" != 7 ]] || { echo "host_lock_hold: FD is a descriptor number, not 7 (the turnstile's)" >&2; return 2; }
-  [[ -z "$wait" || "$wait" =~ ^[0-9]+$ ]] || { echo "host_lock_hold: WAIT must be a nonnegative integer" >&2; return 2; }
+  [[ "$wait" != wait ]] || wait=
+  [[ -z "$wait" || "$wait" =~ ^[0-9]+$ ]] || { echo "host_lock_hold: WAIT must be a nonnegative integer or wait" >&2; return 2; }
   if [[ /proc/self/fd/$fd -ef "$path" ]]; then flock "$flag" -n "$fd" && return 0
   else
     mask=$(umask); umask 002

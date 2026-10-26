@@ -68,9 +68,9 @@ permissions:
 
 env:
   # Credential refresh and component installation use the same host lock.
-  # How long a phase waits for another repository's host operation (an Engine CI parity ingest, the MCP deploy) to
-  # release the shared host lock before it refuses; the repository variable, as in Laplace-Operations' delivery (#131).
-  LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || '3600' }}
+  # Queue behind active ingestion and other host operations. A repository variable may set a numeric deadline;
+  # the default waits for the holder, as in Laplace-Operations' delivery.
+  LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || 'wait' }}
 
 concurrency:
   group: laplace-promotion
