@@ -52,9 +52,11 @@ CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     SUPPORT @extschema@.array_length_rows_support
 AS $native$
 WITH ids AS MATERIALIZED (SELECT DISTINCT id,encode(id,'hex')::public.blake3 AS key FROM unnest(p_ids) u(id) WHERE id IS NOT NULL),
-forms AS (SELECT i.id,e.tier,public.laplace_codepoint(i.key) AS scalar FROM ids i LEFT JOIN public.entity e ON e.id=i.key)
+forms AS (SELECT i.id,coalesce(e.tier,t.tier) AS tier,t.type_id,
+ public.laplace_codepoint(i.key) AS scalar FROM ids i
+ LEFT JOIN public.entity e ON e.id=i.key LEFT JOIN laplace.entities t ON t.id=i.id)
 SELECT id,coalesce(tier,0)::smallint,
- CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') ELSE NULL::bytea END
+ coalesce(type_id,CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') END)
 FROM forms WHERE tier IS NOT NULL OR scalar IS NOT NULL ORDER BY id
 $native$;
 

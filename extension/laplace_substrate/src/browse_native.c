@@ -100,7 +100,7 @@ typedef struct {
     int64 rating, rd, witnesses;
     int16 tier;
     BrowseMatchKind match_kind;
-    bool exists;
+    bool exists, has_type;
 } BrowseHit;
 
 static const char *
@@ -255,7 +255,9 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
         BrowseHit *hit = hash_search(hits, &id, HASH_FIND, NULL);
         if (hit) {
             hit->exists = true; hit->tier = DatumGetInt16(SPI_getbinval(t, d, 2, &isnull));
-            hit->type = datum_to_hash128(SPI_getbinval(t, d, 3, &isnull));
+            Datum type = SPI_getbinval(t, d, 3, &isnull);
+            hit->has_type = !isnull;
+            if (hit->has_type) hit->type = datum_to_hash128(type);
         }
     }
     SPI_freetuptable(SPI_tuptable);
@@ -269,11 +271,12 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     for (int64 i = offset; i < n && i < (int64)offset + limit; ++i) {
         hit = &ordered[i];
         bool structural = hit->match_kind != BROWSE_MATCH_NAME;
-        Datum v[] = {hash128_to_datum(&hit->id), Int16GetDatum(hit->tier), hash128_to_datum(&hit->type),
+        Datum v[] = {hash128_to_datum(&hit->id), Int16GetDatum(hit->tier), hit->has_type ? hash128_to_datum(&hit->type) : (Datum)0,
             hash128_to_datum(&hit->name), CStringGetTextDatum(match_kind_text(hit->match_kind)),
             fp_display_numeric(hit->rating), fp_display_numeric(hit->rd), eff_mu_display_numeric(hit->rating, hit->rd),
             Int64GetDatum(hit->witnesses), Int64GetDatum(count), BoolGetDatum(truncated), Int64GetDatum(n)};
         bool nulls[12] = {false};
+        nulls[2] = !hit->has_type;
         nulls[5] = nulls[6] = nulls[7] = structural;
         tuplestore_putvalues(r->setResult, r->setDesc, v, nulls);
     }
