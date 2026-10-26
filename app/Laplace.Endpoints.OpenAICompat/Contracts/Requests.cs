@@ -59,6 +59,13 @@ public sealed record RerankRequest(
     [property: JsonPropertyName("top_n")] int? TopN = null,
     [property: JsonPropertyName("return_documents")] bool ReturnDocuments = true);
 
+public sealed record CodeSearchRequest(
+    [property: JsonPropertyName("query")] string? Query,
+    [property: JsonPropertyName("path")] string? Path = null,
+    [property: JsonPropertyName("limit")] int? Limit = null,
+    [property: JsonPropertyName("offset")] int? Offset = null,
+    [property: JsonPropertyName("reindex")] bool Reindex = false);
+
 public sealed record SearchRequest(
     [property: JsonPropertyName("query")] string? Query,
     [property: JsonPropertyName("count")] int? Count);
