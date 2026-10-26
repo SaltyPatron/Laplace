@@ -1,0 +1,22 @@
+name: Operator workflow validation
+on:
+  push:
+    branches: [main]
+    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh']
+  pull_request:
+    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh']
+permissions:
+  contents: read
+jobs:
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate workflow syntax and operator ownership
+        run: |
+          ruby -rpsych -e 'ARGV.each { |path| Psych.parse_file(path) }' .github/workflows/*.yml
+          bash -n scripts/ingest-source.sh scripts/ensure-foundation.sh deploy/linux/host-lock.sh
+          python3 scripts/test-seed-workflow-ownership.py WorkflowOwnership SeedHostOwnership

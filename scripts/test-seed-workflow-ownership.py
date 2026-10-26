@@ -26,18 +26,16 @@ def run_block(step_name: str) -> str:
 
 
 class WorkflowOwnership(unittest.TestCase):
-    def test_product_push_ignores_documentation_and_delivers_workflow_changes(self):
+    def test_product_push_ignores_documentation_and_workflow_only_changes(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("branches: [main]", text)
-        self.assertIn('- ".github/ISSUE_TEMPLATE/**"', text)
-        self.assertIn('- ".github/PULL_REQUEST_TEMPLATE*"', text)
-        self.assertNotIn('- ".github/**"', text)
+        self.assertIn('- ".github/**"', text)
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
-        self.assertTrue(text.startswith("name: Product — maintenance"))
+        self.assertTrue(text.startswith("name: Product â€” maintenance"))
         self.assertIn("options: [status, access-audit, access-enroll, owner-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]", text)
         operation = text.split("      operation:\n", 1)[1].split("      target:\n", 1)[0]
         for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
@@ -151,7 +149,7 @@ class SeedHostOwnership(unittest.TestCase):
             self.assertIn(f"{name}:", SEED)
 
     def test_generic_seed_is_internal_only_and_operator_wrappers_are_named(self):
-        self.assertIn("name: Internal — substrate ingest", SEED)
+        self.assertIn("name: Internal â€” substrate ingest", SEED)
         self.assertIn("workflow_call:", SEED)
         self.assertNotIn("workflow_dispatch:", SEED)
 
@@ -165,7 +163,7 @@ class SeedHostOwnership(unittest.TestCase):
         ):
             with self.subTest(workflow=name):
                 text = (WORKFLOWS / name).read_text(encoding="utf-8")
-                self.assertTrue(text.startswith("name: Data —"))
+                self.assertTrue(text.startswith("name: Data â€”"))
                 self.assertIn("workflow_dispatch:", text)
                 self.assertNotIn("\n      path:\n", text)
                 self.assertNotIn("evict_confirm:", text)

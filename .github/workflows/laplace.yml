@@ -1,5 +1,5 @@
-name: Product — main delivery
-run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs.promote && 'production' || 'staging' }} — ${{ github.sha }}"
+name: Product â€” main delivery
+run-name: "Deliver â€” ${{ github.event_name == 'push' && 'production' || inputs.promote && 'production' || 'staging' }} â€” ${{ github.sha }}"
 
 # Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
@@ -31,8 +31,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE*"
+      - ".github/**"
       - "docs/**"
       - "**/*.md"
       - "scripts/ci-impact-plan.py"
@@ -81,7 +80,7 @@ concurrency:
 # remain independently callable; the promotion queue is not a machine lock.
 jobs:
   deliver:
-    name: Staging — build, migrate, publish, read back on hart-server
+    name: Staging â€” build, migrate, publish, read back on hart-server
     concurrency:
       group: laplace-site-hart-server
       cancel-in-progress: false
@@ -210,7 +209,7 @@ jobs:
           compression-level: 1
 
   cloud-host:
-    name: Cloud qualification — start the explicitly requested host
+    name: Cloud qualification â€” start the explicitly requested host
     needs: deliver
     if: needs.deliver.result == 'success' && inputs.qualify_cloud == true
     runs-on: ubuntu-24.04
@@ -248,7 +247,7 @@ jobs:
             --metadata "laplace-lease=${{ github.run_id }} $(( $(date +%s) + 300 * 60 ))"
 
   production-build:
-    name: Cloud qualification — build, load extensions and exercise the selected runtime
+    name: Cloud qualification â€” build, load extensions and exercise the selected runtime
     needs: [deliver, cloud-host]
     if: needs.cloud-host.result == 'success'
     runs-on: [self-hosted, laplace, Laplace, cloud]
@@ -302,7 +301,7 @@ jobs:
         run: deploy/linux/site.sh app
 
   cloud-host-release:
-    name: Cloud qualification — release the host to stop when idle
+    name: Cloud qualification â€” release the host to stop when idle
     needs: [cloud-host, production-build]
     if: always() && needs.cloud-host.result == 'success'
     runs-on: ubuntu-24.04
@@ -325,7 +324,7 @@ jobs:
           esac
 
   production:
-    name: Production — received, published and restarted on the hosting host (hart-prod)
+    name: Production â€” received, published and restarted on the hosting host (hart-prod)
     needs: deliver
     if: needs.deliver.result == 'success' && (github.event_name == 'push' || inputs.promote)
     runs-on: [self-hosted, laplace, Laplace, production]
