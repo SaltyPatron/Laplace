@@ -42,7 +42,7 @@ class SourceScopedGateBoundsTests(unittest.TestCase):
                 return str(global_count)
             raise AssertionError(f"unexpected SQL: {sql}")
 
-        with patch.object(GATE, "load_gates", return_value=config), patch.object(
+        with patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
             GATE, "psql", side_effect=fake_psql
         ):
             return GATE.check_source(
@@ -89,7 +89,7 @@ class DocumentCompositionGateTests(unittest.TestCase):
                 return "t"
             raise AssertionError(f"unexpected SQL: {sql}")
 
-        with patch.object(GATE, "load_gates", return_value=config), patch.object(
+        with patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
             GATE, "psql", side_effect=fake_psql
         ):
             report = GATE.check_source(
@@ -103,6 +103,39 @@ class DocumentCompositionGateTests(unittest.TestCase):
         self.assertEqual(0, attestations["count"])
         self.assertNotIn("tier = 4", "\n".join(seen))
         self.assertNotIn("CONTAINS", "\n".join(seen))
+
+
+class NativeSourceProofTests(unittest.TestCase):
+    def run_gate(self, **changes: object) -> dict:
+        proof = {"run_id": "run", "source_id": "actual-trunk", "layer": 1,
+                 "source_complete": True, "files_total": 2, "files_received": 2,
+                 "files_complete": 2, "ids_requested": 3, "ids_present": 3, "series": 4}
+        proof.update(changes)
+        config = {"sources": {"iso-639": {"decomposer": "ISO639", "layer": 1,
+                   "witness": ["retired-authority", "retired-release"]}}}
+        catalog = {"sources": [{"name": "iso-639", "aliases": ["iso639"]}]}
+        import json
+        with patch.object(GATE, "load_catalog", return_value=catalog), \
+             patch.object(GATE, "load_gates", return_value=config), \
+             patch.object(GATE, "canonical_source", return_value="iso-639"), \
+             patch.object(GATE, "psql", return_value=json.dumps(proof)) as query:
+            report = GATE.check_source("iso639", "laplace-mono", host="/tmp", user="laplace",
+                                       allow_health_tier=False)
+        self.assertEqual(1, query.call_count)
+        sql = query.call_args.args[1]
+        self.assertIn("'iso-639'", sql)
+        self.assertIn("public.laplace_contained_series", sql)
+        self.assertNotIn("retired-authority", sql)
+        return report
+
+    def test_complete_native_output_uses_actual_published_trunk(self) -> None:
+        self.assertTrue(self.run_gate()["passed"])
+
+    def test_partial_or_missing_native_output_fails(self) -> None:
+        for changes in ({"source_complete": False}, {"files_received": 1},
+                        {"files_complete": 1}, {"ids_present": 2}, {"series": 0}, {"layer": 2}):
+            with self.subTest(changes=changes):
+                self.assertFalse(self.run_gate(**changes)["passed"])
 
 
 if __name__ == "__main__":

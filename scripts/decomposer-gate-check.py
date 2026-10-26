@@ -10,7 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from ingest_catalog import canonical_source
+from ingest_catalog import canonical_source, load_catalog
 
 ROOT = Path(__file__).resolve().parent.parent
 GATES = ROOT / "scripts" / "decomposer-gates.json"
@@ -37,6 +37,40 @@ def load_gates() -> dict:
         return json.load(f)
 
 
+
+def check_native_source(source: str, src: dict, dbname: str, *, host: str, user: str) -> dict:
+    """Verify Native output under the producer's actual trunk, not retired typed relations."""
+    checks: list[dict] = []
+    def record(name: str, passed: bool, detail: str) -> None:
+        checks.append({"check": name, "passed": passed, "detail": detail})
+    try:
+        literal = "'" + source.replace("'", "''") + "'"
+        sql = (ROOT / "scripts/native-ingest-proof.sql").read_text(encoding="utf-8")
+        raw = psql(dbname, sql.replace("__SOURCE_LITERAL__", literal), host=host, user=user)
+        if not raw:
+            raise ValueError(f"no Native run receipt for {source}")
+        proof = json.loads(raw)
+        record("native_source_complete", proof["source_complete"] is True
+               and proof["layer"] == src["layer"],
+               f"run={proof['run_id']} witness={proof['source_id']} layer={proof['layer']}")
+        total = proof["files_total"]
+        record("native_file_receipts", total > 0
+               and proof["files_received"] == total and proof["files_complete"] == total,
+               f"selected={total} received={proof['files_received']} complete={proof['files_complete']}")
+        record("native_carriers", proof["ids_requested"] > 0
+               and proof["ids_requested"] == proof["ids_present"],
+               f"file/source ID pairs present={proof['ids_present']}/{proof['ids_requested']}")
+        required = not src.get("content_only") and src.get("attestations") != "optional"
+        record("native_source_series", not required or proof["series"] > 0,
+               f"{proof['series']} attributed series; required={required}")
+    except Exception as error:
+        record("native_output_proof", False, str(error))
+    return {"source": source, "dbname": dbname, "decomposer": source,
+            "layer": src["layer"], "contract": "native",
+            "passed": all(check["passed"] for check in checks),
+            "checked_at": datetime.now(timezone.utc).isoformat(), "checks": checks}
+
+
 def check_source(
     source: str,
     dbname: str,
@@ -50,6 +84,9 @@ def check_source(
     src = spec["sources"].get(source)
     if not src:
         raise SystemExit(f"unknown source '{source}' — not in decomposer-gates.json")
+
+    if any(entry["name"] == source for entry in load_catalog()["sources"]):
+        return check_native_source(source, src, dbname, host=host, user=user)
 
     decomposer = src["decomposer"]
     # A source generation is the witness [authority, release]; legacy decomposers keep

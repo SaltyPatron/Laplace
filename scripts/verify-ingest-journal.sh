@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/verify-ingest-journal.sh <SourceName>           # e.g. FrameNetDecomposer
-#   scripts/verify-ingest-journal.sh --cli-key framenet    # resolve via decomposer-gates.json
+#   scripts/verify-ingest-journal.sh --cli-key framenet    # resolve through the producer catalog
 #
 # Exit 0 iff the latest ingest_run_journal row for that source is a successful
 # terminal status — see the case block at the bottom for the list and why each is there.
@@ -22,13 +22,7 @@ usage() {
 SOURCE=""
 if [[ "${1:-}" == "--cli-key" ]]; then
   [[ $# -ge 2 ]] || usage
-  key="$(python3 "$ROOT/scripts/ingest_catalog.py" --resolve "$2")"
-  SOURCE=$(python3 -c "
-import json, sys
-e = json.load(open('${ROOT}/scripts/decomposer-gates.json'))['sources'].get(sys.argv[1])
-print(e['decomposer'] if e else '')
-" "$key")
-  [[ -n "$SOURCE" ]] || { echo "error: no decomposer-gates.json entry for '$key'" >&2; exit 2; }
+  SOURCE="$(python3 "$ROOT/scripts/ingest_catalog.py" --journal-source "$2")"
 elif [[ $# -ge 1 && "$1" != -* ]]; then
   SOURCE="$1"
 else
@@ -38,12 +32,13 @@ fi
 PSQL=(psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -tAc)
 
 # Fully-qualify — a leading SET under -tAc prints "SET" as the first result row.
+SOURCE_SQL=${SOURCE//\'/\'\'}
 row=$("${PSQL[@]}" "
 SELECT status || '|' || coalesce(files_done::text,'') || '|' || coalesce(files_total::text,'')
     || '|' || coalesce(entities::text,'') || '|' || coalesce(attestations::text,'')
     || '|' || coalesce(error,'')
 FROM laplace.ingest_run_journal
-WHERE source_name = '${SOURCE}'
+WHERE source_name = '${SOURCE_SQL}'
 ORDER BY started_at DESC
 LIMIT 1;
 ")
