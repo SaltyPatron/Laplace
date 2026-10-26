@@ -35,7 +35,7 @@ class WorkflowOwnership(unittest.TestCase):
 
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
-        self.assertTrue(text.startswith("name: Product â€” maintenance"))
+        self.assertTrue(text.startswith("name: Product — maintenance"))
         self.assertIn("options: [status, access-audit, access-enroll, owner-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]", text)
         operation = text.split("      operation:\n", 1)[1].split("      target:\n", 1)[0]
         for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
@@ -149,7 +149,7 @@ class SeedHostOwnership(unittest.TestCase):
             self.assertIn(f"{name}:", SEED)
 
     def test_generic_seed_is_internal_only_and_operator_wrappers_are_named(self):
-        self.assertIn("name: Internal â€” substrate ingest", SEED)
+        self.assertIn("name: Internal — substrate ingest", SEED)
         self.assertIn("workflow_call:", SEED)
         self.assertNotIn("workflow_dispatch:", SEED)
 
@@ -163,7 +163,7 @@ class SeedHostOwnership(unittest.TestCase):
         ):
             with self.subTest(workflow=name):
                 text = (WORKFLOWS / name).read_text(encoding="utf-8")
-                self.assertTrue(text.startswith("name: Data â€”"))
+                self.assertTrue(text.startswith("name: Data —"))
                 self.assertIn("workflow_dispatch:", text)
                 self.assertNotIn("\n      path:\n", text)
                 self.assertNotIn("evict_confirm:", text)
