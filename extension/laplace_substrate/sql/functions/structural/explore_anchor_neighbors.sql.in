@@ -64,7 +64,7 @@ BEGIN ATOMIC
         SELECT w.id AS entity_id, pr.v_traj
         FROM params pr
         JOIN laplace.v_word_points w
-          ON w.tier = 2 AND w.trajectory IS NOT NULL
+          ON w.type_id = laplace.entity_type_id('Word') AND w.trajectory IS NOT NULL
         WHERE pr.v_traj IS NOT NULL
         ORDER BY w.coord <<->> pr.v_anchor
         LIMIT p_frechet_k
@@ -106,7 +106,7 @@ BEGIN ATOMIC
         SELECT 'shape'::text AS axis,
                f.entity_id,
                COALESCE(NULLIF(d.rendered[f.rn], ''), d.labels[f.rn]) AS label,
-               2::smallint AS tier,
+               (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = f.entity_id) AS tier,
                NULL::float8 AS geodesic,
                f.fr AS frechet
         FROM shape_numbered f CROSS JOIN shape_display d
