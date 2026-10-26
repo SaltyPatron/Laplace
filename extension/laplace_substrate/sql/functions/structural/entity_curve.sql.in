@@ -4,12 +4,21 @@ CREATE OR REPLACE FUNCTION structural.entity_curve(p_entity bytea, p_type smalli
 
 BEGIN ATOMIC
 
-    SELECT public.ST_MakeLine(p.coord ORDER BY c.ordinal)
-    FROM generation.trajectory_unpacked_points(p_entity, p_type)
-         WITH ORDINALITY AS c(child_id, run_length, ctier, ordinal)
-    JOIN laplace.physicalities p
-      ON p.entity_id = c.child_id AND p.type = 1 AND p.coord IS NOT NULL
-;
+    -- A codepoint's canonical placement can live only in the Native floor.
+    -- Resolve it there instead of silently dropping it from the realized curve.
+    -- A missing non-floor constituent makes the whole curve unresolved.
+    WITH points AS (
+        SELECT c.ordinal,
+               COALESCE(p.coord, public.ST_GeomFromEWKB(
+                   public.laplace_cp_coord_ewkb(realize.codepoint_for_id(c.child_id)))) AS coord
+        FROM generation.trajectory_unpacked_points(p_entity, p_type)
+             WITH ORDINALITY AS c(child_id, run_length, ctier, ordinal)
+        LEFT JOIN laplace.physicalities p
+          ON p.entity_id = c.child_id AND p.type = 1
+    )
+    SELECT CASE WHEN bool_and(coord IS NOT NULL)
+                THEN public.ST_MakeLine(coord ORDER BY ordinal) END
+    FROM points;
 END;
 
 -- Content-lane default, BEGIN ATOMIC so the delegation records pg_depend (GH #764).
