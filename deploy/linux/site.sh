@@ -90,7 +90,7 @@ fail() { echo "::error::$*" >&2; exit 1; }
 host_lock() {
   local path="${LAPLACE_HOST_LOCK:-$LAPLACE_LOCKS/host-resource.lock}" mode="${1:-exclusive}"
   local wait="${LAPLACE_HOST_LOCK_WAIT_SECONDS:-0}" rc=0
-  [[ "$wait" =~ ^[0-9]+$ ]] || fail "LAPLACE_HOST_LOCK_WAIT_SECONDS must be a nonnegative integer"
+  [[ "$wait" == wait || "$wait" =~ ^[0-9]+$ ]] || fail "LAPLACE_HOST_LOCK_WAIT_SECONDS must be a nonnegative integer or wait"
   case "$mode" in shared|exclusive) ;; *) fail "invalid host lock mode: $mode" ;; esac
   [[ -d "$(dirname "$path")" ]] || fail "missing shared host lock directory: $path"
   host_lock_hold "$mode" 8 "$path" "$wait" || rc=$?      # through the turnstile: a waiting deployment is not overtaken
@@ -795,7 +795,8 @@ lock_needed=; lock_mode=shared
 for p in "${phases[@]}"; do
   [[ "$p" == serve ]] && continue
   lock_needed=1
-  [[ "$p" == smoke || "$p" == status ]] || lock_mode=exclusive
+  # Bundle reads the installed runtime and writes only this delivery's staging directory.
+  [[ "$p" == smoke || "$p" == status || "$p" == bundle ]] || lock_mode=exclusive
 done
 [[ -z "$lock_needed" ]] || host_lock "$lock_mode"
 for p in "${phases[@]}"; do

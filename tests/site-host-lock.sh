@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${TMPDIR:?build scratch required}"
+# Exercise the interactive default even when CI itself is configured to wait.
+unset LAPLACE_HOST_LOCK_WAIT_SECONDS
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "$TMPDIR/site-host-lock.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -45,7 +47,7 @@ echo 'PASS the next deployment acquires the released lock'
 # Writer preference (#1899): while a deployment waits for an ingest, a later ingest waits behind it, not past it; the
 # ingest's own nested command, which inherited its lock, still goes on at once.
 host_lock shared
-LAPLACE_HOST_LOCK_WAIT_SECONDS=10 bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock exclusive && touch "$LAPLACE_LOCKS/deployed"; sleep 1' 8>&- 2> "$work/deploy-waiting" &
+LAPLACE_HOST_LOCK_WAIT_SECONDS=wait bash -c 'fail(){ exit 1; }; source "$FUNCTIONS"; host_lock exclusive && touch "$LAPLACE_LOCKS/deployed"; sleep 1' 8>&- 2> "$work/deploy-waiting" &
 deployment=$!
 for attempt in {1..100}; do grep -q 'Waiting' "$work/deploy-waiting" && break; sleep .02; done
 grep -q 'Waiting' "$work/deploy-waiting" || { echo 'the deployment did not wait'; exit 1; }
