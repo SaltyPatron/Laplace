@@ -42,7 +42,7 @@ class SourceScopedGateBoundsTests(unittest.TestCase):
                 return str(global_count)
             raise AssertionError(f"unexpected SQL: {sql}")
 
-        with patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
+        with patch.object(GATE, "canonical_source", side_effect=str.lower), patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
             GATE, "psql", side_effect=fake_psql
         ):
             return GATE.check_source(
@@ -89,7 +89,7 @@ class DocumentCompositionGateTests(unittest.TestCase):
                 return "t"
             raise AssertionError(f"unexpected SQL: {sql}")
 
-        with patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
+        with patch.object(GATE, "canonical_source", side_effect=str.lower), patch.object(GATE, "load_catalog", return_value={"sources": []}), patch.object(GATE, "load_gates", return_value=config), patch.object(
             GATE, "psql", side_effect=fake_psql
         ):
             report = GATE.check_source(

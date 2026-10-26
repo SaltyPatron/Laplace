@@ -68,6 +68,7 @@ run_ci_contract_checks() {
   ci_contract_check python3 scripts/test-product-ci-artifact-ownership.py
   ci_contract_check python3 scripts/test-seed-workflow-ownership.py
   ci_contract_check python3 scripts/test-ingest-source-exit.py
+  ci_contract_check python3 scripts/test-decomposer-gate-check.py
   ci_contract_check python3 scripts/test-db-reset-guard.py
   ci_contract_check python3 scripts/test-host-lock-wait.py
   ci_contract_check ruby tests/site-workflow.rb
