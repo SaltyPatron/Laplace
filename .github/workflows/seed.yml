@@ -128,13 +128,23 @@ jobs:
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           source scripts/ci-environment.sh
+          echo "Ingest requested: mode=$MODE source=${SOURCE_KEY:-ladder} database=$PGDATABASE"
+          echo "Using the installed CLI; acquiring shared runtime access (deployments remain exclusive)."
+          {
+            echo "## Ingest startup"
+            echo "- Database: $PGDATABASE"
+            echo "- Mode: $MODE"
+            echo "- Runtime access: shared; independent databases may ingest concurrently"
+          } >> "$GITHUB_STEP_SUMMARY"
           host_lock="${LAPLACE_HOST_LOCK:-${LAPLACE_LOCKS:-/run/lock/laplace}/host-resource.lock}"
           if [[ /proc/self/fd/9 -ef "$host_lock" ]]; then
+            flock -s 9
             exec 8>&9
           else
             source deploy/linux/host-lock.sh
-            host_lock_hold exclusive 8 "$host_lock"
+            host_lock_hold shared 8 "$host_lock"
           fi
+          echo "Runtime access acquired; checking active ingestion in $PGDATABASE."
           export LAPLACE_INGEST_RUNTIME="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}/cli"
           export LAPLACE_CLI_BIN="$LAPLACE_INGEST_RUNTIME/Laplace.Cli"
           [[ -x "$LAPLACE_CLI_BIN" && -f "$LAPLACE_INGEST_RUNTIME/Laplace.Cli.dll" ]] || {

@@ -105,6 +105,14 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertNotIn("group: laplace-host-lifecycle", SEED)
         self.assertNotIn("queue: max", SEED)
 
+    def test_seed_shares_runtime_access_with_other_databases(self):
+        block = run_block(SEED_STEP)
+        self.assertIn('host_lock_hold shared 8 "$host_lock"', block)
+        self.assertNotIn('host_lock_hold exclusive', block)
+        self.assertIn('flock -s 9', block)
+        self.assertLess(block.index('## Ingest startup'), block.index('host_lock_hold shared'))
+        self.assertIn('scripts/wait-for-quiet-substrate.sh "$PGDATABASE"', block)
+
     def test_checkout_and_mutation_share_the_real_host_lock(self):
         block = run_block(SEED_STEP)
         lock = block.index("flock 9")
