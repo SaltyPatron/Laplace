@@ -33,7 +33,7 @@ public static class NpgsqlBrowseReads
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("browse.page"),
             static r => (
-                Id: r.GetFieldValue<byte[]>(0), Type: r.GetFieldValue<byte[]>(2),
+                Id: r.GetFieldValue<byte[]>(0), Type: r.IsDBNull(2) ? null : r.GetFieldValue<byte[]>(2),
                 Row: new NamedEntityRow(
                     Convert.ToHexString(r.GetFieldValue<byte[]>(0)).ToLowerInvariant(), "",
                     r.GetInt16(1), "",
@@ -66,7 +66,7 @@ public static class NpgsqlBrowseReads
         return rows.Select((r, i) => r.Row with
         {
             Label = labels.First[i],
-            Type = string.IsNullOrEmpty(types[i]) ? Convert.ToHexString(r.Type).ToLowerInvariant() : types[i],
+            Type = string.IsNullOrEmpty(types[i]) ? r.Type is null ? "" : Convert.ToHexString(r.Type).ToLowerInvariant() : types[i],
         }).ToArray();
     }
 }

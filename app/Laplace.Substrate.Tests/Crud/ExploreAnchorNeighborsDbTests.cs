@@ -54,6 +54,29 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
         Assert.DoesNotContain(shape, n => n.IdHex == number.Id.ToHex());
     }
 
+    [Fact]
+    public async Task BrowsePreservesWordRoleAndCanonicalHeight()
+    {
+        CodepointPerfcache.LoadDefault();
+        string unit = $"browse-word-role/{Guid.NewGuid():N}";
+        Hash128 source = Hash128.Text(unit);
+        using var builder = new SubstrateChangeBuilder(source, unit)
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        Assert.NotNull(ContentEmitter.Emit(builder, unit, source));
+        using var tree = TextDecomposer.Run("mississippi");
+        var word = StageRoot(builder, tree, EntityTypeRegistry.Word, source);
+        await using (var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
+            await writer.ApplyWorkingSetAsync(builder.Build());
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        var rows = await NpgsqlBrowseReads.NamedEntitiesAsync(connection,
+            [word.Id.ToBytes()], word.Id.ToBytes(), 0, 20, 0, CancellationToken.None);
+        var selected = Assert.Single(rows, r => r.IdHex == word.Id.ToHex());
+        Assert.Equal((short)1, selected.Tier);
+        Assert.Equal("word", selected.Type);
+        Assert.Equal("surface", selected.MatchKind);
+    }
+
     private static OrderedCompositionResult StageRoot(
         SubstrateChangeBuilder builder, TierTree tree, Hash128 role, Hash128 source)
     {
