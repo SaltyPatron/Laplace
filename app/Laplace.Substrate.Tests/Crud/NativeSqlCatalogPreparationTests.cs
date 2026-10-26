@@ -98,13 +98,15 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CanonicalMigrationKeepsByteOperatorsDirectAndScopesNativeSpi()
+    public async Task CanonicalMigrationRestoresNativeFunctionBindings()
     {
         await using var connection = await _source.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         // Exercise recovery of an installation carrying the previous guard.
         await using (var previous = new NpgsqlCommand(
-            "ALTER FUNCTION public.blake3_cmp(public.blake3,public.blake3) SET search_path=public,pg_temp",
+            "ALTER FUNCTION public.blake3_cmp(public.blake3,public.blake3) SET search_path=public,pg_temp; "
+            + "ALTER FUNCTION public.laplace_mask_has_value(bit,text,text) SET search_path=public,pg_temp; "
+            + "ALTER FUNCTION public.laplace_coord(text) SET search_path=public,pg_temp",
             connection, transaction)) await previous.ExecuteNonQueryAsync();
         await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
             await migrate.ExecuteNonQueryAsync();
@@ -116,6 +118,25 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
               AND EXISTS(SELECT FROM unnest(p.proconfig) setting WHERE setting LIKE 'search_path=%')
             """, connection, transaction))
             Assert.Equal(0L, await audit.ExecuteScalarAsync());
+        await using (var bindings = new NpgsqlCommand("""
+            SELECT bool_and(
+              coalesce(p.proconfig @> ARRAY['search_path=public, pg_temp'],false)
+              = (c.sql_scope OR p.prosecdef))
+            FROM pg_proc p JOIN public.laplace_function_bindings() c ON c.symbol=p.prosrc
+            JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
+            JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass
+            WHERE e.extname='laplace' AND d.deptype='e'
+            """, connection, transaction))
+            Assert.Equal(true, await bindings.ExecuteScalarAsync());
+        await using (var adapters = new NpgsqlCommand("""
+            SELECT bool_and(p.prosqlbody IS NOT NULL AND NOT EXISTS(
+              SELECT FROM unnest(p.proconfig) setting WHERE setting LIKE 'search_path=%'))
+            FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
+            JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
+            JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass
+            WHERE e.extname='laplace' AND d.deptype='e' AND l.lanname='sql' AND NOT p.prosecdef
+            """, connection, transaction))
+            Assert.Equal(true, await adapters.ExecuteScalarAsync());
         await using (var scoped = new NpgsqlCommand("""
             SELECT bool_and(coalesce(p.proconfig @> ARRAY['search_path=public, pg_temp'],false))
             FROM pg_proc p WHERE p.proname='laplace_contained_series'
@@ -127,6 +148,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             SELECT public.blake3_cmp(public.laplace_cp_id(65),public.laplace_cp_id(65))=0
               AND public.blake3_eq(public.laplace_cp_id(65),public.laplace_cp_id(65))
               AND public.blake3_hash(public.laplace_cp_id(65))=public.blake3_hash(public.laplace_cp_id(65))
+              AND public.laplace_mask_has_value(public.laplace_mask_slot('kind','claim'),'kind','claim')
+              AND public.ST_AsEWKB(public.laplace_coord('A'))=public.laplace_coord_ewkb('A')
             """, connection, transaction))
             Assert.Equal(true, await probe.ExecuteScalarAsync());
         await transaction.RollbackAsync();

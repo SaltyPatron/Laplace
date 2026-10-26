@@ -83,7 +83,8 @@ internal static partial class IngestCommands
                 journal.OnNativeProgress(lastProgress);
                 if (elapsed.Elapsed.TotalSeconds - printedAt >= 5 || progress.Event == "complete")
                 {
-                    Console.WriteLine($"ingest {source}: {done}/{total} files, {entities:N0} entities, {physicalities:N0} physicalities; {progress.Event}");
+                    string reading = progress.File is null ? "" : $"; file={System.Text.Json.JsonSerializer.Serialize(progress.File)}; records={progress.Records:N0}";
+                    Console.WriteLine($"ingest {source}: {done}/{total} files, {entities:N0} new entities, {physicalities:N0} new physicalities; {progress.Event}{reading}");
                     printedAt = elapsed.Elapsed.TotalSeconds;
                 }
             }

@@ -131,6 +131,19 @@ def canonical_source(name: str, catalog: dict | None = None) -> str:
     return key  # explicit managed/operator commands are resolved by their owner
 
 
+def journal_source(name: str, catalog: dict | None = None) -> str:
+    """Use the Native producer's canonical name; managed operators retain their owner mapping."""
+    catalog = catalog or load_catalog()
+    key = canonical_source(name, catalog)
+    if any(source["name"] == key for source in catalog["sources"]):
+        return key
+    gates = json.loads((ROOT / "scripts/decomposer-gates.json").read_text(encoding="utf-8"))
+    entry = gates["sources"].get(key)
+    if not entry:
+        raise ValueError(f"No journal source for {name!r}")
+    return entry["decomposer"]
+
+
 def markdown(catalog: dict) -> str:
     lines = ["## Ingestion catalog", "", "| Command | Source / witness | Content | Decomposers | After |",
              "|---|---|---|---|---|"]
@@ -180,6 +193,7 @@ def main() -> int:
     parser.add_argument("--recipes", type=Path)
     parser.add_argument("--format", choices=("json", "markdown", "names"), default="json")
     parser.add_argument("--resolve")
+    parser.add_argument("--journal-source")
     parser.add_argument("--check-engine", type=Path, help="Verify the actual Engine exposes the same complete catalog")
     parser.add_argument("--check-mono", type=Path, help="Verify the built monorepo CLI catalog without a database or caches")
     parser.add_argument("--grammar-sources", type=Path, help="Select required grammar source revisions from a TSV lock")
@@ -206,6 +220,8 @@ def main() -> int:
         if native != catalog:
             raise ValueError("Engine and operator recipe catalogs differ")
         print(f"Engine/operator catalog parity: {len(catalog['sources'])} sources, {len(catalog['formats'])} formats")
+    elif args.journal_source:
+        print(journal_source(args.journal_source, catalog))
     elif args.resolve:
         print(canonical_source(args.resolve, catalog))
     elif args.format == "names":
