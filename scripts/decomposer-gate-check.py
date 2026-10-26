@@ -61,7 +61,8 @@ def check_native_source(source: str, src: dict, dbname: str, *, host: str, user:
                and proof["ids_requested"] == proof["ids_present"],
                f"file/source ID pairs present={proof['ids_present']}/{proof['ids_requested']}")
         required = not src.get("content_only") and src.get("attestations") != "optional"
-        record("native_source_series", not required or proof["series"] > 0,
+        evidence_ok = proof["series"] == 0 if src.get("content_only") else (not required or proof["series"] > 0)
+        record("native_source_series", evidence_ok,
                f"{proof['series']} attributed series; required={required}")
     except Exception as error:
         record("native_output_proof", False, str(error))
