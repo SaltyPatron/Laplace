@@ -107,6 +107,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "installed-database-health.yml": "name: Runtime — installed database health",
             "full-qualification.yml": "name: Audit — full product qualification",
             "laplace.yml": "name: Product — main delivery",
+            "operator-workflows.yml": "name: Operator workflow validation",
             "product-operator.yml": "name: Product — maintenance",
             "product-stage.yml": "name: Internal — product stage",
             "seed.yml": "name: Internal — substrate ingest",
