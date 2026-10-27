@@ -24,6 +24,22 @@ shift /1
 goto parse
 :parsed
 
+rem The canonical migration also upgrades the shared laplace extension. Build
+rem its current module, not only laplace_geom and laplace_substrate.
+set "PG_SOURCE=%LAPLACE_SRC%\Laplace-postgres"
+pwsh -NoProfile -File "%~dp0assert-build-source.ps1" -SourceDirectory "%PG_SOURCE%" -BuildDirectory "%LAPLACE_PG_EXTENSION_BUILD%" || exit /b 1
+pwsh -NoProfile -File "%~dp0tree-lock.ps1" acquire build-pg-extension || exit /b 1
+cmake -S "%PG_SOURCE%" -B "%LAPLACE_PG_EXTENSION_BUILD%" -G Ninja ^
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
+  %LAPLACE_RESOURCE_FLAGS% ^
+  "-DPG_CONFIG=%PGBIN:\=/%/pg_config.exe" ^
+  "-DLAPLACE_NATIVE=%LAPLACE_NATIVE:\=/%" ^
+  "-DLAPLACE_TIER0=%LAPLACE_PERFCACHE_BIN:\=/%"
+if errorlevel 1 goto pg_fail
+cmake --build "%LAPLACE_PG_EXTENSION_BUILD%" --target laplace_pg
+if errorlevel 1 goto pg_fail
+pwsh -NoProfile -File "%~dp0tree-lock.ps1" release build-pg-extension || exit /b 1
+
 if "%SKIP_CODEGEN%"=="0" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%LAPLACE_ROOT%\scripts\codegen-attestation-law.ps1" || exit /b 1
 ) else (
@@ -79,4 +95,8 @@ exit /b 0
 
 :fail
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tree-lock.ps1" release build-win-ext
+exit /b 1
+
+:pg_fail
+pwsh -NoProfile -File "%~dp0tree-lock.ps1" release build-pg-extension
 exit /b 1
