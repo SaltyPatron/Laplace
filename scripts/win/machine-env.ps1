@@ -34,8 +34,8 @@ Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace'
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))
 $checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')).TrimEnd('\').ToLowerInvariant()
 $workspaceId = [IO.Path]::GetFileName($checkout) + '-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($checkout))).Substring(0,12).ToLowerInvariant()
-$canonical=[IO.Path]::GetFullPath((Join-Path $env:LAPLACE_SRC 'Laplace')).TrimEnd('\').ToLowerInvariant()
-$buildDefault=if($checkout -eq $canonical){Join-Path $env:LAPLACE_BUILD 'Laplace'}else{[IO.Path]::Combine($env:LAPLACE_BUILD,'worktrees',$workspaceId)}
+$canonical=[IO.Path]::GetFullPath([IO.Path]::Combine($env:LAPLACE_SRC,'Laplace')).TrimEnd('\').ToLowerInvariant()
+$buildDefault=if($checkout -eq $canonical){[IO.Path]::Combine($env:LAPLACE_BUILD,'Laplace')}else{[IO.Path]::Combine($env:LAPLACE_BUILD,'worktrees',$workspaceId)}
 Set-LaplaceDefault LAPLACE_BUILD_ROOT $buildDefault
 Set-LaplaceDefault LAPLACE_DEPS ([IO.Path]::Combine($env:LAPLACE_BUILD, 'dependencies'))
 Set-LaplaceDefault LAPLACE_DEPSRC ([IO.Path]::Combine($env:LAPLACE_DEPS, 'src'))

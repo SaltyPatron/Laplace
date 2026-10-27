@@ -30,26 +30,17 @@ jobs:
   runtime-files:
     runs-on: windows-2025
     timeout-minutes: 5
-    env:
-      LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          persist-credentials: false
-      - name: Check out the shared artifact store implementation
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: SaltyPatron/Laplace-Operations
-          ref: 509999068277034c7754d2e41cd8bde512cdcda7
-          path: .ci-dependencies/Laplace-Operations
           persist-credentials: false
       - name: Verify unchanged locked DLL reuse and changed runtime copying
         shell: pwsh
         run: pwsh -NoProfile -File scripts/tests/windows-runtime-copy.ps1
       - name: Verify web artifact reuse inputs and qualification
         run: python scripts/test-web-artifact.py
-      - name: Verify component dependency boundaries and shared immutable storage
-        run: python scripts/test-windows-components.py
+      # Operations owns the cross-repository component/storage qualification in
+      # deployment-contracts.yml, against an immutable application revision.
       - name: Verify immutable package composition and replacement
         shell: pwsh
         run: pwsh -NoProfile -File scripts/tests/windows-artifact-links.ps1
