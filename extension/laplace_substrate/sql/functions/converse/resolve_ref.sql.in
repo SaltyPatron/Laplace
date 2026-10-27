@@ -1,28 +1,13 @@
 DROP FUNCTION IF EXISTS laplace.resolve_ref(text);
 CREATE OR REPLACE FUNCTION ops.resolve_refs(p_ids bytea[],p_labels text[])
 RETURNS TABLE(ordinal bigint,id bytea,label text,present boolean)
-LANGUAGE plpgsql STABLE PARALLEL SAFE SET search_path=public,pg_temp AS $resolve_batch$
-BEGIN
- IF cardinality(p_ids) IS DISTINCT FROM cardinality(p_labels) OR array_position(p_ids,NULL) IS NOT NULL THEN
-  RAISE EXCEPTION 'reference identities and surfaces must retain the same non-NULL ID positions' USING ERRCODE='22023';
- END IF;
- RETURN QUERY
- WITH input AS MATERIALIZED (
-  SELECT u.ordinal,u.id,u.label,encode(u.id,'hex')::public.blake3 AS key
-  FROM unnest(p_ids,p_labels) WITH ORDINALITY u(id,label,ordinal)
- ), presence AS MATERIALIZED (
-  SELECT k.key,e.id IS NOT NULL OR public.laplace_codepoint(k.key) IS NOT NULL AS present
-  FROM (SELECT DISTINCT key FROM input) k LEFT JOIN public.entity e ON e.id=k.key
- ), realized AS MATERIALIZED (
-  SELECT entity,content FROM public.laplace_labels(ARRAY(
-   SELECT DISTINCT i.key FROM input i JOIN presence p USING(key) WHERE i.label IS NULL AND p.present))
- ) SELECT i.ordinal,i.id,coalesce(i.label,r.content,i.key::text),p.present
- FROM input i JOIN presence p USING(key) LEFT JOIN realized r ON r.entity=i.key ORDER BY i.ordinal;
-END $resolve_batch$;
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+ SELECT r.ordinal,r.id,r.label,r.present FROM public.laplace_resolve_refs(p_ids,p_labels) r;
+END;
 
 CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text) RETURNS bytea
-LANGUAGE sql STABLE STRICT PARALLEL SAFE SET search_path=public,pg_temp AS $resolve$
-WITH candidate AS (SELECT CASE WHEN p_ref ~* '^[0-9a-f]{32}$' THEN lower(p_ref)::public.blake3 ELSE public.laplace_id(p_ref) END AS id)
-SELECT r.id FROM candidate c CROSS JOIN LATERAL ops.resolve_refs(ARRAY[decode(c.id::text,'hex')],ARRAY[p_ref]) r
-WHERE c.id IS NOT NULL AND r.present
-$resolve$;
+LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+ SELECT public.laplace_resolve_ref(p_ref);
+END;
