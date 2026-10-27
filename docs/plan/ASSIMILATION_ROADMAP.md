@@ -221,6 +221,31 @@ Still open:
 - **Norm gains, RoPE, fused QKV, latent attention, experts and low-rank pairs are recognized but feed no circuit.**
 - **Model-local occurrences** beyond the vocabulary ordinal (merges as a trajectory, not `MERGES_WITH` testimony).
 
+**Implementation audit, 2026-10-27.** The inventor reiterated that non-relations owe no records; neither top-k nor a generic noise floor implements Laplace's model decomposition. Tokenizer ordinals resolve to canonical content; head/layer physicality trajectories connect that content through indexed containment to compositions and their evidence. FFN up/down components (and gate where present) have an explicit correspondence along their shared intermediate axis. Preserve the operator's activation, bias and occurrence context when decomposing that structure. These requirements follow the inventor's model statements in `INVENTOR_RECORD.md`, especially those recorded on September 5 and September 25; they do not require an attestation on every tokenizer fragment or another corpus before a model can enter.
+
+Current code still diverges in three concrete places:
+
+- `ModelTokenEdgeETL.EmitAsync` writes `BuildCircuitObservation`, then calls `EmitSignificantClaims` for every circuit. Native `bilinear_contraction_significant_pairs` forms vocabulary-wide dot-product tiles and scans every subject/object pair. The Gaussian-null rule `z >= sqrt(2 ln N)`, introduced by `4d009f2fc`, is an implementation choice under audit, not evidence that E4 or the invention has been satisfied. The October 27 corroboration correction `be79faa8b` reused this rule; it corrected score-sign refutation but did not establish faithful model decomposition.
+- The recorded circuit walk orders **every** canonical vocabulary entry by `bilinear_contraction_entity_salience`, which reduces each entry to the norm of its transient left/right vectors. A norm-ranked walk is a summary; its existence alone does not establish preservation of the component connections and effects needed by the model query/export contract. `TestimonyWalk.Pack` currently uses one 32-byte vertex per entry, including zero-energy entries. Circuit content identity also still includes model and ordinal coordinates, as recorded above.
+- `ModelCircuitEstate.CompletionCircuits` feeds each FFN to `ffn_contraction_create_output`, which evaluates it over the vocabulary embeddings before pair scoring. Shape recognition already binds up/down/gate, but those bindings have not become the direct component/trajectory decomposition described by the inventor. Replacing this with another pruning constant would leave the architectural problem in place.
+
+The following source changes were checked in Git history. Commit messages and earlier audit prose are not treated as proof of runtime behavior:
+
+| Date | Commit | Implementation or contract change |
+| --- | --- | --- |
+| May 25 | [`a2d52c62`](https://github.com/SaltyPatron/Laplace/commit/a2d52c62d919c7ac593743ed4419f62ed0a19112) | `LlamaWeightExtractor` selects 5% and at most 32 pairs per row, uses the first 64 embedding dimensions as a synthetic projection, and maps weight values into rating fields. |
+| May 27 | [`24027160`](https://github.com/SaltyPatron/Laplace/commit/240271600228c037cb1edea23bc78d5bc3ef170b) | Replaces feature-dimension endpoints with token-pair contractions and projected physicalities; retains `LotteryTicket` top-k selection. |
+| May 29 | [`8a22af1b`](https://github.com/SaltyPatron/Laplace/commit/8a22af1b519117bb0329a5e875e59b0bde4a1343) | Claims no-top-k ingestion, but `WeightTensorETL` substitutes fixed `QkNoiseFloor = 0.05` and `NoiseFloor = 1e-9`. |
+| July 19 | [`c1b1325e`](https://github.com/SaltyPatron/Laplace/commit/c1b1325e49ae4f15794b33d04f11b652ab4ddc78) | Deletes eager pair-fold modes while retaining dense vocabulary-by-dimension factor trajectories per circuit. A bounded batch does not remove that retained-volume multiplier. |
+| August 16 | [`54314382`](https://github.com/SaltyPatron/Laplace/commit/543143826e8d936b06fbc044bdbc0c91c4f83906) | Retracts an earlier audit's claim that traversal had no production caller. The retraction explicitly records that its published reproduction command had not been executed. Historical audit assertions require independent checking. |
+| September 14 | [`0a7f1e3a`](https://github.com/SaltyPatron/Laplace/commit/0a7f1e3ada13b6f79333716cd88e1d5da1d1763d) | Supersedes the August reduction that a checkpoint is not content and only supplies votes on pre-existing edges. |
+| September 18 | [`b9af9671e`](https://github.com/SaltyPatron/Laplace/commit/b9af9671e) | Replaces factor storage with circuit physicalities and calculated evidence. The current physicality summary descends from this change; its label is not an end-to-end query/export verification. |
+| September 25 | [`4d009f2fc`](https://github.com/SaltyPatron/Laplace/commit/4d009f2fc937f4b32eabcf7ef7b003f04503029e) | Adds the exhaustive per-circuit pair scan and Gaussian universal threshold, along with operator recognition and vocabulary trajectories. |
+
+The older [Hartonomous-001 FFN implementation](https://github.com/SaltyPatron/Hartonomous-001/blob/1ea12b4dfaa0a24b46ffa8c41290d9e1767fec4b/src/Hartonomous.Decomposers/Safetensors/Passes/FfnTuplePass.cs) also resolves up/down/gate tuples, then selects 16 source tokens while allocating full vocabulary-wide response and intermediate arrays. Its bounded-memory header contradicts those allocations. The archived FFN-as-KV document is therefore not evidence that the corresponding faithful extractor was finished; its proposed synthesis methods are not adopted here.
+
+Coverage: located primary and archived Git histories plus the connected Hartonomous repositories reach April–October 2026. The local subject search identified 599 distinct candidate commits; only the explicitly described source transitions were examined here. This is not a completed twenty-month history audit. Historical storage totals have not been remeasured. No checkpoint numerics were ingested during this audit.
+
 Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034.
 
 ### F. The native forward pass over curated content (read path)
