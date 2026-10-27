@@ -22,4 +22,9 @@
     <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../extension/laplace_substrate/sql/functions/model/model_consensus.sql.in"
+          Link="model_consensus.sql.in" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

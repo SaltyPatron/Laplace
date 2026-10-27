@@ -97,6 +97,49 @@ COMMENT ON FUNCTION generation.circuit_coord(
 'Canonical model-circuit content identity for ordered path model-circuit/plane[/layer/N][/head/N]. '
 'Compatibility p_structure_relation is no longer an identity input: path structure lives in the Content trajectory.';
 
+-- Source-local address written by ModelCoordinates.StageCircuit. Keep this
+-- overload distinct from the older source-free path: a head ordinal in one
+-- checkpoint must never read another checkpoint's physicality. This resolves
+-- the current writer's address, not the still-open canonical circuit-content
+-- identity law; it does not assert that equal ordinals identify equal circuits.
+CREATE OR REPLACE FUNCTION generation.circuit_coord(
+    p_source bytea,
+    p_plane text,
+    p_layer integer DEFAULT NULL,
+    p_head integer DEFAULT NULL)
+RETURNS bytea
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH path AS (
+        SELECT ARRAY[
+                   p_source,
+                   laplace.word_id('model-circuit'),
+                   laplace.word_id(lower(btrim(p_plane)))
+               ]::bytea[]
+             || CASE WHEN p_layer >= 0 THEN ARRAY[
+                         laplace.word_id('layer'),
+                         laplace.word_id(p_layer::text)
+                     ]::bytea[] ELSE ARRAY[]::bytea[] END
+             || CASE WHEN p_head >= 0 THEN ARRAY[
+                         laplace.word_id('head'),
+                         laplace.word_id(p_head::text)
+                     ]::bytea[] ELSE ARRAY[]::bytea[] END AS ids
+    )
+    SELECT CASE
+             WHEN p_source IS NULL OR p_plane IS NULL OR btrim(p_plane) = ''
+               OR (p_head >= 0 AND COALESCE(p_layer, -1) < 0)
+               THEN NULL::bytea
+             ELSE public.laplace_hash128_merkle(0::smallint, path.ids)
+           END
+    FROM path;
+END;
+
+COMMENT ON FUNCTION generation.circuit_coord(
+    bytea, text, integer, integer) IS
+'Source-local model-circuit address matching ModelCoordinates.StageCircuit. '
+'Layer/head NULL and negative sentinels omit that address component; a head requires a layer. '
+'This address is not a cross-model functional circuit identity.';
+
 
 -- generation.circuit_coupling -- one entry of one circuit's matrix.
 --
@@ -295,8 +338,7 @@ COMMENT ON FUNCTION generation.adjudicated_row(bytea, integer, text) IS
     'softmax output layer''s maximum-inner-product search over the vocabulary.';
 
 
-DROP FUNCTION IF EXISTS generation.model_circuit_testimony(bytea,text,integer,integer);
-CREATE FUNCTION generation.model_circuit_testimony(
+CREATE OR REPLACE FUNCTION generation.model_circuit_testimony(
     p_source bytea,
     p_plane text,
     p_layer integer DEFAULT NULL,
@@ -311,7 +353,7 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH circuit AS MATERIALIZED (
         SELECT generation.circuit_coord(
-            p_plane, p_layer, p_head) AS id
+            p_source, p_plane, p_layer, p_head) AS id
     ),
     forms AS MATERIALIZED (
         SELECT DISTINCT p.id AS physicality_id
