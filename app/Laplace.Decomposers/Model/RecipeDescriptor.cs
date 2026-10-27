@@ -11,8 +11,15 @@ namespace Laplace.Decomposers.Model;
 
 
 
+public sealed record RelationPathStep(string[] Types, bool Reverse, bool Optional);
+
 public sealed record OperatorSpec(string Op, string? Type, string? Metric)
 {
+    public double MaxOutsideProbability {get;init;}
+    public bool EqualCandidates {get;init;}
+    public IReadOnlyList<RelationPathStep>? Steps { get; init; }
+    public string PathJson => JsonSerializer.Serialize(Steps?.Select(s => new {types=s.Types,reverse=s.Reverse,optional=s.Optional}));
+
     public static OperatorSpec FromJson(JsonElement e)
     {
         string op = e.TryGetProperty("op", out var o) ? o.GetString() ?? "" : "";
@@ -20,12 +27,28 @@ public sealed record OperatorSpec(string Op, string? Type, string? Metric)
         string? metric = e.TryGetProperty("metric", out var m) ? m.GetString() : null;
         if (string.IsNullOrEmpty(op))
             throw new InvalidOperationException($"operator missing 'op': {e}");
-        return new OperatorSpec(op, type, metric);
+        double bound=e.TryGetProperty("max_outside_probability",out var probability)?probability.GetDouble():0;
+        string scoring=e.TryGetProperty("scoring",out var scoringElement)?scoringElement.GetString()??"weighted":"weighted";
+        if(!double.IsFinite(bound)||bound<0||bound>=1||scoring is not ("weighted" or "set"))throw new InvalidOperationException("invalid output candidate scoring or probability bound");
+        if(scoring=="set"&&bound==0)throw new InvalidOperationException("set scoring requires max_outside_probability in (0,1)");
+        var result = new OperatorSpec(op, type, metric){MaxOutsideProbability=bound,EqualCandidates=scoring=="set"};
+        if (op == "path") {
+            if (!e.TryGetProperty("steps",out var steps) || steps.ValueKind!=JsonValueKind.Array || steps.GetArrayLength()==0)
+                throw new InvalidOperationException("path operator requires nonempty steps");
+            result = result with { Steps = steps.EnumerateArray().Select(step => {
+                var types=step.GetProperty("types").EnumerateArray().Select(t=>t.GetString() ?? "").ToArray();
+                if(types.Length==0 || types.Any(string.IsNullOrWhiteSpace)) throw new InvalidOperationException("path step requires relation types");
+                return new RelationPathStep(types,step.TryGetProperty("reverse",out var reverse) && reverse.GetBoolean(),
+                    step.TryGetProperty("optional",out var optional) && optional.GetBoolean());
+            }).ToArray() };
+        }
+        return result;
     }
 
 
     public string Key => Op switch
     {
+        "path" => $"path:{PathJson}",
         "relation" => $"relation:{Type}",
         "metric" => $"metric:{Metric}",
         "attribute" => $"attribute:{Type}",
@@ -34,7 +57,12 @@ public sealed record OperatorSpec(string Op, string? Type, string? Metric)
     };
 }
 
-public sealed record LayerSpec(int KvHeads, IReadOnlyList<OperatorSpec> Heads, OperatorSpec Ffn);
+public sealed record LayerSpec(int KvHeads, IReadOnlyList<OperatorSpec> Heads, OperatorSpec Ffn)
+{
+    public int IntermediateSize {get;init;}
+    public IReadOnlyList<OperatorSpec> Experts {get;init;}=[];
+    public int ExpertsPerToken {get;init;}
+}
 
 public sealed record VocabSpec(
     string Source, IReadOnlyList<string> Seeds, int Hops, int Fanout, int Size, string? Tokenizer);
@@ -57,6 +85,11 @@ public sealed record RecipeDescriptor(
     string Compile,
     byte[] CanonicalJson)
 {
+    public string ModelType {get;init;}="llama";
+    public string Format {get;init;}="gguf";
+    public int ContextLength {get;init;}=2048;
+    public int SequenceLimit {get;init;}=256;
+    public double RopeTheta {get;init;}=10000;
     public bool HiddenSizeAuto => HiddenSize == "auto";
     public bool ContinuationCompile =>
         string.Equals(Compile, "continuation", StringComparison.OrdinalIgnoreCase);
@@ -91,6 +124,7 @@ public sealed record RecipeDescriptor(
         var layers = new List<LayerSpec>();
         if (!root.TryGetProperty("layers", out var layersEl) || layersEl.ValueKind != JsonValueKind.Array)
             throw new InvalidOperationException("recipe has no layers[]");
+        int expertCount=Int(root,"num_experts",0),expertsUsed=Int(root,"experts_per_token",Math.Min(2,expertCount));
         foreach (var layer in layersEl.EnumerateArray())
         {
             int kv = layer.TryGetProperty("kv_heads", out var kvh) && kvh.ValueKind == JsonValueKind.Number
@@ -102,8 +136,21 @@ public sealed record RecipeDescriptor(
                 throw new InvalidOperationException($"layer {layers.Count} has no heads[]");
             var ffn = layer.TryGetProperty("ffn", out var ffnEl) ? OperatorSpec.FromJson(ffnEl)
                                                                  : new OperatorSpec("unary", null, null);
-            layers.Add(new LayerSpec(kv, heads, ffn));
+            var experts=new List<OperatorSpec>();
+            if(layer.TryGetProperty("experts",out var expertArray))
+                foreach(var expert in expertArray.EnumerateArray())experts.Add(OperatorSpec.FromJson(expert));
+            else if(structure=="moe") {
+                int count=expertCount;
+                if(layer.TryGetProperty("ffn",out var fspec)&&fspec.TryGetProperty("experts",out var ec)&&ec.ValueKind==JsonValueKind.Number)count=ec.GetInt32();
+                if(count<=0)throw new InvalidOperationException("moe requires num_experts or explicit layer experts");
+                experts.AddRange(Enumerable.Repeat(ffn,count));
+            }
+            int selected=Int(layer,"experts_per_token",expertsUsed>0?expertsUsed:Math.Min(2,experts.Count));
+            if(experts.Count>0&&(selected<1||selected>experts.Count))throw new InvalidOperationException("experts_per_token must be within the declared experts");
+            layers.Add(new LayerSpec(kv,heads,ffn){IntermediateSize=Int(layer,"intermediate_size",intermediate),Experts=experts,ExpertsPerToken=selected});
         }
+        if(layers.Count==0)throw new InvalidOperationException("recipe requires at least one layer");
+        if(intermediate<=0||layers.Any(l=>l.IntermediateSize<=0||l.KvHeads<=0||l.Heads.Count%l.KvHeads!=0))throw new InvalidOperationException("invalid FFN or grouped-query dimensions");
         if (root.TryGetProperty("num_layers", out var nl) && nl.ValueKind == JsonValueKind.Number
             && nl.GetInt32() != layers.Count)
             throw new InvalidOperationException(
@@ -132,7 +179,12 @@ public sealed record RecipeDescriptor(
 
         return new RecipeDescriptor(
             Hash128.Blake3(canonical), name, structure, hidden, intermediate, layers.Count,
-            rope, tie, norm, embed, lmHead, layers, vocab, attributes, compile, canonical);
+            rope, tie, norm, embed, lmHead, layers, vocab, attributes, compile, canonical) {
+                ModelType=Str(root,"model_type",structure=="moe"?"mixtral":"llama"),
+                Format=Str(root,"format","gguf"),
+                ContextLength=Int(root,"context_length",2048),SequenceLimit=Int(root,"sequence_limit",256),
+                RopeTheta=root.TryGetProperty("rope_theta",out var theta)?theta.GetDouble():10000
+            };
     }
 
     private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);

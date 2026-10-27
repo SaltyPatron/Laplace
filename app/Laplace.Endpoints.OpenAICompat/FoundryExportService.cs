@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -17,15 +17,13 @@ internal interface IFoundryExportService
 }
 
 /// <summary>
-/// Model export as a recipe over current standing and structure: runs the CLI's
-/// <c>synthesize substrate</c> in a subprocess, which writes the file to a work directory.
-/// No weights are loaded in the request process.
+/// Uses the same native construction and codecs as the operator CLI.
 /// </summary>
-internal sealed class CliFoundryExportService : IFoundryExportService
+internal sealed class NativeFoundryExportService : IFoundryExportService
 {
     /// <summary>Formats this route writes; any other requested format is refused.</summary>
     internal static readonly HashSet<string> WritableFormats =
-        new(StringComparer.OrdinalIgnoreCase) { "gguf" };
+        new(StringComparer.OrdinalIgnoreCase) { "gguf", "safetensors" };
 
 
     public async Task<FoundryExportResult> ExportAsync(
@@ -43,22 +41,15 @@ internal sealed class CliFoundryExportService : IFoundryExportService
             throw new ArgumentException(
                 $"foundry export cannot produce '{requested}'. Writable formats: "
                 + string.Join(", ", WritableFormats.Order(StringComparer.Ordinal))
-                + ". SafeTensors export is not yet connected to this route.",
+                + ".",
                 nameof(format));
         var ext = requested.ToLowerInvariant();
-
-        if (!LaplaceInstall.TryRepoRoot(out var repoRoot))
-            throw new InvalidOperationException("Cannot locate Laplace repo root for foundry export.");
-
-        var cliProj = Path.Combine(repoRoot, "app", "Laplace.Cli", "Laplace.Cli.csproj");
-        if (!File.Exists(cliProj))
-            throw new InvalidOperationException($"CLI project not found: {cliProj}");
 
         var workDir = Path.Combine(Path.GetTempPath(), $"laplace-export-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workDir);
 
         string recipePath;
-        var args = new List<string> { "run", "--project", cliProj, "--no-build", "--", "synthesize", "substrate" };
+        var args = new List<string> { "substrate", "--format", ext };
 
         if (!string.IsNullOrWhiteSpace(recipeIdPrefix))
         {
@@ -80,38 +71,19 @@ internal sealed class CliFoundryExportService : IFoundryExportService
         }
 
         var outputName = string.IsNullOrWhiteSpace(filename) ? $"laplace-export.{ext}" : filename.Trim();
+        if (Path.GetFileName(outputName) != outputName || outputName is "." or "..")
+            throw new ArgumentException("filename must be a filename inside the export directory.", nameof(filename));
         var outputPath = Path.Combine(workDir, outputName);
         args.Add(outputPath);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            WorkingDirectory = repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start foundry export subprocess.");
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-
-        if (process.ExitCode != 0)
-        {
-            var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
-            throw new InvalidOperationException(
-                $"Foundry export failed (exit {process.ExitCode}): {detail.Trim()}");
-        }
-
-        if (!File.Exists(outputPath))
-            throw new InvalidOperationException("Foundry export completed but output file was not produced.");
-
-        var bytes = new FileInfo(outputPath).Length;
+        ct.ThrowIfCancellationRequested();
+        int status = await FoundrySynthesis.SynthesizeAsync(args.ToArray());
+        ct.ThrowIfCancellationRequested();
+        if (status != 0) throw new InvalidOperationException($"Native model export failed (status {status}).");
+        if (!File.Exists(outputPath) && !Directory.Exists(outputPath))
+            throw new InvalidOperationException("Native model export produced no artifact.");
+        var bytes = File.Exists(outputPath) ? new FileInfo(outputPath).Length
+            : Directory.EnumerateFiles(outputPath, "*", SearchOption.AllDirectories).Sum(p => new FileInfo(p).Length);
         return new FoundryExportResult(outputPath, bytes, ext);
     }
 }
