@@ -33,10 +33,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, byte[][] roots, string stepsJson, int fanout, int cap, bool visibleOnly)
     {
         await using var connection=await ds.OpenConnectionAsync();
-        await using var transaction=await connection.BeginTransactionAsync();
-        await using(var scope=NpgsqlCatalog.Command(connection,transaction,"generation.path_search_path"))
-            await scope.ExecuteNonQueryAsync();
-        await using var command=NpgsqlCatalog.Command(connection,transaction,"generation.path_plane",roots,stepsJson,fanout,cap,visibleOnly);
+        await using var command=NpgsqlCatalog.Command(connection,null,"generation.path_plane",roots,stepsJson,fanout,cap,visibleOnly);
         command.CommandTimeout=600;
         await using var reader=await command.ExecuteReaderAsync();
         var rows=new List<PathEdgeRow>();
@@ -57,9 +54,7 @@ public static class NpgsqlFoundryReads
     public readonly record struct SourceObservationRow(byte[] SourceId,byte[] ClaimId,long Games,long Rating,long Rd,long OpponentRating,long OpponentRd);
     public static async Task<IReadOnlyList<SourceObservationRow>> ExportSourceObservationsAsync(NpgsqlDataSource ds,string touched,byte[][]? sources=null)
     {
-        await using var connection=await ds.OpenConnectionAsync();await using var transaction=await connection.BeginTransactionAsync();
-        await using(var scope=NpgsqlCatalog.Command(connection,transaction,"generation.path_search_path"))await scope.ExecuteNonQueryAsync();
-        await using var command=NpgsqlCatalog.Command(connection,transaction,"generation.export_source_observations",touched,(object?)sources??DBNull.Value);
+        await using var connection=await ds.OpenConnectionAsync();await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_source_observations",touched,(object?)sources??DBNull.Value);
         command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync();var rows=new List<SourceObservationRow>();
         while(await reader.ReadAsync())rows.Add(new((byte[])reader[0],(byte[])reader[1],reader.GetInt64(2),reader.GetInt64(3),reader.GetInt64(4),reader.GetInt64(5),reader.GetInt64(6)));
         return rows;
@@ -126,9 +121,7 @@ public static class NpgsqlFoundryReads
     public static async Task<IReadOnlyList<TypePlaneEdgeRow>> ConsensusTypePlaneAsync(
         NpgsqlDataSource ds,byte[][] vocab,int degreeCap,byte[][]? typeIds,CancellationToken ct=default)
     {
-        await using var connection=await ds.OpenConnectionAsync(ct);await using var transaction=await connection.BeginTransactionAsync(ct);
-        await using(var scope=NpgsqlCatalog.Command(connection,transaction,"generation.path_search_path"))await scope.ExecuteNonQueryAsync(ct);
-        await using var command=NpgsqlCatalog.Command(connection,transaction,"generation.export_type_plane",vocab,degreeCap,(object?)typeIds??DBNull.Value);
+        await using var connection=await ds.OpenConnectionAsync(ct);await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_type_plane",vocab,degreeCap,(object?)typeIds??DBNull.Value);
         command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync(ct);var rows=new List<TypePlaneEdgeRow>();
         while(await reader.ReadAsync(ct))rows.Add(new((byte[])reader[0],(byte[])reader[1],reader.GetDouble(2),(byte[])reader[3],reader.GetDouble(4)));
         return rows;
@@ -136,9 +129,7 @@ public static class NpgsqlFoundryReads
 
     public static async Task<IReadOnlyList<WeightedEdgeRow>> ConsensusAdjacencyAsync(NpgsqlDataSource ds,byte[][] vocab,int degreeCap,CancellationToken ct=default)
     {
-        await using var connection=await ds.OpenConnectionAsync(ct);await using var transaction=await connection.BeginTransactionAsync(ct);
-        await using(var scope=NpgsqlCatalog.Command(connection,transaction,"generation.path_search_path"))await scope.ExecuteNonQueryAsync(ct);
-        await using var command=NpgsqlCatalog.Command(connection,transaction,"generation.export_adjacency",vocab,degreeCap);
+        await using var connection=await ds.OpenConnectionAsync(ct);await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_adjacency",vocab,degreeCap);
         command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync(ct);var rows=new List<WeightedEdgeRow>();
         while(await reader.ReadAsync(ct))rows.Add(new((byte[])reader[0],(byte[])reader[1],reader.GetDouble(2)));
         return rows;
@@ -173,17 +164,17 @@ public static class NpgsqlFoundryReads
             p => p.Add(ByteaArray("vocab", vocab)),
             timeoutSeconds: 600, ct: ct, label: "entity_hilbert_keys");
 
-    public static Task<IReadOnlyList<GapEdgeRow>> EntityTrajectoryPlaneAsync(
+    public static Task<IReadOnlyList<GapEdgeRow>> TrajectoryPlaneAsync(
         NpgsqlDataSource ds, byte[][] vocab, int gap, int degreeCap,
         CancellationToken ct = default) =>
-        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("laplace.entity_trajectory_plane"),
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.trajectory_plane"),
             static r => new GapEdgeRow(r.GetInt32(0), (byte[])r[1], (byte[])r[2], r.GetDouble(3)),
             p =>
             {
                 p.Add(ByteaArray("vocab", vocab));
                 p.AddWithValue("gap", gap);
                 p.AddWithValue("cap", degreeCap);
-            }, timeoutSeconds: 600, ct: ct, label: "entity_trajectory_plane");
+            }, timeoutSeconds: 600, ct: ct, label: "trajectory_plane");
 
     public static Task<IReadOnlyList<WeightedEdgeRow>> GraphemeOrderAsync(
         NpgsqlDataSource ds, byte[][] vocab, int limit, CancellationToken ct = default) =>

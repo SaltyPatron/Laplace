@@ -410,7 +410,7 @@ internal static class FoundryExport
         for (int g = 0; g < maxGap; g++) adj[g] = new Dictionary<int, List<(int, double)>>();
         try
         {
-            var rows = await NpgsqlFoundryReads.EntityTrajectoryPlaneAsync(ds, vocab, maxGap, degreeCap);
+            var rows = await NpgsqlFoundryReads.TrajectoryPlaneAsync(ds, vocab, maxGap, degreeCap);
             foreach (var row in rows)
             {
                 int g = row.Gap;
@@ -429,7 +429,7 @@ internal static class FoundryExport
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")
         {
-            throw RequiredQueryUnavailable("entity_trajectory_plane", ex);
+            throw RequiredQueryUnavailable("trajectory_plane", ex);
         }
         var planes = new PlaneCoo[maxGap];
         for (int g = 0; g < maxGap; g++) planes[g] = CooFromAdj(adj[g], degreeCap);

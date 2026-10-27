@@ -5,6 +5,7 @@
 #include "utils/hsearch.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
 #include "trajectory_wkb.h"
 #include "laplace/core/sql_catalog.h"
 #include "laplace/core/trajectory.h"
@@ -22,7 +23,7 @@ adjacency_plan(SPIPlanPtr *slot, const char *key, int n, Oid *types)
 {
     if (*slot == NULL) {
         *slot = SPI_prepare_cursor(laplace_sql_query_text(key), n, types,
-                                  CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
+                                  CURSOR_OPT_CUSTOM_PLAN);
         if (*slot == NULL || SPI_keepplan(*slot) != 0)
             elog(ERROR, "word_adjacency: cannot retain read plan");
     }
@@ -93,6 +94,37 @@ adjacency_visit(void *context, size_t ordinal, const hash128_t *id, uint64_t fla
     return 0;
 }
 
+static void
+adjacency_manifest(TupleTableSlot *row, void *context)
+{
+    AdjacencyVisit *visit = context;
+    bool isnull;
+    Datum entity = slot_getattr(row, 1, &isnull);
+    if (isnull) return;
+    visit->witness = datum_to_hash128(entity);
+    Datum manifest = slot_getattr(row, 2, &isnull);
+    if (isnull) return;
+    uint32 points;
+    const unsigned char *raw = laplace_trajectory_wkb_points(DatumGetByteaPP(manifest), &points);
+    if (points == 0) return;
+    if ((Size)points > MaxAllocSize / (4 * sizeof(double)))
+        elog(ERROR, "word_adjacency: trajectory exceeds allocation capacity");
+    double *aligned = palloc((Size)points * 4 * sizeof(double));
+    memcpy(aligned, raw, (Size)points * 4 * sizeof(double));
+    size_t count;
+    if (trajectory_constituent_count(aligned, points, &count) != 0)
+        elog(ERROR, "word_adjacency: invalid trajectory");
+    visit->width = Min(count, visit->gap + 2);
+    if (count > visit->gap) {
+        if (visit->width > MaxAllocSize / sizeof(hash128_t))
+            elog(ERROR, "word_adjacency: ordinal window exceeds allocation capacity");
+        visit->window = palloc(visit->width * sizeof(hash128_t));
+        if (trajectory_visit_constituents(aligned, points, adjacency_visit, visit) != 0)
+            elog(ERROR, "word_adjacency: constituent visit failed");
+    }
+    /* The common receiver releases this row's scratch memory. */
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_word_adjacency);
 Datum
 pg_laplace_word_adjacency(PG_FUNCTION_ARGS)
@@ -127,45 +159,9 @@ pg_laplace_word_adjacency(PG_FUNCTION_ARGS)
     Oid types[] = {BYTEAARRAYOID, INT4OID};
     Datum args[] = {PointerGetDatum(vocab), PG_ARGISNULL(1) ? (Datum)0 : PG_GETARG_DATUM(1)};
     char nulls[] = {' ', PG_ARGISNULL(1) ? 'n' : ' '};
-    Portal cursor = SPI_cursor_open(NULL, adjacency_plan(&adjacency_manifests_plan,
-        "generation.adjacency_manifests", 2, types), args, nulls, true);
-    if (cursor == NULL) elog(ERROR, "word_adjacency: cannot open manifest read");
-    for (;;) {
-        CHECK_FOR_INTERRUPTS();
-        SPI_cursor_fetch(cursor, true, 128);
-        uint64 fetched = SPI_processed;
-        for (uint64 row = 0; row < fetched; ++row) {
-            bool isnull;
-            HeapTuple tuple = SPI_tuptable->vals[row];
-            TupleDesc desc = SPI_tuptable->tupdesc;
-            Datum entity = SPI_getbinval(tuple, desc, 1, &isnull);
-            if (isnull) continue;
-            visit.witness = datum_to_hash128(entity);
-            Datum manifest = SPI_getbinval(tuple, desc, 2, &isnull);
-            if (isnull) continue;
-            uint32 points;
-            const unsigned char *raw = laplace_trajectory_wkb_points(DatumGetByteaPP(manifest), &points);
-            if (points == 0) continue;
-            double *aligned = palloc((Size)points * 4 * sizeof(double));
-            memcpy(aligned, raw, (Size)points * 4 * sizeof(double));
-            size_t count;
-            if (trajectory_constituent_count(aligned, points, &count) != 0)
-                elog(ERROR, "word_adjacency: invalid trajectory");
-            visit.width = Min(count, visit.gap + 2);
-            if (count > visit.gap) {
-                if (visit.width > MaxAllocSize / sizeof(hash128_t))
-                    elog(ERROR, "word_adjacency: ordinal window exceeds allocation capacity");
-                visit.window = palloc(visit.width * sizeof(hash128_t));
-                if (trajectory_visit_constituents(aligned, points, adjacency_visit, &visit) != 0)
-                    elog(ERROR, "word_adjacency: constituent visit failed");
-                pfree(visit.window);
-            }
-            pfree(aligned);
-        }
-        SPI_freetuptable(SPI_tuptable);
-        if (fetched == 0) break;
-    }
-    SPI_cursor_close(cursor);
+    laplace_spi_stream(adjacency_plan(&adjacency_manifests_plan,
+        "generation.adjacency_manifests", 2, types), 2, types, args, nulls,
+        adjacency_manifest, &visit);
     laplace_spi_finish(spi_top);
     return (Datum)0;
 }

@@ -49,54 +49,20 @@ BEGIN
         RAISE EXCEPTION 'relation_plane: unknown traj plane % (next | gap | window)', p_name;
     END IF;
 
-    -- Pairs are computed HERE, at export time, from the trajectories themselves.
-    -- The pour is corpus-bounded by definition — it renders the whole consensus —
-    -- so a full aggregation inside it is honest cost. What was NOT honest was a
-    -- maintained trajectory_pairs cache with a corpus fingerprint and rebuild
-    -- guards: a second materialization of what laplace.physicalities.trajectory holds
-    -- exactly-invertibly (§15 — a second body is a future divergence; §9 — the
-    -- trajectory IS the sequence). gen_corpus and trajectory_pairs are deleted;
-    -- this inline scan is the one remaining whole-corpus reader, and it lives on
-    -- the export path where whole-corpus is the contract.
-    --
-    -- next/gap = pairs at exactly stride g; window = all strides 1..g. One body,
-    -- bounded by (lo, hi). subject_total matches the retired semantics: per
-    -- (subject, exact gap) for next/gap, per subject across the window for
-    -- window. Separators are excluded through generation.separator_ids() — one body for
-    -- that fact too — so pairs count CONTENT adjacency, as the corpus stream did.
+    -- One manifest read and one Native run-pair kernel serve exact gaps and
+    -- windows. Aggregate exact multiplicities before normalization; objects
+    -- outside the requested vocabulary remain in each subject's denominator.
     RETURN QUERY
-    WITH bounds AS (
-        SELECT CASE WHEN p_name = 'window' THEN 1 ELSE g END AS lo, g AS hi
-    ),
-    sepset AS MATERIALIZED (
-        SELECT COALESCE(generation.separator_ids(), ARRAY[]::bytea[]) AS ids
-    ),
-    seq AS (
-        SELECT w.id AS root, c.ordinal + rs.i - 1 AS ordinal, c.entity_id AS tok
-        FROM laplace.v_word_points w
-        CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
-        CROSS JOIN LATERAL generate_series(1, GREATEST(c.run_length, 1)) rs(i)
-        WHERE w.type_id IN (laplace.entity_type_id('Sentence'), laplace.entity_type_id('Document'))
-          AND w.trajectory IS NOT NULL
-    ),
-    content AS (
-        SELECT s.root, s.tok,
-               row_number() OVER (PARTITION BY s.root ORDER BY s.ordinal) AS cord
-        FROM seq s CROSS JOIN sepset x
-        WHERE NOT (s.tok OPERATOR(pg_catalog.=) ANY (x.ids))
-    ),
-    pairs AS (
-        SELECT a.tok AS s, b.tok AS o, count(*) AS cnt
-        FROM content a
-        JOIN bounds ON true
-        JOIN content b ON b.root = a.root
-                      AND b.cord BETWEEN a.cord + bounds.lo AND a.cord + bounds.hi
-        GROUP BY a.tok, b.tok
-    ),
-    tot AS (
-        SELECT p.s, sum(p.cnt) AS subject_total FROM pairs p GROUP BY p.s
+    WITH counts AS MATERIALIZED (
+        SELECT c.subject_id, c.object_id, sum(c.occurrences) AS n
+        FROM generation.trajectory_pair_counts(p_vocab,
+            CASE WHEN p_name = 'window' THEN 1 ELSE g END, g) c
+        GROUP BY c.subject_id, c.object_id
+    ), totals AS (
+        SELECT c.*, sum(c.n) OVER (PARTITION BY c.subject_id) AS total
+        FROM counts c
     )
-    SELECT p.s, p.o, p.cnt::double precision / t.subject_total
-    FROM pairs p JOIN tot t ON t.s = p.s;
+    SELECT t.subject_id, t.object_id, (t.n / t.total)::double precision
+    FROM totals t WHERE p_vocab IS NULL OR t.object_id = ANY(p_vocab);
 END;
 $$;

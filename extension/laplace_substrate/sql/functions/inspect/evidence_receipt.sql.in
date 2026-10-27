@@ -1,14 +1,15 @@
 CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea,p_limit integer DEFAULT 25)
 RETURNS TABLE(type_id bytea,object_id bytea,type_label text,object_label text,eff_mu numeric,witness_count bigint,source_labels text)
-LANGUAGE sql STABLE SET search_path=public,pg_temp AS $receipt$
+LANGUAGE sql STABLE
+BEGIN ATOMIC
 WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts(p_id,p_limit)), provenance AS MATERIALIZED (
- SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT claim FROM facts),false) a WHERE a.witness
+ SELECT DISTINCT a.claim,a.trunk FROM @extschema:laplace@.laplace_attested(ARRAY(SELECT claim FROM facts),false) a WHERE a.witness
 )
 SELECT decode(f.predicate::text,'hex'),decode(f.object::text,'hex'),f.type,f.fact,f.eff_mu,
  count(p.trunk)::bigint,string_agg(p.trunk::text,', ' ORDER BY p.trunk)
-FROM facts f LEFT JOIN provenance p USING(claim)
-GROUP BY f.claim,f.predicate,f.type,f.object,f.fact,f.eff_mu ORDER BY f.eff_mu DESC,f.claim
-$receipt$;
+FROM facts f LEFT JOIN provenance p ON p.claim OPERATOR(@extschema:laplace@.=) f.claim
+GROUP BY f.claim,f.predicate,f.type,f.object,f.fact,f.eff_mu ORDER BY f.eff_mu DESC,f.claim;
+END;
 
 
 DROP FUNCTION IF EXISTS ops.native_evidence_receipt(bytea,integer);

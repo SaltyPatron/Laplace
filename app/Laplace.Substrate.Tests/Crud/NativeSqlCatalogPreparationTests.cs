@@ -19,6 +19,59 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     private NpgsqlDataSource _source = null!;
 
     [Fact]
+    public async Task TrajectoryPlanesShareCompressedCountsAndPreserveVocabularyDenominators()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        using var window = new StagedSourceWriter(10000, 100000, 1 << 24);
+        var a = window.Text("A"u8);
+        var b = window.Text("B"u8);
+        var c = window.Text("C"u8);
+        var separator = window.Text("\r\n"u8);
+        var children = new[] { a, a, separator, b, a, c };
+        var root = window.Compose(children, checked((byte)(children.Max(x => x.Tier) + 1)), 0, 0);
+        var writer = new NpgsqlSubstrateWriter(_source);
+        await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [root.Id]);
+        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
+        {
+            register.Parameters.AddWithValue(root.Id);
+            await register.ExecuteNonQueryAsync();
+        }
+        byte[][] ids = [a.Id.ToBytes(), b.Id.ToBytes(), c.Id.ToBytes()];
+        await using (var path = new NpgsqlCommand("SET LOCAL search_path=pg_catalog,pg_temp", connection, transaction))
+            await path.ExecuteNonQueryAsync();
+
+        static string Key(byte[] a, byte[] b) => Convert.ToHexString(a) + ":" + Convert.ToHexString(b);
+        var vocab = new[] { ids[0], ids[1], ids[0] };
+        var planes = new Dictionary<(int Gap, string Pair), double>();
+        await using (var read = NpgsqlCatalog.Command(connection, transaction, "generation.trajectory_plane", vocab, 2, 8))
+        await using (var rows = await read.ExecuteReaderAsync())
+            while (await rows.ReadAsync())
+                planes.Add((rows.GetInt32(0), Key((byte[])rows[1], (byte[])rows[2])), rows.GetDouble(3));
+        Assert.Equal(5, planes.Count);
+        Assert.Equal(1d / 3, planes[(1, Key(ids[0], ids[0]))], 12);
+        Assert.Equal(1d / 3, planes[(1, Key(ids[0], ids[1]))], 12);
+        Assert.Equal(1, planes[(1, Key(ids[1], ids[0]))]);
+        Assert.Equal(.5, planes[(2, Key(ids[0], ids[0]))]);
+        Assert.Equal(.5, planes[(2, Key(ids[0], ids[1]))]);
+
+        foreach (var (name, arg) in new[] { ("gap", 1), ("window", 2) })
+        {
+            var actual = new Dictionary<string, double>();
+            await using var read = NpgsqlCatalog.Command(connection, transaction, "generation.relation_plane", "traj", name, arg, vocab);
+            await using var rows = await read.ExecuteReaderAsync();
+            while (await rows.ReadAsync()) actual.Add(Key((byte[])rows[0], (byte[])rows[1]), rows.GetDouble(2));
+            Assert.Equal(3, actual.Count);
+            Assert.Equal(name == "gap" ? 1d / 3 : .4, actual[Key(ids[0], ids[0])], 12);
+            Assert.Equal(name == "gap" ? 1d / 3 : .4, actual[Key(ids[0], ids[1])], 12);
+            Assert.Equal(name == "gap" ? 1 : .5, actual[Key(ids[1], ids[0])], 12);
+        }
+        await using var empty = NpgsqlCatalog.Command(connection, transaction, "generation.trajectory_plane", Array.Empty<byte[]>(), 2, 8);
+        await using var emptyRows = await empty.ExecuteReaderAsync();
+        Assert.False(await emptyRows.ReadAsync());
+    }
+
+    [Fact]
     public async Task BrokenBackendLogsRollbackFailureAndPreservesThePrimaryDatabaseException()
     {
         await using var connection = await _source.OpenConnectionAsync();
@@ -68,7 +121,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var selected = Environment.GetEnvironmentVariable("LAPLACE_SQL_TEST_CONNECTION");
         if (!string.IsNullOrWhiteSpace(selected))
         {
-            _source = NpgsqlDataSource.Create(selected);
+            _source = LaplaceDataSource.Create(SubstrateAccess.Ingest, selected);
             return;
         }
         // Normal managed-db CI runs this check too. Complete the disposable
@@ -152,9 +205,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             """, connection, transaction))
             Assert.Equal(0L, await audit.ExecuteScalarAsync());
         await using (var bindings = new NpgsqlCommand("""
-            SELECT bool_and(
-              coalesce(p.proconfig @> ARRAY['search_path=public, pg_temp'],false)
-              = (c.sql_scope OR p.prosecdef))
+            SELECT bool_and(p.proconfig IS NULL AND NOT p.prosecdef)
             FROM pg_proc p JOIN public.laplace_function_bindings() c ON c.symbol=p.prosrc
             JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
             JOIN pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_extension'::regclass
@@ -171,7 +222,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             """, connection, transaction))
             Assert.Equal(true, await adapters.ExecuteScalarAsync());
         await using (var scoped = new NpgsqlCommand("""
-            SELECT bool_and(coalesce(p.proconfig @> ARRAY['search_path=public, pg_temp'],false))
+            SELECT count(*)>0 AND bool_and(p.proconfig IS NULL AND NOT p.prosecdef)
             FROM pg_proc p WHERE p.proname='laplace_contained_series'
               AND p.pronamespace='public'::regnamespace
             """, connection, transaction))
