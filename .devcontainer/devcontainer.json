@@ -1,0 +1,103 @@
+{
+  "name": "Laplace Multi-Repo & Monorepo Workspace",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "workspaceFolder": "/workspaces",
+  "hostRequirements": {
+    "cpus": 8,
+    "memory": "32gb",
+    "storage": "64gb"
+  },
+  "containerEnv": {
+    "LAPLACE_SRC": "/repos/src",
+    "LAPLACE_BUILD": "/repos/build",
+    "LAPLACE_WORK": "/repos/work",
+    "LAPLACE_DEPS": "/repos/deps",
+    "LAPLACE_DEPSRC": "/repos/src",
+    "LAPLACE_DATA": "/vault/Data",
+    "LAPLACE_MODELS": "/vault/Models",
+    "LAPLACE_PG_DIR": "/usr/local/pgsql",
+    "LAPLACE_PGDATA": "/data/pgdata",
+    "LAPLACE_PGWAL": "/data/pgwal",
+    "LAPLACE_PGTEMP": "/data/pgtemp",
+    "LAPLACE_ROLE": "laplace",
+    "LAPLACE_CONNINFO": "host=/tmp port=5432 user=laplace dbname=laplace",
+    "PAGER": "",
+    "GIT_PAGER": ""
+  },
+  "forwardPorts": [5187, 5188, 5432, 8080],
+  "portsAttributes": {
+    "5187": {
+      "label": "Laplace API & Web UI",
+      "onAutoForward": "notify"
+    },
+    "5188": {
+      "label": "Laplace Modular MCP",
+      "onAutoForward": "silent"
+    },
+    "5432": {
+      "label": "PostgreSQL 18.6 Substrate",
+      "onAutoForward": "silent"
+    },
+    "8080": {
+      "label": "Laplace Monorepo MCP / Site",
+      "onAutoForward": "silent"
+    }
+  },
+  "postCreateCommand": "bash /workspaces/Laplace/.devcontainer/bootstrap-codespace.sh create",
+  "postStartCommand": "bash /workspaces/Laplace/.devcontainer/bootstrap-codespace.sh start",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "Laplace/README.md",
+        "Laplace-Operations/README.md"
+      ],
+      "repositories": {
+        "SaltyPatron/Laplace": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Native": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-postgres": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Engine": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-MCP": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-UCI": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Operations": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Prototype": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Wiki": {
+          "permissions": "write-all"
+        },
+        "SaltyPatron/Laplace-Conventional": {
+          "permissions": "write-all"
+        }
+      }
+    },
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "ms-python.python",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "cmake.configureOnOpen": false
+      }
+    }
+  }
+}
