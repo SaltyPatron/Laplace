@@ -5,6 +5,7 @@ param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$
     [switch]$Plan,[switch]$Force,[string]$Receipt,[string]$ComponentSelection)
 $ErrorActionPreference='Stop'
 if($ComponentSelection){$Components=$ComponentSelection.Split(',');foreach($component in $Components){if($component -notin @('all','native','postgres','api','cli','uci','migrations','web')){throw "Unknown component: $component"}}}
+$requiresNative=@($Components | Where-Object {$_ -ne 'web'}).Count -gt 0
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 . "$PSScriptRoot/iis-runtime.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
@@ -32,14 +33,14 @@ if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED)) {
     if(-not(Test-Path -LiteralPath $developerShell -PathType Leaf)){throw "The configured developer shell is missing: $developerShell"}
     . $developerShell
 }
-if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED -and (Get-Command icx.exe -ErrorAction SilentlyContinue))){throw 'The native build requires the configured MSVC and oneAPI developer environment.'}
+if($requiresNative -and -not($env:VSCMD_VER -and $env:SETVARS_COMPLETED -and (Get-Command icx.exe -ErrorAction SilentlyContinue))){throw 'The native build requires the configured MSVC and oneAPI developer environment.'}
 . "$PSScriptRoot/../../scripts/win/laplace-paths.ps1"
 Import-LaplaceEnv
 if($EngineBuild){$env:LAPLACE_ENGINE_BUILD=[IO.Path]::GetFullPath($EngineBuild)}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $env:LAPLACE_ROOT=$repo
 $cache=Join-Path $env:LAPLACE_ENGINE_BUILD 'CMakeCache.txt'
-if(Test-Path -LiteralPath $cache) {
+if($requiresNative -and (Test-Path -LiteralPath $cache)) {
     $homeLine=Select-String -LiteralPath $cache -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$'
     $configuredSource=if($homeLine){[IO.Path]::GetFullPath($homeLine.Matches[0].Groups[1].Value)}else{''}
     if($configuredSource.TrimEnd('\','/') -ine (Join-Path $repo 'engine').TrimEnd('\','/')) {
