@@ -32,6 +32,8 @@
     <LAPLACE_ROLE Condition="'$(LAPLACE_ROLE)' == ''">laplace</LAPLACE_ROLE>
     <_LaplaceCheckout>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..').TrimEnd('\').ToLowerInvariant())</_LaplaceCheckout>
     <_LaplaceWorkspaceId>$([System.IO.Path]::GetFileName('$(_LaplaceCheckout)'))-$([MSBuild]::StableStringHash('$(_LaplaceCheckout)', 'Sha256').Substring(0,12))</_LaplaceWorkspaceId>
+    <_LaplaceCanonicalCheckout>$([System.IO.Path]::GetFullPath('$(LAPLACE_SRC)\Laplace').TrimEnd('\').ToLowerInvariant())</_LaplaceCanonicalCheckout>
+    <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(_LaplaceCheckout)' == '$(_LaplaceCanonicalCheckout)'">$(LAPLACE_BUILD)\Laplace</LAPLACE_BUILD_ROOT>
     <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == ''">$(LAPLACE_BUILD)\worktrees\$(_LaplaceWorkspaceId)</LAPLACE_BUILD_ROOT>
     <LAPLACE_PGUSER Condition="'$(LAPLACE_PGUSER)' == '' AND '$(LAPLACE_ROLE)' != ''">$(LAPLACE_ROLE)</LAPLACE_PGUSER>
     <LAPLACE_PGUSER Condition="'$(LAPLACE_PGUSER)' == ''">laplace</LAPLACE_PGUSER>

@@ -49,6 +49,27 @@ function Write-IisAtomic([string]$Path,[string]$Content) {
     [IO.File]::Move($temp,$Path,$true)
 }
 function Iis-Json($Value){ConvertTo-Json -InputObject $Value -Depth 16 -Compress}
+function Copy-IisArtifactFile([string]$Source,[string]$Destination) {
+    # Both sides are immutable release/artifact files. Hardlinks share their
+    # storage without introducing a runtime dependency on another directory.
+    $null=New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($Destination)) -Force
+    if(Test-Path -LiteralPath $Destination -PathType Leaf){
+        if((Get-FileHash -LiteralPath $Source).Hash -eq (Get-FileHash -LiteralPath $Destination).Hash){return}
+        # Unlink the destination before replacing it; never modify an inode
+        # shared with a previous immutable release.
+        Remove-Item -LiteralPath $Destination -Force
+    }
+    try { $null=New-Item -ItemType HardLink -Path $Destination -Target $Source -ErrorAction Stop }
+    catch { Copy-Item -LiteralPath $Source -Destination $Destination -ErrorAction Stop }
+}
+function Copy-IisArtifactTree([string]$Source,[string]$Destination,[string[]]$Exclude=@()) {
+    foreach($file in Get-ChildItem -LiteralPath $Source -File -Recurse) {
+        $relative=[IO.Path]::GetRelativePath($Source,$file.FullName)
+        $normalized=$relative.Replace('\','/')
+        if(@($Exclude | Where-Object {$normalized -eq $_ -or $normalized.StartsWith($_+'/')}).Count){continue}
+        Copy-IisArtifactFile $file.FullName (Join-Path $Destination $relative)
+    }
+}
 function Get-IisOwnerPolicyPath($c){Join-Path $c.directory 'state/platform-owners/policy.json'}
 function ConvertTo-IisCanonicalOwnerPolicy($Policy){
     $owners=@($Policy.owners | Sort-Object -Property provider,issuer,subject -CaseSensitive | ForEach-Object {

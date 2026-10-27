@@ -13,7 +13,7 @@ $files=@(Get-ChildItem -LiteralPath $Published -File -Recurse | Where-Object Nam
     $relative=[IO.Path]::GetRelativePath($Published,$_.FullName)
     $target=Join-Path $Destination $relative
     $null=New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($target)) -Force
-    Copy-Item -LiteralPath $_.FullName -Destination $target
+    Copy-IisArtifactFile $_.FullName $target
     @{path=$relative;sha256=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()}
 })
 $identity=(@($files|Sort-Object path|ForEach-Object {$_.path+':'+$_.sha256}) -join "`n")

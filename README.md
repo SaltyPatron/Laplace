@@ -197,6 +197,14 @@ and rebuilds; `--skip-install` uses existing dependencies without certifying a n
 installation. `deploy/windows/Build-IisPackage.ps1 -ForceWeb` requests the same forced
 web rebuild while packaging IIS.
 
+Desktop development and IIS delivery use the same component builder. API, CLI,
+UCI, migrations and web each have an independent artifact receipt, with managed
+dependencies taken from the project-reference graph. `laplace-ops deploy desktop
+-Components web` updates the frontend; `-Components api,cli` selects API/web and CLI;
+`-Components modular` selects Engine/MCP delivery independently. `-Plan` shows the
+selected stages and `-Force` explicitly rebuilds the selected closure. An unchanged
+full build reuses its component artifacts and complete verified IIS package.
+
 ### 3. Database Lifecycle & Maintenance
 
 Laplace separates content/substrate state (`LAPLACE_DB`) from accounts, sessions, API keys, and billing (`LAPLACE_APP_DB`). You can inspect, migrate, repair (recreate after an external drop), or reset either database without rebuilding the application:

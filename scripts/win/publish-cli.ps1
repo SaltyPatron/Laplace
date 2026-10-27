@@ -16,11 +16,13 @@ $Destination = [IO.Path]::GetFullPath($Destination)
 $executable = Join-Path $Destination 'Laplace.Cli.exe'
 $repo = Get-LaplaceRepoRoot
 
-& py -3 (Join-Path $repo 'scripts/install-zstd.py')
-if ($LASTEXITCODE) { throw 'The locked Zstandard runtime could not be prepared.' }
-& dotnet publish (Join-Path $repo 'app/Laplace.Cli/Laplace.Cli.csproj') -c Release `
-    -p:Platform=AnyCPU -p:PublishReadyToRun=true --no-self-contained -o $Destination --nologo
-if ($LASTEXITCODE) { throw 'CLI publication failed.' }
+$receipt=Join-Path $env:LAPLACE_BUILD_ROOT 'cli-component.json'
+& python (Join-Path $repo 'scripts/windows-components.py') --root $repo --build $env:LAPLACE_BUILD_ROOT `
+    --native $env:LAPLACE_ENGINE_BUILD --store (Join-Path $env:LAPLACE_WORK 'artifacts/windows-components') --components cli --output $receipt
+if ($LASTEXITCODE) { throw 'CLI component publication failed.' }
+$artifact=(Get-Content -LiteralPath $receipt -Raw|ConvertFrom-Json).components|Where-Object component -EQ cli
+. (Join-Path $repo 'deploy/windows/iis-runtime.ps1')
+Copy-IisArtifactTree $artifact.directory $Destination
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "CLI publication did not produce $executable"
 }

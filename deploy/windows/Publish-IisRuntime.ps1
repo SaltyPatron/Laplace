@@ -61,7 +61,7 @@ try {
     }else{
         $null=New-Item -ItemType Directory -Path $target -Force
         Grant-IisRuntimeReaders $target $readers
-        Copy-Item -Path (Join-Path $Package '*') -Destination $target -Recurse
+        Copy-IisArtifactTree $Package $target
         $null=Test-IisPackage $target
     }
     $config=Join-Path $web 'web.config';$previous=Get-Content -LiteralPath $config -Raw

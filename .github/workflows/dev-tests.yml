@@ -19,6 +19,9 @@ on:
       - '.github/workflows/windows-operations.yml'
       - 'scripts/web-artifact.py'
       - 'scripts/test-web-artifact.py'
+      - 'scripts/windows-components.py'
+      - 'scripts/test-windows-components.py'
+      - 'scripts/tests/windows-artifact-links.ps1'
 
 permissions:
   contents: read
