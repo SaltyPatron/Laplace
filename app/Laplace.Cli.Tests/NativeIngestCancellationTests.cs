@@ -128,6 +128,10 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
             Assert.NotEmpty(committed);
             Assert.Equal(0, kill(process.Id, signal));
             await process.WaitForExitAsync(token);
+            // PostgreSQL can remain in a lock wait after its client has exited.
+            // Release the fixture's lock so it can observe EOF and roll back
+            // the uncommitted source publication.
+            await transaction.RollbackAsync(token);
             output.WriteLine("stdout: {0}", await stdout);
             output.WriteLine("stderr: {0}", await stderr);
             Assert.NotEqual(0, process.ExitCode);
@@ -161,6 +165,8 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
                 command.Parameters.AddWithValue(nativePid);
                 return (bool)(await command.ExecuteScalarAsync(token))!;
             }, null, token);
+            await using (var witnesses = new NpgsqlCommand("SELECT count(*) FROM public.witness", connection))
+                Assert.Equal(0L, await witnesses.ExecuteScalarAsync(token));
             output.WriteLine("signal={0}; run={1}; retained={2}; Native backend stopped; run/files cancelled",
                 signal, run, committed.Count);
         }
