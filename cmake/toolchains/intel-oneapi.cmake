@@ -8,6 +8,23 @@ endif()
 set(CMAKE_C_COMPILER   "${_ONEAPI_COMPILER}/bin/icx"   CACHE FILEPATH "C compiler")
 set(CMAKE_CXX_COMPILER "${_ONEAPI_COMPILER}/bin/icpx"  CACHE FILEPATH "C++ compiler")
 
+# Fresh dependency checkouts can change mtimes without changing their contents.
+# Reuse compiler outputs across those checkouts and build profiles through the
+# installed compiler cache. Its normal key still includes flags and headers;
+# hash the compiler contents because oneAPI's `latest` path is a moving symlink.
+option(LAPLACE_USE_COMPILER_CACHE "Reuse unchanged oneAPI compilation inputs with ccache when installed" ON)
+if(LAPLACE_USE_COMPILER_CACHE)
+    find_program(LAPLACE_CCACHE_EXECUTABLE NAMES ccache)
+    if(LAPLACE_CCACHE_EXECUTABLE)
+        set(_laplace_ccache_launcher "${CMAKE_COMMAND};-E;env;CCACHE_COMPILERCHECK=content;CCACHE_COMPILERTYPE=clang;${LAPLACE_CCACHE_EXECUTABLE}")
+        foreach(_laplace_language C CXX)
+            if(NOT DEFINED CMAKE_${_laplace_language}_COMPILER_LAUNCHER)
+                set(CMAKE_${_laplace_language}_COMPILER_LAUNCHER "${_laplace_ccache_launcher}")
+            endif()
+        endforeach()
+    endif()
+endif()
+
 set(LAPLACE_TARGET_ISA "$ENV{LAPLACE_TARGET_ISA}")
 if(NOT LAPLACE_TARGET_ISA)
     set(LAPLACE_TARGET_ISA "AVX2")

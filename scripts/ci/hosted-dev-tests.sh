@@ -5,7 +5,9 @@
 # pins, and the oneAPI compiler/MKL/TBB versions hart-server builds with. The perf caches are build products of those
 # inputs, so the managed tests run on the exact candidate ROM rather than an installed one.
 #   scripts/ci/hosted-dev-tests.sh deps|native|managed|uci|browser|all
-# Work tree: $LAPLACE_CI_WORK (default $RUNNER_TEMP/laplace-ci or /tmp/laplace-ci).
+# Build/dependency estate: $LAPLACE_CI_WORK. The self-hosted workflow supplies a
+# permanent build path, retaining Ninja objects, grammar receipts, and MSBuild
+# outputs across jobs. Temporary hosted callers still default to RUNNER_TEMP.
 set -euo pipefail
 # Hermetic on any runner: a self-hosted machine's own declarations (the runner .env's LAPLACE_* roots, PG* defaults,
 # /etc/laplace/machine.env and /opt/laplace/secrets, read by LaplaceInstall) never reach the profile. Only this
@@ -23,14 +25,16 @@ WORK="${LAPLACE_CI_WORK:-${RUNNER_TEMP:-/tmp}/laplace-ci}"
 EXT="$WORK/external"
 UCD="$WORK/ucd"
 export LAPLACE_EXTERNAL="$EXT" LAPLACE_NATIVE="$EXT/laplace-native" LAPLACE_UCD_ROOT="$UCD"
-export LAPLACE_BUILD_ROOT="$WORK/managed" LAPLACE_WORK_ROOT="$WORK/work"
+export LAPLACE_BUILD_ROOT="$WORK/managed"
+export LAPLACE_WORK_ROOT="${RUNNER_TEMP:-$WORK}/laplace-dev-work"
 # The public corpora the dev tier reads, under one data root laid out as the estate is: the UCD release the build pins
 # and the lichess openings revision the estate acquires (LichessOpenings/lichess-openings-<rev>.tar.gz),
 # the CILI checkout and the ISO 639-3 code tables, each at the revision hart-server's /vault/Data holds.
 DATA="$WORK/data"
 export LAPLACE_DATA="$DATA" LAPLACE_MODELS="$WORK/models"
 # Tests keep their scratch under the declared permanent work root (scripts/lib/storage.sh), never /tmp.
-export TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp"
+export TMPDIR="${RUNNER_TEMP:-$WORK}/laplace-dev-scratch"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
 # A hosted runner has no laplace-runner group; the work roots belong to the runner's own group (scripts/lib/storage.sh).
 export LAPLACE_BUILD_GROUP="${LAPLACE_BUILD_GROUP:-$(id -gn)}"
 BUILD="$WORK/build/engine"   # checkout cleanup must not discard the candidate compiler outputs
@@ -204,15 +208,16 @@ managed() {
   end
 }
 
-uci() {
+uci() (
   oneapi
   say "UCI handshake"
   local runtime; runtime="$(mktemp -d)"
+  trap 'rm -rf -- "$runtime"' EXIT
   dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-build --no-self-contained -o "$runtime" --nologo
   local out; out="$(printf 'uci\nisready\nquit\n' | timeout 30 "$runtime/laplace-uci")"
   grep -q '^uciok$' <<<"$out" && grep -q '^readyok$' <<<"$out"
   end
-}
+)
 
 browser() {
   say "browser suites (typecheck, read-resource, workspace-ui, data-ui, chess-ui)"
