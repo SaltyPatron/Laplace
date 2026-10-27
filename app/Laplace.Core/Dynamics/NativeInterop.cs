@@ -111,11 +111,22 @@ public static partial class NativeInterop
         int* outRows, int* outCols, long* outScoresFp1e9, double* outZ,
         nuint capacity, nuint* outCount, nuint* outRowEnd, double* outThreshold);
 
+    [LibraryImport(Library, EntryPoint = "bilinear_contraction_significant_candidates")]
+    public static unsafe partial int BilinearContractionSignificantCandidates(
+        IntPtr context, int* rows, int* cols, nuint pairCount, int symmetric,
+        long* outScoresFp1e9, short* outOutcomes);
+
     [LibraryImport(Library, EntryPoint = "bilinear_contraction_free")]
     public static partial void BilinearContractionFree(IntPtr context);
 
     [LibraryImport(Library, EntryPoint = "model_circuit_calibrate_glicko")]
     public static unsafe partial int ModelCircuitCalibrateGlicko(
+        long* scoresFp1e9, long* opponentRatingsFp1e9, long* opponentRdsFp1e9,
+        nuint circuitCount, nuint candidateCount,
+        long* outScoresFp1e9, short* outOutcomes);
+
+    [LibraryImport(Library, EntryPoint = "model_circuit_corroboration_glicko")]
+    public static unsafe partial int ModelCircuitCorroborationGlicko(
         long* scoresFp1e9, long* opponentRatingsFp1e9, long* opponentRdsFp1e9,
         nuint circuitCount, nuint candidateCount,
         long* outScoresFp1e9, short* outOutcomes);

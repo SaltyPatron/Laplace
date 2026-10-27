@@ -73,7 +73,7 @@ public sealed class ModelCorroborationWorkingSet
 /// </summary>
 public sealed class ModelSimilarityCorroborationETL
 {
-    private const string Family = "model-pair-similarity-corroboration";
+    private const string Family = "model-pair-similarity-corroboration/significance-v1";
     private readonly SelectedModelAnalysisInput _left;
     private readonly SelectedModelAnalysisInput _right;
     private readonly int _pageSize;
@@ -102,7 +102,7 @@ public sealed class ModelSimilarityCorroborationETL
         ArgumentNullException.ThrowIfNull(reader);
         Hash128 typeId = ModelDecomposer.SimilarToTypeId;
         Hash128[] vocabulary = CommonVocabulary(_left.Tokens, _right.Tokens);
-        if (vocabulary.Length == 0) yield break;
+        if (vocabulary.Length < 2) yield break;
         var rowByEntity = new Dictionary<Hash128, int>(vocabulary.Length);
         for (int i = 0; i < vocabulary.Length; i++) rowByEntity.Add(vocabulary[i], i);
 
@@ -136,8 +136,8 @@ public sealed class ModelSimilarityCorroborationETL
                     throw new InvalidDataException("Phase-5b proposal basis must be non-empty and cannot claim target-kind corroboration");
             }
 
-            (long[] leftScores, short[] leftOutcomes) = leftCircuit.Score(rows, cols);
-            (long[] rightScores, short[] rightOutcomes) = rightCircuit.Score(rows, cols);
+            (long[] leftScores, short[] leftOutcomes) = leftCircuit.SignificantCandidates(rows, cols, symmetric: true);
+            (long[] rightScores, short[] rightOutcomes) = rightCircuit.SignificantCandidates(rows, cols, symmetric: true);
             var admitted = NativeAttestation.CorroboratedIndexes(leftOutcomes, rightOutcomes);
 
             if (admitted.Count > 0)
