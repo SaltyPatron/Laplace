@@ -35,37 +35,22 @@ void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t
     lp_id_compose((const lp_id*)children, n, (lp_id*)out);
 }
 
+typedef struct { hash128_run_reader_t next; void *context; } HashRuns;
+static int hash_run(void *context, lp_id *child, uint64_t *run) {
+    HashRuns *input = context;
+    hash128_t id; size_t copies = 0;
+    int result = input->next(input->context, &id, &copies);
+    if (result == 0) { memcpy(child, &id, sizeof *child); *run = copies; }
+    return result;
+}
 int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
                         void* context, hash128_t* out) {
     if (!reader || !out || child_count < 2) return -1;
-    if (child_count > SIZE_MAX / sizeof(hash128_t)) return -1;
-
-    /* The runs expanded into the children they stand for, then Laplace-Native's lp_id_compose: the one
-     * implementation of a composition's ID (Storage/Identity.md), no second hasher. Nearly every node fits the
-     * stack buffer (64 children, one BLAKE3 chunk); a longer one is expanded on the heap. */
-    hash128_t local[64];
-    hash128_t* kids = child_count <= 64 ? local : (hash128_t*)malloc(child_count * sizeof(hash128_t));
-    if (!kids) return -1;
-
-    int rc = -1;
-    size_t seen = 0;
-    while (seen < child_count) {
-        hash128_t child;
-        size_t run = 0;
-        if (reader(context, &child, &run) != 0 || run == 0 || run > child_count - seen) goto done;
-        for (size_t i = 0; i < run; ++i) kids[seen + i] = child;
-        seen += run;
-    }
-
-    hash128_t extra;
-    size_t extra_run = 0;
-    if (reader(context, &extra, &extra_run) != 1) goto done;   /* the reader must end exactly at child_count */
-
-    lp_id_compose((const lp_id*)kids, child_count, (lp_id*)out);
-    rc = 0;
-done:
-    if (kids != local) free(kids);
-    return rc;
+    HashRuns input = {reader, context};
+    lp_id id;
+    if (!lp_id_compose_runs(child_count, hash_run, &input, &id)) return -1;
+    memcpy(out, &id, sizeof *out);
+    return 0;
 }
 
 typedef struct {

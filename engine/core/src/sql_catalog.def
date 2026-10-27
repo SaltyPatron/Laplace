@@ -1033,7 +1033,7 @@ SQL_QUERY("laplace.intent_preflight_entities", "bytea[]",
     "SELECT (laplace.intent_preflight($1, ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists")
 
 SQL_QUERY("consensus.relation_family_type_ids", "text",
-    "SELECT consensus.relation_family_type_ids($1)")
+    "SELECT consensus.relation_family_ids($1)")
 
 SQL_QUERY("laplace.score_pair", "float8,float8",
     "SELECT s.score, laplace.laplace_score_inverse(s.score, $2)\nFROM (SELECT laplace.laplace_score($1, $2) AS score) s")
@@ -1309,7 +1309,7 @@ SQL_QUERY("realize.render_text_batch", "bytea[]",
     "SELECT realize.render_text_batch($1)")
 
 SQL_QUERY("generation.recall_trajectory_answer", "text,int4",
-    "SELECT answer FROM generation.recall_trajectories(laplace.word_id($1), $2) LIMIT 1")
+    "SELECT answer FROM generation.recall_trajectories($1, $2) LIMIT 1")
 
 SQL_QUERY("consensus.salient_fact_for_word", "text,int4",
     "SELECT fact FROM consensus.salient_facts(laplace.word_id($1), NULL, $2)\nORDER BY eff_mu DESC LIMIT 1")
@@ -1386,8 +1386,8 @@ SQL_QUERY("ops.entity_physicality_coords", "bytea[]",
 SQL_QUERY("generation.entity_hilbert_keys", "bytea[]",
     "SELECT entity_id, hilbert_index FROM generation.entity_hilbert_keys($1)")
 
-SQL_QUERY("laplace.entity_trajectory_plane", "bytea[],int4,int4",
-    "SELECT gap, subject_id, object_id, w FROM laplace.entity_trajectory_plane($1, $2, $3)")
+SQL_QUERY("generation.trajectory_plane", "bytea[],int4,int4",
+    "SELECT gap, subject_id, object_id, w FROM generation.trajectory_plane($1, $2, $3)")
 
 SQL_QUERY("generation.grapheme_order", "bytea[],int4",
     "SELECT subject_id, object_id, w FROM generation.grapheme_order($1, 50000, $2)")
@@ -1649,7 +1649,7 @@ SQL_QUERY("write.copy_attestations", "", "COPY laplace.attestations (id,subject_
 
 SQL_QUERY("maintenance.physicalities_constituents_gin", "", "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL")
 
-SQL_QUERY("maintenance.physicalities_traj_first_id_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1")
+SQL_QUERY("maintenance.physicalities_traj_first_id_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree (((public.laplace_trajectory_constituent_ids(trajectory))[1])) WHERE trajectory IS NOT NULL AND type = 1")
 
 SQL_QUERY("maintenance.physicalities_traj_probe", "", "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL")
 
@@ -1766,11 +1766,11 @@ SQL_QUERY("generation.path_plane", "bytea[],text,int4,int4,bool",
     "   SELECT w.id AS id,1::float8 AS weight,NULL::jsonb AS claim WHERE s.optional "
     "   UNION ALL "
     "   SELECT c.object_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
-    "   FROM consensus c "
+    "   FROM laplace.consensus c "
     "   WHERE NOT s.reverse AND c.subject_id=w.id AND c.type_id=ANY(s.tids) AND c.object_id IS NOT NULL "
     "   UNION ALL "
     "   SELECT c.subject_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
-    "   FROM consensus c "
+    "   FROM laplace.consensus c "
     "   WHERE s.reverse AND c.object_id=w.id AND c.type_id=ANY(s.tids) "
     "  ) edge WHERE edge.weight>0 "
     "  ORDER BY edge.weight DESC,edge.id LIMIT $3 "
@@ -1789,8 +1789,6 @@ SQL_QUERY("generation.path_plane", "bytea[],text,int4,int4,bool",
     ") "
     "SELECT subject_id,object_id,w,paths FROM ranked WHERE rn<=$4 ORDER BY subject_id,rn ")
 
-SQL_QUERY("generation.path_search_path", "", "SET LOCAL search_path = pg_temp, laplace, public")
-
 SQL_QUERY("generation.export_sequences", "bytea[],int4,int4,bytea[]",
     "SELECT p.entity_id,p.id,public.laplace_trajectory_constituent_ids(p.trajectory) "
     "FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL "
@@ -1806,29 +1804,16 @@ SQL_QUERY("generation.export_source_observations", "jsonb,bytea[]",
     "FROM jsonb_to_recordset($1) AS x(s text,t text,o text)) "
     "SELECT a.source_id,c.id,a.observation_count,c.rating,c.rd,"
     "a.opponent_rating_fp1e9,a.opponent_rd_fp1e9 FROM touched q "
-    "JOIN consensus c ON c.subject_id=q.s AND c.type_id=q.t AND c.object_id=q.o "
+    "JOIN laplace.consensus c ON c.subject_id=q.s AND c.type_id=q.t AND c.object_id=q.o "
     "JOIN laplace.attestations a ON a.subject_id=q.s AND a.type_id=q.t AND a.object_id=q.o "
     "WHERE a.observation_count>0 AND ($2 IS NULL OR a.source_id=ANY($2)) "
     "ORDER BY a.source_id,c.id,a.id")
 
 SQL_QUERY("generation.export_type_plane", "bytea[],int4,bytea[]",
-    "WITH v AS (SELECT DISTINCT u id FROM unnest($1) u), edges AS MATERIALIZED ("
-    "SELECT c.subject_id,c.object_id,c.rating,c.rd,c.type_id FROM v "
-    "JOIN consensus c ON c.subject_id=v.id JOIN v o ON o.id=c.object_id "
-    "WHERE ($3 IS NULL OR c.type_id=ANY($3))), ranked AS ("
-    "SELECT e.*,r.rank,consensus.walk_edge_weight(e.rating,e.rd) w FROM edges e "
-    "CROSS JOIN LATERAL consensus.relation_rank_resolved(e.type_id) r(rank) WHERE r.rank IS NOT NULL), capped AS ("
-    "SELECT *,row_number() OVER(PARTITION BY subject_id,type_id ORDER BY abs(w) DESC,object_id) rn "
-    "FROM ranked WHERE w<>0) SELECT subject_id,object_id,w,type_id,rank FROM capped "
-    "WHERE rn<=$2 ORDER BY type_id,subject_id,rn")
+    "SELECT subject_id,object_id,w,type_id,layer_rank "
+    "FROM generation.consensus_type_plane($1,$2,$3) WHERE w<>0 "
+    "ORDER BY type_id,subject_id,abs(w) DESC,object_id")
 
 SQL_QUERY("generation.export_adjacency", "bytea[],int4",
-    "WITH v AS (SELECT DISTINCT u id FROM unnest($1) u), edges AS MATERIALIZED ("
-    "SELECT c.subject_id,c.object_id,c.rating,c.rd,c.type_id FROM v "
-    "JOIN consensus c ON c.subject_id=v.id JOIN v o ON o.id=c.object_id), summed AS ("
-    "SELECT e.subject_id,e.object_id,sum(r.rank*consensus.walk_edge_weight(e.rating,e.rd)) w "
-    "FROM edges e CROSS JOIN LATERAL consensus.relation_rank_resolved(e.type_id) r(rank) "
-    "WHERE r.rank IS NOT NULL GROUP BY e.subject_id,e.object_id), capped AS ("
-    "SELECT *,row_number() OVER(PARTITION BY subject_id ORDER BY abs(w) DESC,object_id) rn "
-    "FROM summed WHERE w<>0) SELECT subject_id,object_id,w FROM capped WHERE rn<=$2 "
-    "ORDER BY subject_id,rn")
+    "SELECT subject_id,object_id,w FROM generation.consensus_adjacency($1,$2) "
+    "ORDER BY subject_id,abs(w) DESC,object_id")

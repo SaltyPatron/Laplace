@@ -8,6 +8,7 @@ if(NOT BASH)
     message(FATAL_ERROR "bash not found — required for extension SQL postprocess")
 endif()
 message(STATUS "Laplace SQL bash: ${BASH}")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/LaplaceWindowsExports.cmake")
 
 if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.20)

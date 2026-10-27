@@ -3,7 +3,9 @@
 DO $adopt_native_helpers$
 DECLARE signature text; function_oid oid; owner_extension oid;
 BEGIN
- FOREACH signature IN ARRAY ARRAY['ops.claim_label(public.blake3)','ops.claim_facts(bytea,integer)'] LOOP
+ FOREACH signature IN ARRAY ARRAY[format('ops.claim_label(%I.blake3)',
+   (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='laplace')),
+   'ops.claim_facts(bytea,integer)'] LOOP
   function_oid=to_regprocedure(signature);
   IF function_oid IS NULL THEN CONTINUE; END IF;
   SELECT d.refobjid INTO owner_extension FROM pg_depend d
@@ -15,46 +17,32 @@ BEGIN
   END IF;
  END LOOP;
 END $adopt_native_helpers$;
-CREATE OR REPLACE FUNCTION ops.claim_label(p_id public.blake3) RETURNS text
-LANGUAGE sql STABLE PARALLEL SAFE SET search_path=public,pg_temp AS $label$
- SELECT content FROM public.laplace_labels(ARRAY[p_id])
-$label$;
+CREATE OR REPLACE FUNCTION ops.claim_label(p_id @extschema:laplace@.blake3) RETURNS text
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+ SELECT content FROM @extschema:laplace@.laplace_labels(ARRAY[p_id]);
+END;
 
 CREATE OR REPLACE FUNCTION ops.claim_facts(p_subject bytea,p_limit integer DEFAULT NULL)
-RETURNS TABLE(claim public.blake3,predicate public.blake3,object public.blake3,type text,fact text,
+RETURNS TABLE(claim @extschema:laplace@.blake3,predicate @extschema:laplace@.blake3,object @extschema:laplace@.blake3,type text,fact text,
  eff_mu numeric,rating double precision,deviation double precision,volatility double precision)
-LANGUAGE sql STABLE SET search_path=public,pg_temp AS $facts$
-WITH subject AS (SELECT encode(p_subject,'hex')::public.blake3 AS id), page AS MATERIALIZED (
- SELECT c.entity,c.path,c.rating,c.deviation,c.volatility,public.laplace_path_length(c.path) AS length
- FROM subject s CROSS JOIN LATERAL public.laplace_claims_each(ARRAY[s.id],NULL::bigint,
-   ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
- WHERE public.laplace_path_starts(c.path,s.id)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+WITH subject AS (SELECT encode(p_subject,'hex')::@extschema:laplace@.blake3 AS id), page AS MATERIALIZED (
+ SELECT c.entity,c.rating,c.deviation,c.volatility
+ FROM subject s CROSS JOIN LATERAL @extschema:laplace@.laplace_claims_each(ARRAY[s.id],NULL::bigint,
+   ARRAY[@extschema:laplace@.laplace_bank_bit('kind','claim')],'{}'::@extschema:laplace@.blake3[]) c
+ WHERE @extschema:laplace@.laplace_path_starts(c.path,s.id)
  ORDER BY c.rating-2*c.deviation DESC,c.entity LIMIT p_limit
 ), parts AS MATERIALIZED (
- SELECT page.*,
-  CASE WHEN length=3 THEN (public.laplace_vertex_ids(ST_PointN(path,
-   CASE WHEN public.laplace_path_length(ST_PointN(path,1))>=2 THEN 1 ELSE 2 END)))[1] END AS predicate,
-  (public.laplace_vertex_ids(ST_PointN(path,ST_NPoints(path))))[1] AS last
- FROM page
-), ids AS MATERIALIZED (
- SELECT predicate AS id FROM parts WHERE predicate IS NOT NULL
- UNION SELECT last FROM parts WHERE length<=3
- UNION SELECT (public.laplace_vertex_ids(ST_PointN(p.path,i)))[1]
- FROM parts p CROSS JOIN LATERAL generate_series(1,ST_NPoints(p.path)) i WHERE length>3
-), labels AS MATERIALIZED (
- SELECT entity,content FROM public.laplace_labels(ARRAY(SELECT id FROM ids))
+ SELECT * FROM @extschema:laplace@.laplace_claim_preview(ARRAY(SELECT entity FROM page))
 ), relation_metadata AS MATERIALIZED (
  SELECT * FROM consensus.relation_metadata(ARRAY(SELECT DISTINCT decode(predicate::text,'hex') FROM parts WHERE predicate IS NOT NULL))
 )
-SELECT p.entity,p.predicate,CASE WHEN p.length<=3 THEN p.last ELSE p.entity END,
- coalesce(CASE WHEN NOT m.inverse AND m.qualifier_bit<0 THEN m.canonical END,pt.content,''),
- CASE WHEN p.length<=3 THEN obj.content ELSE
-  (SELECT string_agg(l.content || CASE WHEN public.laplace_path_length(ST_PointN(p.path,i))>1
-    THEN ' × '||public.laplace_path_length(ST_PointN(p.path,i)) ELSE '' END,' · ' ORDER BY i)
-   FROM generate_series(1,ST_NPoints(p.path)) i
-   JOIN labels l ON l.entity=(public.laplace_vertex_ids(ST_PointN(p.path,i)))[1]) END,
- (p.rating-2*p.deviation)::numeric,p.rating,p.deviation,p.volatility
-FROM parts p LEFT JOIN labels pt ON pt.entity=p.predicate LEFT JOIN labels obj ON obj.entity=p.last
+SELECT p.entity,p.predicate,p.object,
+ coalesce(CASE WHEN NOT m.inverse AND m.qualifier_bit<0 THEN m.canonical END,p.type_label,''),p.fact,
+ (s.rating-2*s.deviation)::numeric,s.rating,s.deviation,s.volatility
+FROM page s JOIN parts p ON p.entity OPERATOR(@extschema:laplace@.=) s.entity
 LEFT JOIN relation_metadata m ON m.surface_id=decode(p.predicate::text,'hex')
-ORDER BY p.rating-2*p.deviation DESC,p.entity
-$facts$;
+ORDER BY s.rating-2*s.deviation DESC,p.entity;
+END;

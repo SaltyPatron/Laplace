@@ -2,16 +2,15 @@
 -- the trajectory (Pillar 3a: text emits no PRECEDES laplace.attestations); this is the calculated
 -- view over it.
 --
--- The weight is a DOCUMENT frequency, not a corpus frequency: ids are content hashes and
--- physicality identity is (entity_id, type), so a sentence occurring a million times is
--- ONE row with ONE trajectory. count(*) here is "in how many distinct compositions is this
--- pair adjacent", never "how many times did it occur". Callers needing occurrence mass
--- must use testimony (laplace.attestations.observation_count / consensus.witness_count), which the
--- text lane deliberately does not emit. Do not relabel this as corpus frequency.
+-- Count ordered occurrences in recorded compositions, including repeated pairs
+-- inside one composition. A repeated source observation does not duplicate the
+-- content-addressed trajectory. Source testimony belongs to attestations and
+-- standings; this count does not multiply by observation_count. Counting distinct
+-- containing compositions instead requires count(DISTINCT witness_id).
 DROP FUNCTION IF EXISTS laplace.word_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
 BEGIN ATOMIC
     -- COUNT is one valuation of generation.word_adjacency, which owns the extraction.
     -- The continuation lane values the same rows by the adjudicated standing of the
