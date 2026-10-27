@@ -24,10 +24,7 @@ internal static partial class IngestCommands
             ExpandPrerequisites: cli.NativeExpandPrerequisites);
         using var output = Console.OpenStandardOutput();
         using var error = Console.OpenStandardError();
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        void Cancel(object? sender, ConsoleCancelEventArgs args) { args.Cancel = true; cancellation.Cancel(); }
-        Console.CancelKeyPress += Cancel;
-        try
+        using (var cancellation = new IngestCancellationScope(ct))
         {
             if (cli.NativeMode != NativeRecipeMode.Ingest)
                 return await execution.ExecuteAsync(request, output, error, cancellation.Token).ConfigureAwait(false);
@@ -116,7 +113,6 @@ internal static partial class IngestCommands
                 throw;
             }
         }
-        finally { Console.CancelKeyPress -= Cancel; }
     }
 
     internal static string NativeConnectionInfo(string connectionString)

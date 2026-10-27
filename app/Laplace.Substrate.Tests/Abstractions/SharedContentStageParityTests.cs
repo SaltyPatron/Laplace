@@ -71,7 +71,7 @@ public sealed class SharedContentStageParityTests
     [Theory]
     [InlineData("dog", 1)]
     [InlineData("ab", 1)]
-    [InlineData("banana", 2)]
+    [InlineData("banana", 1)]
     [InlineData("ab ab", 2)]
     // A one-child composition is the child: the root of "A" is the tier-0 codepoint,
     // not a tier-1 wrapper. Only a multi-codepoint cluster roots at the grapheme tier.

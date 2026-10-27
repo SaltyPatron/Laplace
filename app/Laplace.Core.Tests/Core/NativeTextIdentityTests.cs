@@ -8,15 +8,28 @@ namespace Laplace.Engine.Core.Tests;
 public sealed class NativeTextIdentityTests
 {
     // Read from the separately built Engine's `laplace text` command over the
-    // canonical a6540fe9... scalar cache, not calculated by this test's Core.
+    // canonical a6540fe9... scalar cache and Native adfda017 (UAX boundaries),
+    // not calculated by this test's Core.
     [Theory]
     [InlineData("abandon.01", "2d25f2d444594c0115ab1bdab872167b")]
     [InlineData("New York", "7400a4cd15dfbd2acd2ceebfbae264c9")]
-    [InlineData("mississippi", "5dedbc2e6df582f50aee2224d8ec8cd0")]
+    [InlineData("mississippi", "8e6d5bf8d0c8be55f1e5ae1f87465581")]
     public void TextMatchesIndependentEngineComposition(string text, string expected)
     {
         Assert.Equal(expected, Hash128.Text(text).ToHex());
         Assert.NotEqual(Hash128.Blake3(Encoding.UTF8.GetBytes(text)), Hash128.Text(text));
+    }
+
+    [Theory]
+    [InlineData("banana")]
+    [InlineData("mississippi")]
+    [InlineData("aaaa")]
+    [InlineData("abababab")]
+    public void RepeatedSubstringsDoNotAddBoundariesInsideOneWord(string text)
+    {
+        var scalars = text.EnumerateRunes()
+            .Select(scalar => Hash128.Blake3(Encoding.UTF8.GetBytes(scalar.ToString()))).ToArray();
+        Assert.Equal(Hash128.Merkle(1, scalars), Hash128.Text(text));
     }
 
     [Fact]

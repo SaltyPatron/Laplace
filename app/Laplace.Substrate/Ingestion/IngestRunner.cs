@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -37,17 +36,7 @@ public sealed class IngestRunner
         ArgumentNullException.ThrowIfNull(decomposer);
         ArgumentNullException.ThrowIfNull(options);
 
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx =>
-        {
-            ctx.Cancel = true;
-            linked.Cancel();
-        });
-        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx =>
-        {
-            ctx.Cancel = true;
-            linked.Cancel();
-        });
+        using var linked = new IngestCancellationScope(ct);
 
         try
         {

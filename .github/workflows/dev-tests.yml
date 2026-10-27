@@ -21,7 +21,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-ingest-cancellation:
+    name: Native ingest process cancellation and terminal receipts
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, laplace, staging]
+    timeout-minutes: 15
+    env:
+      LAPLACE_REUSE_INSTALLED_NATIVE: '1'
+      LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
+      LAPLACE_INSTALL_PREFIX: /opt/laplace/app/cli/native/recipe-engine
+      LAPLACE_RECIPES: /opt/laplace/app/cli/native/recipe-engine/share/laplace/recipes
+      LAPLACE_TIER0: /opt/laplace/app/cli/share/laplace/tier0.bin
+      LAPLACE_FLAGS: /opt/laplace/app/cli/share/laplace/tier0.flags
+      LAPLACE_HIGHWAY: /opt/laplace/app/cli/share/laplace/highway.bin
+      LAPLACE_DB: Host=/tmp;Username=laplace;Database=postgres;Command Timeout=0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: tree-sitter/tree-sitter-c
+          ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
+          path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
+        with:
+          dotnet-version: '10.0.402'
+      - name: Signal the candidate CLI against the qualified Native install and private databases
+        run: |
+          set -euo pipefail
+          export LAPLACE_BUILD_ROOT="$RUNNER_TEMP/native-ingest-cancellation-build"
+          # Match tests/ingest-completion.sh: this cluster keeps the monorepo's
+          # extension controls and modules in its installation prefix.
+          export PGOPTIONS='-c dynamic_library_path=/opt/laplace/lib/postgresql/18:$libdir -c extension_control_path=/opt/laplace/share/postgresql/18:$system -c session_preload_libraries=laplace_substrate'
+          export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
+          source deploy/linux/host-lock.sh
+          host_lock_hold shared 8 "${LAPLACE_HOST_LOCK:-/run/lock/laplace/host-resource.lock}" 600
+          # The managed candidate changes signal ownership. Its Native dependency
+          # and PostgreSQL extensions are the existing qualified host installation.
+          # Native libraries retain their normal /opt/laplace/lib lookup.
+          dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj -c Release --nologo \
+            -p:LAPLACE_INSTALL_PREFIX=/opt/laplace \
+            --filter FullyQualifiedName~NativeIngestCancellationTests \
+            --logger 'console;verbosity=detailed' \
+            --logger 'trx;LogFileName=native-ingest-cancellation.trx' \
+            --results-directory "$RUNNER_TEMP/native-ingest-cancellation-results" 8>&-
+          # These regressions own database fixtures; they cannot run in the
+          # hermetic managed dev lane without a PostgreSQL declaration.
+          existing=$(psql -X -Atq -h /tmp -U laplace -d postgres \
+            -c "SELECT count(*) FROM pg_database WHERE datname='laplace_substratecrud_test'")
+          [[ "$existing" == 0 ]] || { echo 'Explore fixture database is already in use; refusing to replace it.' >&2; exit 1; }
+          dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj -c Release --nologo \
+            -p:LAPLACE_INSTALL_PREFIX=/opt/laplace \
+            --filter 'FullyQualifiedName~ExploreAnchorNeighborsDbTests|FullyQualifiedName~IngestSignalHandlingTests' \
+            --logger 'console;verbosity=detailed' \
+            --logger 'trx;LogFileName=ingest-scope-and-explore.trx' \
+            --results-directory "$RUNNER_TEMP/native-ingest-cancellation-results" 8>&-
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-ingest-cancellation-results
+          path: ${{ runner.temp }}/native-ingest-cancellation-results
+          if-no-files-found: error
+          retention-days: 7
+
   dev-tests:
+    needs: native-ingest-cancellation
     name: Dev test profile (native, managed, UCI, browser) on the pinned Intel host
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace, staging]
