@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -75,14 +76,29 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
     directories = tuple(project.rsplit("/", 1)[0] + "/" for project in projects)
     inputs = {root / os.fsdecode(path) for path in tracked.split(b"\0") if path
               and os.fsdecode(path).replace("\\", "/").startswith(directories)}
+    external = os.environ.get("LAPLACE_EXTERNAL", "")
+    configured = native.parent / "CMakeCache.txt"
+    if configured.is_file():
+        match = re.search(r"(?m)^LAPLACE_EXTERNAL:(?:PATH|STRING)=([^\r\n]*)", configured.read_text())
+        if match:
+            external = match[1]
+    runtime = Path(os.environ.get("LAPLACE_RECIPE_RUNTIME") or native / "core/recipe_engine/runtime")
+    properties = {"LAPLACE_ENGINE_BUILD": str(native), "LaplaceRecipeRuntime": str(runtime),
+                  "LAPLACE_RECIPE_RUNTIME": str(runtime), "LAPLACE_EXTERNAL": external,
+                  "LaplaceGrammarRoot": str(Path(external) / "tree-sitter-grammars") if external else ""}
     for project in projects:
         for item in ET.parse(root / project).getroot().iter():
             if item.tag.rsplit("}", 1)[-1] not in ("Content", "None", "Compile", "EmbeddedResource"):
                 continue
             include = item.attrib.get("Include", "").replace("\\", "/")
-            if include and "$" not in include and "@" not in include:
+            for pattern in include.split(";"):
+                if not pattern:
+                    continue
+                pattern = re.sub(r"\$\(([^)]+)\)", lambda match: properties.get(match[1], match[0]), pattern)
+                if "$" in pattern or "@" in pattern:
+                    raise ValueError(f"Unresolved publication resource in {project}: {pattern}")
                 location = root / project.rsplit("/", 1)[0]
-                inputs.update(Path(path) for path in __import__("glob").glob(str(location / include), recursive=True)
+                inputs.update(Path(path).resolve() for path in __import__("glob").glob(str(location / pattern), recursive=True)
                               if Path(path).is_file())
     inputs.update(root / path for path in (
         "global.json", "NuGet.Config", "app/Directory.Build.props", "app/Directory.Build.targets",
@@ -92,7 +108,10 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
     ))
     payload = []
     for path in sorted(inputs):
-        relative = os.path.relpath(path, root).replace("\\", "/")
+        try:
+            relative = os.path.relpath(path, root).replace("\\", "/")
+        except ValueError:  # installed resources may be on another Windows volume
+            relative = path.as_posix()
         if "/wwwroot/" in relative or "/bin/" in relative or "/obj/" in relative:
             continue
         payload.append((relative, digest(path) if path.is_file() else None))

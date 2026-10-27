@@ -71,6 +71,29 @@ class Components(unittest.TestCase):
         library.write_bytes(b"native ABI two")
         self.assertNotEqual(before, self.inputs("api"))
 
+    def test_semicolon_lists_and_recipe_runtime_resources_are_tracked(self):
+        project = self.root / "app/Laplace.Cli/Laplace.Cli.csproj"
+        project.write_text('<Project><ItemGroup><Content Include="../../first.txt;../../second.txt" />'
+                           '<Content Include="$(LaplaceRecipeRuntime)/**/*" /></ItemGroup></Project>')
+        (self.root / "first.txt").write_text("first")
+        second = self.root / "second.txt"
+        second.write_text("second")
+        recipe = self.native / "core/recipe_engine/runtime/share/recipes/source.recipe"
+        recipe.parent.mkdir(parents=True)
+        recipe.write_text("old recipe")
+        before = self.inputs("cli")
+        second.write_text("changed linked resource")
+        self.assertNotEqual(before, self.inputs("cli"))
+        before = self.inputs("cli")
+        recipe.write_text("changed runtime recipe")
+        self.assertNotEqual(before, self.inputs("cli"))
+
+    def test_unknown_resource_properties_cannot_silently_reuse_an_artifact(self):
+        project = self.root / "app/Laplace.Cli/Laplace.Cli.csproj"
+        project.write_text('<Project><ItemGroup><Content Include="$(UnresolvedProducer)/resource.bin" /></ItemGroup></Project>')
+        with self.assertRaisesRegex(ValueError, "Unresolved publication resource"):
+            self.inputs("cli")
+
     def test_identical_runtime_files_share_storage_and_corruption_is_rejected(self):
         source = self.root / "source"
         source.mkdir()
