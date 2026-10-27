@@ -21,7 +21,6 @@ jobs:
     timeout-minutes: 15
     env:
       LAPLACE_REUSE_INSTALLED_NATIVE: '1'
-      LAPLACE_BUILD_ROOT: ${{ runner.temp }}/native-ingest-cancellation-build
       LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
       LAPLACE_INSTALL_PREFIX: /opt/laplace/app/cli/native/recipe-engine
       LAPLACE_RECIPES: /opt/laplace/app/cli/native/recipe-engine/share/laplace/recipes
@@ -47,6 +46,7 @@ jobs:
       - name: Signal the candidate CLI against the qualified Native install and private databases
         run: |
           set -euo pipefail
+          export LAPLACE_BUILD_ROOT="$RUNNER_TEMP/native-ingest-cancellation-build"
           # The managed candidate changes signal ownership. Its Native dependency
           # and PostgreSQL extensions are the existing qualified host installation.
           # Native libraries retain their normal /opt/laplace/lib lookup.
