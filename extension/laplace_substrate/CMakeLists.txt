@@ -36,13 +36,15 @@ set(EXT_EXECUTION_SOURCES
     src/forward_respond.c
     src/trajectory_continuations.c
     src/trajectory_generate.c
+    src/word_adjacency.c
     src/realize_batch.c
     src/prompt_coherence.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h")
-set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers}
+file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LaplaceWindowsExports.cmake" _exports_contract)
+set(_execution_inputs CMakeLists.txt "${_exports_contract}" ${EXT_EXECUTION_SOURCES} ${_execution_headers}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.def)
 if(WIN32)
     get_target_property(_core_archive laplace_core IMPORTED_LOCATION)
@@ -133,7 +135,6 @@ set(EXT_C_SOURCES
     src/prompt_language.c
     src/consensus_fold_step.c
     src/generate_walk.c
-    src/word_adjacency.c
     src/chess_learned_moves.c
     src/chess_syzygy.c
     src/variant_synth.c
@@ -173,6 +174,7 @@ if(WIN32)
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME ${EXT_NAME} SUFFIX ".dll"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    laplace_windows_exports(${EXT_NAME})
     # SYSTEM: the PG server headers trip clang pointer-sign/compat warnings
     # (generic-msvc.h) that are PostgreSQL's to fix, not ours — keep our build clean.
     target_include_directories(${EXT_NAME} SYSTEM PRIVATE
@@ -234,6 +236,12 @@ endif()
 set_target_properties(laplace_execution PROPERTIES PREFIX "" OUTPUT_NAME "${EXT_EXECUTION_MODULE}")
 target_include_directories(laplace_execution SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
 target_link_libraries(laplace_execution PRIVATE laplace_core laplace_dynamics)
+if(TARGET laplace_static)
+    target_link_libraries(laplace_execution PRIVATE laplace_static)
+else()
+    # The standalone Windows build imports core's serialized Native closure.
+    target_include_directories(laplace_execution PRIVATE ${LAPLACE_CORE_STATIC_INCLUDE_DIRECTORIES})
+endif()
 if(UNIX AND NOT APPLE)
     # A backend can retain an earlier module version. Calls between execution
     # operations must resolve within this version, never interpose an older
@@ -242,6 +250,7 @@ if(UNIX AND NOT APPLE)
 endif()
 if(WIN32)
     set_target_properties(laplace_execution PROPERTIES SUFFIX ".dll" WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    laplace_windows_exports(laplace_execution)
     target_include_directories(laplace_execution SYSTEM PRIVATE
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32_msvc"
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"

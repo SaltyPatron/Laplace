@@ -387,8 +387,9 @@ Native matches is not an attestation census.
 ## Native inspection readers
 
 Shared API reference preparation derives Native identities on the client; `ops.resolve_refs`
-preserves input positions and performs indexed presence checks against `public.entity`
-and the Tier-0 perf-cache. Hex references are batch-realized only after presence election.
+delegates to `laplace_resolve_refs`, which preserves input positions, resolves the
+Tier-0 perf-cache first, and probes only unresolved IDs through Native indexed
+presence. Hex references are batch-realized only after presence election.
 
 `realize.display_label_batch` delegates to Native `public.laplace_labels`. The former
 legacy display walker is removed. Compiled relation metadata is projected by original
@@ -398,6 +399,11 @@ lookup keys. Unknown stored semantic types remain unknown.
 `ops.claim_facts`, `ops.entity_evidence_counts` and `ops.evidence_receipt` read Native
 claims and distinct registered claim/witness pairs. Reported games are not evidence counts.
 Non-ternary claims retain their identity and complete ordered, counted constituents.
+`laplace_claim_preview` uses the same Native frontier/label context for a complete
+selected claim set; SQL no longer extracts and renders each geometry vertex.
+These adapters have parsed SQL bodies with installed-extension references and
+no per-call search-path settings. Functional API names remain stable while the
+Native storage namespace is bound by the extension dependency.
 Leaderboards use one Native claim read and batch-realize elected constituents.
 Explore uses labels returned by these owners directly, retaining complete n-ary
 previews rather than running a second display selection over them.
@@ -406,3 +412,26 @@ These inspection operations are components of the read contract above. They do n
 replace the routed forward program, recipe-declared lexicalization, or geometric coupling.
 The aggregate attestation census and migration of the remaining legacy operators are
 separate unfinished obligations.
+
+## Ordered structure export
+
+`generation.trajectory_pair_counts` delegates to Native PostgreSQL
+`laplace_ordered_pair_counts`. It visits canonical stored paths under registered
+witness roots, once per distinct container across shared subtrees and witnesses.
+It reads every tier without depending on the separate application carrier tables.
+These are immediate ordered structural occurrences, not flattened document token
+streams or additional source testimony. Compressed runs stay compressed.
+
+The Unicode floor owns separator identities, including the UAX #29 CRLF grapheme.
+Separators are removed before measuring offsets. One Native run-pair kernel
+serves exact gaps and windows; `generation.trajectory_plane` requests all gaps
+in one traversal. PostgreSQL aggregates exact multiplicities with spillable
+operators, normalizes each subject before vocabulary projection, and caps by
+weight with deterministic ID tie-breaking. Objects outside the vocabulary still
+contribute to the denominator. No expanded RLE ordinal table or pair cache is
+created. The older `word_adjacency` application-carrier reader uses the shared
+executor receiver instead of a cursor fetch loop; its storage contract is distinct.
+
+Foundry consensus exports delegate to the installed consensus plane owners.
+Carrier relations are explicitly qualified; readers no longer create a
+transaction solely to change `search_path`.

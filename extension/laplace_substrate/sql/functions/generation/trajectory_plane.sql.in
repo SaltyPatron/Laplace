@@ -1,0 +1,32 @@
+-- Ordered occurrence counts, not document frequency. Separators are removed
+-- before offsets are measured; Native operates on compressed runs. PostgreSQL
+-- owns spillable aggregation, normalization, vocabulary projection and caps.
+CREATE OR REPLACE FUNCTION generation.trajectory_pair_counts(p_vocab bytea[], p_lo int, p_hi int)
+    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, occurrences bigint)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+    SELECT c.gap, @extschema:laplace@.blake3_send(c.subject), @extschema:laplace@.blake3_send(c.object), c.occurrences
+    FROM @extschema:laplace@.laplace_ordered_pair_counts(
+        CASE WHEN p_vocab IS NULL THEN NULL ELSE
+            ARRAY(SELECT encode(v,'hex')::@extschema:laplace@.blake3 FROM unnest(p_vocab) v) END,
+        p_lo,p_hi) c;
+END;
+
+CREATE OR REPLACE FUNCTION generation.trajectory_plane(p_vocab bytea[], p_max_gap int, p_degree_cap int)
+    RETURNS TABLE(gap int, subject_id bytea, object_id bytea, w double precision)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+    WITH counts AS MATERIALIZED (
+        SELECT c.gap, c.subject_id, c.object_id, sum(c.occurrences) AS n
+        FROM generation.trajectory_pair_counts(p_vocab, 1, p_max_gap) c
+        GROUP BY c.gap, c.subject_id, c.object_id
+    ), totals AS (
+        SELECT c.*, sum(c.n) OVER (PARTITION BY c.gap, c.subject_id) AS total
+        FROM counts c
+    ), ranked AS (
+        SELECT t.*, row_number() OVER (PARTITION BY t.gap, t.subject_id ORDER BY t.n DESC, t.object_id) AS rn
+        FROM totals t WHERE p_vocab IS NULL OR t.object_id = ANY(p_vocab)
+    )
+    SELECT r.gap, r.subject_id, r.object_id, (r.n / r.total)::double precision
+    FROM ranked r WHERE r.rn <= p_degree_cap;
+END;

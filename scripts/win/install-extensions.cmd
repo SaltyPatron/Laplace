@@ -117,7 +117,11 @@ rem redirect that absolute module reference. Publish the module there and its
 rem matching control/upgrade scripts in the declared extension search path.
 call :swapcopy "%LAPLACE_PG_EXTENSION_BUILD%\laplace.dll" "%PG_MODULE_DIR%" || exit /b 1
 copy /y "%PG_SOURCE%\laplace.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
-for %%F in ("%PG_SOURCE%\sql\laplace--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+if not exist "%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace--*.sql" (
+  echo ERROR: missing generated Native extension SQL -- run build-extensions.cmd first
+  exit /b 1
+)
+for %%F in ("%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1
