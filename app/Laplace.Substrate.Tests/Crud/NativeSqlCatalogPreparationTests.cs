@@ -98,6 +98,39 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PurposeReadAdaptersRemainBoundAndVisibleToThePlanner()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
+            await migrate.ExecuteNonQueryAsync();
+        await using (var bindings = new NpgsqlCommand("""
+            SELECT count(*)=3 AND bool_and(p.proconfig IS NULL AND NOT p.prosecdef AND p.prosqlbody IS NOT NULL)
+            FROM pg_catalog.pg_proc p WHERE p.oid=ANY(ARRAY[
+              'ops.entity_record(bytea)'::regprocedure,
+              'ops.entity_evidence_counts(bytea[])'::regprocedure,
+              'ops.entity_evidence_count(bytea)'::regprocedure])
+            """, connection, transaction))
+            Assert.Equal(true, await bindings.ExecuteScalarAsync());
+
+        // Definition-time binding must survive a caller without public or any
+        // purpose schema on its path. EXPLAIN also detects an opaque SQL wrapper.
+        await using (var path = new NpgsqlCommand("SET LOCAL search_path=pg_catalog,pg_temp", connection, transaction))
+            await path.ExecuteNonQueryAsync();
+        foreach (var call in new[] { "ops.entity_record(decode(repeat('00',16),'hex'))",
+                     "ops.entity_evidence_counts(ARRAY[decode(repeat('00',16),'hex')])" })
+        {
+            await using var plan = new NpgsqlCommand("EXPLAIN (FORMAT JSON) SELECT * FROM " + call, connection, transaction);
+            var json = Assert.IsType<string>(await plan.ExecuteScalarAsync());
+            Assert.DoesNotContain("\"Function Name\": \"entity_record\"", json);
+            Assert.DoesNotContain("\"Function Name\": \"entity_evidence_counts\"", json);
+            await using var read = new NpgsqlCommand("SELECT count(*) FROM " + call, connection, transaction);
+            Assert.Equal(1L, await read.ExecuteScalarAsync());
+        }
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task CanonicalMigrationRestoresNativeFunctionBindings()
     {
         await using var connection = await _source.OpenConnectionAsync();
