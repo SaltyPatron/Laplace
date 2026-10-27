@@ -14,6 +14,15 @@ if(-not $Installation){throw 'No IIS installation is configured. Use -Installati
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
+Add-Type -Path "$env:windir/System32/inetsrv/Microsoft.Web.Administration.dll"
+function Restart-PublishedIisPool {
+    $manager=[Microsoft.Web.Administration.ServerManager]::new()
+    try {
+        $pool=$manager.ApplicationPools[$c.pool]
+        if(-not $pool){throw "The declared IIS pool is missing: $($c.pool)"}
+        if($pool.State -eq 'Stopped'){$null=$pool.Start()}else{$null=$pool.Recycle()}
+    }finally{$manager.Dispose()}
+}
 $operatorToken=if($env:LAPLACE_OPERATOR_TOKEN){$env:LAPLACE_OPERATOR_TOKEN}else{''}
 $apiKey=if($env:LAPLACE_API_KEY){$env:LAPLACE_API_KEY}else{''}
 $devInstallation=if($env:LAPLACE_DEVELOPMENT_INSTALLATION){$env:LAPLACE_DEVELOPMENT_INSTALLATION}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
@@ -58,11 +67,15 @@ try {
     $config=Join-Path $web 'web.config';$previous=Get-Content -LiteralPath $config -Raw
     try {
         Write-IisPublicAtomic $config (Get-IisWebConfig $manifest.revision (Join-Path $c.directory 'state/logs')) $readers
+        # ANCM hosts the runtime inside the worker. Select a fresh worker after
+        # changing its executable, including when returning to the prior release.
+        Restart-PublishedIisPool
         for($i=0;$i -lt 12;$i++){
             try{$result=Test-IisEndpoint $c -OperatorToken $operatorToken -ApiKey $apiKey;break}catch{if($i -eq 11){throw};Start-Sleep -Seconds 2}
         }
     } catch {
         Write-IisPublicAtomic $config $previous $readers
+        Restart-PublishedIisPool
         throw
     }
     $result.revision=$manifest.revision
