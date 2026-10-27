@@ -76,8 +76,9 @@ Static API keys are the only option most vendors offer for inference — OpenAI,
 xAI, Groq, DeepSeek and Mistral have no OAuth on the completions API, and
 OpenRouter's PKCE flow *issues a key* rather than replacing one. Where OAuth or
 SSO does exist it is a different endpoint and flow per provider, not a flag:
-Anthropic profiles (`ant auth login`), Google via Vertex AI's ADC, Azure/Foundry
-via Entra ID, Bedrock via SigV4 and IAM Identity Center.
+Anthropic profiles (`ant auth login`), Google Vertex AI via the `vertex`
+provider (Application Default Credentials, below), Azure/Foundry via Entra ID,
+Bedrock via SigV4 and IAM Identity Center.
 
 Three per-agent fields cover every case that is a bearer token:
 
@@ -106,8 +107,34 @@ command exists to prevent. It is also **not a shell**: the string is split on
 whitespace honouring quotes and executed directly, so no pipeline or substitution
 runs. Name a shell explicitly if you need one.
 
-What these three fields do **not** cover: AWS SigV4 (Bedrock) and Google ADC
-(Vertex) are request *signing*, not a header, so they need real signing code.
+What these three fields do **not** cover: AWS SigV4 (Bedrock) is request
+signing, not a header, so it needs real signing code.
+
+The `vertex` provider uses [Google.Apis.Auth](https://www.nuget.org/packages/Google.Apis.Auth)
+for Application Default Credentials, token exchange and expiry-aware refresh. It supports
+user credentials, service accounts and workload federation through the SDK. File credentials
+come from `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, or the standard gcloud
+location for the operating system. With a declared Cloud project and no local file, the SDK
+can discover the attached workload identity.
+
+The resource project comes from `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT`,
+`GOOGLE_PROJECT`, the credential file's `project_id`, its `quota_project_id`,
+then the active gcloud configuration. The quota project is separate: `GOOGLE_CLOUD_QUOTA_PROJECT`
+or the credential's quota project supplies `x-goog-user-project`; an explicit alias header
+wins. Changing the resource project does not silently replace the quota project.
+
+Location comes from `GOOGLE_CLOUD_LOCATION`, `CLOUDSDK_COMPUTE_REGION`,
+`GOOGLE_CLOUD_REGION`, then `global`. The generated publisher URL is
+`{host}/v1/projects/{project}/locations/{location}/publishers/google`.
+The Google wire adds `/models/{model}:generateContent` and uses a bearer token.
+The global host is `aiplatform.googleapis.com`; regional hosts have a location prefix.
+Choose a model and location supported by that deployment.
+
+Credential-file content changes invalidate the SDK credential cache. `Describe` / `agents`
+only inspects local configuration and reports its presence; it does not refresh a token or
+verify Cloud access. Token values and token-endpoint response bodies are not returned in
+errors. `token_command` takes precedence when explicitly configured. Existing agent defaults
+are retained; select `vertex/<model>` or configure a Vertex alias to use this route.
 
 ## Checking a route before blaming the vendor
 
@@ -140,8 +167,9 @@ safe to read into a model's context.
   name is provider data, not a branch.
 - **OpenAI Responses** gets `input`, optional `instructions`, and
   `max_output_tokens`; this is the route used by the `codex` alias.
-- **Google** gets `contents` / `systemInstruction` / `generationConfig`, and its
-  key rides `x-goog-api-key`.
+- **Google** (`google` and `vertex`, the same body) gets `contents` /
+  `systemInstruction` / `generationConfig`. On `google` the key rides
+  `x-goog-api-key`. On `vertex` the credential is the ADC bearer.
 - A **refusal** (Anthropic `stop_reason: "refusal"`) or an upstream block
   (Google `promptFeedback.blockReason`) returns an **empty reply with a
   finish_reason and a note**, not an error. Both arrive as HTTP 200 with an empty

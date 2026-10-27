@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <PackageReference Include="Google.Apis.Auth" />
   </ItemGroup>
 
   <ItemGroup>

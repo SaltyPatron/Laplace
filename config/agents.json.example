@@ -15,6 +15,16 @@
       "max_tokens": 8192
     },
 
+    "//vertex": "Vertex AI on this machine's Application Default Credentials.",
+    "//vertex2": "Select the model deployed in your Cloud project. No key in",
+    "//vertex3": "this file. Configure GOOGLE_CLOUD_LOCATION as needed. A bare",
+    "//vertex4": "gemini-* name still uses the API-key `google` provider above.",
+    "vertex": {
+      "provider": "vertex",
+      "model": "YOUR_VERTEX_MODEL",
+      "max_tokens": 8192
+    },
+
     "openai": {
       "provider": "openai",
       "model": "gpt-5.4",
