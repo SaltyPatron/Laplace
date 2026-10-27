@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
 using Npgsql;
 using Xunit;

@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Laplace.Decomposers.Tests" />
+    <InternalsVisibleTo Include="Laplace.Cli.Tests" />
+    <InternalsVisibleTo Include="Laplace.Cli" />
     <InternalsVisibleTo Include="Laplace.Substrate.Tests" />
   </ItemGroup>
 

@@ -5,6 +5,74 @@ namespace Laplace.Engine.Synthesis;
 public static partial class NativeInterop
 {
     private const string Library = "laplace_synthesis";
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BasisReceipt {
+        public nuint Rank,Anchors;
+        public double OrthogonalityError,SpanRelativeError,FrameOrthogonalityError,AnchorErrorBefore,AnchorErrorAfter;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SpectralReceipt {
+        public nuint ActiveVertices,Components,RequestedModes,RetainedModes,CombinedRank;
+        public double EigenResidualMax,MassOrthogonalityError,DiscardedSvdEnergy;
+    }
+    [LibraryImport(Library,EntryPoint="laplace_basis_refine")]
+    public static unsafe partial int BasisRefine(double* embedding,nuint rows,nuint width,nuint rank,double* coordinates,int* input,BasisReceipt* receipt);
+    [LibraryImport(Library,EntryPoint="laplace_spectral_embed")]
+    public static unsafe partial int SpectralEmbed(nuint rows,nuint width,int* input,double* coordinates,int* rowsIndex,int* colsIndex,double* weights,nuint count,double* embedding,nuint* features,SpectralReceipt* receipt);
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct SourceObservation {public fixed byte SourceId[16];public fixed byte ClaimId[16];public long Games,Rating,Rd,OpponentRating,OpponentRd;}
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct SourceShare {public fixed byte SourceId[16];public ulong ClaimsTouched,Games;public double FisherWeight;public uint ShareBp;}
+    [LibraryImport(Library,EntryPoint="laplace_source_attribution")]
+    public static unsafe partial int SourceAttribution(SourceObservation* observations,nuint count,SourceShare* shares,nuint capacity,nuint* written);
+    [LibraryImport(Library, EntryPoint="laplace_program_create")]
+    public static unsafe partial IntPtr ProgramCreate(nuint vocab,nuint width,double* embedding,int bos,int eos,double epsilon,double ropeBase,double ropeScale,double attentionGain,double residualGain,nuint layers);
+    [LibraryImport(Library, EntryPoint="laplace_program_tie_embeddings")]
+    public static partial int ProgramTieEmbeddings(IntPtr program,int tied);
+    [LibraryImport(Library,EntryPoint="laplace_program_output_floor")]
+    public static partial int ProgramOutputFloor(IntPtr program,double bound,int equalCandidates);
+    [LibraryImport(Library,EntryPoint="laplace_program_observation_readout")]
+    public static partial int ProgramObservationReadout(IntPtr program,int enabled);
+    [LibraryImport(Library, EntryPoint="laplace_program_plane")]
+    public static unsafe partial int ProgramPlane(IntPtr program,int* rows,int* cols,double* weights,nuint count);
+    [LibraryImport(Library, EntryPoint="laplace_program_layer")]
+    public static unsafe partial int ProgramLayer(IntPtr program,nuint heads,nuint kv,nuint intermediate,int* headOperators,int ffnOperator,int* expertOperators,nuint experts,nuint used);
+    [LibraryImport(Library, EntryPoint="laplace_program_sequence")]
+    public static unsafe partial int ProgramSequence(IntPtr program,int* tokens,nuint count,double weight);
+    [LibraryImport(Library, EntryPoint="laplace_program_compile")]
+    public static unsafe partial int ProgramCompile(IntPtr program,int readout,int* input,int* emit,
+        delegate* unmanaged[Cdecl]<IntPtr,byte*,byte*,nuint*,nuint,float*,nuint,int> sink,
+        delegate* unmanaged[Cdecl]<IntPtr,nuint,byte*,nuint,double,double,void> trace,IntPtr state);
+    [LibraryImport(Library, EntryPoint="laplace_program_error")]
+    public static partial IntPtr ProgramError(IntPtr program);
+    [LibraryImport(Library, EntryPoint="laplace_program_states")]
+    public static unsafe partial float* ProgramStates(IntPtr program,nuint* rows,nuint* width);
+    [LibraryImport(Library, EntryPoint="laplace_program_nodes")]
+    public static unsafe partial nuint ProgramNodes(IntPtr program,int** tokens,int** parents,int** positions);
+    [LibraryImport(Library, EntryPoint="laplace_program_targets")]
+    public static unsafe partial nuint ProgramTargets(IntPtr program,nuint** nodes,double** floors,nuint** offsets,int** columns,double** deltas);
+    [LibraryImport(Library, EntryPoint="laplace_program_free")]
+    public static partial void ProgramFree(IntPtr program);
+
+    [LibraryImport(Library, EntryPoint="laplace_readout_fit")]
+    public static unsafe partial int ReadoutFit(float* states,nuint vocab,nuint width,int* input,int* emit,int* rows,int* cols,double* weights,nuint nnz,float* head,nuint* rank,double* relativeError,double* accuracy);
+    [LibraryImport(Library, EntryPoint="laplace_readout_embed")]
+    public static unsafe partial int ReadoutEmbed(nuint vocab,nuint width,int* input,int* emit,int* rows,int* cols,double* weights,nuint nnz,double* coordinates,double* embedding,nuint* features);
+    [LibraryImport(Library, EntryPoint="laplace_readout_embed_policy")]
+    public static unsafe partial int ReadoutEmbedPolicy(nuint vocab,nuint width,int* input,int* emit,int* rows,int* cols,double* weights,nuint nnz,double* coordinates,double* embedding,nuint* features,double bound,int equalCandidates);
+    [LibraryImport(Library, EntryPoint="laplace_graph_basis")]
+    public static unsafe partial int GraphBasis(int* rows,int* cols,double* weights,nuint nnz,nuint vocab,nuint requested,double* output,nuint* rank);
+    [LibraryImport(Library, EntryPoint="laplace_operator_apply")]
+    public static unsafe partial int OperatorApply(double* basis,nuint vocab,nuint width,double* value,double scale,double* accumulator);
+    [LibraryImport(Library, EntryPoint="laplace_operator_compile")]
+    public static unsafe partial int OperatorCompile(double* basis,nuint vocab,nuint width,
+        int* rows,int* cols,double* weights,nuint nnz,double* scores,double* values,
+        nuint* rank,double* scoreError,double* valueError);
+
+    [LibraryImport(Library, EntryPoint = "laplace_lookup_compile")]
+    public static unsafe partial int LookupCompile(nuint vocab,nuint dim,int eos,double epsilon,
+        int* inputOperand,int* operandOutput,int* rows,int* cols,double* weights,nuint nnz,double* embedding,double* output);
+
 
     [LibraryImport(Library, EntryPoint = "laplace_synthesis_version")]
     private static partial IntPtr LaplaceSynthesisVersionPtr();
@@ -253,25 +321,25 @@ public static partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "format_writer_create",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial IntPtr FormatWriterCreate(string format, string outputDirPath);
+    public static partial IntPtr FormatWriterCreate(string format, string outputDirPath);
 
     [LibraryImport(Library, EntryPoint = "format_writer_add_tensor",
         StringMarshalling = StringMarshalling.Utf8)]
-    internal static unsafe partial int FormatWriterAddTensor(
+    public static unsafe partial int FormatWriterAddTensor(
         IntPtr w, string name, int dtype,
         nuint* shape, nuint rank, void* data, nuint dataLen);
 
     [LibraryImport(Library, EntryPoint = "format_writer_set_config")]
-    internal static unsafe partial int FormatWriterSetConfig(IntPtr w, byte* configJson, nuint len);
+    public static unsafe partial int FormatWriterSetConfig(IntPtr w, byte* configJson, nuint len);
 
     [LibraryImport(Library, EntryPoint = "format_writer_set_tokenizer")]
-    internal static unsafe partial int FormatWriterSetTokenizer(IntPtr w, byte* tokJson, nuint len);
+    public static unsafe partial int FormatWriterSetTokenizer(IntPtr w, byte* tokJson, nuint len);
 
     [LibraryImport(Library, EntryPoint = "format_writer_finalize")]
-    internal static partial int FormatWriterFinalize(IntPtr w);
+    public static partial int FormatWriterFinalize(IntPtr w);
 
     [LibraryImport(Library, EntryPoint = "format_writer_free")]
-    internal static partial void FormatWriterFree(IntPtr w);
+    public static partial void FormatWriterFree(IntPtr w);
 
 
     [LibraryImport(Library, EntryPoint = "feature_extractor_load",

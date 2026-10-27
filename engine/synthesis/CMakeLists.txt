@@ -1,4 +1,8 @@
 set(LAPLACE_SYNTHESIS_HEADERS
+    include/laplace/synthesis/attribution.h
+    include/laplace/synthesis/basis.h
+    include/laplace/synthesis/program.h
+    include/laplace/synthesis/lookup_compile.h
     include/laplace/synthesis/version.h
     include/laplace/synthesis/init.h
     include/laplace/synthesis/recipe.h
@@ -18,6 +22,12 @@ set(LAPLACE_SYNTHESIS_HEADERS
 )
 
 set(LAPLACE_SYNTHESIS_SOURCES
+    src/attribution.cpp
+    src/basis.cpp
+    src/target_ops.cpp
+    src/program.cpp
+    src/lookup_compile.c
+    src/operator_compile.cpp
     src/init.cpp
     src/version.cpp
     src/recipe.cpp

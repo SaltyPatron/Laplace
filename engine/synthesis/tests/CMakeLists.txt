@@ -1,4 +1,6 @@
 set(LAPLACE_SYNTHESIS_TEST_SOURCES
+    test_program.cpp
+    test_basis.cpp
     test_version.cpp
     test_toolchain.cpp
     test_recipe.cpp

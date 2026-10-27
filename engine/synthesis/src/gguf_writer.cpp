@@ -1,6 +1,12 @@
 #include "laplace/synthesis/gguf_writer.h"
 
 #include <cstdint>
+#include <array>
+#include <limits>
+#include <unordered_set>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -72,7 +78,7 @@ struct TensorEntry {
     std::string           name;
     uint32_t              dtype;
     std::vector<uint64_t> dims;
-    std::vector<uint8_t>  data;
+    size_t bytes = 0;
 };
 
 size_t gguf_dtype_element_size(uint32_t dtype) {
@@ -89,7 +95,7 @@ int dtype_from_api(int api_dtype) {
         case 0: return (int)GGUF_TENSOR_F32;
         case 1: return (int)GGUF_TENSOR_F16;
         case 2: return (int)GGUF_TENSOR_BF16;
-        default: return (int)GGUF_TENSOR_BF16;
+        default: return -1;
     }
 }
 
@@ -99,12 +105,18 @@ struct gguf_writer {
     std::string              output_path;
     std::vector<MetaKV>      metadata;
     std::vector<TensorEntry> tensors;
+    std::unordered_set<std::string> tensor_names,metadata_names;
+    FILE* payload=nullptr;
+    bool failed=false,finalized=false;
+    ~gguf_writer(){if(payload)std::fclose(payload);}
 };
 
 extern "C" gguf_writer_t* gguf_writer_create(const char* output_path) {
     if (!output_path) return nullptr;
     auto* w = new gguf_writer();
     w->output_path = output_path;
+    w->payload=std::tmpfile();
+    if(!w->payload){delete w;return nullptr;}
     return w;
 }
 
@@ -114,6 +126,7 @@ extern "C" int gguf_writer_add_metadata_str(gguf_writer_t* w, const char* key, c
     kv.key = key;
     kv.kind = META_STR;
     kv.str_val = value;
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -124,6 +137,7 @@ extern "C" int gguf_writer_add_metadata_u32(gguf_writer_t* w, const char* key, u
     kv.key = key;
     kv.kind = META_U32;
     kv.u32_val = value;
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -134,6 +148,7 @@ extern "C" int gguf_writer_add_metadata_f32(gguf_writer_t* w, const char* key, f
     kv.key = key;
     kv.kind = META_F32;
     kv.f32_val = value;
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -144,6 +159,7 @@ extern "C" int gguf_writer_add_metadata_bool(gguf_writer_t* w, const char* key, 
     kv.key = key;
     kv.kind = META_BOOL;
     kv.u32_val = value ? 1u : 0u;
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -159,6 +175,7 @@ extern "C" int gguf_writer_add_metadata_str_array_packed(gguf_writer_t* w,
     kv.kind = META_STR_ARRAY_PACKED;
     kv.array_count = count;
     kv.packed_data.assign(packed_data, packed_data + total_bytes);
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -171,6 +188,7 @@ extern "C" int gguf_writer_add_metadata_f32_array(gguf_writer_t* w, const char* 
     kv.kind = META_F32_ARRAY;
     kv.array_count = count;
     kv.f32_array.assign(values, values + count);
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -183,6 +201,7 @@ extern "C" int gguf_writer_add_metadata_i32_array(gguf_writer_t* w, const char* 
     kv.kind = META_I32_ARRAY;
     kv.array_count = count;
     kv.i32_array.assign(values, values + count);
+    if(w->failed||w->finalized||!w->metadata_names.insert(kv.key).second)return -1;
     w->metadata.push_back(std::move(kv));
     return 0;
 }
@@ -194,31 +213,25 @@ int gguf_writer_add_tensor(gguf_writer_t* w,
                            const size_t*  shape,
                            size_t         rank,
                            const void*    data) {
-    if (!w || !name || !shape || !data || rank == 0) return -1;
-
-    TensorEntry te;
-    te.name  = name;
-    te.dtype = (uint32_t)dtype_from_api(dtype);
-
-    size_t n_elements = 1;
-    for (size_t d = 0; d < rank && d < 8; ++d) {
-        te.dims.push_back((uint64_t)shape[d]);
-        n_elements *= shape[d];
+    if(!w||w->failed||w->finalized||!name||!shape||!data||!rank||rank>8||dtype_from_api(dtype)<0||w->tensor_names.count(name))return -1;
+    TensorEntry te;te.name=name;te.dtype=(uint32_t)dtype_from_api(dtype);
+    size_t elements=1;
+    for(size_t d=0;d<rank;d++){
+        if(!shape[d]||elements>SIZE_MAX/shape[d])return -1;
+        elements*=shape[d];te.dims.push_back(shape[d]);
     }
-
-    const size_t elem_size = gguf_dtype_element_size(te.dtype);
-    if (elem_size == 0) return -1;
-
-    const size_t byte_len = n_elements * elem_size;
-    te.data.resize(byte_len);
-    std::memcpy(te.data.data(), data, byte_len);
-
-    w->tensors.push_back(std::move(te));
-    return 0;
+    size_t element_size=gguf_dtype_element_size(te.dtype);
+    if(!element_size||elements>SIZE_MAX/element_size)return -1;
+    te.bytes=elements*element_size;
+    if(te.bytes>SIZE_MAX-31)return -1;
+    if(std::fwrite(data,1,te.bytes,w->payload)!=te.bytes){w->failed=true;return -1;}
+    uint8_t zero[32]={};size_t padding=align_up(te.bytes,32)-te.bytes;
+    if(padding&&std::fwrite(zero,1,padding,w->payload)!=padding){w->failed=true;return -1;}
+    w->tensor_names.insert(te.name);w->tensors.push_back(std::move(te));return 0;
 }
 
 extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
-    if (!w) return -1;
+    if(!w||w->failed||w->finalized)return -1;
 
     std::vector<uint8_t> header;
     header.reserve(4096);
@@ -285,7 +298,7 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
         for (size_t i = 0; i < w->tensors.size(); ++i) {
             tensor_offsets[i] = cur_offset;
             cur_offset = (uint64_t)align_up(
-                (size_t)cur_offset + w->tensors[i].data.size(), 32);
+                (size_t)cur_offset + w->tensors[i].bytes, 32);
         }
     }
 
@@ -301,30 +314,21 @@ extern "C" int gguf_writer_finalize(gguf_writer_t* w) {
     const size_t pad = align_up(header.size(), 32) - header.size();
     header.insert(header.end(), pad, 0x00);
 
-    FILE* f = std::fopen(w->output_path.c_str(), "wb");
-    if (!f) return -1;
-
-    if (std::fwrite(header.data(), 1, header.size(), f) != header.size()) {
-        std::fclose(f);
-        return -1;
-    }
-
-    for (size_t i = 0; i < w->tensors.size(); ++i) {
-        const TensorEntry& te = w->tensors[i];
-        if (std::fwrite(te.data.data(), 1, te.data.size(), f) != te.data.size()) {
-            std::fclose(f);
-            return -1;
-        }
-        const size_t written = te.data.size();
-        const size_t pad_bytes = align_up(written, 32) - written;
-        if (pad_bytes > 0) {
-            uint8_t zeros[32] = {};
-            std::fwrite(zeros, 1, pad_bytes, f);
-        }
-    }
-
-    std::fclose(f);
-    return 0;
+    const std::string pending=w->output_path+".partial";
+    FILE* f=std::fopen(pending.c_str(),"wb");if(!f)return -1;
+    bool ok=std::fwrite(header.data(),1,header.size(),f)==header.size()&&std::fflush(w->payload)==0;
+    std::rewind(w->payload);std::array<uint8_t,65536> block;
+    while(ok){size_t count=std::fread(block.data(),1,block.size(),w->payload);
+        if(count&&std::fwrite(block.data(),1,count,f)!=count){ok=false;break;}
+        if(count<block.size()){if(std::ferror(w->payload))ok=false;break;}}
+    ok=std::fclose(f)==0&&ok;
+    if(!ok){std::remove(pending.c_str());w->failed=true;return -1;}
+#ifdef _WIN32
+    if(!MoveFileExA(pending.c_str(),w->output_path.c_str(),MOVEFILE_REPLACE_EXISTING)){std::remove(pending.c_str());return -1;}
+#else
+    if(std::rename(pending.c_str(),w->output_path.c_str())!=0){std::remove(pending.c_str());return -1;}
+#endif
+    w->finalized=true;return 0;
 }
 
 extern "C" void gguf_writer_free(gguf_writer_t* w) {

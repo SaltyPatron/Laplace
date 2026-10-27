@@ -1,6 +1,6 @@
 using Laplace.Engine.Core;
 
-namespace Laplace.Cli;
+namespace Laplace.Decomposers.Model;
 
 /// <summary>
 /// Allocates an exported model's d_model into named, disjoint residual strata:
