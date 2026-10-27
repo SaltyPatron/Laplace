@@ -23,7 +23,8 @@ def plan(*paths: str) -> dict:
 
 class ImpactPlanTests(unittest.TestCase):
     def test_windows_deployment_changes_do_not_rebuild_or_promote_linux(self):
-        value = plan('scripts/win/install-extensions.cmd', 'deploy/windows/Publish-IisRuntime.ps1')
+        value = plan('scripts/win/install-extensions.cmd', 'deploy/windows/Publish-IisRuntime.ps1',
+                     'scripts/web-artifact.py', 'scripts/test-web-artifact.py')
         self.assertEqual(value['components'], [])
         self.assertEqual(value['build_components'], [])
         self.assertEqual(value['delivery_actions'], [])

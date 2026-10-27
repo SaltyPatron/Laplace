@@ -190,6 +190,13 @@ To build, publish, migrate databases, and verify a local IIS installation in one
 laplace-ops deploy -Target desktop
 ```
 
+Windows web builds reuse `web/dist` when the source inputs, generated API contract,
+toolchain and output hashes match. Dependency restore has its own lock receipt in
+the configured build root. `scripts/win/build-web.cmd --force` explicitly restores
+and rebuilds; `--skip-install` uses existing dependencies without certifying a new
+installation. `deploy/windows/Build-IisPackage.ps1 -ForceWeb` requests the same forced
+web rebuild while packaging IIS.
+
 ### 3. Database Lifecycle & Maintenance
 
 Laplace separates content/substrate state (`LAPLACE_DB`) from accounts, sessions, API keys, and billing (`LAPLACE_APP_DB`). You can inspect, migrate, repair (recreate after an external drop), or reset either database without rebuilding the application:

@@ -17,6 +17,8 @@ on:
       - 'scripts/win/**'
       - 'scripts/tests/windows-runtime-copy.ps1'
       - '.github/workflows/windows-operations.yml'
+      - 'scripts/web-artifact.py'
+      - 'scripts/test-web-artifact.py'
 
 permissions:
   contents: read

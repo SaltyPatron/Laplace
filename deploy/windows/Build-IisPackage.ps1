@@ -1,6 +1,6 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$Publish)
+param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$Publish,[switch]$ForceWeb)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
@@ -98,9 +98,8 @@ foreach($component in @(@('Laplace.Endpoints.OpenAICompat',$published),@('Laplac
 Push-Location (Join-Path $repo 'web')
 try {
     if (-not (Test-Path -LiteralPath 'openapi/openapi.json')) { throw 'The endpoint build did not generate web/openapi/openapi.json.' }
-    & npm ci --no-audit --no-fund
-    if($LASTEXITCODE){throw 'Frontend dependency installation failed.'}
-    & npm run build
+    $webOptions=if($ForceWeb){@('--force')}else{@()}
+    & python (Join-Path $repo 'scripts/web-artifact.py') build --root $repo --manifest (Join-Path $ManagedBuild 'web-build.json') @webOptions
     if($LASTEXITCODE){throw 'Frontend build failed.'}
     $null=New-Item -ItemType Directory -Path (Join-Path $published 'wwwroot') -Force
     Copy-Item -Path 'dist/*' -Destination (Join-Path $published 'wwwroot') -Recurse -Force

@@ -6,6 +6,8 @@ on:
       - 'deploy/windows/**'
       - 'scripts/win/**'
       - 'scripts/tests/windows-runtime-copy.ps1'
+      - 'scripts/web-artifact.py'
+      - 'scripts/test-web-artifact.py'
       - '.github/workflows/windows-operations.yml'
   pull_request:
     branches: [main]
@@ -13,6 +15,8 @@ on:
       - 'deploy/windows/**'
       - 'scripts/win/**'
       - 'scripts/tests/windows-runtime-copy.ps1'
+      - 'scripts/web-artifact.py'
+      - 'scripts/test-web-artifact.py'
       - '.github/workflows/windows-operations.yml'
 permissions:
   contents: read
@@ -27,6 +31,8 @@ jobs:
       - name: Verify unchanged locked DLL reuse and changed runtime copying
         shell: pwsh
         run: pwsh -NoProfile -File scripts/tests/windows-runtime-copy.ps1
+      - name: Verify web artifact reuse inputs and qualification
+        run: python scripts/test-web-artifact.py
       - name: Parse Windows deployment PowerShell entry points
         shell: pwsh
         run: |

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Seal and verify the exact qualified web artifact consumed by publication."""
+"""Build once from content inputs, then seal and verify the qualified web artifact."""
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+from itertools import chain
 from pathlib import Path
 
 SCHEMA = 1
@@ -83,6 +85,98 @@ def write_atomic(path: Path, payload: dict) -> None:
             pass
 
 
+def build_inputs(root: Path, tools: dict) -> str:
+    """Content inputs of the SPA, including its generated API/architecture edges."""
+    names = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard',
+                            '--', 'web', 'docs/operation-atlas'], cwd=root, check=True, capture_output=True).stdout
+    paths = {root / os.fsdecode(name) for name in names.split(b'\0') if name}
+    paths.update(root / 'web' / name for name in
+                 ('openapi/openapi.json', '.env', '.env.local', '.env.production', '.env.production.local'))
+    # package-architecture reads working sources only for these evidence entries;
+    # the full source-map is a static snapshot, not 3,000 live build dependencies.
+    atlas = root / 'docs/operation-atlas'
+    evidence = []
+    if (atlas / 'machine.json').is_file():
+        for diagram in json.loads((atlas / 'machine.json').read_text(encoding='utf-8'))['diagrams'].values():
+            evidence.extend(diagram.get('evidence', []))
+    if (atlas / 'traces.json').is_file():
+        for trace in json.loads((atlas / 'traces.json').read_text(encoding='utf-8')):
+            evidence.extend(trace.get('evidence', []))
+    for entry in evidence:
+        if isinstance(entry, dict) and entry.get('sha256'):
+            paths.add(root.parent / entry['path'])
+    inputs = []
+    for path in sorted(paths):
+        relative = os.path.relpath(path, root).replace('\\', '/')
+        if relative.startswith(('web/dist/', 'web/node_modules/', 'web/public/architecture/')) or relative == 'web/src/api/types.gen.ts':
+            continue
+        inputs.append((relative, sha256_file(path) if path.is_file() else None))
+    environment = {key: value for key, value in os.environ.items()
+                   if key.startswith('VITE_') or key in ('NODE_ENV', 'LAPLACE_API_URL')}
+    value = {'files': inputs, 'tools': tools, 'environment': environment,
+             'builder': sha256_file(Path(__file__))}
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def build_web(root: Path, state: Path, *, force=False, skip_install=False) -> dict:
+    web = root / 'web'
+    dist = web / 'dist'
+    for path in chain((dist,), dist.rglob('*')):
+        if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
+            raise ValueError(f'Web build output may not redirect outside its directory: {path}')
+    npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+    node = shutil.which('node')
+    if not npm or not node:
+        raise ValueError('Web building requires the declared Node and npm toolchain')
+    tools = {name: subprocess.run([program, '--version'], check=True, capture_output=True,
+                                 text=True).stdout.strip() for name, program in (('node', node), ('npm', npm))}
+    package = json.loads((web / 'package.json').read_text(encoding='utf-8'))
+    dependencies = {key: package.get(key) for key in
+                    ('dependencies', 'devDependencies', 'optionalDependencies', 'overrides', 'engines')}
+    dependency_key = hashlib.sha256(json.dumps({'package': dependencies, 'tools': tools,
+                    'lock': sha256_file(web / 'package-lock.json'),
+                    'npmrc': [sha256_file(path) if path.is_file() else None
+                              for path in (root / '.npmrc', web / '.npmrc')]}, sort_keys=True).encode()).hexdigest()
+    dependency_state = state.with_name(state.stem + '-dependencies.json')
+    hidden_lock = web / 'node_modules/.package-lock.json'
+    try:
+        installed = json.loads(dependency_state.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        installed = {}
+    current_dependencies = (installed.get('schema') == 1 and installed.get('inputs') == dependency_key and hidden_lock.is_file()
+                            and installed.get('lock') == sha256_file(hidden_lock))
+    restored = False
+    if not skip_install and (force or not current_dependencies):
+        subprocess.run([npm, 'ci', '--prefer-offline', '--no-audit', '--no-fund'], cwd=web, check=True)
+        restored = True
+    if not hidden_lock.is_file():
+        raise ValueError('The installed npm dependency lock is missing; restore dependencies first')
+    for program in ('typescript/bin/tsc', 'vite/bin/vite.js'):
+        if not (web / 'node_modules' / program).is_file():
+            raise ValueError('Required installed web builder is missing: ' + program)
+    # An explicit --skip-install is not evidence that the installed tree matches
+    # the requested lock. Only a restore can establish a new dependency receipt.
+    if restored:
+        write_atomic(dependency_state, {'schema': 1, 'inputs': dependency_key, 'lock': sha256_file(hidden_lock)})
+    inputs = {**tools, 'dependencies': dependency_key, 'installed_lock': sha256_file(hidden_lock)}
+    key = build_inputs(root, inputs)
+    try:
+        previous = json.loads(state.read_text(encoding='utf-8'))
+        reuse = (not force and previous.get('inputs') == key
+                 and previous.get('dist_sha256') == dist_digest(web / 'dist'))
+    except (OSError, ValueError):
+        reuse = False
+    if reuse:
+        return {'action': 'reused', 'dependencies_restored': restored, 'dist_sha256': previous['dist_sha256']}
+    subprocess.run([npm, 'run', 'build'], cwd=web, check=True)
+    if build_inputs(root, inputs) != key:
+        raise ValueError('Web source inputs changed during the build; rerun to qualify the current inputs')
+    payload = {'schema': 1, 'inputs': key,
+               'dist_sha256': dist_digest(web / 'dist'), 'built_source_sha': git_head(root)}
+    write_atomic(state, payload)
+    return {'action': 'built', 'dependencies_restored': restored, **payload}
+
+
 def verify(root: Path, manifest: Path) -> dict:
     try:
         expected = json.loads(manifest.read_text(encoding="utf-8"))
@@ -128,16 +222,23 @@ def installed_verify(root: Path, manifest: Path, directory: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("seal", "verify", "verify-installed", "digest"))
+    parser.add_argument("operation", choices=("build", "seal", "verify", "verify-installed", "digest"))
     parser.add_argument("--root", default=".")
     parser.add_argument("--manifest")
     parser.add_argument("--directory")
+    parser.add_argument('--force', action='store_true', help='Restore dependencies and rebuild the web artifact')
+    parser.add_argument('--skip-install', action='store_true', help='Use an existing declared npm installation')
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
     manifest = Path(args.manifest).resolve() if args.manifest else None
     directory = Path(args.directory).resolve() if args.directory else None
     try:
+        if args.operation == 'build':
+            if manifest is None or directory is not None:
+                parser.error('build requires --manifest for its build receipt and no --directory')
+            print(json.dumps(build_web(root, manifest, force=args.force, skip_install=args.skip_install)))
+            return 0
         if args.operation == "digest":
             if directory is None or manifest is not None:
                 parser.error("digest requires --directory and no --manifest")
@@ -170,7 +271,7 @@ def main() -> int:
                 f"WEB_ARTIFACT_VERIFIED source={payload['source_sha']} "
                 f"dist={payload['dist_sha256']}"
             )
-    except (ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"web-artifact: {error}", file=__import__("sys").stderr)
         return 1
     return 0
