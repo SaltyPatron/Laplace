@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Model;
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Engine.Core;
@@ -5,7 +6,7 @@ using Laplace.SubstrateCRUD.Npgsql;
 using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
-namespace Laplace.Cli;
+namespace Laplace.Decomposers.Model;
 
 
 
@@ -1068,19 +1069,23 @@ internal static class FoundryExport
         }
         else
         {
-            int rc;
+            int rc; nuint basisRank=(nuint)k;
             unsafe
             {
                 fixed (int* pr = leGraph.Rows) fixed (int* pc = leGraph.Cols)
                 fixed (double* pv = leGraph.Vals) fixed (double* py = y)
-                    rc = DynInterop.LaplacianEigenmapsFromSparseGraph(
-                        pr, pc, pv, (nuint)leGraph.Nnz, (nuint)vocab, (nuint)k, py);
+                    rc = SynInterop.GraphBasis(pr,pc,pv,(nuint)leGraph.Nnz,(nuint)vocab,(nuint)k,py,&basisRank);
             }
             if (rc != 0)
                 throw new InvalidOperationException(
                     $"laplacian_eigenmaps_from_sparse_graph rc={rc} (vocab={vocab}, K={k}, nnz={leGraph.Nnz})");
 
 
+            if((int)basisRank!=k) {
+                int effective=(int)basisRank;var trimmed=new double[(long)vocab*effective];
+                for(int x=0;x<vocab;x++)Array.Copy(y,(long)x*k,trimmed,(long)x*effective,effective);
+                y=trimmed;k=effective;
+            }
             var yt = new double[(long)k * vocab];
             for (int i = 0; i < vocab; i++)
                 for (int d = 0; d < k; d++) yt[(long)d * vocab + i] = y[(long)i * k + d];
@@ -1272,25 +1277,18 @@ internal static class FoundryExport
 
 
 
-    internal static double[] ProjectOperator(double[] e, int vocab, int dModel, PlaneCoo coo)
+    internal sealed record LoweredOperator(double[] Scores,double[] Values,int BasisRank,double ScoreError,double ValueError);
+    internal static LoweredOperator LowerOperator(double[] basis,int vocab,int width,PlaneCoo plane)
     {
-        var ones = new double[vocab];
-        Array.Fill(ones, 1.0);
-        var unary = new double[(long)dModel * dModel];
-        var binary = new double[(long)dModel * dModel];
-        int rc;
-        unsafe
-        {
-            fixed (double* pe = e) fixed (double* po = ones)
-            fixed (int* pr = coo.Rows) fixed (int* pc = coo.Cols) fixed (double* pv = coo.Vals)
-            fixed (double* pu = unary) fixed (double* pb = binary)
-                rc = SynInterop.ComputeSubstrateGram(
-                    pe, po, (nuint)vocab, (nuint)dModel,
-                    pr, pc, pv, (nuint)coo.Nnz, pu, pb);
+        var scores=new double[(long)width*width]; var values=new double[(long)width*width];
+        nuint rank=0; double se=0,ve=0; int rc;
+        unsafe {
+            fixed(double* r=basis,s=scores,v=values,w=plane.Vals)
+            fixed(int* rows=plane.Rows,cols=plane.Cols)
+                rc=SynInterop.OperatorCompile(r,(nuint)vocab,(nuint)width,rows,cols,w,(nuint)plane.Nnz,s,v,&rank,&se,&ve);
         }
-        if (rc != 0)
-            throw new InvalidOperationException($"compute_substrate_gram rc={rc} (nnz={coo.Nnz})");
-        return binary;
+        if(rc!=0) throw new InvalidOperationException($"native operator compiler status {rc}");
+        return new(scores,values,(int)rank,se,ve);
     }
 
     internal sealed record Factors(float[] Left, float[] Right, int Rank, int Dim, double SampleResidual, double SpectralNorm);
@@ -1382,7 +1380,7 @@ internal static class FoundryExport
         }
     }
 
-    internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose)
+    internal static Factors Factor(double[] m, int d, int rankCap, double relTol, bool transpose, bool preserveSpectrum=false)
     {
         var a = new float[(long)d * d];
         for (int i = 0; i < d; i++)
@@ -1410,7 +1408,7 @@ internal static class FoundryExport
         float halfAlpha = (float)(FoundryDefaults.FactorSpectrumAlpha / 2.0);
         for (int r = 0; r < k; r++)
         {
-            float sq = MathF.Pow((float)(Math.Max(0f, s[r]) / s0), halfAlpha);
+            float sq = preserveSpectrum ? MathF.Sqrt(Math.Max(0f,s[r])) : MathF.Pow((float)(Math.Max(0f, s[r]) / s0), halfAlpha);
             for (int j = 0; j < d; j++)
             {
                 left[(long)r * d + j] = sq * u[(long)j * d + r];
@@ -1428,7 +1426,7 @@ internal static class FoundryExport
             int j = (int)(Next(ref rng) % (ulong)d);
             double approx = 0;
             for (int r = 0; r < k; r++) approx += (double)left[(long)r * d + i] * right[(long)r * d + j];
-            double exact = a[(long)i * d + j] / s0;
+            double exact = a[(long)i * d + j] / (preserveSpectrum?1:s0);
             num += (exact - approx) * (exact - approx);
             den += exact * exact;
         }
@@ -1437,6 +1435,27 @@ internal static class FoundryExport
     }
 
 
+
+    internal static unsafe void ApplyOperator(double[] basis,int vocab,int width,double[] value,double scale,double[] accumulator)
+    {
+        int rc;
+        fixed(double* r=basis,v=value,a=accumulator)
+            rc=SynInterop.OperatorApply(r,(nuint)vocab,(nuint)width,v,scale,a);
+        if(rc!=0) throw new InvalidOperationException($"operator application failed ({rc})");
+    }
+
+    internal static Factors HeadFactors(Factors factors,IReadOnlyList<OperatorSpec> heads,int index,int capacity)
+    {
+        int copies=heads.Count(h=>h.Key==heads[index].Key);
+        int ordinal=heads.Take(index).Count(h=>h.Key==heads[index].Key);
+        int count=Math.Min(capacity,Math.Max(0,(factors.Rank-ordinal+copies-1)/copies));
+        var left=new float[count*factors.Dim];var right=new float[count*factors.Dim];
+        for(int i=0;i<count;i++) {
+            Array.Copy(factors.Left,(ordinal+i*copies)*factors.Dim,left,i*factors.Dim,factors.Dim);
+            Array.Copy(factors.Right,(ordinal+i*copies)*factors.Dim,right,i*factors.Dim,factors.Dim);
+        }
+        return factors with {Rank=count,Left=left,Right=right};
+    }
 
     internal static void FillRows(float[] vals, int rows, int cols, Factors f, double scale)
     {

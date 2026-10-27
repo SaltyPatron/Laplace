@@ -42,6 +42,31 @@ Commercial "quick/standard/deep" levels are compute envelopes over the same auth
 
 ## Operator catalog (the `op` values)
 
+The `lm_head` operator can additionally request `"scoring":"set"` and
+`"max_outside_probability":0.000001`. Set scoring admits every positive supported
+candidate with the same target logit. `"scoring":"weighted"` retains relative
+positive support. The optional probability bound specifies the requested **total**
+softmax mass outside that candidate set, including the entire remaining vocabulary.
+It is an output encoding policy, separate from the sources' epistemic standing.
+
+For a set of K candidates in a V-slot vocabulary, a finite gap
+`M = log((V-K)*(1-delta)/(K*delta))` suffices when supported logits are zero and
+excluded logits are `-M`. The compiler solves for weights against these targets;
+the exported model needs no runtime substrate lookup. Projection and F32 errors
+can change the achieved bound, so native construction records the mean/maximum
+outside mass and the number of construction states exceeding the requested bound.
+`MODEL.targets.bin` records each construction state's candidate slots and target
+logits for independent consumer evaluation. Membership alone does not specify the
+sequence required to enumerate a set or realize a multi-token entity name; those
+remain ordered operator/realization jobs.
+
+Witnessed sequences may supply body execution context without changing a relation
+readout. Observed next-token completions become output targets only for an explicit
+continuation readout (`trajectory`, `sentence_order`, or a conditional operator).
+A path/relation readout retains its selected operator on every recorded prefix;
+usage frequency does not replace that claim-selection job. Complete witnessed
+sequences record an EOS target when continuation readout is selected.
+
 Each head/embed/lm_head/ffn is one operator. Operators map to the fixed ETL (see
 `docs/invention/05-synthesis-layers-heads.md`):
 

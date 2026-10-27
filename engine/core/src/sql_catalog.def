@@ -1689,3 +1689,90 @@ SQL_QUERY("migration.application_schema", "",
     "CREATE SCHEMA app")
 SQL_QUERY("migration.cutover_sessions", "text[]",
     "SELECT pg_terminate_backend(pid,5000) FROM pg_stat_activity WHERE datname=ANY($1) AND pid<>pg_backend_pid()")
+
+
+SQL_QUERY("generation.path_plane", "bytea[],text,int4,int4,bool",
+    "WITH RECURSIVE "
+    "steps AS MATERIALIZED ( "
+    " SELECT ord::int AS depth, "
+    "   ARRAY(SELECT laplace.relation_type_id(t) FROM jsonb_array_elements_text(s->'types') t) AS tids, "
+    "   COALESCE((s->>'reverse')::boolean,false) AS reverse, "
+    "   COALESCE((s->>'optional')::boolean,false) AS optional "
+    " FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY q(s,ord) "
+    "), "
+    "walk(root,id,depth,weight,ids,claims) AS ( "
+    " SELECT DISTINCT id,id,0,1::float8,ARRAY[id],'[]'::jsonb FROM unnest($1::bytea[]) v(id) "
+    " UNION ALL "
+    " SELECT w.root,e.id,w.depth+1,w.weight*e.weight,w.ids||e.id,w.claims||CASE WHEN e.claim IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(e.claim) END "
+    " FROM walk w JOIN steps s ON s.depth=w.depth+1 "
+    " CROSS JOIN LATERAL ( "
+    "  SELECT edge.id,edge.weight,edge.claim FROM ( "
+    "   SELECT w.id AS id,1::float8 AS weight,NULL::jsonb AS claim WHERE s.optional "
+    "   UNION ALL "
+    "   SELECT c.object_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
+    "   FROM consensus c "
+    "   WHERE NOT s.reverse AND c.subject_id=w.id AND c.type_id=ANY(s.tids) AND c.object_id IS NOT NULL "
+    "   UNION ALL "
+    "   SELECT c.subject_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
+    "   FROM consensus c "
+    "   WHERE s.reverse AND c.object_id=w.id AND c.type_id=ANY(s.tids) "
+    "  ) edge WHERE edge.weight>0 "
+    "  ORDER BY edge.weight DESC,edge.id LIMIT $3 "
+    " ) e "
+    "), "
+    "aggregated AS ( "
+    " SELECT root AS subject_id,id AS object_id,sum(weight) AS w, "
+    "   jsonb_agg(jsonb_build_object('ids',ids,'claims',claims,'weight',weight) ORDER BY ids) AS paths "
+    " FROM walk "
+    " WHERE depth=(SELECT count(*) FROM steps) AND root<>id "
+    "   AND (NOT $5 OR id=ANY($1::bytea[])) "
+    " GROUP BY root,id "
+    "), ranked AS ( "
+    " SELECT *,row_number() OVER(PARTITION BY subject_id ORDER BY w DESC,object_id) AS rn "
+    " FROM aggregated "
+    ") "
+    "SELECT subject_id,object_id,w,paths FROM ranked WHERE rn<=$4 ORDER BY subject_id,rn ")
+
+SQL_QUERY("generation.path_search_path", "", "SET LOCAL search_path = pg_temp, laplace, public")
+
+SQL_QUERY("generation.export_sequences", "bytea[],int4,int4,bytea[]",
+    "SELECT p.entity_id,p.id,public.laplace_trajectory_constituent_ids(p.trajectory) "
+    "FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL "
+    "AND p.n_constituents BETWEEN 2 AND $3 "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1 "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) <@ $1 "
+    "AND ($4 IS NULL OR EXISTS(SELECT FROM laplace.attestations a "
+    "WHERE a.subject_id=p.entity_id AND a.source_id=ANY($4))) "
+    "ORDER BY p.entity_id,p.id LIMIT $2")
+
+SQL_QUERY("generation.export_source_observations", "jsonb,bytea[]",
+    "WITH touched AS (SELECT DISTINCT decode(s,'hex') s,decode(t,'hex') t,decode(o,'hex') o "
+    "FROM jsonb_to_recordset($1) AS x(s text,t text,o text)) "
+    "SELECT a.source_id,c.id,a.observation_count,c.rating,c.rd,"
+    "a.opponent_rating_fp1e9,a.opponent_rd_fp1e9 FROM touched q "
+    "JOIN consensus c ON c.subject_id=q.s AND c.type_id=q.t AND c.object_id=q.o "
+    "JOIN laplace.attestations a ON a.subject_id=q.s AND a.type_id=q.t AND a.object_id=q.o "
+    "WHERE a.observation_count>0 AND ($2 IS NULL OR a.source_id=ANY($2)) "
+    "ORDER BY a.source_id,c.id,a.id")
+
+SQL_QUERY("generation.export_type_plane", "bytea[],int4,bytea[]",
+    "WITH v AS (SELECT DISTINCT u id FROM unnest($1) u), edges AS MATERIALIZED ("
+    "SELECT c.subject_id,c.object_id,c.rating,c.rd,c.type_id FROM v "
+    "JOIN consensus c ON c.subject_id=v.id JOIN v o ON o.id=c.object_id "
+    "WHERE ($3 IS NULL OR c.type_id=ANY($3))), ranked AS ("
+    "SELECT e.*,r.rank,consensus.walk_edge_weight(e.rating,e.rd) w FROM edges e "
+    "CROSS JOIN LATERAL consensus.relation_rank_resolved(e.type_id) r(rank) WHERE r.rank IS NOT NULL), capped AS ("
+    "SELECT *,row_number() OVER(PARTITION BY subject_id,type_id ORDER BY abs(w) DESC,object_id) rn "
+    "FROM ranked WHERE w<>0) SELECT subject_id,object_id,w,type_id,rank FROM capped "
+    "WHERE rn<=$2 ORDER BY type_id,subject_id,rn")
+
+SQL_QUERY("generation.export_adjacency", "bytea[],int4",
+    "WITH v AS (SELECT DISTINCT u id FROM unnest($1) u), edges AS MATERIALIZED ("
+    "SELECT c.subject_id,c.object_id,c.rating,c.rd,c.type_id FROM v "
+    "JOIN consensus c ON c.subject_id=v.id JOIN v o ON o.id=c.object_id), summed AS ("
+    "SELECT e.subject_id,e.object_id,sum(r.rank*consensus.walk_edge_weight(e.rating,e.rd)) w "
+    "FROM edges e CROSS JOIN LATERAL consensus.relation_rank_resolved(e.type_id) r(rank) "
+    "WHERE r.rank IS NOT NULL GROUP BY e.subject_id,e.object_id), capped AS ("
+    "SELECT *,row_number() OVER(PARTITION BY subject_id ORDER BY abs(w) DESC,object_id) rn "
+    "FROM summed WHERE w<>0) SELECT subject_id,object_id,w FROM capped WHERE rn<=$2 "
+    "ORDER BY subject_id,rn")
