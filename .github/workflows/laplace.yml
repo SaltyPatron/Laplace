@@ -96,6 +96,7 @@ jobs:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
+      LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -109,6 +110,13 @@ jobs:
           repository: SaltyPatron/Laplace-Native
           ref: 1224202d1cb52607682e3502c303047ac3c05adf
           path: .ci-dependencies/Laplace-Native
+          persist-credentials: false
+      - name: Check out canonical Native PostgreSQL
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-postgres
+          ref: 85bed5c3676e4a254f7f6a5c31bded3ef406ad6b
+          path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -265,6 +273,7 @@ jobs:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
+      LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -278,6 +287,13 @@ jobs:
           repository: SaltyPatron/Laplace-Native
           ref: 1224202d1cb52607682e3502c303047ac3c05adf
           path: .ci-dependencies/Laplace-Native
+          persist-credentials: false
+      - name: Check out canonical Native PostgreSQL
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-postgres
+          ref: 85bed5c3676e4a254f7f6a5c31bded3ef406ad6b
+          path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -342,6 +358,7 @@ jobs:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
+      LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

@@ -140,6 +140,20 @@ set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS ${LAPLACE_INSTALL_DIR_PERMS})
 
 add_subdirectory(engine)
 
+# Ship the canonical Native PostgreSQL module with its consumers. A prior
+# system installation is not an artifact dependency for this release.
+set(LAPLACE_POSTGRES_SOURCE "$ENV{LAPLACE_POSTGRES_SOURCE}" CACHE PATH "Canonical Laplace-postgres sources")
+if(NOT LAPLACE_POSTGRES_SOURCE)
+    set(LAPLACE_POSTGRES_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../Laplace-postgres")
+endif()
+if(NOT EXISTS "${LAPLACE_POSTGRES_SOURCE}/CMakeLists.txt")
+    message(FATAL_ERROR "Missing canonical Laplace-postgres source: ${LAPLACE_POSTGRES_SOURCE}")
+endif()
+set(LAPLACE_PG_INSTALL_LIBDIR "${LAPLACE_EXT_LIBDIR}")
+set(LAPLACE_PG_INSTALL_SHAREDIR "${LAPLACE_EXT_SHAREDIR}")
+set(LAPLACE_PG_MODULE_PATHNAME "laplace")
+add_subdirectory("${LAPLACE_POSTGRES_SOURCE}" postgres)
+
 add_subdirectory(extension)
 
 install(CODE "
