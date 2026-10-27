@@ -12,6 +12,11 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'deploy/windows/**'
+      - 'scripts/win/**'
+      - 'scripts/tests/windows-runtime-copy.ps1'
+      - '.github/workflows/windows-operations.yml'
 
 permissions:
   contents: read

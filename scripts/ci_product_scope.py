@@ -1,7 +1,8 @@
 """Repository path laws for product triggering and candidate freshness.
 
-`ignored` paths are pure policy/verification/diagnostic surfaces: they neither
-trigger Product — main delivery nor invalidate an existing candidate.
+`ignored` paths do not affect Linux product bytes: they neither trigger
+Product — main delivery nor invalidate an existing Linux candidate. Windows
+deployment controls have their own Windows qualification workflow.
 `candidate_equivalent` additionally admits managed test-project changes. Those
 still trigger targeted qualification, but they do not change shipped product bytes.
 """
@@ -12,6 +13,8 @@ import fnmatch
 PRODUCT_IGNORED_PREFIXES = (
     ".github/",
     "docs/",
+    "deploy/windows/",
+    "scripts/win/",
     "scripts/test-suites/",
 )
 
@@ -81,6 +84,8 @@ GITHUB_PATH_IGNORES = (
     "vault-data-inventory.tsv",
     "vault-data-directories.list",
     "docs/**",
+    "deploy/windows/**",
+    "scripts/win/**",
     "**/*.md",
     ".github/**",
     "scripts/api-diagnostics.py",

@@ -4,12 +4,15 @@ call "%~dp0env.cmd" || exit /b 1
 cd /d "%LAPLACE_ROOT%"
 set "DEPLOY=%LAPLACE_DEPLOY%"
 set "RECYCLE=0"
+set "FORCE_RECYCLE=0"
+set "RUNTIME_CHANGED=0"
 set "FILES_ONLY=0"
 set "SKIP_BUILD=0"
 set "CHECK_CONNECTION=0"
 :parse_install
 if "%~1"=="" goto parse_install_done
 if /i "%~1"=="--recycle" ( set "RECYCLE=1" & shift /1 & goto parse_install )
+if /i "%~1"=="--force-recycle" ( set "RECYCLE=1" & set "FORCE_RECYCLE=1" & shift /1 & goto parse_install )
 if /i "%~1"=="--files-only" ( set "FILES_ONLY=1" & shift /1 & goto parse_install )
 if /i "%~1"=="--skip-build" ( set "SKIP_BUILD=1" & shift /1 & goto parse_install )
 if /i "%~1"=="--check-connection" ( set "CHECK_CONNECTION=1" & shift /1 & goto parse_install )
@@ -138,6 +141,7 @@ call :swapcopy "%TRANSITION_SRC%" "%DEPLOY%\share" || exit /b 1
 rem laplace_core's own run-time dependencies, the one list (engine-runtime.cmd): beside postgres.exe, where a backend
 rem module's dependencies are searched (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
 call "%~dp0engine-runtime.cmd" "%PGRT%" || exit /b 1
+if "%LAPLACE_RUNTIME_CHANGED%"=="1" set "RUNTIME_CHANGED=1"
 
 rem geos/proj/sqlite are STATIC into laplace_geom — no runtime DLLs to deploy for them.
 
@@ -168,7 +172,9 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
 )
 "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
 "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;" || exit /b 1
-if "%RECYCLE%"=="1" (
+if "%FORCE_RECYCLE%"=="1" set "RUNTIME_CHANGED=1"
+if "%RECYCLE%"=="1" if "%RUNTIME_CHANGED%"=="0" echo runtime files unchanged: backend recycling skipped
+if "%RECYCLE%"=="1" if "%RUNTIME_CHANGED%"=="1" (
   echo recycling laplace backends so fresh DLLs/SQL load on next connection...
   > "%GUC_SQL%" echo DO $$ DECLARE recycled_count integer; recycled_ok boolean; BEGIN WITH attempts AS MATERIALIZED ^(SELECT pg_terminate_backend^(pid^) AS recycled FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid ^<^> pg_backend_pid^(^)^) SELECT count^(*^) FILTER ^(WHERE recycled^), COALESCE^(bool_and^(recycled^),true^) INTO recycled_count,recycled_ok FROM attempts; IF NOT recycled_ok THEN RAISE EXCEPTION 'PostgreSQL could not recycle every selected backend' USING ERRCODE = '55000'; END IF; RAISE NOTICE '%% backend^(s^) recycled',recycled_count; END $$;
   "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
@@ -241,6 +247,11 @@ if exist "%SRC%" goto sc_copy
 echo missing build artifact: "%SRC%"
 exit /b 1
 :sc_copy
+if exist "%DESTDIR%\%BASE%" (
+  fc /b "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul
+  if not errorlevel 1 exit /b 0
+)
+set "RUNTIME_CHANGED=1"
 copy /y "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul && exit /b 0
 rem Locked DLL: rename aside, then MOVE the stale image OUT of deploy (not next to
 rem live libs). Leaving *.stale~* under deploy\lib has crashed the postmaster

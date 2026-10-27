@@ -6,6 +6,7 @@ rem the dependency prefix and oneAPI: zlib, libxml2, ICU, TBB, MKL's TBB threadi
 rem   engine-runtime.cmd <destination directory>
 rem A locked DLL (a running backend or worker holds it) is renamed aside and the stale image moved out of the directory.
 setlocal EnableDelayedExpansion
+set "RUNTIME_CHANGED=0"
 set "DEST=%~1"
 if "%DEST%"=="" ( echo engine-runtime: destination directory required & exit /b 2 )
 if not defined LAPLACE_DEPS_PREFIX call "%~dp0env.cmd" || exit /b 1
@@ -49,12 +50,17 @@ for %%K in (intel_thread def mc3 avx2 avx512 vml_def vml_mc3 vml_avx2 vml_avx512
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libmmd.dll" || exit /b 1
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\libiomp5md.dll" || exit /b 1
 call :put "%LAPLACE_ONEAPI%\compiler\latest\bin\svml_dispmd.dll" || exit /b 1
-exit /b 0
+endlocal & set "LAPLACE_RUNTIME_CHANGED=%RUNTIME_CHANGED%" & exit /b 0
 
 :put
 set "SRC=%~1"
 set "BASE=%~nx1"
 if not exist "%SRC%" ( echo missing build artifact: "%SRC%" & exit /b 1 )
+if exist "%DEST%\%BASE%" (
+  fc /b "%SRC%" "%DEST%\%BASE%" >nul 2>nul
+  if not errorlevel 1 exit /b 0
+)
+set "RUNTIME_CHANGED=1"
 copy /y "%SRC%" "%DEST%\%BASE%" >nul 2>nul && exit /b 0
 rem Locked DLL: rename aside, then move the stale image out of the directory (a stale image left beside live
 rem libraries has crashed the postmaster).

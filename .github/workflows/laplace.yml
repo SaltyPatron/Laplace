@@ -1,7 +1,7 @@
 name: Product — main delivery
 run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs.promote && 'production' || 'staging' }} — ${{ github.sha }}"
 
-# Every merge to main is built, installed, migrated and published on hart-server (the machine Laplace-Operations
+# Linux product changes on main are built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
 # staging; no sudo), with deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database
 # laplace-mono, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
@@ -16,6 +16,7 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # artifacts or overwrite each other's cloud lease while waiting on later hosts.
 #
 # Explicit full and competitive qualification use the same site lifecycle and host reservation.
+# Windows-only deployment controls are qualified by windows-operations.yml.
 
 on:
   workflow_call:
@@ -33,6 +34,8 @@ on:
     paths-ignore:
       - ".github/**"
       - "docs/**"
+      - "deploy/windows/**"
+      - "scripts/win/**"
       - "**/*.md"
       - "scripts/ci-impact-plan.py"
       - "scripts/ci-qualification-cache.py"

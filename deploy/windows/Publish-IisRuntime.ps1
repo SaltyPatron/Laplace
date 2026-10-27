@@ -1,6 +1,6 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([string]$Installation,[Parameter(Mandatory)][string]$Package)
+param([string]$Installation,[Parameter(Mandatory)][string]$Package,[switch]$Force)
 $ErrorActionPreference='Stop'
 if(-not $Installation -and -not $env:LAPLACE_IIS_INSTALLATION){
     if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'installation.json')){
@@ -65,20 +65,26 @@ try {
         $null=Test-IisPackage $target
     }
     $config=Join-Path $web 'web.config';$previous=Get-Content -LiteralPath $config -Raw
+    $desired=Get-IisWebConfig $manifest.revision (Join-Path $c.directory 'state/logs')
+    $changed=$previous -cne $desired
     try {
-        Write-IisPublicAtomic $config (Get-IisWebConfig $manifest.revision (Join-Path $c.directory 'state/logs')) $readers
+        if ($changed) { Write-IisPublicAtomic $config $desired $readers }
         # ANCM hosts the runtime inside the worker. Select a fresh worker after
         # changing its executable, including when returning to the prior release.
-        Restart-PublishedIisPool
+        if ($changed -or $Force) { Restart-PublishedIisPool }
+        else { Write-Host 'IIS package and configuration unchanged: app pool recycling skipped; verifying the running application.' }
         for($i=0;$i -lt 12;$i++){
             try{$result=Test-IisEndpoint $c -OperatorToken $operatorToken -ApiKey $apiKey;break}catch{if($i -eq 11){throw};Start-Sleep -Seconds 2}
         }
     } catch {
-        Write-IisPublicAtomic $config $previous $readers
-        Restart-PublishedIisPool
+        if ($changed) {
+            Write-IisPublicAtomic $config $previous $readers
+            Restart-PublishedIisPool
+        }
         throw
     }
     $result.revision=$manifest.revision
+    $result.activation=if ($changed -or $Force) {'restarted'} else {'reused'}
     $receipt=Join-Path $c.directory ('receipts/publication-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'.json')
     Write-IisAtomic $receipt (Iis-Json $result)
     Write-IisPublicAtomic (Join-Path $web 'active.json') (Iis-Json @{revision=$manifest.revision}) $readers

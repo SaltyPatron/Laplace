@@ -1,0 +1,37 @@
+name: Policy — Windows deployment
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/windows/**'
+      - 'scripts/win/**'
+      - 'scripts/tests/windows-runtime-copy.ps1'
+      - '.github/workflows/windows-operations.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/windows/**'
+      - 'scripts/win/**'
+      - 'scripts/tests/windows-runtime-copy.ps1'
+      - '.github/workflows/windows-operations.yml'
+permissions:
+  contents: read
+jobs:
+  runtime-files:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify unchanged locked DLL reuse and changed runtime copying
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/tests/windows-runtime-copy.ps1
+      - name: Parse Windows deployment PowerShell entry points
+        shell: pwsh
+        run: |
+          foreach ($file in Get-ChildItem deploy/windows -Filter '*.ps1') {
+            $tokens=$null; $errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }

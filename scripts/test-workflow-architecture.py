@@ -104,6 +104,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "db-ops.yml": "name: Database — maintenance",
             "ci-contract.yml": "name: Policy — CI contract",
             "dev-tests.yml": "name: Policy — dev tests",
+            "windows-operations.yml": "name: Policy — Windows deployment",
             "installed-database-health.yml": "name: Runtime — installed database health",
             "full-qualification.yml": "name: Audit — full product qualification",
             "laplace.yml": "name: Product — main delivery",
