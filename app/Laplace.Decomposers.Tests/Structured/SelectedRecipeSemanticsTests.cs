@@ -150,11 +150,11 @@ public sealed class SelectedRecipeSemanticsTests
     }
 
     internal static List<AttestationRow> Read(string recipePath, string input, int chunkSize = 4096,
-        Action<OrderedCompositionComponent>? fileCompleted = null)
+        Action<OrderedCompositionComponent>? fileCompleted = null, int recordDepth = 2)
     {
         CodepointPerfcache.LoadDefault();
         var recipe = new LaplaceCookbook().InstallJson(SourceGenerationRegressionTests.RepositoryFile(recipePath));
-        using var stream = NativeRecipeStream.Open(NativeRecipeCompiler.Compile(recipe),
+        using var stream = NativeRecipeStream.Open(NativeRecipeCompiler.Compile(recipe, recordDepth),
             SourceWitness.Id(recipe.Authority, recipe.Release), 1);
         if (fileCompleted is not null)
         {
