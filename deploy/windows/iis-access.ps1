@@ -65,7 +65,7 @@ function Get-IisRuntimeReaders($Config) {
     }
     @($readers|Sort-Object)
 }
-function Grant-IisRuntimeReaders([string]$Path,[string[]]$Readers) {
+function Grant-IisRuntimeReaders([string]$Path,[string[]]$Readers,[switch]$Recurse) {
     if(-not $Readers){return}
     $acl=Get-Acl -LiteralPath $Path
     $inheritance=if(Test-Path -LiteralPath $Path -PathType Container){'ContainerInherit,ObjectInherit'}else{'None'}
@@ -83,6 +83,14 @@ function Grant-IisRuntimeReaders([string]$Path,[string[]]$Readers) {
         $changed=$true
     }
     if($changed){Set-IisFileAccess $Path $acl}
+    if($Recurse -and (Test-Path -LiteralPath $Path -PathType Container)){
+        # A hard-linked immutable artifact retains its original file ACL; a
+        # readable release directory does not grant access to that inode.
+        # This policy applies only to public runtime artifacts, never state.
+        foreach($file in Get-ChildItem -LiteralPath $Path -File -Recurse){
+            Grant-IisRuntimeReaders $file.FullName $Readers
+        }
+    }
 }
 function Write-IisPublicAtomic([string]$Path,[string]$Content,[string[]]$Readers) {
     $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.new'

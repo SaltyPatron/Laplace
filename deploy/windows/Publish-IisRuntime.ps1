@@ -57,11 +57,12 @@ try {
     $readers=@(Get-IisRuntimeReaders $c)
     if(Test-Path $target){
         $null=Test-IisPackage $target
-        Grant-IisRuntimeReaders $target $readers
+        Grant-IisRuntimeReaders $target $readers -Recurse
     }else{
         $null=New-Item -ItemType Directory -Path $target -Force
         Grant-IisRuntimeReaders $target $readers
         Copy-IisArtifactTree $Package $target
+        Grant-IisRuntimeReaders $target $readers -Recurse
         $null=Test-IisPackage $target
     }
     $config=Join-Path $web 'web.config';$previous=Get-Content -LiteralPath $config -Raw
