@@ -77,7 +77,7 @@ static int runs(void) {
     char ha[33], hb[33]; hex(&a, ha); hex(&b, hb);
     if (strcmp(ha, hb) != 0) { fprintf(stderr, "FAIL runs: streamed %s, lp_id_compose %s\n", ha, hb); return 1; }
     printf("ok   runs       %s (74 children in 3 runs)\n", ha);
-    /* A reader that says more or fewer children than declared is refused, on the stack and the heap path. */
+    /* A reader that says more or fewer children than declared is refused. */
     size_t short_r[3] = { 3, 1, 69 }, long_r[3] = { 3, 1, 71 };
     reader_t s1 = { k, short_r, 3, 0 }, s2 = { k, long_r, 3, 0 }, s3 = { k, r, 2, 0 };
     if (hash128_merkle_runs(m, next_run, &s1, &a) == 0 || hash128_merkle_runs(m, next_run, &s2, &a) == 0 ||
