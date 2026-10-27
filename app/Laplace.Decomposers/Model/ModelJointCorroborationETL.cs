@@ -13,7 +13,7 @@ namespace Laplace.Decomposers.Model;
 /// </summary>
 public sealed class ModelJointCorroborationETL
 {
-    private const string Family = "model-joint-circuit-corroboration";
+    private const string Family = "model-joint-circuit-corroboration/significance-v1";
     private static readonly Hash128[] TargetTypeIds =
     [
         ModelDecomposer.SimilarToTypeId,
@@ -52,7 +52,7 @@ public sealed class ModelJointCorroborationETL
     {
         ArgumentNullException.ThrowIfNull(reader);
         Hash128[] vocabulary = CommonVocabulary(_left.Tokens, _right.Tokens);
-        if (vocabulary.Length == 0) yield break;
+        if (vocabulary.Length < 2) yield break;
         Dictionary<Hash128, int> rowByEntity = IndexVocabulary(vocabulary);
         var leftEstate = new ModelCircuitEstate(_left, rowByEntity);
         var rightEstate = new ModelCircuitEstate(_right, rowByEntity);
@@ -75,7 +75,7 @@ public sealed class ModelJointCorroborationETL
         ArgumentNullException.ThrowIfNull(reader);
         RelationTypeRegistry.RelationTypeResolution target = ResolveTarget(targetName);
         Hash128[] vocabulary = CommonVocabulary(_left.Tokens, _right.Tokens);
-        if (vocabulary.Length == 0) yield break;
+        if (vocabulary.Length < 2) yield break;
         Dictionary<Hash128, int> rowByEntity = IndexVocabulary(vocabulary);
         var leftEstate = new ModelCircuitEstate(_left, rowByEntity);
         var rightEstate = new ModelCircuitEstate(_right, rowByEntity);
@@ -195,7 +195,9 @@ public sealed class ModelJointCorroborationETL
         short[]? firstCircuitOutcomes = null;
         foreach (ModelCircuitDescriptor circuit in estate.Enumerate(targetType))
         {
-            (long[] scores, short[] outcomes) = circuit.Contraction.Score(rows, cols);
+            (long[] scores, short[] outcomes) = circuit.Contraction.SignificantCandidates(rows, cols,
+                ResolveTarget(targetType).Symmetry == RelationTypeRegistry.Symmetry.Symmetric
+                    && circuit.Contraction.SharedFactors);
             circuitScores.Add(scores);
             firstCircuitOutcomes ??= outcomes;
             contexts.Add(circuit.ContextId);
@@ -217,7 +219,7 @@ public sealed class ModelJointCorroborationETL
         else
         {
             (scoresOut, outcomesOut) = NativeBilinearContraction.AggregateCircuitScores(
-                circuitScores, opponentRatings, opponentRds);
+                circuitScores, opponentRatings, opponentRds, affirmativeEvidence: true);
         }
         Hash128 context = contexts.Count == 1
             ? contexts[0]

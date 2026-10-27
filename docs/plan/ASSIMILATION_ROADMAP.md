@@ -213,12 +213,12 @@ Landed in the first E slice:
 - **E2:** `engine/manifest/model_operators.toml` declares the operator templates (vocabulary projection, position and segment embeddings, norms, GQA self-attention, fused QKV in either orientation, latent attention, gated, fused-gated and plain MLP, router, stacked experts, low-rank factor pairs). `ModelOperatorRecognizer` binds d by axis frequency, V by the tokenizer, L by path repetition, the rest from config, and a feed-forward width per instance; names only break symmetries between equal shapes, undecided slots are ambiguous and unclaimed tensors are unrecognized. `ArchitectureProfile` and `TensorRoleClassifier` are gone. TinyLlama, Phi-2, MiniLM, Qwen2.5, Qwen3-MoE and DeepSeek-V2-Lite (MLA + MoE + shared experts) recognize with nothing left over.
 - **E5 identity:** a circuit is the ordered composition [model witness, plane, layer, n, head, m]. That puts the source and positions in the identity and violates the identity law; the model is the containing trunk and layer and head are positions under it.
 - **E5 claims:** each circuit writes its own significant pairs under a declared per-subject null (z against the subject's own score distribution, kept iff z ≥ √(2 ln N)); nothing below significance is written, and nothing is refuted. `consensus.circuit_candidates` is dropped.
+- **Two-model corroboration:** both corroboration lanes evaluate nominated pairs against that same circuit null and whole-circuit family. Insignificant circuits supply no vote; the native Glicko fold consumes affirmative circuit evidence without treating an absent observation or a low raw score as refutation. Calculation receipts use the `significance-v1` family.
 - **E3:** the tokenizer vocabulary is one ordered composition whose trajectory ordinal is the model-local id; control pieces decode to their surface; the config enters as facts on the checkpoint structure. The `Blake3` recipe and tokenizer entities and `OfCanonical` special tokens are gone.
 
 Still open:
 - **The FFN stage is a full nonlinear per-token probe in double precision.**
 - **Norm gains, RoPE, fused QKV, latent attention, experts and low-rank pairs are recognized but feed no circuit.**
-- **The two-model corroboration lanes** (`ModelSimilarityCorroborationETL`, `ModelJointCorroborationETL`) still read outcomes from a score's sign.
 - **Model-local occurrences** beyond the vocabulary ordinal (merges as a trajectory, not `MERGES_WITH` testimony).
 
 Related: #1015, #1074, #1344, #1362, #1111, #1054, #1034.

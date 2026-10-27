@@ -163,12 +163,31 @@ int bilinear_contraction_significant_pairs(
     size_t* out_count, size_t* out_row_end,
     double* out_threshold);
 
+/* Evaluate nominated pairs under the same subject null, family threshold and
+ * grade as significant_pairs, without enumerating a dense pair product.
+ * A significant pair confirms. Self/zero-variance/non-significant pairs return
+ * DRAW and score 0.5 as absence of evidence; none are semantic refutations. */
+int bilinear_contraction_significant_candidates(
+    bilinear_contraction_context_t* context,
+    const int* rows, const int* cols, size_t pair_count, int symmetric,
+    int64_t* out_scores_fp1e9, int16_t* out_outcomes);
+
 void bilinear_contraction_free(bilinear_contraction_context_t* context);
 
 /* Fold each candidate's circuit-score column through the canonical Glicko-2
  * rating-period calculus, then return and classify its native expected score.
  * Scores are circuit-major: score[circuit * candidate_count + candidate]. */
 int model_circuit_calibrate_glicko(
+    const int64_t* scores_fp1e9,
+    const int64_t* opponent_ratings_fp1e9,
+    const int64_t* opponent_rds_fp1e9,
+    size_t circuit_count, size_t candidate_count,
+    int64_t* out_scores_fp1e9, int16_t* out_outcomes);
+
+/* Fold affirmative significant-circuit grades only. Score 0.5 is absence, not
+ * an opponent observation. No contributing circuit returns DRAW; otherwise the
+ * model retains the typed confirmation, with its Glicko-folded strength. */
+int model_circuit_corroboration_glicko(
     const int64_t* scores_fp1e9,
     const int64_t* opponent_ratings_fp1e9,
     const int64_t* opponent_rds_fp1e9,
