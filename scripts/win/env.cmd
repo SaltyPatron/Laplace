@@ -23,6 +23,8 @@ if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DEPS%"
 if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"
 if not defined LAPLACE_ENGINE_BUILD set "LAPLACE_ENGINE_BUILD=%LAPLACE_BUILD_ROOT%\build-win"
 if not defined LAPLACE_EXT_BUILD set "LAPLACE_EXT_BUILD=%LAPLACE_BUILD_ROOT%\build-win-ext"
+rem The shared Native PostgreSQL extension uses its canonical modular build tree.
+if not defined LAPLACE_PG_EXTENSION_BUILD set "LAPLACE_PG_EXTENSION_BUILD=%LAPLACE_BUILD%\Laplace-postgres\icx-release"
 if not defined LAPLACE_ENGINE_BUILD_ASAN set "LAPLACE_ENGINE_BUILD_ASAN=%LAPLACE_BUILD_ROOT%\build-win-asan"
 rem PostgreSQL built from external/postgresql (scripts\win\build-pg.cmd), mirroring the
 rem Linux ${LAPLACE_DEPS_PREFIX}/pgsql-18 install prefix from external/CMakeLists.txt.

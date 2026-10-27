@@ -54,6 +54,7 @@ function Resolve-LaplaceTreePath {
     $fromEnv = @{
         'build-win'         = $env:LAPLACE_ENGINE_BUILD
         'build-win-ext'     = $env:LAPLACE_EXT_BUILD
+        'build-pg-extension' = $env:LAPLACE_PG_EXTENSION_BUILD
         'build-win-asan'    = $env:LAPLACE_ENGINE_BUILD_ASAN
         'build-cutechess'   = $env:LAPLACE_CUTECHESS_BUILD
     }

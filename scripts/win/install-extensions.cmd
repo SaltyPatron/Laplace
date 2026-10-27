@@ -79,13 +79,20 @@ if not exist "%TRANSITION_SRC%" (
 )
 
 if "%SKIP_BUILD%"=="0" (
-  cmake --build "%LAPLACE_EXT_BUILD%" --target laplace_geom_sql laplace_substrate_sql || exit /b 1
+  call "%~dp0build-extensions.cmd" laplace_geom_sql laplace_substrate_sql || exit /b 1
 ) else (
   echo install-extensions: SQL target rebuild skipped (--skip-build^)
 )
 
 set "GEOM_DIR=%LAPLACE_EXT_BUILD%\laplace_geom"
 set "SUB_DIR=%LAPLACE_EXT_BUILD%\laplace_substrate"
+set "PG_SOURCE=%LAPLACE_SRC%\Laplace-postgres"
+for %%F in ("%PG_SOURCE%\laplace.control" "%LAPLACE_PG_EXTENSION_BUILD%\laplace.dll") do if not exist "%%~F" (
+  echo ERROR: missing %%~F -- run build-extensions.cmd first
+  exit /b 1
+)
+for /f "delims=" %%P in ('"%PGBIN%\pg_config.exe" --pkglibdir') do set "PG_MODULE_DIR=%%P"
+if not defined PG_MODULE_DIR exit /b 1
 if not exist "%GEOM_DIR%\laplace_geom.control" (
   echo ERROR: missing %GEOM_DIR%\laplace_geom.control — run build-extensions.cmd first
   exit /b 1
@@ -101,6 +108,13 @@ for %%F in ("%GEOM_DIR%\laplace_geom--*.sql") do copy /y "%%F" "%DEPLOY%\share\e
 copy /y "%SUB_DIR%\laplace_substrate.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
 for %%F in ("%SUB_DIR%\laplace_substrate--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
 copy /y "%SUB_DIR%\laplace_substrate_upgrade.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
+
+rem Existing functions bind $libdir/laplace; dynamic_library_path alone cannot
+rem redirect that absolute module reference. Publish the module there and its
+rem matching control/upgrade scripts in the declared extension search path.
+call :swapcopy "%LAPLACE_PG_EXTENSION_BUILD%\laplace.dll" "%PG_MODULE_DIR%" || exit /b 1
+copy /y "%PG_SOURCE%\laplace.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
+for %%F in ("%PG_SOURCE%\sql\laplace--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1
@@ -177,6 +191,8 @@ exit /b 1
 :verify_deploy
 set "OK=1"
 for %%P in (
+  "%PG_MODULE_DIR%\laplace.dll"
+  "%DEPLOY%\share\extension\laplace.control"
   "%DEPLOY%\lib\laplace_substrate.dll"
   "%DEPLOY%\lib\laplace_geom.dll"
   "%PGRT%\laplace_core.dll"
@@ -191,6 +207,10 @@ for %%P in (
   )
 )
 if "%OK%"=="0" exit /b 1
+fc /b "%LAPLACE_PG_EXTENSION_BUILD%\laplace.dll" "%PG_MODULE_DIR%\laplace.dll" >nul 2>&1 || (
+  echo ERROR: deployed Native PostgreSQL module does not match build output
+  exit /b 1
+)
 fc /b "%T0_SRC%" "%T0_DST%" >nul 2>&1 || (
   echo ERROR: deployed T0 perfcache does not match build output
   exit /b 1
