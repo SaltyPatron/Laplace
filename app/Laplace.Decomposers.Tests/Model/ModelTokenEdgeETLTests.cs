@@ -134,6 +134,62 @@ public sealed class ModelTokenEdgeETLTests
         Assert.Equal((short)AttestationOutcome.Refute, outcomes[1]);
     }
 
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(-1f)]
+    public void ConstantCircuitScore_IsAbsentEvidenceRegardlessOfSign(float sign)
+    {
+        const int n = 24;
+        float[] left = Enumerable.Repeat(1f, n).ToArray();
+        float[] right = Enumerable.Repeat(sign, n).ToArray();
+        int[] indexes = Enumerable.Range(0, n).ToArray();
+        using var circuit = NativeBilinearContraction.Direct(left, right, n, 1, indexes, indexes, n);
+        var raw = circuit.Score([0], [1]);
+        Assert.Equal(sign > 0 ? (short)AttestationOutcome.Confirm : (short)AttestationOutcome.Refute,
+            raw.Outcomes[0]);
+        var evidence = circuit.SignificantCandidates([0], [1], symmetric: false);
+        Assert.Equal(500_000_000, Assert.Single(evidence.Scores));
+        Assert.Equal((short)AttestationOutcome.Draw, Assert.Single(evidence.Outcomes));
+    }
+
+    [Fact]
+    public void CandidateSignificance_UsesTheCircuitPairFamilyAndExcludesSelf()
+    {
+        const int n = 24;
+        float[] rows = SignificantEmbedding(1, n);
+        int[] indexes = Enumerable.Range(0, n).ToArray();
+        using var circuit = NativeBilinearContraction.Direct(rows, rows, n, 2, indexes, indexes, n);
+        SignificantPairPage page = circuit.SignificantPairs(0, n * n, symmetric: true);
+        Assert.Equal(0, Assert.Single(page.Rows));
+        Assert.Equal(1, Assert.Single(page.Cols));
+        var selected = circuit.SignificantCandidates([0, 1, 0, 2], [1, 0, 0, 3], symmetric: true);
+        Assert.Equal(page.ScoresFp1e9[0], selected.Scores[0]);
+        Assert.Equal(selected.Scores[0], selected.Scores[1]);
+        Assert.Equal(new short[] { (short)AttestationOutcome.Confirm, (short)AttestationOutcome.Confirm,
+            (short)AttestationOutcome.Draw, (short)AttestationOutcome.Draw }, selected.Outcomes);
+        Assert.Equal(500_000_000, selected.Scores[2]);
+        Assert.Equal(500_000_000, selected.Scores[3]);
+    }
+
+    [Fact]
+    public void CorroborationFold_IgnoresAbsentCircuitsAndCannotInventARefutation()
+    {
+        long[] ratings = [1_500_000_000_000];
+        long[] rds = [350_000_000_000];
+        var single = NativeBilinearContraction.AggregateCircuitScores(
+            new long[][] { [950_000_000, 500_000_000] }, ratings, rds, affirmativeEvidence: true);
+        var padded = NativeBilinearContraction.AggregateCircuitScores(
+            new long[][] { [950_000_000, 500_000_000], [500_000_000, 500_000_000] },
+            [ratings[0], 1_000_000_000_000], [rds[0], 50_000_000_000], affirmativeEvidence: true);
+        Assert.Equal(single.Scores, padded.Scores);
+        Assert.Equal(single.Outcomes, padded.Outcomes);
+        Assert.Equal((short)AttestationOutcome.Confirm, single.Outcomes[0]);
+        Assert.Equal(500_000_000, single.Scores[1]);
+        Assert.Equal((short)AttestationOutcome.Draw, single.Outcomes[1]);
+        Assert.Throws<InvalidOperationException>(() => NativeBilinearContraction.AggregateCircuitScores(
+            new long[][] { [100_000_000] }, ratings, rds, affirmativeEvidence: true));
+    }
+
     [Fact]
     public void SameStructuralAddress_InTwoModels_IsTwoCircuits()
     {
@@ -226,19 +282,20 @@ public sealed class ModelTokenEdgeETLTests
     [Fact]
     public async Task TwoIndependentModels_AdmitOnlySameKindSameDirectionGraphNominations()
     {
-        string leftDir = WriteEmbeddingFixture([1, 0, 1, 0, 0, 1]);
-        string rightDir = WriteEmbeddingFixture([2, 0, 1, 0, 0, -1]);
+        const int n = 24;
+        string leftDir = WriteEmbeddingFixture(SignificantEmbedding(1, n), rows: n);
+        string rightDir = WriteEmbeddingFixture(SignificantEmbedding(2, n), rows: n);
         try
         {
-            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = SignificantTokens(n);
             using SourceEntityIdConventions.ModelContentSnapshot leftSnapshot =
                 SourceEntityIdConventions.OpenModelContentSnapshot(leftDir)!;
             using SourceEntityIdConventions.ModelContentSnapshot rightSnapshot =
                 SourceEntityIdConventions.OpenModelContentSnapshot(rightDir)!;
             var left = new SelectedModelAnalysisInput(
-                leftDir, FixtureManifest(), tokens, leftSnapshot.SourceId, leftSnapshot);
+                leftDir, EmbeddingManifest(n, 2), tokens, leftSnapshot.SourceId, leftSnapshot);
             var right = new SelectedModelAnalysisInput(
-                rightDir, FixtureManifest(), tokens, rightSnapshot.SourceId, rightSnapshot);
+                rightDir, EmbeddingManifest(n, 2), tokens, rightSnapshot.SourceId, rightSnapshot);
             Assert.NotEqual(left.SourceId, right.SourceId);
             Hash128 basis = RelationTypeRegistry.RelationTypeId("IS_SIMILAR_TO");
             var proposal = new CircuitPairProposal(
@@ -275,18 +332,19 @@ public sealed class ModelTokenEdgeETLTests
     [Fact]
     public async Task CorroborationWorkingSet_PreventsOrDetectsMutationBeforeApplyCommit()
     {
-        string leftDir = WriteEmbeddingFixture([1, 0, 1, 0, 0, 1]);
-        string rightDir = WriteEmbeddingFixture([2, 0, 1, 0, 0, 1]);
+        const int n = 24;
+        string leftDir = WriteEmbeddingFixture(SignificantEmbedding(1, n), rows: n);
+        string rightDir = WriteEmbeddingFixture(SignificantEmbedding(2, n), rows: n);
         try
         {
-            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = SignificantTokens(n);
             using SourceEntityIdConventions.ModelContentSnapshot leftSnapshot =
                 SourceEntityIdConventions.OpenModelContentSnapshot(leftDir)!;
             using SourceEntityIdConventions.ModelContentSnapshot rightSnapshot =
                 SourceEntityIdConventions.OpenModelContentSnapshot(rightDir)!;
             var etl = new ModelSimilarityCorroborationETL(
-                new(leftDir, FixtureManifest(), tokens, leftSnapshot.SourceId, leftSnapshot),
-                new(rightDir, FixtureManifest(), tokens, rightSnapshot.SourceId, rightSnapshot),
+                new(leftDir, EmbeddingManifest(n, 2), tokens, leftSnapshot.SourceId, leftSnapshot),
+                new(rightDir, EmbeddingManifest(n, 2), tokens, rightSnapshot.SourceId, rightSnapshot),
                 pageSize: 8);
             Hash128 basis = RelationTypeRegistry.RelationTypeId("IS_SIMILAR_TO");
             CircuitPairProposal proposal = new(
@@ -329,11 +387,13 @@ public sealed class ModelTokenEdgeETLTests
         }
     }
 
-    [Fact]
-    public async Task TwoModelsThatDisagree_DoNotMaterializeANovelTargetClaim()
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(-1f)]
+    public async Task InsignificantModels_DoNotMaterializeATargetClaimEvenWhenScoresArePositive(float sign)
     {
         string leftDir = WriteEmbeddingFixture([1, 0, 1, 0, 0, 1]);
-        string rightDir = WriteEmbeddingFixture([1, 0, -1, 0, 0, 1]);
+        string rightDir = WriteEmbeddingFixture([2, 0, sign, 0, 0, 1]);
         try
         {
             IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
@@ -367,11 +427,12 @@ public sealed class ModelTokenEdgeETLTests
     public async Task JointModelAdmission_ContractsEverySupportedTargetKind(
         string targetName, int expectedCircuits)
     {
-        (string leftDir, ModelManifest leftManifest) = WriteCircuitFixture(1);
-        (string rightDir, ModelManifest rightManifest) = WriteCircuitFixture(2);
+        const int n = 24;
+        (string leftDir, ModelManifest leftManifest) = WriteCircuitFixture(1, rows: n);
+        (string rightDir, ModelManifest rightManifest) = WriteCircuitFixture(2, rows: n);
         try
         {
-            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = SignificantTokens(n);
             using SourceEntityIdConventions.ModelContentSnapshot leftSnapshot =
                 SourceEntityIdConventions.OpenModelContentSnapshot(leftDir)!;
             using SourceEntityIdConventions.ModelContentSnapshot rightSnapshot =
@@ -554,17 +615,20 @@ public sealed class ModelTokenEdgeETLTests
         return dir;
     }
 
-    private static (string Directory, ModelManifest Manifest) WriteCircuitFixture(float scale, float outputSign = 1)
+    private static (string Directory, ModelManifest Manifest) WriteCircuitFixture(
+        float scale, float outputSign = 1, int rows = 3)
     {
         string dir = Path.Combine(
             Path.GetTempPath(), "laplace-model-circuits-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var tensors = new (string Name, int[] Shape, float[] Values, TensorRoleKind Kind)[]
         {
-            ("embeddings.word_embeddings.weight", [3, 2],
-                [scale, scale, scale, scale, -scale, -scale], TensorRoleKind.Embedding),
-            ("lm_head.weight", [3, 2],
-                [outputSign * scale, outputSign * scale, outputSign * scale, outputSign * scale, -outputSign * scale, -outputSign * scale], TensorRoleKind.LmHead),
+            ("embeddings.word_embeddings.weight", [rows, 2],
+                rows == 3 ? [scale, scale, scale, scale, -scale, -scale]
+                    : SignificantEmbedding(scale, rows), TensorRoleKind.Embedding),
+            ("lm_head.weight", [rows, 2],
+                rows == 3 ? [outputSign * scale, outputSign * scale, outputSign * scale, outputSign * scale, -outputSign * scale, -outputSign * scale]
+                    : SignificantEmbedding(outputSign * scale, rows), TensorRoleKind.LmHead),
             ("encoder.layer.0.attention.self.query.weight", [2, 2],
                 [scale, 0, 0, scale], TensorRoleKind.AttnQ),
             ("encoder.layer.0.attention.self.key.weight", [2, 2],
@@ -606,12 +670,12 @@ public sealed class ModelTokenEdgeETLTests
 
         ModelManifest manifest = ModelManifest.Recognize(
             tensors.Select(t => new HeaderTensor(t.Name, "F32", t.Shape)).ToArray(),
-            ConfigResult(BertConfig(3, 2, 1, 2, 1, 3), new()
+            ConfigResult(BertConfig(rows, 2, 1, 2, 1, 3), new()
             {
                 ["hidden_size"] = 2, ["num_attention_heads"] = 2, ["head_dim"] = 1,
                 ["num_hidden_layers"] = 1, ["intermediate_size"] = 3,
             }),
-            3, "circuit-fixture");
+            rows, "circuit-fixture");
         foreach (var tensor in tensors)
             Assert.Equal(tensor.Kind, Assert.Single(manifest.Roles, r => r.Name == tensor.Name).Kind);
         return (dir, manifest);
@@ -641,6 +705,19 @@ public sealed class ModelTokenEdgeETLTests
         rows, "fixture");
 
     private static ModelManifest FixtureManifest() => EmbeddingManifest(3, 2);
+
+    // One rare matching pair among 24 entities: z = sqrt(n-2), above the
+    // declared whole-circuit threshold, unlike a merely positive dot product.
+    private static float[] SignificantEmbedding(float scale, int rows)
+    {
+        var values = new float[rows * 2];
+        values[0] = values[1] = values[2] = values[3] = scale;
+        return values;
+    }
+
+    private static LlamaTokenizerParser.TokenRecord[] SignificantTokens(int rows) =>
+        Enumerable.Range(0, rows).Select(i => Token(i, $"token-{i}",
+            Hash128.Text($"test/token/{i}"))).ToArray();
 
     private static IReadOnlyList<LlamaTokenizerParser.TokenRecord> FixtureTokens() =>
     [

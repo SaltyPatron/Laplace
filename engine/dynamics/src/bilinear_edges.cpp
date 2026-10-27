@@ -768,6 +768,55 @@ int prepare_subject_null(bilinear_contraction_context_t* context)
 } // namespace
 
 extern "C"
+int bilinear_contraction_significant_candidates(
+    bilinear_contraction_context_t* context,
+    const int* rows, const int* cols, std::size_t pair_count, int symmetric,
+    int64_t* out_scores_fp1e9, int16_t* out_outcomes)
+{
+    if (!context || context->entity_count < 2 || context->rank == 0
+        || (symmetric && !context->shared_factors)) return -1;
+    if (pair_count == 0) return 0;
+    if (!rows || !cols || !out_scores_fp1e9 || !out_outcomes) return -1;
+    const std::size_t n = context->entity_count;
+    for (std::size_t i = 0; i < pair_count; ++i)
+        if (rows[i] < 0 || cols[i] < 0
+            || (std::size_t)rows[i] >= n || (std::size_t)cols[i] >= n) return -1;
+    int rc;
+    try { rc = prepare_subject_null(context); }
+    catch (const std::bad_alloc&) { return -3; }
+    if (rc != 0) return rc;
+    const double family = symmetric ? (double)n * (double)(n - 1) / 2.0
+                                    : (double)n * (double)(n - 1);
+    const double tau = std::sqrt(2.0 * std::log(family));
+    const auto& R = context->shared_factors ? context->left : context->right;
+    for (std::size_t i = 0; i < pair_count; ++i) {
+        out_scores_fp1e9[i] = 500000000LL;
+        out_outcomes[i] = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+        const std::size_t subject = (std::size_t)rows[i], object = (std::size_t)cols[i];
+        if (subject == object || !(tau > 0.0)) continue;
+        const double* left = context->left.data() + subject * context->rank;
+        const double* right = R.data() + object * context->rank;
+#ifdef LAPLACE_HAS_MKL
+        const double value = cblas_ddot((MKL_INT)context->rank, left, 1, right, 1);
+#else
+        double value = 0.0;
+        for (std::size_t k = 0; k < context->rank; ++k) value += left[k] * right[k];
+#endif
+        if (!std::isfinite(value)) return -2;
+        double z = context->null_sd[subject] > 0.0
+            ? (value - context->null_mean[subject]) / context->null_sd[subject]
+            : -std::numeric_limits<double>::infinity();
+        if (symmetric && context->null_sd[object] > 0.0)
+            z = std::max(z, (value - context->null_mean[object]) / context->null_sd[object]);
+        if (!(z >= tau)) continue;
+        if (!std::isfinite(z)) return -2;
+        out_scores_fp1e9[i] = (int64_t)std::llround(0.5 * (1.0 + std::tanh(z / tau)) * 1e9);
+        out_outcomes[i] = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
+    }
+    return 0;
+}
+
+extern "C"
 int bilinear_contraction_significant_pairs(
     bilinear_contraction_context_t* context,
     std::size_t row_begin, int symmetric,
@@ -898,8 +947,8 @@ void bilinear_contraction_free(bilinear_contraction_context_t* context)
     delete context;
 }
 
-extern "C"
-int model_circuit_calibrate_glicko(
+static int calibrate_model_circuits(
+    bool affirmative_only,
     const int64_t* scores_fp1e9,
     const int64_t* opponent_ratings_fp1e9,
     const int64_t* opponent_rds_fp1e9,
@@ -912,29 +961,55 @@ int model_circuit_calibrate_glicko(
         return -1;
     std::vector<glicko2_observation_t> observations(circuit_count);
     for (std::size_t candidate = 0; candidate < candidate_count; ++candidate) {
+        std::size_t used = 0;
         for (std::size_t circuit = 0; circuit < circuit_count; ++circuit) {
             const int64_t score = scores_fp1e9[circuit * candidate_count + candidate];
             if (score < 0 || score > 1000000000LL
                 || opponent_rds_fp1e9[circuit] < 0)
                 return -1;
-            observations[circuit] = {
+            if (affirmative_only && score < 500000000LL) return -1;
+            if (affirmative_only && score == 500000000LL) continue;
+            observations[used++] = {
                 opponent_ratings_fp1e9[circuit],
                 opponent_rds_fp1e9[circuit],
                 score,
             };
         }
+        if (used == 0) {
+            out_scores_fp1e9[candidate] = 500000000LL;
+            out_outcomes[candidate] = LAPLACE_ATTESTATION_OUTCOME_DRAW;
+            continue;
+        }
         glicko2_state_t state;
         glicko2_init(&state, LAPLACE_GLICKO2_NEUTRAL_MU_FP,
             350000000000LL, 60000000LL);
-        glicko2_update_period(&state, observations.data(), observations.size(),
+        glicko2_update_period(&state, observations.data(), used,
             LAPLACE_GLICKO2_DEFAULT_TAU, 0);
         const int64_t folded_score = laplace_glicko2_expected_score_fp(state.rating, state.rd);
         out_scores_fp1e9[candidate] = folded_score;
-        if (laplace_attestation_outcome_from_score_fp(
-                folded_score, out_outcomes + candidate) != 0)
-            return -2;
+        // Presence of affirmative circuit evidence is a typed outcome; a rating
+        // or absence of evidence must not be reinterpreted as semantic refutation.
+        if (affirmative_only) out_outcomes[candidate] = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
+        else if (laplace_attestation_outcome_from_score_fp(
+                     folded_score, out_outcomes + candidate) != 0) return -2;
     }
     return 0;
+}
+
+extern "C"
+int model_circuit_calibrate_glicko(
+    const int64_t* scores, const int64_t* ratings, const int64_t* rds,
+    std::size_t circuits, std::size_t candidates, int64_t* output, int16_t* outcomes)
+{
+    return calibrate_model_circuits(false, scores, ratings, rds, circuits, candidates, output, outcomes);
+}
+
+extern "C"
+int model_circuit_corroboration_glicko(
+    const int64_t* scores, const int64_t* ratings, const int64_t* rds,
+    std::size_t circuits, std::size_t candidates, int64_t* output, int16_t* outcomes)
+{
+    return calibrate_model_circuits(true, scores, ratings, rds, circuits, candidates, output, outcomes);
 }
 
 extern "C"

@@ -189,6 +189,25 @@ internal sealed class NativeBilinearContraction : IDisposable
             scores.AsSpan(0, n).ToArray(), checked((int)rowEnd), threshold);
     }
 
+    public unsafe (long[] Scores, short[] Outcomes) SignificantCandidates(
+        int[] rows, int[] cols, bool symmetric)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        if (rows.Length != cols.Length)
+            throw new ArgumentException("candidate row and column arrays must have equal length");
+        var scores = new long[rows.Length];
+        var outcomes = new short[rows.Length];
+        int rc;
+        fixed (int* rowPtr = rows)
+        fixed (int* colPtr = cols)
+        fixed (long* scorePtr = scores)
+        fixed (short* outcomePtr = outcomes)
+            rc = DynInterop.BilinearContractionSignificantCandidates(
+                _handle, rowPtr, colPtr, (nuint)rows.Length, symmetric ? 1 : 0, scorePtr, outcomePtr);
+        if (rc != 0) throw new InvalidOperationException($"native candidate significance failed: {rc}");
+        return (scores, outcomes);
+    }
+
     public unsafe (long[] Scores, short[] Outcomes) Score(int[] rows, int[] cols)
     {
         ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
@@ -210,7 +229,8 @@ internal sealed class NativeBilinearContraction : IDisposable
     public static unsafe (long[] Scores, short[] Outcomes) AggregateCircuitScores(
         IReadOnlyList<long[]> circuitScores,
         IReadOnlyList<long> opponentRatingsFp1e9,
-        IReadOnlyList<long> opponentRdsFp1e9)
+        IReadOnlyList<long> opponentRdsFp1e9,
+        bool affirmativeEvidence = false)
     {
         ArgumentNullException.ThrowIfNull(circuitScores);
         ArgumentNullException.ThrowIfNull(opponentRatingsFp1e9);
@@ -236,10 +256,11 @@ internal sealed class NativeBilinearContraction : IDisposable
         fixed (long* rdPtr = rds)
         fixed (long* scoreOutPtr = scoresOut)
         fixed (short* outcomeOutPtr = outcomesOut)
-            rc = DynInterop.ModelCircuitCalibrateGlicko(
-                scorePtr, ratingPtr, rdPtr,
-                (nuint)circuitScores.Count, (nuint)candidates,
-                scoreOutPtr, outcomeOutPtr);
+            rc = affirmativeEvidence
+                ? DynInterop.ModelCircuitCorroborationGlicko(
+                    scorePtr, ratingPtr, rdPtr, (nuint)circuitScores.Count, (nuint)candidates, scoreOutPtr, outcomeOutPtr)
+                : DynInterop.ModelCircuitCalibrateGlicko(
+                    scorePtr, ratingPtr, rdPtr, (nuint)circuitScores.Count, (nuint)candidates, scoreOutPtr, outcomeOutPtr);
         if (rc != 0) throw new InvalidOperationException($"native circuit aggregation failed: {rc}");
         return (scoresOut, outcomesOut);
     }
