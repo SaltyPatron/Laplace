@@ -73,8 +73,10 @@ public sealed class ExploreDisplayLabelGateTests
 
         Assert.Contains("public.entity e ON e.id=i.key", facetsSql, StringComparison.Ordinal);
         Assert.Contains("public.laplace_codepoint", facetsSql, StringComparison.Ordinal);
-        Assert.Contains("ELSE NULL::bytea", facetsSql, StringComparison.Ordinal);
-        Assert.DoesNotContain("laplace.entities", facetsSql, StringComparison.Ordinal);
+        // Preserve observed semantic roles without inferring Word from a tier.
+        // Native scalar identity is the only implicit type; other unknowns stay NULL.
+        Assert.Contains("coalesce(type_id,CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') END)", facetsSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("THEN laplace.entity_type_id('Word')", facetsSql, StringComparison.Ordinal);
         Assert.DoesNotContain("laplace.consensus", facetsSql, StringComparison.Ordinal);
         Assert.Contains("COALESCE(w.tier, 32767) ASC, cand.word_id", realizeBatch, StringComparison.Ordinal);
         Assert.Contains("realize.lexicalize_batch(ARRAY[p_id], p_lang)", synsetLemmaSql, StringComparison.Ordinal);
