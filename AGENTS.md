@@ -39,6 +39,10 @@ Laplace runs across a single-owner, multi-host topology connected over LAN (`192
 
 ---
 
+**hart-server operating role:** This host is primarily a deployment target and a persistent shared-services/storage machine. Preserve its archives, vault, model checkpoints, corpora, databases, OpenBao, Vaultwarden, Qdrant, DNS, game servers, and certificate renewal/distribution when cleaning source or build outputs. Determine ownership and active references before retiring a directory; recovered historical snapshots are archival material.
+
+Routine builds, verification, delivery, and recovery should be reproducible through CI/CD and the existing operator commands, with unchanged inputs reused. The existing primary repositories may be used for focused work that needs the server's local data or services or does not reproduce adequately through CI/CD. Land that work on `main`, retire its temporary copies, and feed repeatable operations back into the normal workflow. The aim is to reduce the operator's need to log into this machine; source access here does not authorize unrelated service or storage changes.
+
 ## 3. Execution Boundaries: What Is Automated vs. How the User Executes
 
 A critical architectural rule across Laplace is keeping the four execution planes distinct and friction-free:
