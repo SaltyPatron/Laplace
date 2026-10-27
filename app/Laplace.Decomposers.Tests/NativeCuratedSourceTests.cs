@@ -18,7 +18,7 @@ public sealed class NativeCuratedSourceTests
             "claim\t0\t1\tvnclass:reflexive_appearance-48.1.2\tEvidence",
         ] },
         { "predicate-matrix", [
-            "claim\t0\t1\tcat\tv\tabaixar.1.default\targ0\tvnclass:roll-51.3.1\tdrop\tAgent\t[drop, eng, ili:i31613]\tili:i31613\tBody_movement\t[Body_movement, drop.v]\t[Body_movement, Agent]\tdrop.01\t0\t0\tfactotum\tMotion\tDynamic;Location\tmotion\tili:i30898\t21\tMotion",
+            "claim\t0\t1\tcat\tv\tabaixar.1.default\targ0\tvnclass:roll-51.3.1\tdrop\tAgent\t[drop, eng, ili:i31613]\tili:i31613\tBody_movement\t[Body_movement, drop.v]\t[Body_movement, Agent]\tdrop.01\t0\t0\tfactotum\tMotion\tDynamic;Location\tmotion\tili:i30898\t21\t007\tMotion",
             "claim\t0\t1\t[drop, eng, ili:i31613]\tWordNet synset type\t2",
             "claim\t0\t1\t[drop, eng, ili:i31613]\tlexfile:verb.motion",
             "claim\t0\t1\t[drop, eng, ili:i31613]\tWordNet lexical identifier\t00",

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Laplace.Decomposers.Abstractions;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 using Native=Laplace.Engine.Synthesis.NativeInterop;
@@ -9,9 +10,16 @@ internal static class FoundrySourceAttribution
     {
         var touched=new HashSet<(string s,string t,string o)>();
         foreach(var program in paths.Values)foreach(var evidence in program.Evidence){
-            using var doc=JsonDocument.Parse(evidence.Paths);
-            foreach(var path in doc.RootElement.EnumerateArray())foreach(var cell in path.GetProperty("claims").EnumerateArray())
-                touched.Add((cell.GetProperty("subject_id").GetString()![2..],cell.GetProperty("type_id").GetString()![2..],cell.GetProperty("object_id").GetString()![2..]));
+            using var doc=JsonAstDocument.Parse(evidence.Paths);
+            if(!doc.Root.IsArray)throw new InvalidDataException("Foundry evidence paths must be a JSON array");
+            foreach(var path in doc.Root.Items()) {
+                var claims=path.Property("claims");
+                if(!claims.IsArray)throw new InvalidDataException("Foundry evidence path has no claims array");
+                foreach(var cell in claims.Items())
+                    touched.Add(((cell.String("subject_id") ?? throw new InvalidDataException("claim has no subject_id"))[2..],
+                        (cell.String("type_id") ?? throw new InvalidDataException("claim has no type_id"))[2..],
+                        (cell.String("object_id") ?? throw new InvalidDataException("claim has no object_id"))[2..]));
+            }
         }
         if(touched.Count==0)return new{covered_operators=Array.Empty<string>(),claims_touched=0,sources=Array.Empty<object>()};
         string json=JsonSerializer.Serialize(touched.OrderBy(c=>c.s,StringComparer.Ordinal).ThenBy(c=>c.t,StringComparer.Ordinal).ThenBy(c=>c.o,StringComparer.Ordinal).Select(c=>new{c.s,c.t,c.o}));

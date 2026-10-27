@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
@@ -19,6 +20,7 @@ public sealed class JsonAstDocument : IDisposable
     private readonly int[] _childStart;
     private readonly int[] _childList;
     private readonly int _rootIndex;
+    private bool _strictSyntaxValidated;
 
     private JsonAstDocument(GrammarAst ast, byte[] utf8, bool ownsAst = true)
     {
@@ -76,6 +78,37 @@ public sealed class JsonAstDocument : IDisposable
 
     public static JsonAstDocument? TryParse(string text) =>
         TryParse(Encoding.UTF8.GetBytes(text));
+
+    /// <summary>Require a complete object or array through the registered grammar.</summary>
+    public static JsonAstDocument Parse(byte[] utf8)
+    {
+        var document = TryParse(utf8)
+            ?? throw new InvalidDataException("JSON source has no object or array root");
+        try { document.RequireCompleteSyntax(); return document; }
+        catch { document.Dispose(); throw; }
+    }
+
+    public static JsonAstDocument Parse(string text) => Parse(Encoding.UTF8.GetBytes(text));
+
+    internal void RequireCompleteSyntax()
+    {
+        if (_strictSyntaxValidated) return;
+        var root = _ast.GetNode(_rootIndex);
+        bool complete = SyntaxComplete
+            && OnlyWhitespace(Utf8.AsSpan(0, (int)root.StartByte))
+            && OnlyWhitespace(Utf8.AsSpan((int)root.EndByte));
+        for (int i = 0; complete && i < _ast.NodeCount; i++)
+            complete = !_ast.NodeTypeIs(_ast.GetNode(i).NodeTypeId, "comment"u8);
+        if (!complete) throw new InvalidDataException("JSON source contains incomplete or invalid syntax");
+        _strictSyntaxValidated = true;
+    }
+
+    private static bool OnlyWhitespace(ReadOnlySpan<byte> source)
+    {
+        foreach (byte value in source)
+            if (value is not ((byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')) return false;
+        return true;
+    }
 
     /// <summary>
     /// Whether the registered JSON grammar parsed the complete source without
@@ -204,6 +237,18 @@ public readonly struct JsonAstCursor(JsonAstDocument doc, int node)
         if (!IsValid) return null;
         var nd = _doc.Ast.GetNode(_node);
         return Slice(nd.StartByte, nd.EndByte) is { } span ? Encoding.UTF8.GetString(span) : null;
+    }
+
+    /// <summary>Emit the grammar-validated value without reparsing or rounding its numbers.</summary>
+    public void WriteTo(Utf8JsonWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        if (!IsValid)
+            throw new InvalidDataException("Cannot emit an invalid JSON grammar value");
+        _doc.RequireCompleteSyntax();
+        var node = _doc.Ast.GetNode(_node);
+        writer.WriteRawValue(_doc.Utf8.AsSpan((int)node.StartByte,
+            checked((int)(node.EndByte - node.StartByte))), skipInputValidation: true);
     }
 
     /// <summary>Array items (value nodes), in source order.</summary>

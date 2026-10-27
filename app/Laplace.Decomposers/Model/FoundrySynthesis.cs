@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Code;
@@ -517,7 +518,20 @@ public static class FoundrySynthesis
         string recipeText = await File.ReadAllTextAsync(recipePath);
         if (recipeText.Contains("\"laplace.recipe\"", StringComparison.Ordinal))
         {
-            if(format is not null){var node=System.Text.Json.Nodes.JsonNode.Parse(recipeText)!;node["format"]=format;recipeText=node.ToJsonString();}
+            if(format is not null) {
+                using var recipeDocument=JsonAstDocument.Parse(recipeText);
+                if(!recipeDocument.Root.IsObject)throw new InvalidDataException("Mold-a-Model recipe must be a JSON object");
+                using var buffer=new MemoryStream();
+                using(var writer=new Utf8JsonWriter(buffer)) {
+                    writer.WriteStartObject();
+                    foreach(var (key,value) in recipeDocument.Root.Pairs()) {
+                        if(key=="format")continue;
+                        writer.WritePropertyName(key);value.WriteTo(writer);
+                    }
+                    writer.WriteString("format",format);writer.WriteEndObject();
+                }
+                recipeText=Encoding.UTF8.GetString(buffer.ToArray());
+            }
             var moldDesc = RecipeDescriptor.Parse(recipeText);
             string moldDir = Path.GetDirectoryName(recipePath) ?? ".";
             return await SynthesizeMoldAModelAsync(moldDesc, moldDir, outputPath, scopeSource);
@@ -1807,21 +1821,21 @@ public static class FoundrySynthesis
     {
         var merges = new List<string>();
         if (!File.Exists(tokenizerJsonPath)) return merges;
-        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(tokenizerJsonPath));
-        if (!doc.RootElement.TryGetProperty("model", out var model)
-            || !model.TryGetProperty("merges", out var arr)
-            || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
-            return merges;
-        foreach (var el in arr.EnumerateArray())
+        using var doc = JsonAstDocument.Parse(File.ReadAllBytes(tokenizerJsonPath));
+        var arr = doc.Root.Property("model").Property("merges");
+        if (!arr.IsArray) return merges;
+        foreach (var el in arr.Items())
         {
-            if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+            if (el.Kind == JsonAstKind.String)
             {
-                var s = el.GetString();
+                var s = el.AsString();
                 if (!string.IsNullOrEmpty(s)) merges.Add(s);
             }
-            else if (el.ValueKind == System.Text.Json.JsonValueKind.Array && el.GetArrayLength() == 2)
+            else if (el.IsArray)
             {
-                var l = el[0].GetString(); var r = el[1].GetString();
+                var pair = el.Items().ToArray();
+                if (pair.Length != 2) continue;
+                var l = pair[0].AsString(); var r = pair[1].AsString();
                 if (!string.IsNullOrEmpty(l) && !string.IsNullOrEmpty(r)) merges.Add(l + " " + r);
             }
         }
@@ -1856,8 +1870,10 @@ public static class FoundrySynthesis
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.architecture", "llama");
         SynthInterop.GgufWriterAddMetadataStr(gguf, "general.name", recipe.ModelType+"-"+recipe.RecipeEntityId.ToHex());
 
-        using var config=System.Text.Json.JsonDocument.Parse(recipe.CanonicalJson);
-        uint contextLength=config.RootElement.TryGetProperty("max_position_embeddings",out var ctx)?ctx.GetUInt32():2048;
+        using var config=JsonAstDocument.Parse(recipe.CanonicalJson);
+        var ctx=config.Root.Property("max_position_embeddings");
+        uint contextLength=ctx.IsValid
+            ? checked((uint)(ctx.AsInt64() ?? throw new InvalidDataException("max_position_embeddings must be an integer"))) : 2048;
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.context_length", contextLength);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.embedding_length", (uint)recipe.HiddenSize);
         SynthInterop.GgufWriterAddMetadataU32(gguf, "llama.block_count", (uint)recipe.NumLayers);
@@ -1874,13 +1890,13 @@ public static class FoundrySynthesis
         string genCfgPath = Path.Combine(modelDir, "generation_config.json");
         if (File.Exists(genCfgPath))
         {
-            using var gen = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(genCfgPath));
-            if (gen.RootElement.TryGetProperty("bos_token_id", out var bos)
-                && bos.ValueKind == System.Text.Json.JsonValueKind.Number)
-                bosId = bos.GetUInt32();
-            if (gen.RootElement.TryGetProperty("eos_token_id", out var eos)
-                && eos.ValueKind == System.Text.Json.JsonValueKind.Number)
-                eosId = eos.GetUInt32();
+            using var gen = JsonAstDocument.Parse(File.ReadAllBytes(genCfgPath));
+            var bos=gen.Root.Property("bos_token_id");
+            if (bos.Kind == JsonAstKind.Number)
+                bosId = checked((uint)(bos.AsInt64() ?? throw new InvalidDataException("bos_token_id must be an integer")));
+            var eos=gen.Root.Property("eos_token_id");
+            if (eos.Kind == JsonAstKind.Number)
+                eosId = checked((uint)(eos.AsInt64() ?? throw new InvalidDataException("eos_token_id must be an integer")));
         }
 
         if (byteBpe)
@@ -2006,10 +2022,9 @@ public static class FoundrySynthesis
         string cfgPath = Path.Combine(modelDir, "tokenizer_config.json");
         if (File.Exists(cfgPath))
         {
-            using var cfg = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(cfgPath));
-            if (cfg.RootElement.TryGetProperty("chat_template", out var ct)
-                && ct.ValueKind == System.Text.Json.JsonValueKind.String)
-                SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.chat_template", ct.GetString()!);
+            using var cfg = JsonAstDocument.Parse(File.ReadAllBytes(cfgPath));
+            if (cfg.Root.String("chat_template") is { } template)
+                SynthInterop.GgufWriterAddMetadataStr(gguf, "tokenizer.chat_template", template);
         }
     }
 

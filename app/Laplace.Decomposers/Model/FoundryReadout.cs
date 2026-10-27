@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -84,31 +85,62 @@ internal static class FoundryReadout
             File.WriteAllText(outputPath+".calibration.json",await stdout);
             File.WriteAllText(outputPath+".calibration.log",await stderr);
             if(process.ExitCode!=0) throw new InvalidOperationException($"runtime calibrator failed ({process.ExitCode}); see calibration.log");
-            using var measurement=JsonDocument.Parse(await stdout);
-            long offset=measurement.RootElement.GetProperty("output_weight_offset").GetInt64();
-            int count=measurement.RootElement.GetProperty("output_weight_bytes").GetInt32();
+            using var measurement=JsonAstDocument.Parse(await stdout);
+            long offset=measurement.Root.Int64("output_weight_offset")
+                ?? throw new InvalidDataException("calibrator returned no output_weight_offset");
+            int count=checked((int)(measurement.Root.Int64("output_weight_bytes")
+                ?? throw new InvalidDataException("calibrator returned no output_weight_bytes")));
             if(count!=checked(vocab*width*sizeof(float))) throw new InvalidOperationException("calibrator returned an inconsistent output tensor size");
             byte[] finalHead=new byte[count];
             using(var artifact=File.OpenRead(outputPath)){artifact.Position=offset;artifact.ReadExactly(finalHead);}
             string receiptPath=outputPath+".tensors.json";
-            var receipts=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(receiptPath))!.AsArray();
-            var headReceipt=receipts.Single(item=>item!["tensor"]!.GetValue<string>()=="output.weight")!;
-            headReceipt["sha256"]=Convert.ToHexString(SHA256.HashData(finalHead)).ToLowerInvariant();
-            headReceipt["calculation"]="native SGELSD on complete-runtime hidden states; measurement in calibration.json";
-            File.WriteAllText(receiptPath,receipts.ToJsonString(new JsonSerializerOptions{WriteIndented=true}));
+            using var receipts=JsonAstDocument.Parse(File.ReadAllBytes(receiptPath));
+            if(!receipts.Root.IsArray)throw new InvalidDataException("tensor receipts must be a JSON array");
+            var items=receipts.Root.Items().ToArray();
+            _=items.Single(item=>item.String("tensor")=="output.weight");
+            using var buffer=new MemoryStream();
+            using(var writer=new Utf8JsonWriter(buffer,new JsonWriterOptions{Indented=true})) {
+                writer.WriteStartArray();
+                foreach(var item in items) {
+                    if(item.String("tensor")!="output.weight"){item.WriteTo(writer);continue;}
+                    writer.WriteStartObject();
+                    foreach(var (key,value) in item.Pairs()) {
+                        if(key is "sha256" or "calculation")continue;
+                        writer.WritePropertyName(key);value.WriteTo(writer);
+                    }
+                    writer.WriteString("sha256",Convert.ToHexStringLower(SHA256.HashData(finalHead)));
+                    writer.WriteString("calculation","native SGELSD on complete-runtime hidden states; measurement in calibration.json");
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+            }
+            File.WriteAllBytes(receiptPath,buffer.ToArray());
         }
 
         internal void WriteReceipt(IntPtr gguf,string outputPath,IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens)
         {
-            var receipt=new {
-                recipe=JsonDocument.Parse(Recipe.CanonicalJson).RootElement,
-                operation="positive weighted path transfer; sum of products; explicit token realization",
-                bindings=tokens.Select(t=>new {slot=t.TokenId,canonical_id=t.EntityId.ToHex(),operand_id=Bindings.OperandIds[t.TokenId].ToHex(),
-                    input_operand=Bindings.InputOperand[t.TokenId],output_slot=Bindings.OperandOutput[Bindings.InputOperand[t.TokenId]]}),
-                evidence=Evidence.Select(e=>new {subject=Convert.ToHexString(e.SubjectId),@object=Convert.ToHexString(e.ObjectId),weight=e.W,
-                    paths=JsonDocument.Parse(e.Paths).RootElement})
-            };
-            byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(receipt,new JsonSerializerOptions {WriteIndented=true});
+            using var recipe=JsonAstDocument.Parse(Recipe.CanonicalJson);
+            using var buffer=new MemoryStream();
+            using(var writer=new Utf8JsonWriter(buffer,new JsonWriterOptions{Indented=true})) {
+                writer.WriteStartObject();
+                writer.WritePropertyName("recipe");recipe.Root.WriteTo(writer);
+                writer.WriteString("operation","positive weighted path transfer; sum of products; explicit token realization");
+                writer.WritePropertyName("bindings");
+                JsonSerializer.Serialize(writer,tokens.Select(t=>new {slot=t.TokenId,canonical_id=t.EntityId.ToHex(),operand_id=Bindings.OperandIds[t.TokenId].ToHex(),
+                    input_operand=Bindings.InputOperand[t.TokenId],output_slot=Bindings.OperandOutput[Bindings.InputOperand[t.TokenId]]}));
+                writer.WriteStartArray("evidence");
+                foreach(var e in Evidence) {
+                    using var paths=JsonAstDocument.Parse(e.Paths);
+                    writer.WriteStartObject();
+                    writer.WriteString("subject",Convert.ToHexString(e.SubjectId));
+                    writer.WriteString("object",Convert.ToHexString(e.ObjectId));
+                    writer.WriteNumber("weight",e.W);
+                    writer.WritePropertyName("paths");paths.Root.WriteTo(writer);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();writer.WriteEndObject();
+            }
+            byte[] bytes=buffer.ToArray();
             File.WriteAllBytes(outputPath+".provenance.json",bytes);
             if(gguf==IntPtr.Zero) return;
             SynthInterop.GgufWriterAddMetadataStr(gguf,"laplace.export.recipe",Encoding.UTF8.GetString(Recipe.CanonicalJson));
