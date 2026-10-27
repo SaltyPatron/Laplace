@@ -57,14 +57,13 @@ if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             set(LAPLACE_ENGINE_BUILD "D:/Data/Laplace/build-win")
         endif()
     endif()
-    foreach(_eng core dynamics)
-        if(NOT EXISTS "${LAPLACE_ENGINE_BUILD}/${_eng}/laplace_${_eng}_static.lib")
-            message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/${_eng}/laplace_${_eng}_static.lib — build the engine first (scripts\\win\\build-engine.cmd)")
+    # Check exactly the two archives imported below. The PostgreSQL adapter
+    # uses sequential MKL initialization, not the application's TBB archive.
+    foreach(_archive core/laplace_core_static.lib dynamics/laplace_dynamics_pg_static.lib)
+        if(NOT EXISTS "${LAPLACE_ENGINE_BUILD}/${_archive}")
+            message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/${_archive} — build the extension prerequisites (scripts\\win\\build-extensions.cmd)")
         endif()
     endforeach()
-    if(NOT EXISTS "${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_pg_static.lib")
-        message(FATAL_ERROR "Missing ${LAPLACE_ENGINE_BUILD}/dynamics/laplace_dynamics_pg_static.lib — build the engine first (scripts\\win\\build-engine.cmd)")
-    endif()
 
     if(NOT DEFINED ENV{MKLROOT})
         message(FATAL_ERROR "MKLROOT not set — run via scripts\\win\\build-extensions.cmd (env.cmd chain). "
