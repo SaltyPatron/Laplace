@@ -49,7 +49,9 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
         {
             await ExecuteAsync(admin, $"CREATE DATABASE {Quote(database)}", token);
             created = true;
-            string file = Path.Combine(scratch, "abandon.xml");
+            string data = Path.Combine(scratch, "data");
+            string frames = Directory.CreateDirectory(Path.Combine(data, "PropBank", "propbank-cancellation", "frames")).FullName;
+            string file = Path.Combine(frames, "abandon.xml");
             await File.WriteAllTextAsync(file, """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <frameset><predicate lemma="abandon">
@@ -89,8 +91,13 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (string arg in new[] { cli, "ingest", "propbank", file }) start.ArgumentList.Add(arg);
+            // A named source owns its witness trunk. An explicit file is only a
+            // source fragment and correctly does not publish that source witness.
+            // The normal explicit chain selects this private source without
+            // launching an unrelated prerequisite ingestion campaign.
+            foreach (string arg in new[] { cli, "ingest", "chain", "propbank" }) start.ArgumentList.Add(arg);
             start.Environment["LAPLACE_DB"] = settings.ConnectionString;
+            start.Environment["LAPLACE_DATA"] = data;
             start.Environment["LAPLACE_WORK_ROOT"] = scratch;
             start.Environment["LAPLACE_WORK"] = scratch;
             start.Environment["LAPLACE_INGEST_RUN_RECEIPT_PATH"] = receipt;
