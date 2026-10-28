@@ -131,9 +131,12 @@ class NativeSourceProofTests(unittest.TestCase):
     def test_complete_native_output_uses_actual_published_trunk(self) -> None:
         self.assertTrue(self.run_gate()["passed"])
 
+    def test_native_completion_does_not_require_managed_decomposer_layer_numbers(self) -> None:
+        self.assertTrue(self.run_gate(layer=-1)["passed"])
+
     def test_partial_or_missing_native_output_fails(self) -> None:
         for changes in ({"source_complete": False}, {"files_received": 1},
-                        {"files_complete": 1}, {"ids_present": 2}, {"series": 0}, {"layer": 2}):
+                        {"files_complete": 1}, {"ids_present": 2}, {"series": 0}):
             with self.subTest(changes=changes):
                 self.assertFalse(self.run_gate(**changes)["passed"])
 

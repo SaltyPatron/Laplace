@@ -35,7 +35,11 @@ internal static partial class IngestCommands
                 b => b.ConnectionStringBuilder.CommandTimeout = 0, CliRuntime.ConnString);
             var journal = new NpgsqlIngestObservability(data,
                 logger: CliRuntime.LoggerFactory.CreateLogger<NpgsqlIngestObservability>());
-            int layer = EtlManifest.TryGet(EtlManifest.CanonicalSourceName(source), out var manifest) ? manifest.Layer : -1;
+            // Native admission follows the recipe dependency DAG. Managed decomposer
+            // layer numbers are a different contract and must not initialize its rows.
+            const int layer = -1;
+            var catalog = EtlManifest.Catalog;
+            string canonicalSource = catalog.Resolve(source);
             journal.OnNativeRunStart(source, layer);
             var elapsed = Stopwatch.StartNew();
             long entities = 0, physicalities = 0, completedEntities = 0, completedPhysicalities = 0;
@@ -69,12 +73,12 @@ internal static partial class IngestCommands
                 if (progress.Event == "complete")
                 {
                     completedEntities = entities; completedPhysicalities = physicalities; completedFiles = done;
-                    if (progress.SourceId is { } id && EtlManifest.CanonicalSourceName(progress.Source ?? "") == EtlManifest.CanonicalSourceName(source))
+                    if (progress.SourceId is { } id && catalog.Resolve(progress.Source ?? "") == canonicalSource)
                     {
                         sourceId = Hash128.FromBytes(Convert.FromHexString(id));
                         journal.OnNativeSourceIdentified(sourceId);
                     }
-                    complete = EtlManifest.CanonicalSourceName(progress.Source ?? "") == EtlManifest.CanonicalSourceName(source);
+                    complete = catalog.Resolve(progress.Source ?? "") == canonicalSource;
                 }
                 lastProgress = new IngestProgress(source, layer, 0, 0, 0,
                     total, done, total, done, progress.File, "files", elapsed.Elapsed,

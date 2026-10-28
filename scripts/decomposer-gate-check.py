@@ -43,6 +43,7 @@ def check_native_source(source: str, src: dict, dbname: str, *, host: str, user:
     checks: list[dict] = []
     def record(name: str, passed: bool, detail: str) -> None:
         checks.append({"check": name, "passed": passed, "detail": detail})
+    proof: dict = {}
     try:
         literal = "'" + source.replace("'", "''") + "'"
         sql = (ROOT / "scripts/native-ingest-proof.sql").read_text(encoding="utf-8")
@@ -50,8 +51,9 @@ def check_native_source(source: str, src: dict, dbname: str, *, host: str, user:
         if not raw:
             raise ValueError(f"no Native run receipt for {source}")
         proof = json.loads(raw)
-        record("native_source_complete", proof["source_complete"] is True
-               and proof["layer"] == src["layer"],
+        # Native completion is the published corpus trunk and its retained
+        # contents. Managed decomposer layer numbers do not describe this DAG.
+        record("native_source_complete", proof["source_complete"] is True,
                f"run={proof['run_id']} witness={proof['source_id']} layer={proof['layer']}")
         total = proof["files_total"]
         record("native_file_receipts", total > 0
@@ -67,7 +69,7 @@ def check_native_source(source: str, src: dict, dbname: str, *, host: str, user:
     except Exception as error:
         record("native_output_proof", False, str(error))
     return {"source": source, "dbname": dbname, "decomposer": source,
-            "layer": src["layer"], "contract": "native",
+            "layer": proof.get("layer"), "contract": "native",
             "passed": all(check["passed"] for check in checks),
             "checked_at": datetime.now(timezone.utc).isoformat(), "checks": checks}
 
