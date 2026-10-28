@@ -180,12 +180,21 @@ public sealed class NativeRecipeExecution
 
     private static ProcessStartInfo ProcessInfo(string executable, string? connectionInfo)
     {
+        string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+            ?? throw new InvalidOperationException("Native execution requires the declared work directory.");
+        work = Path.GetFullPath(work);
+        if (!Directory.Exists(work)) throw new DirectoryNotFoundException($"The declared work directory is not available: {work}");
         var start = new ProcessStartInfo(executable)
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(executable)!,
+            WorkingDirectory = work,
         };
+        // The Engine and its source jobs write receipts and room.tsv here.
+        // Published executables and their content-addressed packages are immutable.
+        start.Environment["LAPLACE_WORK"] = work;
+        start.Environment["LAPLACE_WORK_ROOT"] = work;
         if (connectionInfo is not null) start.Environment["LAPLACE_CONNINFO"] = connectionInfo;
         return start;
     }

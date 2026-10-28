@@ -113,7 +113,8 @@ if($Publish -and $selected.Contains('postgres')){
 }
 $published=Join-Path $run 'published'
 $base=$null
-if($Installation){
+$complete=@('api','cli','uci','migrations','web' | Where-Object {-not $selected.Contains($_)}).Count -eq 0
+if($Installation -and -not $complete){
     if(-not (Get-Command Read-IisInstallation -ErrorAction SilentlyContinue)){. "$PSScriptRoot/iis-runtime.ps1"}
     $iisConfig=Read-IisInstallation $Installation
     $activePath=Join-Path $iisConfig.directory 'web/active.json'
@@ -124,7 +125,6 @@ if($Installation){
     }
 }
 if(-not (Get-Command Copy-IisArtifactTree -ErrorAction SilentlyContinue)){. "$PSScriptRoot/iis-runtime.ps1"}
-$complete=@('api','cli','uci','migrations','web' | Where-Object {-not $selected.Contains($_)}).Count -eq 0
 $preserved=@()
 if($base -and -not $complete){
     $preserved=@($baseManifest.files | Where-Object {

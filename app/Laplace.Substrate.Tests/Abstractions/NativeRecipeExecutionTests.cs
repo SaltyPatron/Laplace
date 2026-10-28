@@ -7,6 +7,19 @@ namespace Laplace.SubstrateCRUD.Tests;
 
 public sealed class NativeRecipeExecutionTests
 {
+    [Fact]
+    public void NativeRuntimeWritesBelongToTheDeclaredWorkDirectory()
+    {
+        var execution = NativeRecipeExecution.Configured();
+        var start = execution.StartInfo(new NativeRecipeRequest(NativeRecipeMode.Plan, "propbank", []));
+        string work = Path.GetFullPath(LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")!);
+        Assert.Equal(work, start.WorkingDirectory);
+        Assert.Equal(work, start.Environment["LAPLACE_WORK"]);
+        Assert.Equal(work, start.Environment["LAPLACE_WORK_ROOT"]);
+        Assert.NotEqual(Path.GetDirectoryName(execution.Executable), start.WorkingDirectory);
+    }
+
     [Theory]
     [InlineData(NativeRecipeMode.Plan)]
     [InlineData(NativeRecipeMode.NoLoad)]
