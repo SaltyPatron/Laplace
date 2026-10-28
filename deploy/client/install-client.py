@@ -8,10 +8,17 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def operator_environment(profile):
     """Enroll native work paths from the same machine declaration as CI/setup."""
+    if 'knowledge' in profile:
+        if 'database' in profile and profile['database'] != profile['knowledge']:
+            raise ValueError('Conflicting operator database declarations; preserved')
+        profile['database'] = profile.pop('knowledge')
+    if 'database' not in profile or profile.get('credential', {}).get('kind') != 'peer':
+        raise ValueError('Operator enrollment requires a declared database and peer credential')
     environment = profile.setdefault('environment', {})
     source = Path(__file__).resolve().parents[2] / 'scripts/machine-env.py'
     if source.is_file():
@@ -19,7 +26,9 @@ def operator_environment(profile):
         machine = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(machine)
         declaration = os.environ.get('LAPLACE_MACHINE_ENV') or '/etc/laplace/machine.env'
-        overrides = dict(environment, LAPLACE_MACHINE_ENV=declaration)
+        overrides = dict(environment)
+        if os.environ.get('LAPLACE_MACHINE_ENV'):
+            overrides['LAPLACE_MACHINE_ENV'] = declaration
         paths = machine.paths(Path(declaration), overrides, Path(profile['runtime']['directory']))
         for key in ('LAPLACE_WORK', 'LAPLACE_WORK_ROOT'):
             if paths.get(key): environment.setdefault(key, paths[key])
@@ -56,6 +65,16 @@ def main():
     if config['version'] == 2:
         subprocess.run([sys.executable, str(source_launcher), '--profile', config['default_profile'], *check],
                        env=verify_env, check=True)
+    else:
+        # Check the upgraded declaration with the selected runtime before replacing
+        # either installed file. The scoped preflight declaration is always removed.
+        with tempfile.TemporaryDirectory(prefix='laplace-client-', dir=args.configuration.parent) as preflight:
+            selected = Path(preflight) / 'client.json'
+            selected.write_text(json.dumps(config))
+            operator_env = dict(os.environ, LAPLACE_MONO_CLIENT_CONFIG=str(selected))
+            for operation in (['--where'], check):
+                subprocess.run([sys.executable, str(source_launcher), '--profile', config['default_profile'], *operation],
+                               env=operator_env, check=True)
     args.destination.mkdir(parents=True, exist_ok=True)
     args.command_directory.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_launcher, launcher)

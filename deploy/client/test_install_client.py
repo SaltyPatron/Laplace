@@ -69,13 +69,43 @@ class ClientInstallationTests(unittest.TestCase):
         work = self.root / 'declared-work'
         machine = self.root / 'machine.env'
         machine.write_text('LAPLACE_WORK=' + shlex.quote(str(work)) + '\n')
-        profile = {'runtime': {'directory': str(self.root / 'runtime')}, 'environment': {'LAPLACE_DATA': str(self.root / 'data')}}
+        profile = {'runtime': {'directory': str(self.root / 'runtime')},
+                   'database': {'host': '/tmp', 'database': 'laplace-mono'},
+                   'credential': {'kind': 'peer'},
+                   'environment': {'LAPLACE_DATA': str(self.root / 'data')}}
         with mock.patch.dict(os.environ, {'LAPLACE_MACHINE_ENV': str(machine),
                                          'LAPLACE_WORK_ROOT': str(self.root / 'obsolete-install/work')}):
             INSTALLER.operator_environment(profile)
         self.assertEqual(str(work / 'laplace-mono'), profile['environment']['LAPLACE_WORK_ROOT'])
         self.assertEqual(str(work), profile['environment']['LAPLACE_WORK'])
         self.assertTrue((work / 'laplace-mono').is_dir())
+
+    def test_operator_upgrade_preserves_enrolled_database_and_rejects_conflicts(self):
+        database = {'host': '/tmp', 'port': 5432, 'database': 'laplace-mono', 'role': 'laplace', 'pool_max': 4}
+        profile = {'knowledge': database.copy(), 'credential': {'kind': 'peer'},
+                   'runtime': {'directory': str(self.root / 'runtime')},
+                   'environment': {'LAPLACE_WORK_ROOT': str(self.root / 'work')}}
+        INSTALLER.operator_environment(profile)
+        self.assertEqual(database, profile['database'])
+        self.assertNotIn('knowledge', profile)
+        profile['knowledge'] = dict(database, database='different-database')
+        with self.assertRaisesRegex(ValueError, 'Conflicting operator database'):
+            INSTALLER.operator_environment(profile)
+
+    def test_failed_operator_preflight_preserves_installation_and_removes_preflight(self):
+        self.existing_installation()
+        self.configuration.write_text(json.dumps({
+            'version': 1, 'default_profile': 'selected', 'profiles': {'selected': {
+                'knowledge': {'host': '/tmp', 'database': 'laplace-mono'}, 'credential': {'kind': 'peer'},
+                'runtime': {'directory': str(self.root / 'runtime')},
+                'environment': {'LAPLACE_WORK_ROOT': str(self.root / 'work')},
+            }}}))
+        with mock.patch.object(INSTALLER.subprocess, 'run',
+                               side_effect=subprocess.CalledProcessError(1, ['--where'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_installer()
+        self.assert_existing_installation_preserved()
+        self.assertFalse(list(self.root.glob('laplace-client-*')))
 
     @unittest.skipIf(os.name == 'nt', 'POSIX command symlink is exercised in Linux CI')
     def test_installed_checks_pin_configuration_and_profile(self):
