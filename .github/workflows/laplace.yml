@@ -60,6 +60,7 @@ on:
       - "web/e2e/**"
       - "scripts/test-workflow-architecture.py"
       - "scripts/test-seed-workflow-ownership.py"
+      - "scripts/native-ingest-idempotency.sql"
       - "scripts/test-product-ci-artifact-ownership.py"
       - "scripts/test-benchmark-suite.py"
       - "scripts/validate-pipeline.py"
