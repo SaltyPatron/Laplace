@@ -132,7 +132,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 1224202d1cb52607682e3502c303047ac3c05adf
+          ref: 36aba90b274c5745ab4956527689f35973c51c6b
           path: .ci-dependencies/laplace-native
           persist-credentials: false
       - name: BLAKE3 1.8.3, as on the build host
