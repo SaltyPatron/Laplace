@@ -133,8 +133,9 @@ jobs:
           toolchain: 1.90.0
 
       - name: Own staging work across delivery steps
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: begin
 
       - name: Externals and build (engine, perf-caches, extensions)
@@ -230,8 +231,9 @@ jobs:
 
       - name: Clean staging delivery work after package upload
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain staging cleanup receipt
         if: always()
@@ -330,8 +332,9 @@ jobs:
           toolchain: 1.90.0
 
       - name: Own cloud qualification work until cleanup
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: begin
 
       - name: Externals and build (engine, perf-caches, extensions)
@@ -349,8 +352,9 @@ jobs:
 
       - name: Clean qualification work before cloud lease release
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cloud cleanup receipt
         if: always()
@@ -407,8 +411,9 @@ jobs:
           fetch-depth: 1
 
       - name: Own received production work until readback
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: begin
 
       - name: Where the bundle goes
@@ -435,8 +440,9 @@ jobs:
 
       - name: Clean received production package after readback
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain production cleanup receipt
         if: always()

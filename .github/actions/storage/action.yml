@@ -1,0 +1,34 @@
+name: Qualified environment cleanup
+description: Use the private Operations controller through the existing dependency credential.
+inputs:
+  operation:
+    default: clean
+  receipt:
+    default: ''
+  checkout-token:
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check out the qualified Operations controller once per job
+      if: env.LAPLACE_STORAGE_READY != 'f58c4431b80c8a93bc166e39fb2adfeda9f13bae'
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+        repository: SaltyPatron/Laplace-Operations
+        ref: f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        path: .ci-dependencies/Laplace-Operations
+        token: ${{ inputs.checkout-token }}
+        persist-credentials: false
+    - shell: bash
+      run: echo 'LAPLACE_STORAGE_READY=f58c4431b80c8a93bc166e39fb2adfeda9f13bae' >> "$GITHUB_ENV"
+    - name: Run the common storage owner
+      shell: bash
+      env:
+        STORAGE_OPERATION: ${{ inputs.operation }}
+        STORAGE_RECEIPT: ${{ inputs.receipt }}
+        GH_TOKEN: ${{ github.token }}
+        LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ env.LAPLACE_HOST_LOCK_WAIT_SECONDS || '120' }}
+      run: |
+        arguments=("$STORAGE_OPERATION" --finish-job)
+        if [[ -n "$STORAGE_RECEIPT" ]]; then arguments+=(--receipt "$STORAGE_RECEIPT"); fi
+        bash .ci-dependencies/Laplace-Operations/storage.sh "${arguments[@]}"

@@ -513,8 +513,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Audit or clean with the qualified owner
-        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
+        uses: ./.github/actions/storage
         with:
+          checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: ${{ inputs.operation == 'storage' && 'status' || 'clean' }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cleanup evidence
