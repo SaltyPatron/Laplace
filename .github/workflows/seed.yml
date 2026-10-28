@@ -301,6 +301,24 @@ jobs:
           verify_idempotency() {
             local key="$1"
             local path="${2:-}"
+            if python3 scripts/ingest_catalog.py --format names | grep -Fxq -- "$key"; then
+              native_snapshot() {
+                psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" \
+                  -v ON_ERROR_STOP=1 -v source="$key" \
+                  -f scripts/native-ingest-idempotency.sql | sha256sum | cut -d ' ' -f 1
+              }
+              local before after
+              before=$(native_snapshot)
+              ingest_one "$key" "$path"
+              verify_source "$key"
+              after=$(native_snapshot)
+              [[ "$before" == "$after" ]] || {
+                echo "::error::Native idempotency broken for $key: witness, series or standings changed" >&2
+                exit 1
+              }
+              echo "IDEMPOTENCY_OK source=$key native_snapshot_sha256=$after"
+              return
+            fi
             local src_name
             src_name=$(python3 -c 'import json,sys; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print("" if not e else (f"laplace.witness_id(%r, %r)" % tuple(e["witness"]) if e.get("witness") else f"laplace.source_id(%r)" % e["decomposer"]))' "$key")
             local before after
