@@ -1,9 +1,10 @@
 # Run the installer's actual session-lifecycle routine. The forced-maintenance
 # branch uses a recording client; optional live acceptance keeps a real query
 # running through ordinary publication without changing installed files.
-param([string]$ConnectionInfo)
+param([string]$ConnectionInfo,[switch]$Publish)
 $ErrorActionPreference='Stop'
 if(-not $IsWindows){throw 'This acceptance exercises the Windows installer.'}
+if($Publish -and -not $ConnectionInfo){throw 'Publication acceptance requires a live connection declaration.'}
 $temporary=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\','/')
 $root=Join-Path $temporary ('laplace-backend-lifecycle-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $root
@@ -20,11 +21,18 @@ try {
         $start=[Diagnostics.ProcessStartInfo]::new($psql)
         $start.UseShellExecute=$false; $start.CreateNoWindow=$true
         $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
-        foreach($arg in @('-X','-w','-v','ON_ERROR_STOP=1','--dbname',$ConnectionInfo,'-c',"BEGIN; SELECT pg_sleep(8); ROLLBACK;")){$start.ArgumentList.Add($arg)}
+        $seconds=if($Publish){30}else{8}
+        foreach($arg in @('-X','-w','-v','ON_ERROR_STOP=1','--dbname',$ConnectionInfo,'-c',"BEGIN; SELECT pg_sleep($seconds); ROLLBACK;")){$start.ArgumentList.Add($arg)}
         $peer=[Diagnostics.Process]::Start($start)
         $stdout=$peer.StandardOutput.ReadToEndAsync(); $stderr=$peer.StandardError.ReadToEndAsync()
         Start-Sleep -Milliseconds 500
         if($peer.HasExited){throw "Live acceptance query did not remain connected: $($stderr.GetAwaiter().GetResult())"}
+    }
+    if($Publish){
+        & (Join-Path $PSScriptRoot '../win/install-extensions.cmd') --skip-build --recycle
+        if($LASTEXITCODE){throw 'Full extension publication failed.'}
+        if($peer.HasExited){throw 'Live query did not span the complete installer; publication acceptance is inconclusive.'}
+        'Full extension publication returned while the peer transaction remained active.'
     }
     foreach($case in @(@{recycle=0;force=0;changed=1},@{recycle=1;force=0;changed=1},@{recycle=1;force=0;changed=0},@{recycle=1;force=1;changed=1})){
         $harness=Join-Path $root 'lifecycle.cmd'
@@ -37,7 +45,7 @@ try {
         if($case.force -eq 1 -and -not (Test-Path -LiteralPath $calls)){throw 'Explicit force-maintenance did not invoke its database client.'}
     }
     if($peer){
-        if(-not $peer.WaitForExit(15000)){throw 'Live acceptance query did not finish.'}
+        if(-not $peer.WaitForExit(45000)){throw 'Live acceptance query did not finish.'}
         if($peer.ExitCode -ne 0){throw "Publication interrupted a live database session: $($stderr.GetAwaiter().GetResult())"}
         $null=$stdout.GetAwaiter().GetResult()
         'Live PostgreSQL transaction completed across ordinary publication.'
