@@ -19,6 +19,29 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     private NpgsqlDataSource _source = null!;
 
     [Fact]
+    public async Task ReadinessPresenceUsesTheNativeTablesRatherThanLegacyAdapters()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        // These are bounded committed-presence probes, not planner estimates.
+        // A populated Native database can retain empty legacy adapter tables.
+        await using var expected = new NpgsqlCommand("""
+            SELECT EXISTS(SELECT FROM public.entity), EXISTS(SELECT FROM public.consensus)
+            """, connection, transaction);
+        (bool entities, bool consensus) presence;
+        await using (var rows = await expected.ExecuteReaderAsync())
+        {
+            Assert.True(await rows.ReadAsync());
+            presence = (rows.GetBoolean(0), rows.GetBoolean(1));
+        }
+        Assert.Equal(presence, await NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(connection, default));
+        var inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
+        Assert.Equal(presence.entities, inventory.HasEntities);
+        Assert.Equal(presence.consensus, inventory.HasConsensus);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task ExecutorReadersPreserveSupportStandingAndCompleteFacetPaging()
     {
         await using var connection = await _source.OpenConnectionAsync();

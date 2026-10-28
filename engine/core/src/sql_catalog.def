@@ -985,10 +985,10 @@ SQL_QUERY("ops.source_counts_approx", "",
     "SELECT source, evidence_approx, encode(source_id, 'hex') FROM ops.source_counts_approx()")
 
 SQL_QUERY("readiness.entities_and_consensus", "",
-    "SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus)")
+    "SELECT EXISTS (SELECT FROM public.entity), EXISTS (SELECT FROM public.consensus)")
 
 SQL_QUERY("readiness.inventory", "",
-    "SELECT COALESCE(max(value) FILTER (WHERE metric='entities(ESTIMATE)'),0),\n       COALESCE(max(value) FILTER (WHERE metric='consensus(ESTIMATE)'),0),\n       EXISTS (SELECT FROM laplace.entities),\n       EXISTS (SELECT FROM laplace.consensus)\nFROM ops.substrate_counts()")
+    "SELECT COALESCE(max(value) FILTER (WHERE metric='entities(ESTIMATE)'),0),\n       COALESCE(max(value) FILTER (WHERE metric='consensus(ESTIMATE)'),0),\n       EXISTS (SELECT FROM public.entity),\n       EXISTS (SELECT FROM public.consensus)\nFROM ops.substrate_counts()")
 
 SQL_QUERY("laplace.substrate_health_metrics", "",
     "SELECT x.metric, x.value\nFROM laplace.substrate_health() h,\n     LATERAL (VALUES ('ok', h.ok::text),\n                     ('fake_tier_bands', h.fake_tier_bands::text),\n                     ('identity_violations', h.identity_violations::text),\n                     -- WITHOUT THIS, identity_violations IS UNREADABLE. It is NULL\n                     -- whenever the deep pass was skipped, and a consumer that\n                     -- cannot see deep_checked reads that NULL as \"no violations\".\n                     -- That is unattested collapsed into attested-false, in the one\n                     -- query that reports substrate integrity.\n                     ('deep_checked', h.deep_checked::text),\n                     ('entities', h.entities::text),\n                     ('surface_present', h.surface_present::text),\n                     ('registry_relations', h.registry_relations::text)) x(metric, value)")
