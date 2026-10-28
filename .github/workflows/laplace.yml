@@ -68,6 +68,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write   # the database host is started through GCP workload identity federation: a short-lived token, no stored key
 
 env:
@@ -131,7 +132,13 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Own staging work across delivery steps
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          operation: begin
+
       - name: Externals and build (engine, perf-caches, extensions)
+        # Delivery staging remains owned across separate build/publish steps.
         run: deploy/linux/site.sh externals build
 
       - name: Verify Native recipe records and file coverage without PostgreSQL
@@ -221,6 +228,20 @@ jobs:
           retention-days: 7
           compression-level: 1
 
+      - name: Clean staging delivery work after package upload
+        if: always()
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          receipt: ${{ runner.temp }}/storage.json
+      - name: Retain staging cleanup receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: storage-staging-${{ github.run_id }}
+          path: ${{ runner.temp }}/storage.json
+          if-no-files-found: warn
+          retention-days: 14
+
   cloud-host:
     name: Cloud qualification — start the explicitly requested host
     needs: deliver
@@ -308,6 +329,11 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Own cloud qualification work until cleanup
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          operation: begin
+
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
 
@@ -320,6 +346,20 @@ jobs:
 
       - name: Stage and exercise the native CLI with its published dependencies
         run: deploy/linux/site.sh app
+
+      - name: Clean qualification work before cloud lease release
+        if: always()
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          receipt: ${{ runner.temp }}/storage.json
+      - name: Retain cloud cleanup receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: storage-cloud-${{ github.run_id }}
+          path: ${{ runner.temp }}/storage.json
+          if-no-files-found: warn
+          retention-days: 14
 
   cloud-host-release:
     name: Cloud qualification — release the host to stop when idle
@@ -366,6 +406,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Own received production work until readback
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          operation: begin
+
       - name: Where the bundle goes
         id: bundle
         run: |
@@ -387,3 +432,17 @@ jobs:
       - name: Retain installed target after failed readback
         if: failure()
         run: deploy/linux/site.sh status
+
+      - name: Clean received production package after readback
+        if: always()
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          receipt: ${{ runner.temp }}/storage.json
+      - name: Retain production cleanup receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: storage-production-${{ github.run_id }}
+          path: ${{ runner.temp }}/storage.json
+          if-no-files-found: warn
+          retention-days: 14

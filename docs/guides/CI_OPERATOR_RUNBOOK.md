@@ -52,6 +52,22 @@ all committed substrate content.
 
 ## Normal source-to-product story
 
+Storage maintenance is part of **Product — maintenance**: use operation `storage`
+to audit or `clean` to collect on `staging`, `production`, or an already running
+`cloud`. `laplace-ops clean -Target production -Wait` dispatches this workflow.
+It does not build, deploy, restart services, or reset a database. Delivery jobs also
+clean in their final steps: after staging package upload, after production readback,
+and before the cloud qualification lease is released. Cleanup leaves stopped cloud
+workers off and defers to an active qualification lease's own final cleanup.
+
+The qualified Operations collector owns work-tree retirement, native release
+retention and per-job staging. Existing managed-service controllers continue to own
+their runtime leases and rollback. Repository/run receipts protect delivery work
+across separate CI steps. Pending recovery, active references and unavailable
+liveness evidence retain affected outputs. The normal incremental build profiles,
+source repositories, archives, corpora, databases and shared infrastructure are kept.
+Every cleanup emits a receipt; workflow receipts remain downloadable for fourteen days.
+
 Platform access inspection uses **Product — maintenance**, operation `access-audit`,
 target `staging` or `production`. The existing installation credential reads the
 people, role-event and provider-client endpoints. The report contains aggregate

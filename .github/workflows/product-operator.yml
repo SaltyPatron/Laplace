@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: verify
-        options: [status, access-audit, access-enroll, owner-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
+        options: [status, storage, clean, access-audit, access-enroll, owner-enroll, verify, forward-chat-proof, reconcile, chess-lab, deploy, qualify-cloud]
       target:
         description: "staging deploys to hart-server; production promotes its verified package; qualify-cloud explicitly uses the database host"
         type: choice
@@ -450,4 +450,77 @@ jobs:
           name: platform-owners-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/platform-owners-${{ github.run_id }}-${{ github.run_attempt }}.json
           if-no-files-found: error
+          retention-days: 14
+
+  storage-select:
+    if: inputs.operation == 'clean' || inputs.operation == 'storage'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+      runner: ${{ steps.select.outputs.runner }}
+    steps:
+      - name: Authenticate only to inspect the cloud worker
+        if: inputs.target == 'cloud'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: projects/398413378767/locations/global/workloadIdentityPools/github/providers/github-actions
+          service_account: laplace-pipeline@project-f5812b96-f924-41a4-94c.iam.gserviceaccount.com
+      - name: Cloud inspection client
+        if: inputs.target == 'cloud'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - name: Select an existing worker without starting one
+        id: select
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            staging) label=staging ;;
+            production) label=production ;;
+            cloud)
+              label=cloud
+              state=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(status)')
+              if [[ "$state" != RUNNING ]]; then
+                echo 'run=false' >> "$GITHUB_OUTPUT"
+                echo "Cloud cleanup deferred: hart-cloud is $state. Its next leased job runs cleanup before lease release." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              lease=$(gcloud compute instances describe hart-cloud --zone us-east1-b --format='value(metadata.items.laplace-lease)')
+              if [[ "$lease" =~ ^[0-9]+\ ([0-9]+)$ && ${BASH_REMATCH[1]} -gt $(date +%s) ]]; then
+                echo 'run=false' >> "$GITHUB_OUTPUT"
+                echo 'Cloud cleanup belongs to its active qualification lease and runs before that lease is released.' >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi ;;
+            *) exit 2 ;;
+          esac
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+          printf 'runner=["self-hosted","laplace","Laplace","%s"]\n' "$label" >> "$GITHUB_OUTPUT"
+  storage-maintain:
+    needs: storage-select
+    if: needs.storage-select.outputs.run == 'true'
+    runs-on: ${{ fromJSON(needs.storage-select.outputs.runner) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Audit or clean with the qualified owner
+        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        with:
+          operation: ${{ inputs.operation == 'storage' && 'status' || 'clean' }}
+          receipt: ${{ runner.temp }}/storage.json
+      - name: Retain cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: storage-${{ inputs.target }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/storage.json
+          if-no-files-found: warn
           retention-days: 14

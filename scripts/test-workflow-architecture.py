@@ -18,6 +18,29 @@ def code(body: str) -> str:
 
 
 class WorkflowArchitecture(unittest.TestCase):
+    def test_delivery_cleanup_follows_consumers_and_keeps_cloud_lease(self):
+        delivery = (WORKFLOWS / 'laplace.yml').read_text()
+        staging = delivery.split('\n  cloud-host:\n', 1)[0]
+        self.assertLess(staging.index('Retain the verified production package'), staging.index('Clean staging delivery work after package upload'))
+        cloud = delivery.split('\n  production-build:\n', 1)[1].split('\n  cloud-host-release:\n', 1)[0]
+        self.assertLess(cloud.index('site.sh app'), cloud.index('Clean qualification work before cloud lease release'))
+        production = delivery.split('\n  production:\n', 1)[1]
+        self.assertLess(production.index('site.sh smoke'), production.index('Clean received production package after readback'))
+        self.assertNotIn('site.sh build', production)
+        for name in ('Clean staging delivery work after package upload', 'Clean qualification work before cloud lease release',
+                     'Clean received production package after readback'):
+            self.assertIn(name + '\n        if: always()', delivery)
+
+    def test_storage_maintenance_uses_existing_operator_and_does_not_start_cloud(self):
+        maintenance = (WORKFLOWS / 'product-operator.yml').read_text()
+        storage = maintenance.split('\n  storage-select:\n', 1)[1]
+        self.assertIn("inputs.operation == 'clean' || inputs.operation == 'storage'", storage)
+        self.assertIn("state\" != RUNNING", storage)
+        self.assertIn('active qualification lease', storage)
+        self.assertNotIn('instances start', storage)
+        self.assertNotIn('site.sh build', storage)
+        self.assertNotIn('site.sh publish', storage)
+
     def test_manual_deployment_passes_the_selected_promotion_boundary(self):
         maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         delivery = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
