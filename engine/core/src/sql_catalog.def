@@ -437,7 +437,7 @@ SQL_QUERY("maintenance.secondary_indexes_present", "text",
     "JOIN pg_namespace n ON n.oid=t.relnamespace "
     "WHERE n.nspname='laplace' AND t.relname=$1 AND NOT i.indisprimary AND NOT i.indisunique)")
 SQL_QUERY("maintenance.index_settings", "text,text",
-    "SELECT set_config('search_path','laplace, public',true),set_config('maintenance_work_mem',$1,true),"
+    "SELECT set_config('maintenance_work_mem',$1,true),"
     "set_config('max_parallel_maintenance_workers',$2,true)")
 SQL_QUERY("advisory.lane_holders", "int4,int4",
     "SELECT l.pid,l.mode,coalesce(a.state,'?'),left(coalesce(a.query,''),120) "
@@ -1657,9 +1657,9 @@ SQL_QUERY("maintenance.physicalities_observed_brin", "", "CREATE INDEX IF NOT EX
 
 SQL_QUERY("maintenance.physicalities_hilbert_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)")
 
-SQL_QUERY("maintenance.physicalities_direction_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_direction_gist ON laplace.physicalities USING gist (public.laplace_direction_4d(coord) gist_geometry_ops_nd) WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL")
+SQL_QUERY("maintenance.physicalities_direction_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_direction_gist ON laplace.physicalities USING gist (public.laplace_direction_4d(coord) public.gist_geometry_ops_nd) WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL")
 
-SQL_QUERY("maintenance.physicalities_coord_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)")
+SQL_QUERY("maintenance.physicalities_coord_gist", "", "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord public.gist_geometry_ops_nd)")
 
 SQL_QUERY("maintenance.physicalities_type_btree", "", "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)")
 
@@ -1669,14 +1669,12 @@ SQL_QUERY("migration.app_tables_present", "",
     "FROM unnest(ARRAY['app.users','app.external_identities','app.platform_roles',"
     "'app.api_keys','app.billing_quotes','app.billing_royalties']) AS required(name)")
 /* Run transactionally after DbUp, including already-journaled databases.
- * Existing managed connections prefer laplace,public. Native SPI must not
- * accidentally read laplace.consensus instead of public.consensus.
+ * Native SPI binds installed objects independently of the caller's namespace.
  * Cache paths are server-side installed paths, not paths from the invoking client.
  * Native owns function bindings: direct ROM/index primitives, parsed SQL adapters,
- * and scoped SQL/SPI entry points. Consumers restore that contract, not their own
+ * and catalog-bound SQL/SPI entry points. Consumers restore that contract, not their own
  * per-function settings or exception lists. */
 SQL_QUERY("migration.canonical_substrate", "",
-    "SET LOCAL search_path = public, pg_temp; "
     "CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public; "
     "ALTER EXTENSION laplace UPDATE; "
     "DO $canonical$ DECLARE cache record; cache_path text; BEGIN "

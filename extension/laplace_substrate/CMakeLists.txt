@@ -1,6 +1,18 @@
 set(EXT_NAME laplace_substrate)
 set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 
+# Both build modes consume the canonical PostgreSQL executor adapter. The
+# standalone Windows extension build does not add the canonical module target.
+if(NOT TARGET laplace_pg_executor)
+    if(NOT LAPLACE_POSTGRES_SOURCE)
+        set(LAPLACE_POSTGRES_SOURCE "$ENV{LAPLACE_POSTGRES_SOURCE}")
+    endif()
+    if(NOT LAPLACE_POSTGRES_SOURCE)
+        get_filename_component(LAPLACE_POSTGRES_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../../Laplace-postgres" ABSOLUTE)
+    endif()
+    include("${LAPLACE_POSTGRES_SOURCE}/cmake/LaplacePgExecutor.cmake")
+endif()
+
 # The preloaded host owns configuration and shared perfcache state. Execution
 # code has a content-versioned library identity and can be rebound transactionally
 # without replacing a library mapped by the postmaster or restarting PostgreSQL.
@@ -45,6 +57,7 @@ file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h")
 file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LaplaceWindowsExports.cmake" _exports_contract)
 set(_execution_inputs CMakeLists.txt "${_exports_contract}" ${EXT_EXECUTION_SOURCES} ${_execution_headers}
+    "${LAPLACE_POSTGRES_SOURCE}/include/laplace_pg/executor.h"
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.def)
 if(WIN32)
     get_target_property(_core_archive laplace_core IMPORTED_LOCATION)
@@ -229,13 +242,15 @@ else()
         VERBATIM)
 endif()
 
+target_link_libraries(${EXT_NAME} PRIVATE laplace_pg_executor)
+
 add_library(laplace_execution MODULE ${EXT_EXECUTION_SOURCES})
 if(BUILD_TESTING)
     target_compile_definitions(laplace_execution PRIVATE LAPLACE_SUBSTRATE_TESTING=1)
 endif()
 set_target_properties(laplace_execution PROPERTIES PREFIX "" OUTPUT_NAME "${EXT_EXECUTION_MODULE}")
 target_include_directories(laplace_execution SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
-target_link_libraries(laplace_execution PRIVATE laplace_core laplace_dynamics)
+target_link_libraries(laplace_execution PRIVATE laplace_core laplace_dynamics laplace_pg_executor)
 if(TARGET laplace_static)
     target_link_libraries(laplace_execution PRIVATE laplace_static)
 else()

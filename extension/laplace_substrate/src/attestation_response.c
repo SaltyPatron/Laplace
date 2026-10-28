@@ -17,6 +17,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_response_batch);
 
@@ -30,6 +31,29 @@ typedef struct ResponseCell
 typedef struct ResponseState { HTAB *cells; bool unary; } ResponseState;
 
 static SPIPlanPtr support_plan;
+
+typedef struct { HTAB *cells, *sources; bool unary; } ResponseSupport;
+static void
+response_support(TupleTableSlot *row, void *context)
+{
+    ResponseSupport *support = context;
+    char key[48];
+    bool found;
+    for (int col = 1; col <= 3; ++col) {
+        bool isnull;
+        Datum value = slot_getattr(row, col, &isnull);
+        if (isnull && col == 2 && support->unary) { memset(key + 16, 0, 16); continue; }
+        if (isnull || VARSIZE_ANY_EXHDR(DatumGetByteaPP(value)) != 16)
+            elog(ERROR, "attestation response: malformed stored evidence identity");
+        memcpy(key + (col - 1) * 16, VARDATA_ANY(DatumGetByteaPP(value)), 16);
+    }
+    hash_search(support->sources, key, HASH_ENTER, &found);
+    if (found) return;
+    ResponseCell *cell = hash_search(support->cells, key, HASH_ENTER, &found);
+    if (!found) { cell->sources = 0; cell->standing = false; }
+    if (cell->sources == INT_MAX) elog(ERROR, "attestation response source count overflow");
+    ++cell->sources;
+}
 
 static void
 response_standing(const LaplaceConsensusRow *row, void *context)
@@ -121,37 +145,9 @@ pg_laplace_attestation_response_batch(PG_FUNCTION_ARGS)
                     PG_ARGISNULL(2) ? (Datum) 0 : PG_GETARG_DATUM(2),
                     PG_ARGISNULL(3) ? (Datum) 0 : PG_GETARG_DATUM(3), BoolGetDatum(unary)};
     char nulls[5] = {' ', ' ', PG_ARGISNULL(2) ? 'n' : ' ', PG_ARGISNULL(3) ? 'n' : ' ', ' '};
-    Portal portal = SPI_cursor_open(NULL, support_plan, args, nulls, true);
-    if (!portal) elog(ERROR, "attestation response: opening support cursor failed");
-    for (;;)
-    {
-        SPI_cursor_fetch(portal, true, 4096);
-        uint64 rows = SPI_processed;
-        for (uint64 i = 0; i < rows; ++i)
-        {
-            char key[48];
-            bool found;
-            for (int col = 1; col <= 3; ++col)
-            {
-                bool isnull;
-                Datum datum = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, col, &isnull);
-                if (isnull && col == 2 && unary) { memset(key + 16, 0, 16); continue; }
-                if (isnull || VARSIZE_ANY_EXHDR(DatumGetByteaPP(datum)) != 16)
-                    elog(ERROR, "attestation response: malformed stored evidence identity");
-                memcpy(key + (col - 1) * 16, VARDATA_ANY(DatumGetByteaPP(datum)), 16);
-            }
-            hash_search(sources, key, HASH_ENTER, &found);
-            if (found) continue;
-            ResponseCell *cell = hash_search(cells, key, HASH_ENTER, &found);
-            if (!found) { cell->sources = 0; cell->standing = false; }
-            if (cell->sources == INT_MAX) elog(ERROR, "attestation response source count overflow");
-            ++cell->sources;
-        }
-        if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
-        if (!rows) break;
-        CHECK_FOR_INTERRUPTS();
-    }
-    SPI_cursor_close(portal);
+    Oid support_types[5] = {BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID, BYTEAOID, BOOLOID};
+    ResponseSupport support = {cells, sources, unary};
+    laplace_spi_stream(support_plan, 5, support_types, args, nulls, response_support, &support);
     MemoryContextSwitchTo(work);
     Datum type_datum = PointerGetDatum(relation);
     ArrayType *types = construct_array(&type_datum, 1, BYTEAOID, -1, false, TYPALIGN_INT);

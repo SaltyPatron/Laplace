@@ -19,6 +19,79 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     private NpgsqlDataSource _source = null!;
 
     [Fact]
+    public async Task ExecutorReadersPreserveSupportStandingAndCompleteFacetPaging()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        // Exercise retained adapter rows above both former fetch sizes. These
+        // are declared test projections; no corpus testimony is synthesized.
+        await using (var seed = new NpgsqlCommand("""
+            CREATE TEMP TABLE executor_case AS
+            SELECT decode(public.laplace_cp_id(65)::text,'hex') AS subject,
+              decode(public.laplace_text_id('executor-support')::text,'hex') AS relation,
+              decode(public.laplace_cp_id(66)::text,'hex') AS object;
+            INSERT INTO laplace.attestations
+              (id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,
+               observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+            SELECT decode(public.laplace_compose(ARRAY[
+                encode(t.subject,'hex')::public.blake3,encode(t.relation,'hex')::public.blake3,
+                encode(t.object,'hex')::public.blake3,public.laplace_text_id('executor-source/'||g),
+                public.laplace_cp_id(c)])::text,'hex'),
+              t.subject,t.relation,t.object,
+              decode(public.laplace_text_id('executor-source/'||g)::text,'hex'),
+              decode(public.laplace_cp_id(c)::text,'hex'),1,now(),1,1000000000,350000000000
+            FROM executor_case t CROSS JOIN generate_series(1,5000) g CROSS JOIN generate_series(67,68) c;
+            INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+            SELECT decode(public.laplace_compose(ARRAY[encode(subject,'hex')::public.blake3,
+                encode(relation,'hex')::public.blake3,encode(object,'hex')::public.blake3])::text,'hex'),
+              subject,relation,object,1700000000000,50000000000,60000000,7000,now() FROM executor_case;
+            """, connection, transaction)) await seed.ExecuteNonQueryAsync();
+
+        foreach (var (scope, context, count) in new[]
+        {
+            ("NULL::bytea[]", "NULL::bytea", 5000),
+            ("ARRAY[decode(public.laplace_text_id('executor-source/1')::text,'hex')]", "NULL::bytea", 1),
+            ("NULL::bytea[]", "decode(public.laplace_cp_id(67)::text,'hex')", 5000),
+        })
+        {
+            await using var read = new NpgsqlCommand($"""
+                SELECT r.* FROM executor_case t CROSS JOIN LATERAL ops.attestation_response_batch(
+                  ARRAY[t.subject,t.subject],t.relation,{scope},{context},NULL,false) r
+                """, connection, transaction);
+            await using var rows = await read.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(count, rows.GetInt32(3));
+            Assert.Equal(1700000000000L, rows.GetInt64(4));
+            Assert.Equal(50000000000L, rows.GetInt64(5));
+            Assert.Equal("pooled", rows.GetString(6));
+            Assert.False(await rows.ReadAsync());
+        }
+        await using (var absent = new NpgsqlCommand("""
+            SELECT count(*) FROM executor_case t CROSS JOIN LATERAL ops.attestation_response_batch(
+              ARRAY[t.subject],t.relation,NULL,decode(public.laplace_cp_id(90)::text,'hex'),NULL,false) r
+            """, connection, transaction)) Assert.Equal(0L, await absent.ExecuteScalarAsync());
+
+        // Every requested floor identity must survive the streamed facet read;
+        // the caller's page applies after the complete matched set is known.
+        foreach (var (offset, limit, expected) in new[] { (0, 5000, 4001L), (4000, 5, 1L) })
+        {
+            await using var browse = new NpgsqlCommand("""
+                SELECT count(*),min(matched_entity_count),bool_and(tier=0 AND rating IS NULL)
+                FROM consensus.browse_named_entities(ARRAY(
+                  SELECT decode(public.laplace_cp_id(g)::text,'hex') FROM generate_series(1024,5024) g),
+                  NULL,$1,$2,1)
+                """, connection, transaction);
+            browse.Parameters.AddWithValue(offset); browse.Parameters.AddWithValue(limit);
+            await using var rows = await browse.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(expected, rows.GetInt64(0));
+            Assert.Equal(4001L, rows.GetInt64(1));
+            Assert.True(rows.GetBoolean(2));
+        }
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task TrajectoryPlanesShareCompressedCountsAndPreserveVocabularyDenominators()
     {
         await using var connection = await _source.OpenConnectionAsync();
@@ -188,6 +261,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     {
         await using var connection = await _source.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
+        await using (var caller = new NpgsqlCommand("SET LOCAL search_path=pg_catalog,pg_temp", connection, transaction))
+            await caller.ExecuteNonQueryAsync();
         // Exercise recovery of an installation carrying the previous guard.
         await using (var previous = new NpgsqlCommand(
             "ALTER FUNCTION public.blake3_cmp(public.blake3,public.blake3) SET search_path=public,pg_temp; "
@@ -196,6 +271,10 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             connection, transaction)) await previous.ExecuteNonQueryAsync();
         await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
             await migrate.ExecuteNonQueryAsync();
+        await using (var settings = NpgsqlCatalog.Command(connection, transaction, "maintenance.index_settings", "64MB", "1"))
+            await settings.ExecuteNonQueryAsync();
+        await using (var caller = new NpgsqlCommand("SELECT current_setting('search_path')", connection, transaction))
+            Assert.Equal("pg_catalog, pg_temp", await caller.ExecuteScalarAsync());
         await using (var audit = new NpgsqlCommand("""
             SELECT count(*) FROM pg_opclass oc
             JOIN pg_amproc a ON a.amprocfamily=oc.opcfamily

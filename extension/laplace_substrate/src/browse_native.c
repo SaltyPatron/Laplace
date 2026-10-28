@@ -7,10 +7,11 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_nested.h"
 #include "content_membership_read.h"
+#include "spi_stream.h"
 
 /* Resolves a query's constituent ids to ranked entities. Membership,
  * deduplication, ranking and paging run in C over retained typed set reads;
- * cursor fetches bound transfer memory. */
+ * borrowed executor slots bound transfer memory. */
 static SPIPlanPtr names_plan, facets_plan;
 
 static SPIPlanPtr
@@ -184,6 +185,37 @@ hit_compare(const void *a, const void *b)
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_browse_named_entities);
+static void
+browse_name(TupleTableSlot *row, void *context)
+{
+    HTAB *hits = context;
+    bool isnull, found;
+    Datum v[5];
+    for (int j = 0; j < 5; ++j) v[j] = slot_getattr(row, j + 1, &isnull);
+    BrowseHit hit = {0};
+    hit.id = datum_to_hash128(v[0]); hit.name = datum_to_hash128(v[1]);
+    hit.rating = DatumGetInt64(v[2]); hit.rd = DatumGetInt64(v[3]); hit.witnesses = DatumGetInt64(v[4]);
+    hit.match_kind = BROWSE_MATCH_NAME;
+    if (laplace_glicko2_refuted(hit.rating, hit.rd)) return;
+    BrowseHit *old = hash_search(hits, &hit.id, HASH_ENTER, &found);
+    int64 mu = laplace_effective_mu_fp(hit.rating, hit.rd);
+    int64 old_mu = found ? laplace_effective_mu_fp(old->rating, old->rd) : 0;
+    if (!found || mu > old_mu || (mu == old_mu && (hit.witnesses > old->witnesses ||
+        (hit.witnesses == old->witnesses && id_compare(&hit.name, &old->name) < 0)))) *old = hit;
+}
+static void
+browse_facet(TupleTableSlot *row, void *context)
+{
+    bool isnull;
+    hash128_t id = datum_to_hash128(slot_getattr(row, 1, &isnull));
+    BrowseHit *hit = hash_search((HTAB *)context, &id, HASH_FIND, NULL);
+    if (hit) {
+        hit->exists = true; hit->tier = DatumGetInt16(slot_getattr(row, 2, &isnull));
+        Datum type = slot_getattr(row, 3, &isnull);
+        hit->has_type = !isnull;
+        if (hit->has_type) hit->type = datum_to_hash128(type);
+    }
+}
 Datum
 pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
 {
@@ -207,31 +239,7 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     SPIPlanPtr p = plan(&names_plan,
         laplace_sql_query_text("browse.names"),
         1, array_type);
-    Portal cursor = SPI_cursor_open(NULL, p, args, NULL, true);
-    if (cursor == NULL) elog(ERROR, "browse: cannot open name read");
-    for (;;) {
-        CHECK_FOR_INTERRUPTS();
-        SPI_cursor_fetch(cursor, true, 1024);
-        uint64 n = SPI_processed;
-        for (uint64 i = 0; i < n; ++i) {
-            bool isnull, found;
-            Datum v[5];
-            for (int j = 0; j < 5; ++j) v[j] = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, j + 1, &isnull);
-            BrowseHit hit = {0};
-            hit.id = datum_to_hash128(v[0]); hit.name = datum_to_hash128(v[1]);
-            hit.rating = DatumGetInt64(v[2]); hit.rd = DatumGetInt64(v[3]); hit.witnesses = DatumGetInt64(v[4]);
-            hit.match_kind = BROWSE_MATCH_NAME;
-            if (laplace_glicko2_refuted(hit.rating, hit.rd)) continue;
-            BrowseHit *old = hash_search(hits, &hit.id, HASH_ENTER, &found);
-            int64 mu = laplace_effective_mu_fp(hit.rating, hit.rd);
-            int64 old_mu = found ? laplace_effective_mu_fp(old->rating, old->rd) : 0;
-            if (!found || mu > old_mu || (mu == old_mu && (hit.witnesses > old->witnesses ||
-                (hit.witnesses == old->witnesses && id_compare(&hit.name, &old->name) < 0)))) *old = hit;
-        }
-        SPI_freetuptable(SPI_tuptable);
-        if (n == 0) break;
-    }
-    SPI_cursor_close(cursor);
+    laplace_spi_stream(p, 1, array_type, args, NULL, browse_name, hits);
     if (!PG_ARGISNULL(1)) {
         hash128_t exact = datum_to_hash128(PG_GETARG_DATUM(1));
         add_structural_hit(hits, &exact, BROWSE_MATCH_SURFACE);
@@ -247,20 +255,7 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
      * row are dropped. */
     args[0] = PointerGetDatum(id_array(hits));
     p = plan(&facets_plan, laplace_sql_query_text("entity.facets"), 1, array_type);
-    if (SPI_execute_plan(p, args, NULL, true, 0) != SPI_OK_SELECT) elog(ERROR, "browse: facet read failed");
-    for (uint64 i = 0; i < SPI_processed; ++i) {
-        bool isnull;
-        HeapTuple t = SPI_tuptable->vals[i]; TupleDesc d = SPI_tuptable->tupdesc;
-        hash128_t id = datum_to_hash128(SPI_getbinval(t, d, 1, &isnull));
-        BrowseHit *hit = hash_search(hits, &id, HASH_FIND, NULL);
-        if (hit) {
-            hit->exists = true; hit->tier = DatumGetInt16(SPI_getbinval(t, d, 2, &isnull));
-            Datum type = SPI_getbinval(t, d, 3, &isnull);
-            hit->has_type = !isnull;
-            if (hit->has_type) hit->type = datum_to_hash128(type);
-        }
-    }
-    SPI_freetuptable(SPI_tuptable);
+    laplace_spi_stream(p, 1, array_type, args, NULL, browse_facet, hits);
     long nhits = hash_get_num_entries(hits);
     if (nhits > MaxAllocSize / sizeof(BrowseHit)) elog(ERROR, "browse: matched set exceeds allocation capacity");
     BrowseHit *ordered = palloc(Max(nhits, 1) * sizeof(BrowseHit));
