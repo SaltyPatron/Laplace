@@ -11,7 +11,9 @@ internal static partial class IngestCommands
 {
     internal static async Task<int> IngestNativeRecipeAsync(string source, IngestCliArgs cli, CancellationToken ct = default)
     {
-        if (cli.LangOverride is not null || cli.EmitCrossLanguageLinks is not null
+        if (cli.LangOverride is not null || LanguageFilter.ForSource(source)?.IsActive == true)
+            throw new ArgumentException("Native source ingestion admits the languages declared by its recipe. Remove --langs and ambient language filters, or select a language-scoped recipe.");
+        if (cli.EmitCrossLanguageLinks is not null
             || cli.RegisterOnly || cli.Force || cli.NoAnalyze || cli.Recursive
             || cli.AnalyzeDepth != 0 || cli.AnalyzeNodes != 0 || cli.SecondPath.Length != 0
             || cli.GitCorpusSelection is not null || cli.GitCorpusReceipt is not null)

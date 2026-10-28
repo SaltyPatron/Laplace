@@ -55,9 +55,19 @@ catalog. Choose a corpus and leave the advanced path blank to use its registered
 location. Documents include a `pierre-simon-laplace` selection for the mathematical
 works under ProjectGutenberg. Registered Gutenberg selections retain the Gutenberg
 source and recipe rather than being routed as unrelated generic documents.
-After changing the recipe inventory, run `scripts/ingest_catalog.py
---write-workflow-choices`; operator CI checks the dropdowns against the same pinned
-Engine inventory used for delivery.
+After changing the recipe inventory, run
+`python3 scripts/ingest_catalog.py --write-workflow-choices`; operator CI checks the
+dropdowns against the same pinned Engine inventory used for delivery.
+
+Relations ingestion admits the complete language scope declared by the source
+recipe. The previous language controls only set an environment variable ignored
+by the Native engine; those controls have been removed. The CLI rejects ambient
+language filters for Native ingestion instead of silently loading more languages.
+
+Selecting a registered corpus root is equivalent to selecting that corpus by
+name: both publish the same corpus witness over the same files. A file-only
+inspection is a source slice. Successful file counters alone do not establish
+completed corpus admission; a full source run must publish its witness.
 
 ## Normal source-to-product story
 
