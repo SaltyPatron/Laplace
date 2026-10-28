@@ -5,10 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Source name or alias from the recipe catalog; ladder runs the foundation campaign"
-        type: string
+        description: "Choose the complete foundation ladder or one foundation source"
+        type: choice
         required: true
         default: ladder
+        options: [ladder, unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink]
       advanced_path_override:
         description: "ADVANCED: local file/directory override for a single source; normally leave blank"
         type: string

@@ -1,12 +1,33 @@
 #!/usr/bin/env python3
 """Install the Linux user command from a declared client profile, without sudo."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+
+
+def operator_environment(profile):
+    """Enroll native work paths from the same machine declaration as CI/setup."""
+    environment = profile.setdefault('environment', {})
+    source = Path(__file__).resolve().parents[2] / 'scripts/machine-env.py'
+    if source.is_file():
+        spec = importlib.util.spec_from_file_location('client_machine', source)
+        machine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(machine)
+        declaration = os.environ.get('LAPLACE_MACHINE_ENV') or '/etc/laplace/machine.env'
+        overrides = dict(environment, LAPLACE_MACHINE_ENV=declaration)
+        paths = machine.paths(Path(declaration), overrides, Path(profile['runtime']['directory']))
+        for key in ('LAPLACE_WORK', 'LAPLACE_WORK_ROOT'):
+            if paths.get(key): environment.setdefault(key, paths[key])
+    work = environment.get('LAPLACE_WORK_ROOT') or environment.get('LAPLACE_WORK')
+    if not work or not Path(work).is_absolute():
+        raise ValueError('The operator profile needs a declared absolute LAPLACE_WORK_ROOT')
+    environment.setdefault('LAPLACE_WORK_ROOT', work)
+    Path(work).mkdir(parents=True, exist_ok=True)
 
 
 def main():
@@ -26,6 +47,9 @@ def main():
     if command.exists() or command.is_symlink():
         if not command.is_symlink() or command.resolve() != launcher.resolve():
             raise ValueError(f'Another command already owns {command}; preserved')
+    if config['version'] == 1:
+        for profile in config['profiles'].values():
+            operator_environment(profile)
     source_launcher = Path(__file__).with_name('laplace-mono.py')
     check = ['ops'] if config['version'] == 2 else ['decompose', 'Laplace']
     verify_env = dict(os.environ, LAPLACE_MONO_CLIENT_CONFIG=str(args.configuration))

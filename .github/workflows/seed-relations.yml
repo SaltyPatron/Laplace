@@ -5,10 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Source name or short alias from the recipe catalog"
-        type: string
+        description: "Choose a registered corpus; its recipe supplies the installed data path"
+        type: choice
         required: true
-        default: omw
+        default: open-multilingual-wordnet
+        options: [unicode, iso-639, cili, open-english-wordnet, open-multilingual-wordnet, princeton-wordnet, propbank, verbnet, verbnet-gl, framenet, semlink, predicate-matrix, mapnet, verbatlas, wordframenet, universal-dependencies-tools, universal-dependencies-documentation, universal-dependencies, wsd-evaluation-framework, wiktionary-kaikki, wiktionary, conceptnet, atomic-2020, framebase, atomic-10x, tatoeba, opensubtitles, project-gutenberg, tokenizers, brown, geonames, hatecheck, sghatecheck, xstest, social-bias-frames, social-chemistry-101, prosocial-dialog, real-toxicity-prompts, toxigen, measuring-hate-speech, civil-comments, chess-com, twic, lumbras-gigabase, openings, workspace-code]
       language_scope:
         description: "Language scope for multilingual sources"
         type: choice

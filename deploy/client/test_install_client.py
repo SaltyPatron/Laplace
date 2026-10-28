@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -63,6 +64,18 @@ class ClientInstallationTests(unittest.TestCase):
                 self.run_installer()
         self.assert_existing_installation_preserved()
         self.assertFalse(self.commands.exists())
+
+    def test_operator_enrollment_uses_declared_machine_work_instead_of_stale_shell_paths(self):
+        work = self.root / 'declared-work'
+        machine = self.root / 'machine.env'
+        machine.write_text('LAPLACE_WORK=' + shlex.quote(str(work)) + '\n')
+        profile = {'runtime': {'directory': str(self.root / 'runtime')}, 'environment': {'LAPLACE_DATA': str(self.root / 'data')}}
+        with mock.patch.dict(os.environ, {'LAPLACE_MACHINE_ENV': str(machine),
+                                         'LAPLACE_WORK_ROOT': str(self.root / 'obsolete-install/work')}):
+            INSTALLER.operator_environment(profile)
+        self.assertEqual(str(work / 'laplace-mono'), profile['environment']['LAPLACE_WORK_ROOT'])
+        self.assertEqual(str(work), profile['environment']['LAPLACE_WORK'])
+        self.assertTrue((work / 'laplace-mono').is_dir())
 
     @unittest.skipIf(os.name == 'nt', 'POSIX command symlink is exercised in Linux CI')
     def test_installed_checks_pin_configuration_and_profile(self):

@@ -50,6 +50,15 @@ as Operator. A fresh heartbeat or held beacon keeps a run live. Recovery cancels
 run and its unfinished file rows only when both witnesses are absent/stale, retaining
 all committed substrate content.
 
+Foundation and relations ingestion use corpus dropdowns generated from the recipe
+catalog. Choose a corpus and leave the advanced path blank to use its registered
+location. Documents include a `pierre-simon-laplace` selection for the mathematical
+works under ProjectGutenberg. Registered Gutenberg selections retain the Gutenberg
+source and recipe rather than being routed as unrelated generic documents.
+After changing the recipe inventory, run `scripts/ingest_catalog.py
+--write-workflow-choices`; operator CI checks the dropdowns against the same pinned
+Engine inventory used for delivery.
+
 ## Normal source-to-product story
 
 Storage maintenance is part of **Product — maintenance**: use operation `storage`

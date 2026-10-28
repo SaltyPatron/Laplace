@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: project-gutenberg
-        options: [project-gutenberg, fixtures, electronics, smoke-alice, custom-path]
+        options: [project-gutenberg, pierre-simon-laplace, fixtures, electronics, smoke-alice, custom-path]
       advanced_path_override:
         description: "ADVANCED: local file/directory override; required only for custom-path"
         type: string
@@ -34,6 +34,7 @@ jobs:
     timeout-minutes: 2
     outputs:
       path: ${{ steps.pick.outputs.path }}
+      source: ${{ steps.pick.outputs.source }}
     steps:
       - id: pick
         env:
@@ -42,6 +43,11 @@ jobs:
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA:?the corpus directory is LAPLACE_DATA (the runner environment: Laplace-Operations agents.sh; /etc/laplace/machine.env)}"
+          case "$CORPUS_INPUT" in
+            project-gutenberg|pierre-simon-laplace|smoke-alice) source=project-gutenberg ;;
+            *) source=document ;;
+          esac
+          echo "source=$source" >> "$GITHUB_OUTPUT"
           if [[ -n "$PATH_INPUT" ]]; then
             [[ -e "$PATH_INPUT" ]] || { echo "::error::$PATH_INPUT does not exist"; exit 1; }
             echo "path=$PATH_INPUT" >> "$GITHUB_OUTPUT"
@@ -49,6 +55,7 @@ jobs:
           fi
           case "$CORPUS_INPUT" in
             project-gutenberg) p="$root/ProjectGutenberg/text" ;;
+            pierre-simon-laplace) p="$root/ProjectGutenberg/Pierre-Simon-Laplace" ;;
             fixtures) p="$root/test-data/text" ;;
             electronics) p="$root/test-data/electronics" ;;
             smoke-alice) p="$root/ProjectGutenberg/text/alice.txt" ;;
@@ -63,7 +70,7 @@ jobs:
     uses: ./.github/workflows/seed.yml
     with:
       mode: source
-      source: document
+      source: ${{ needs.resolve.outputs.source }}
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       run_gate: true

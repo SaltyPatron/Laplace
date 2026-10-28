@@ -131,6 +131,26 @@ def canonical_source(name: str, catalog: dict | None = None) -> str:
     return key  # explicit managed/operator commands are resolved by their owner
 
 
+def workflow_choices(catalog: dict, write: bool = False) -> None:
+    """Materialize GitHub's static dropdowns from the canonical recipe inventory."""
+    foundation = json.loads((ROOT / 'scripts/win/witness-manifest.json').read_text(encoding='utf-8'))['foundation']['sources']
+    selections = {
+        'seed-foundation.yml': ['ladder', *foundation],
+        'seed-relations.yml': [source['name'] for source in catalog['sources']],
+    }
+    for name, choices in selections.items():
+        path = ROOT / '.github/workflows' / name
+        content = path.read_text(encoding='utf-8')
+        pattern = r'(      source:\n.*?        options: )\[[^\n]*\]'
+        rendered, count = re.subn(pattern, lambda m: m[1] + '[' + ', '.join(choices) + ']', content, count=1, flags=re.S)
+        if count != 1:
+            raise ValueError(f'{name}: source must be a catalog dropdown')
+        if rendered != content:
+            if not write:
+                raise ValueError(f'{name}: corpus choices differ from the recipe catalog; run ingest_catalog.py --write-workflow-choices')
+            path.write_text(rendered, encoding='utf-8')
+
+
 def journal_source(name: str, catalog: dict | None = None) -> str:
     """Use the Native producer's canonical name; managed operators retain their owner mapping."""
     catalog = catalog or load_catalog()
@@ -197,9 +217,13 @@ def main() -> int:
     parser.add_argument("--check-engine", type=Path, help="Verify the actual Engine exposes the same complete catalog")
     parser.add_argument("--check-mono", type=Path, help="Verify the built monorepo CLI catalog without a database or caches")
     parser.add_argument("--grammar-sources", type=Path, help="Select required grammar source revisions from a TSV lock")
+    parser.add_argument('--write-workflow-choices', action='store_true')
+    parser.add_argument('--check-workflow-choices', action='store_true')
     args = parser.parse_args()
     catalog = load_catalog(args.recipes)
-    if args.grammar_sources:
+    if args.write_workflow_choices or args.check_workflow_choices:
+        workflow_choices(catalog, args.write_workflow_choices)
+    elif args.grammar_sources:
         print(grammar_sources(catalog, args.recipes or recipe_root(), args.grammar_sources))
     elif args.check_mono:
         executable = args.check_mono.resolve()
