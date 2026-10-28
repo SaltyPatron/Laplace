@@ -14,6 +14,10 @@ if(-not $Installation){throw 'No IIS installation is configured. Use -Installati
 . "$PSScriptRoot/iis-runtime.ps1"
 . "$PSScriptRoot/iis-access.ps1"
 $c=Read-IisInstallation $Installation
+. "$PSScriptRoot/../../scripts/win/machine-env.ps1"
+. (Join-Path $env:LAPLACE_SRC 'Laplace-Operations/installation/storage.ps1')
+$storageOperation=Enter-DesktopStorageOperation
+try {
 Add-Type -Path "$env:windir/System32/inetsrv/Microsoft.Web.Administration.dll"
 function Restart-PublishedIisPool {
     $manager=[Microsoft.Web.Administration.ServerManager]::new()
@@ -91,3 +95,4 @@ try {
     Write-IisPublicAtomic (Join-Path $web 'active.json') (Iis-Json @{revision=$manifest.revision}) $readers
     Write-Host "Published $($manifest.revision) at $($c.origin); authenticated SQL and native storage verified. Receipt: $receipt"
 } finally {$lock.Dispose()}
+} finally { Exit-DesktopStorageOperation -Operation $storageOperation -Iis $c }

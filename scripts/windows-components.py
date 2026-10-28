@@ -270,6 +270,9 @@ def main() -> int:
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print("windows-components: " + str(error), file=sys.stderr)
         return 1
+    finally:
+        if not args.plan:
+            _store.cleanup(args.store.resolve())
 
 
 if __name__ == "__main__":

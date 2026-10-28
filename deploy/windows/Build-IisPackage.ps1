@@ -58,6 +58,11 @@ if($selected.Contains('api')){$null=$selected.Add('web')}
 if(-not $ManagedBuild){$ManagedBuild=$env:LAPLACE_BUILD_ROOT}
 $ManagedBuild=[IO.Path]::GetFullPath($ManagedBuild)
 $store=Join-Path $env:LAPLACE_WORK 'artifacts/windows-components'
+. (Join-Path $env:LAPLACE_SRC 'Laplace-Operations/installation/storage.ps1')
+$cleanupIis=if(-not $Plan -and $Installation){Read-IisInstallation $Installation}else{$null}
+$storageOperation=if(-not $Plan){Enter-DesktopStorageOperation}else{$null}
+$published=$null
+try {
 $run=Join-Path $env:LAPLACE_WORK ('operations/components-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ'))
 $null=New-Item -ItemType Directory -Path $run -Force
 $buildReceipt=Join-Path $run 'components.json'
@@ -195,4 +200,12 @@ if($Publish){
     # checks are serving. A failed check is reported as an incomplete deployment.
     & pwsh -NoProfile -File "$PSScriptRoot/Invoke-IisDatabase.ps1" -Installation $Installation -MigrationRuntime $migrationRuntime -Database substrate -Operation status -ConfigureLogs
     if($LASTEXITCODE){throw 'IIS was published, but application log access verification failed. See the database operation receipt.'}
+}
+} finally {
+    try {
+        if($published -and (Test-Path -LiteralPath $published)) {
+            Assert-StorageTree $published $run
+            Remove-Item -LiteralPath $published -Recurse -Force -ErrorAction Stop
+        }
+    } finally { Exit-DesktopStorageOperation -Operation $storageOperation -Iis $cleanupIis }
 }
