@@ -97,6 +97,8 @@ internal static partial class IngestCommands
                     return code;
                 }
                 if (!complete || total == 0) throw new InvalidDataException("The Native Engine did not report a completed ingest with selected files for the requested source.");
+                if (paths.Length == 0 && sourceId == default)
+                    throw new InvalidDataException("The Native Engine reported files without publishing the requested corpus witness. The retained files do not establish completed corpus admission.");
                 journal.OnRunFinished(source, new IngestRunResult(sourceId, source, 0, 0, 0,
                     entities, physicalities, 0, 0, elapsed.Elapsed, [],
                     FilesDone: done, InputUnitsDone: done, InputUnitsTotal: total), "ok");

@@ -213,7 +213,6 @@ jobs:
               ;;
             openings)
               source=openings
-              p="$chess/openings"
               ;;
             books)
               source=chess-books

@@ -2,9 +2,9 @@ name: Operator workflow validation
 on:
   push:
     branches: [main]
-    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh']
+    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ingest_catalog.py', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh', 'deploy/client/**']
   pull_request:
-    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh']
+    paths: ['.github/**', 'scripts/test-seed-workflow-ownership.py', 'scripts/ingest-source.sh', 'scripts/ingest_catalog.py', 'scripts/ensure-foundation.sh', 'deploy/linux/host-lock.sh', 'deploy/client/**']
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: c697114f01478df4fb45172f778fdb09415780b9
+          ref: 5d890d55f6699674486ef56a862ecf03a8a6ec00
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Validate workflow syntax and operator ownership
