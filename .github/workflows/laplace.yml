@@ -115,7 +115,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 0fc02ad3bd7efd3bfe287d3726a175e6ec58b947
+          ref: 205fd62fb6b648387fc87f8e7dfa5eeb9a7ee38c
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
@@ -292,7 +292,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 0fc02ad3bd7efd3bfe287d3726a175e6ec58b947
+          ref: 205fd62fb6b648387fc87f8e7dfa5eeb9a7ee38c
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
