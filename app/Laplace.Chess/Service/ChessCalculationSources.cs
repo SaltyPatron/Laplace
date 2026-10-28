@@ -20,5 +20,6 @@ internal static class ChessCalculationSources
         CalculationSources.Register(ChessPlayerContextOutcomes.SourceId);
         CalculationSources.Register(ChessTacticOutcomes.SourceId);
         CalculationSources.Register(ChessStockfishEval.SourceId);
+        CalculationSources.Register(ChessSyzygy.SourceId);
     }
 }

@@ -335,6 +335,8 @@ public sealed class ChessSyzygyTests
             .ToList();
         Assert.Contains(verdicts, a => a.TypeId == ChessVocabulary.HasWdlType);
         Assert.Contains(verdicts, a => a.TypeId == ChessVocabulary.HasDtzType);
+        Assert.All(verdicts, a => Assert.Equal(CalculationSources.Qualifier,
+            a.QualifierMask & CalculationSources.Qualifier));
         Assert.DoesNotContain(change.Attestations,
             a => a.SubjectId == ids[1]
                  && (a.TypeId == ChessVocabulary.HasWdlType
