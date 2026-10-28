@@ -133,7 +133,7 @@ jobs:
           toolchain: 1.90.0
 
       - name: Own staging work across delivery steps
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           operation: begin
 
@@ -230,7 +230,7 @@ jobs:
 
       - name: Clean staging delivery work after package upload
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain staging cleanup receipt
@@ -330,7 +330,7 @@ jobs:
           toolchain: 1.90.0
 
       - name: Own cloud qualification work until cleanup
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           operation: begin
 
@@ -349,7 +349,7 @@ jobs:
 
       - name: Clean qualification work before cloud lease release
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cloud cleanup receipt
@@ -407,7 +407,7 @@ jobs:
           fetch-depth: 1
 
       - name: Own received production work until readback
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           operation: begin
 
@@ -435,7 +435,7 @@ jobs:
 
       - name: Clean received production package after readback
         if: always()
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain production cleanup receipt

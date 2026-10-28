@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 jobs:
@@ -512,7 +513,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Audit or clean with the qualified owner
-        uses: SaltyPatron/Laplace-Operations/storage@24d76b17add9caebc61afde279d8dd7034b82429
+        uses: SaltyPatron/Laplace-Operations/storage@f58c4431b80c8a93bc166e39fb2adfeda9f13bae
         with:
           operation: ${{ inputs.operation == 'storage' && 'status' || 'clean' }}
           receipt: ${{ runner.temp }}/storage.json
