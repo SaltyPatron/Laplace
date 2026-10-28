@@ -112,7 +112,9 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
             relative = os.path.relpath(path, root).replace("\\", "/")
         except ValueError:  # installed resources may be on another Windows volume
             relative = path.as_posix()
-        if "/wwwroot/" in relative or "/bin/" in relative or "/obj/" in relative:
+        parts = relative.split("/")
+        project_output = len(parts) > 2 and parts[0] == "app" and parts[2] in ("bin", "obj")
+        if "/wwwroot/" in relative or project_output:
             continue
         payload.append((relative, digest(path) if path.is_file() else None))
     libraries = {}

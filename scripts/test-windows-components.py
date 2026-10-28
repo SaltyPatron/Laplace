@@ -94,6 +94,22 @@ class Components(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unresolved publication resource"):
             self.inputs("cli")
 
+    def test_recipe_executable_and_grammar_changes_invalidate_every_publishing_consumer(self):
+        project = self.root / "app/Laplace.Shared/Laplace.Shared.csproj"
+        project.write_text('<Project><ItemGroup><Content Include="$(LaplaceRecipeRuntime)/**/*" /></ItemGroup></Project>')
+        runtime = self.native / "core/recipe_engine/runtime/bin"
+        runtime.mkdir(parents=True)
+        executable = runtime / "laplace.exe"
+        executable.write_bytes(b"Native reader one")
+        grammar = runtime / "grammars/xml.dll"
+        grammar.parent.mkdir()
+        grammar.write_bytes(b"grammar one")
+        for path in (executable, grammar):
+            before = {name: self.inputs(name) for name in COMPONENTS.PROJECTS}
+            path.write_bytes(path.read_bytes() + b" changed")
+            for name in before:
+                self.assertNotEqual(before[name], self.inputs(name), (name, path))
+
     def test_identical_runtime_files_share_storage_and_corruption_is_rejected(self):
         source = self.root / "source"
         source.mkdir()
