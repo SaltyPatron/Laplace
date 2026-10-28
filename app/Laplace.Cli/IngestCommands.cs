@@ -208,13 +208,19 @@ internal static partial class IngestCommands
 
         var parsed = specs.Select(spec => ParseIngestCliArgs(spec.Split(' ',
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))).ToArray();
+        for (int i = 0; i < parsed.Length; i++)
+        {
+            if (string.IsNullOrEmpty(parsed[i].Source))
+                return Fail($"ingest chain: spec {i + 1} is empty; no sources started");
+            if (!IngestDispatchTable.IsRegistered(parsed[i].Source))
+                return Fail($"ingest chain: unknown source '{parsed[i].Source}' in spec {i + 1}; no sources started "
+                            + $"(supported: {string.Join(", ", IngestDispatchTable.DisplayKeys)})");
+        }
         for (int i = 0; i < specs.Length; i++)
         {
             // The caller supplied this sequence; do not start a second
             // prerequisite campaign inside each of its Native source jobs.
             var cli = parsed[i] with { NativeExpandPrerequisites = false };
-            if (string.IsNullOrEmpty(cli.Source))
-                return Fail($"ingest chain: spec {i + 1} is empty");
             Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");
             if (!IngestDispatchTable.TryDispatch(cli.Source.ToLowerInvariant(), cli, out var task))
                 return Fail($"ingest chain: unknown source '{cli.Source}' in spec {i + 1} "

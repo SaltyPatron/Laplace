@@ -105,7 +105,7 @@ if($Publish -and $selected.Contains('postgres')){
         if($LASTEXITCODE){throw 'PostgreSQL extension connection preflight failed; installed extension files were not changed.'}
         & (Join-Path $repo 'scripts/win/build-extensions.cmd')
         if($LASTEXITCODE){throw 'PostgreSQL extension build failed; no application package was created.'}
-        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build --recycle
+        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build
         if($LASTEXITCODE){throw 'PostgreSQL extension installation failed; no application package was created.'}
     } finally {
         foreach($name in $savedPg.Keys){[Environment]::SetEnvironmentVariable($name,$savedPg[$name])}

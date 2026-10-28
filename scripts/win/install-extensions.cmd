@@ -176,13 +176,28 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
 )
 "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
 "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT name, default_version FROM pg_available_extensions WHERE name LIKE 'laplace%%' ORDER BY 1;" || exit /b 1
-if "%FORCE_RECYCLE%"=="1" set "RUNTIME_CHANGED=1"
-if "%RECYCLE%"=="1" if "%RUNTIME_CHANGED%"=="0" echo runtime files unchanged: backend recycling skipped
-if "%RECYCLE%"=="1" if "%RUNTIME_CHANGED%"=="1" (
+call :recycle_backends || exit /b 1
+goto clients_refreshed
+
+:recycle_backends
+rem DLL publication does not grant ownership of existing database sessions.
+rem Idle Native connections can belong to an ingest between working windows;
+rem filtering only pg_stat_activity.state would still terminate those jobs.
+rem IIS activation reconnects its own pools. Other clients finish on the runtime
+rem they loaded. Only explicitly requested maintenance may force them.
+if not "%FORCE_RECYCLE%"=="1" (
+  echo Existing PostgreSQL sessions retained; application pools reconnect during activation.
+  if "%RECYCLE%"=="1" echo --recycle no longer terminates external clients; explicit maintenance requires --force-recycle.
+  exit /b 0
+)
+if "%FORCE_RECYCLE%"=="1" (
   echo recycling laplace backends so fresh DLLs/SQL load on next connection...
   > "%GUC_SQL%" echo DO $$ DECLARE recycled_count integer; recycled_ok boolean; BEGIN WITH attempts AS MATERIALIZED ^(SELECT pg_terminate_backend^(pid^) AS recycled FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid ^<^> pg_backend_pid^(^)^) SELECT count^(*^) FILTER ^(WHERE recycled^), COALESCE^(bool_and^(recycled^),true^) INTO recycled_count,recycled_ok FROM attempts; IF NOT recycled_ok THEN RAISE EXCEPTION 'PostgreSQL could not recycle every selected backend' USING ERRCODE = '55000'; END IF; RAISE NOTICE '%% backend^(s^) recycled',recycled_count; END $$;
   "%PSQL%" -X -w -h "%LAPLACE_PGHOST%" -p "%LAPLACE_PGPORT%" -U "%LAPLACE_PGUSER%" -d postgres -v ON_ERROR_STOP=1 -f "%GUC_SQL%" || exit /b 1
 )
+exit /b 0
+
+:clients_refreshed
 echo wired: extension_control_path + dynamic_library_path + t0/highway/chess perfcache GUCs -^> %DEPLOY%
 exit /b 0
 

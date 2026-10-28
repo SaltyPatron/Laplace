@@ -38,7 +38,7 @@ echo ==== post-create identity health on %DBNAME% ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d !DBNAME! -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1
 
 if "%RECYCLE%"=="1" (
-  echo ==== recycle backends (fresh DLL load on next connection) ====
+  echo ==== publish runtime while preserving existing client sessions ====
   call "%~dp0install-extensions.cmd" --recycle || exit /b 1
 )
 

@@ -205,6 +205,15 @@ dependencies taken from the project-reference graph. `laplace-ops deploy desktop
 selected stages and `-Force` explicitly rebuilds the selected closure. An unchanged
 full build reuses its component artifacts and complete verified IIS package.
 
+Extension publication preserves existing PostgreSQL sessions, including ingests
+between working windows. IIS activation reconnects its own pools; other clients
+finish with the runtime they loaded. `scripts/win/install-extensions.cmd
+--force-recycle` is an explicit maintenance operation that terminates clients.
+The legacy `--recycle` flag preserves them during ordinary publication.
+
+`laplace-mono ingest chain` validates all source names before starting its first
+source. An invalid later name fails immediately without admitting earlier sources.
+
 ### 3. Database Lifecycle & Maintenance
 
 Laplace separates content/substrate state (`LAPLACE_DB`) from accounts, sessions, API keys, and billing (`LAPLACE_APP_DB`). You can inspect, migrate, repair (recreate after an external drop), or reset either database without rebuilding the application:

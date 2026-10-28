@@ -6,6 +6,7 @@ on:
       - 'deploy/windows/**'
       - 'scripts/win/**'
       - 'scripts/tests/windows-runtime-copy.ps1'
+      - 'scripts/tests/windows-backend-lifecycle.ps1'
       - 'scripts/web-artifact.py'
       - 'scripts/test-web-artifact.py'
       - 'scripts/windows-components.py'
@@ -18,6 +19,7 @@ on:
       - 'deploy/windows/**'
       - 'scripts/win/**'
       - 'scripts/tests/windows-runtime-copy.ps1'
+      - 'scripts/tests/windows-backend-lifecycle.ps1'
       - 'scripts/web-artifact.py'
       - 'scripts/test-web-artifact.py'
       - 'scripts/windows-components.py'
@@ -37,6 +39,9 @@ jobs:
       - name: Verify unchanged locked DLL reuse and changed runtime copying
         shell: pwsh
         run: pwsh -NoProfile -File scripts/tests/windows-runtime-copy.ps1
+      - name: Verify publication preserves database clients
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/tests/windows-backend-lifecycle.ps1
       - name: Verify web artifact reuse inputs and qualification
         run: python scripts/test-web-artifact.py
       # Operations owns the cross-repository component/storage qualification in

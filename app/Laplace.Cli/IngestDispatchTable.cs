@@ -156,6 +156,13 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessPgnDecomposer(cli.Recursive, analyzeInline: !cli.NoAnalyze),
             cli.Path ?? "", skipLayerCheck: true, cli, skipSourceCompletion: true);
 
+    // Inspect the same inventory without invoking a handler. Chain preflight must
+    // validate every source before any handler can open a database or publish.
+    internal static bool IsRegistered(string sourceKey)
+        => CanonicalSourceKeys.Contains(CanonicalSourceName(sourceKey), StringComparer.OrdinalIgnoreCase)
+           || Routes.ContainsKey(sourceKey)
+           || ModelAliases.Contains(sourceKey, StringComparer.OrdinalIgnoreCase);
+
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {
         string canonical = CanonicalSourceName(sourceKey);

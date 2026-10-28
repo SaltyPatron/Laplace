@@ -34,10 +34,8 @@ set "RESET_SQL=%TEMP%\laplace-db-reset.sql"
 "%PGBIN%\createdb.exe" -h localhost -U postgres "%LAPLACE_DBNAME%" || exit /b 1
 
 echo ==== deploy extension SQL + DLLs ====
-rem --recycle is additive inside install-extensions (it only appends a backend
-rem terminate after deploy + GUC wiring), so one call does the recycle work --
-rem the previous second full install-extensions run for RECYCLE==1 duplicated
-rem the entire deploy for one pg_terminate_backend's worth of work.
+rem The legacy --recycle option preserves external clients. Recreating this
+rem database does not authorize terminating jobs connected to other databases.
 if "%RECYCLE%"=="1" (
   call "%~dp0install-extensions.cmd" --recycle || exit /b 1
 ) else (
