@@ -212,7 +212,9 @@ class StockfishSourceTests(unittest.TestCase):
         script = script.replace('main "$@"', 'id() { printf "1\n"; }\nwrite_api_env')
         prefix = self.base / "install"
         (prefix / "app").mkdir(parents=True)
-        (prefix / "app/laplace-api.env").write_text("PRESERVED_SETTING=unchanged\n")
+        (prefix / "app/laplace-api.env").write_text(
+            "PRESERVED_SETTING=unchanged\nLAPLACE_STOCKFISH_SOURCE=/obsolete/work/checkout\n"
+            "LAPLACE_STOCKFISH=/obsolete/work/checkout/src/stockfish\n")
         (prefix / "bin").mkdir()
         cutechess = prefix / "bin/cutechess-cli"
         cutechess.write_text("#!/bin/sh\nexit 0\n")
@@ -227,6 +229,8 @@ class StockfishSourceTests(unittest.TestCase):
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         content = (prefix / "app/laplace-api.env").read_text()
         self.assertEqual(1, content.count("LAPLACE_STOCKFISH_SOURCE="))
+        self.assertEqual(1, content.count("LAPLACE_STOCKFISH="))
+        self.assertNotIn('/obsolete/work', content)
         self.assertIn("LAPLACE_STOCKFISH_SOURCE=" + str(self.source) + "\n", content)
         self.assertIn("LAPLACE_STOCKFISH=" + str(self.source / "src/stockfish") + "\n", content)
         self.assertIn("PRESERVED_SETTING=unchanged\n", content)

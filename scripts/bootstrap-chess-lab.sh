@@ -189,7 +189,10 @@ write_api_env() {
 
   local marker_begin="# >>> laplace-runner managed: chess-lab env >>>"
   local marker_end="# <<< laplace-runner managed: chess-lab env <<<"
-  sed -i -e "/$marker_begin/,/$marker_end/d" "$ENV_FILE"
+  # Older configure operations wrote these assignments outside the managed
+  # block. Remove them as well so readers cannot retain a second source path.
+  sed -i -e "/$marker_begin/,/$marker_end/d" \
+    -e '/^LAPLACE_STOCKFISH=/d' -e '/^LAPLACE_STOCKFISH_SOURCE=/d' "$ENV_FILE"
   {
     echo "$marker_begin"
     [ -n "$cc" ] && echo "LAPLACE_CUTECHESS=$cc"
