@@ -29,13 +29,23 @@ rem its current module, not only laplace_geom and laplace_substrate.
 set "PG_SOURCE=%LAPLACE_SRC%\Laplace-postgres"
 pwsh -NoProfile -File "%~dp0assert-build-source.ps1" -SourceDirectory "%PG_SOURCE%" -BuildDirectory "%LAPLACE_PG_EXTENSION_BUILD%" || exit /b 1
 pwsh -NoProfile -File "%~dp0tree-lock.ps1" acquire build-pg-extension || exit /b 1
+if "%RECONF%"=="1" goto configure_pg
+if not exist "%LAPLACE_PG_EXTENSION_BUILD%\CMakeCache.txt" goto configure_pg
+if not exist "%LAPLACE_PG_EXTENSION_BUILD%\CMakeFiles\rules.ninja" goto configure_pg
+if exist "%LAPLACE_PG_EXTENSION_BUILD%\build.ninja" goto build_pg
+:configure_pg
 cmake -S "%PG_SOURCE%" -B "%LAPLACE_PG_EXTENSION_BUILD%" -G Ninja ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx ^
   %LAPLACE_RESOURCE_FLAGS% ^
   "-DPG_CONFIG=%PGBIN:\=/%/pg_config.exe" ^
   "-DLAPLACE_NATIVE=%LAPLACE_NATIVE:\=/%" ^
-  "-DLAPLACE_TIER0=%LAPLACE_PERFCACHE_BIN:\=/%"
+  "-DLAPLACE_BLAKE3_DIR=%LAPLACE_BLAKE3_DIR:\=/%" ^
+  "-DLAPLACE_COREMATH=%LAPLACE_COREMATH:\=/%" ^
+  "-DLAPLACE_OPERATIONS=%LAPLACE_OPERATIONS:\=/%" ^
+  "-DLAPLACE_ICU_DIR=%LAPLACE_ICU_DIR:\=/%" ^
+  "-DLAPLACE_TIER0=%LAPLACE_TIER0:\=/%"
 if errorlevel 1 goto pg_fail
+:build_pg
 cmake --build "%LAPLACE_PG_EXTENSION_BUILD%" --target laplace_pg
 if errorlevel 1 goto pg_fail
 pwsh -NoProfile -File "%~dp0tree-lock.ps1" release build-pg-extension || exit /b 1

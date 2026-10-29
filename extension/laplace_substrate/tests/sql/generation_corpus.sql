@@ -536,6 +536,36 @@ BEGIN
         RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
     END IF;
 
+    -- 134,215,680 repeated occurrences remain 2,048 compressed runs.
+    -- Expanding these IDs needs over 2 GB and is not an adjacency algorithm.
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
+    SELECT public.laplace_hash128_blake3('test/corpus/wide-rle-physicality'),
+           public.laplace_hash128_blake3('test/corpus/wide-rle-entity'),3,
+           public.ST_SetSRID(public.ST_MakePoint(0,0,0,0),0),decode(repeat('00',16),'hex'),
+           public.ST_MakeLine(ARRAY(
+             SELECT public.laplace_mantissa_pack(w_the,n,65535,t2flag)
+             FROM generate_series(1,2048) n ORDER BY n) || ARRAY[
+             public.laplace_mantissa_pack(sp,2049,1,t2flag),
+             public.laplace_mantissa_pack(w_of,2050,1,t2flag)]),134215682;
+    IF NOT EXISTS (SELECT FROM structural.geometry_successors_batch(
+        ARRAY[w_the,w_the],NULL,2,false,3) g WHERE g.point_id=w_the AND g.successor_id=w_of)
+       OR NOT EXISTS (SELECT FROM structural.geometry_successors_batch(
+        ARRAY[w_of],NULL,2,true,3) g WHERE g.point_id=w_of AND g.successor_id=w_the) THEN
+        RAISE EXCEPTION 'FAIL: compressed adjacency lost long-run successor or predecessor';
+    END IF;
+    UPDATE laplace.physicalities SET trajectory=public.ST_MakeLine(ARRAY[
+        public.laplace_mantissa_pack(w_the,1,1,t2flag),
+        public.laplace_mantissa_pack(sp,2,65535,t2flag),
+        public.laplace_mantissa_pack(w_of,3,1,t2flag)]),n_constituents=65537
+    WHERE id=public.laplace_hash128_blake3('test/corpus/wide-rle-physicality');
+    IF EXISTS (SELECT FROM structural.geometry_successors_batch(
+        ARRAY[w_the],NULL,8,false,3) g WHERE g.successor_id=w_of) THEN
+        RAISE EXCEPTION 'FAIL: compressed separator run did not consume the logical window';
+    END IF;
+    DELETE FROM laplace.physicalities
+    WHERE id=public.laplace_hash128_blake3('test/corpus/wide-rle-physicality');
+
     -- RLE expansion and overlapping contexts preserve every ordinal match.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                        trajectory, n_constituents, observed_at)

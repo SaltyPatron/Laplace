@@ -24,6 +24,8 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
+#include "laplace/core/sql_catalog.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_language);
 
@@ -32,6 +34,24 @@ typedef struct PlEntry
     uint8   key[16];
     double  mass;
 } PlEntry;
+
+static void
+pl_receive_language(TupleTableSlot *row, void *context)
+{
+    HTAB *languages = context;
+    bool isnull, found;
+    Datum object = slot_getattr(row, 1, &isnull);
+    if (isnull) return;
+    bytea *id = DatumGetByteaPP(object);
+    if (VARSIZE_ANY_EXHDR(id) != 16) return;
+    int64 rating = DatumGetInt64(slot_getattr(row, 2, &isnull));
+    if (isnull) return;
+    int64 rd = DatumGetInt64(slot_getattr(row, 3, &isnull));
+    if (isnull) return;
+    PlEntry *entry = hash_search(languages, VARDATA_ANY(id), HASH_ENTER, &found);
+    if (!found) entry->mass = 0.0;
+    entry->mass += (double)laplace_effective_mu_fp(rating, rd);
+}
 
 static int
 pl_cmp(const void *a, const void *b)
@@ -146,57 +166,15 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
         Oid        argtypes[1] = { BYTEAARRAYOID };
         Datum      args[1];
         ArrayType *arr;
-        Portal     portal;
 
         old = MemoryContextSwitchTo(work);
         arr = construct_array(id_datums, n_ids, BYTEAOID, -1, false, TYPALIGN_INT);
         MemoryContextSwitchTo(old);
 
         args[0] = PointerGetDatum(arr);
-        portal = SPI_cursor_open(
-            "pl_edges",
-            spi_common_ensure_plan(
-                &pl_edges_plan,
-                "SELECT c.object_id, c.rating, c.rd FROM laplace.consensus c "
-                "WHERE c.subject_id = ANY($1) "
-                "  AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
-                "  AND c.object_id IS NOT NULL",
-                1, argtypes),
-            args, NULL, true);
-
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 50000);
-            if (SPI_processed == 0)
-                break;
-
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                HeapTuple tup = SPI_tuptable->vals[r];
-                TupleDesc td = SPI_tuptable->tupdesc;
-                bool      isnull, found;
-                bytea    *obj;
-                int64     rating, rd;
-                PlEntry  *e;
-
-                obj = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-                if (isnull || VARSIZE_ANY_EXHDR(obj) != 16) continue;
-                rating = DatumGetInt64(SPI_getbinval(tup, td, 2, &isnull));
-                if (isnull) continue;
-                rd = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-                if (isnull) continue;
-
-                e = (PlEntry *) hash_search(lang_h, VARDATA_ANY(obj),
-                                            HASH_ENTER, &found);
-                if (!found)
-                    e->mass = 0.0;
-                /* Effective mu: rating minus twice the deviation. */
-                e->mass += (double) laplace_effective_mu_fp(rating, rd);
-            }
-            SPI_freetuptable(SPI_tuptable);
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_cursor_close(portal);
+        laplace_spi_stream(spi_common_ensure_plan(&pl_edges_plan,
+            laplace_sql_query_text("prompt.language_edges"), 1, argtypes),
+            1, argtypes, args, NULL, pl_receive_language, lang_h);
     }
 
     /* ---- rank and emit ---- */

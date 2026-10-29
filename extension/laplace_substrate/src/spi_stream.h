@@ -8,8 +8,8 @@
  * state belongs in the caller's context, outside the reset row context. */
 typedef lp_pg_executor_visit LaplaceSqlRowVisitor;
 
-static void laplace_spi_stream(SPIPlanPtr plan, int nargs, const Oid *types,
-    const Datum *values, const char *nulls, LaplaceSqlRowVisitor visit, void *context)
+static ParamListInfo laplace_spi_parameters(int nargs, const Oid *types,
+    const Datum *values, const char *nulls)
 {
     ParamListInfo params = makeParamList(nargs);
     for (int i = 0; i < nargs; i++) {
@@ -17,7 +17,29 @@ static void laplace_spi_stream(SPIPlanPtr plan, int nargs, const Oid *types,
         params->params[i].value = values[i];
         params->params[i].isnull = nulls && nulls[i] == 'n';
     }
-    lp_pg_execute_stream(plan, params, true, visit, context);
+    return params;
+}
+
+static void laplace_spi_stream_mode(SPIPlanPtr plan, int nargs, const Oid *types,
+    const Datum *values, const char *nulls, bool read_only,
+    LaplaceSqlRowVisitor visit, void *context)
+{
+    ParamListInfo params = laplace_spi_parameters(nargs, types, values, nulls);
+    lp_pg_execute_stream(plan, params, read_only, visit, context);
+    pfree(params);
+}
+
+static void laplace_spi_stream(SPIPlanPtr plan, int nargs, const Oid *types,
+    const Datum *values, const char *nulls, LaplaceSqlRowVisitor visit, void *context)
+{
+    laplace_spi_stream_mode(plan, nargs, types, values, nulls, true, visit, context);
+}
+
+static void laplace_spi_stream_until(SPIPlanPtr plan, int nargs, const Oid *types,
+    const Datum *values, const char *nulls, lp_pg_executor_visit_until visit, void *context)
+{
+    ParamListInfo params = laplace_spi_parameters(nargs, types, values, nulls);
+    lp_pg_execute_stream_until(plan, params, true, visit, context);
     pfree(params);
 }
 #endif

@@ -11,6 +11,8 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
+#include "laplace/core/sql_catalog.h"
 #include "trajectory_wkb.h"
 
 #include "laplace/core/mantissa.h"
@@ -30,40 +32,11 @@
  * One GIN-served containment query covers every requested point; each matching
  * trajectory arrives as one LINESTRING ZM WKB whose vertex order is ordinal
  * order, so vertices are decoded here with mantissa_unpack and run lengths are
- * expanded to the full, non-deduplicated sequence that adjacency requires.
+ * scanned as compressed ordered runs without materializing repeated occurrences.
  */
-
-static const char *BATCH_UNPACK_QUERY =
-    "SELECT public.ST_AsBinary(p.trajectory) "
-    "FROM laplace.physicalities p "
-    "WHERE p.type = $2 "
-    "AND p.trajectory IS NOT NULL "
-    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1";
-
-static const char *SEPARATOR_QUERY =
-    "SELECT generation.separator_ids()";
 
 static SPIPlanPtr batch_unpack_plan = NULL;
 static SPIPlanPtr separator_plan = NULL;
-
-static void
-ensure_raw_capacity(char **raw, int *raw_cap, size_t required)
-{
-    if (required > INT_MAX || required > MaxAllocSize / 16)
-        ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg("geometry_successors_batch: expanded trajectory exceeds allocation capacity")));
-    if (required <= (size_t) *raw_cap)
-        return;
-
-    size_t cap = *raw_cap > 0 ? (size_t) *raw_cap : 16;
-    while (cap < required) {
-        if (cap > (size_t) INT_MAX / 2) { cap = required; break; }
-        cap *= 2;
-    }
-    *raw = *raw == NULL ? (char *) palloc(cap * 16) : (char *) repalloc(*raw, cap * 16);
-    *raw_cap = (int) cap;
-}
 
 typedef struct IdEntry { char key[16]; } IdEntry;
 
@@ -71,6 +44,7 @@ typedef struct RootEntry
 {
     char  key[16];
     int32 index;
+    uint64 generation;
 } RootEntry;
 
 typedef struct PairEntry
@@ -98,7 +72,7 @@ ensure_plans(void)
          * by id, so nothing prunes and every partition is scanned; a read-only
          * CURSOR_OPT_PARALLEL_OK plan lets that scan run as a Parallel Append.
          */
-        SPIPlanPtr plan = SPI_prepare_cursor(BATCH_UNPACK_QUERY, 2, argtypes,
+        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("geometry.successor_carriers"), 2, argtypes,
                                             CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
@@ -111,7 +85,7 @@ ensure_plans(void)
 
     if (separator_plan == NULL)
     {
-        SPIPlanPtr plan = SPI_prepare_cursor(SEPARATOR_QUERY, 0, NULL, CURSOR_OPT_PARALLEL_OK);
+        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("geometry.separators"), 0, NULL, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "geometry_successors: SPI_prepare(separators) failed: %s",
@@ -188,46 +162,53 @@ record_batch_pair(HTAB *pairs, const char *root, const char *successor)
     entry->count++;
 }
 
+typedef struct {
+    HTAB *roots, *separators, *pairs;
+    int window;
+    bool backward;
+    uint64 generation;
+} SuccessorRead;
+
+/* Read compressed occurrences directly. A run containing millions of equal
+ * children stays one run; separator counts consume the logical window in one
+ * step. The first occurrence of each requested root still owns its successor. */
 static void
-scan_batch_trajectory(const char *raw, int n_raw, HTAB *roots, int n_roots,
-                      HTAB *separators, HTAB *pairs, int window, bool backward)
+receive_successor_trajectory(TupleTableSlot *row, void *opaque)
 {
-    bool *seen;
-
-    if (n_raw < 1)
-        return;
-
-    seen = (bool *) palloc0(sizeof(bool) * (Size) n_roots);
-    for (int i = 0; i < n_raw; i++)
-    {
-        const char *token = raw + (Size) i * 16;
-        RootEntry  *root = (RootEntry *) hash_search(roots, token, HASH_FIND, NULL);
-        int         considered = 0;
-
-        if (root == NULL || seen[root->index])
-            continue;
-        seen[root->index] = true;
-
-        for (int j = i + (backward ? -1 : 1);
-             j >= 0 && j < n_raw && considered < window;
-             j += backward ? -1 : 1)
-        {
-            const char *candidate = raw + (Size) j * 16;
-
-            /* A forward window skips later occurrences of its own point
-             * without counting them against the window. */
-            if (!backward && memcmp(candidate, root->key, 16) == 0)
+    SuccessorRead *read = opaque;
+    bool isnull;
+    Datum value = slot_getattr(row, 1, &isnull);
+    if (isnull) return;
+    uint32 count;
+    const unsigned char *points = laplace_trajectory_wkb_points(DatumGetByteaPP(value), &count);
+    if (++read->generation == 0)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("geometry_successors_batch: trajectory generation overflow")));
+    for (uint32 i = 0; i < count; i++) {
+        CHECK_FOR_INTERRUPTS();
+        double vertex[4]; mantissa_payload_t token;
+        memcpy(vertex, points + (Size)i * 32, sizeof(vertex));
+        mantissa_unpack(vertex, &token);
+        RootEntry *root = hash_search(read->roots, &token.entity_id, HASH_FIND, NULL);
+        if (!root || root->generation == read->generation) continue;
+        root->generation = read->generation;
+        uint64 remaining = read->window;
+        for (int64 j = (int64)i + (read->backward ? -1 : 1);
+             j >= 0 && j < count && remaining; j += read->backward ? -1 : 1) {
+            mantissa_payload_t candidate;
+            memcpy(vertex, points + (Size)j * 32, sizeof(vertex));
+            mantissa_unpack(vertex, &candidate);
+            if (!read->backward && memcmp(&candidate.entity_id, root->key, 16) == 0)
                 continue;
-
-            considered++;
-            if (hash_search(separators, candidate, HASH_FIND, NULL) != NULL)
-                continue;
-
-            record_batch_pair(pairs, root->key, candidate);
-            break;
+            if (!hash_search(read->separators, &candidate.entity_id, HASH_FIND, NULL)) {
+                record_batch_pair(read->pairs, root->key, (const char *)&candidate.entity_id);
+                break;
+            }
+            uint64 run = candidate.run_length ? candidate.run_length : 1;
+            if (run >= remaining) break;
+            remaining -= run;
         }
     }
-    pfree(seen);
 }
 
 static int
@@ -309,6 +290,7 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
         if (!found)
         {
             root->index = n_roots;
+            root->generation = 0;
             memcpy(root_ids + (Size) n_roots * 16, VARDATA_ANY(point), 16);
             n_roots++;
         }
@@ -331,12 +313,6 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
         ArrayType *normalized;
         Datum      args[2];
         char       nulls[2] = { ' ', ' ' };
-        Portal     portal;
-        char        current[16];
-        bool        have_current = false;
-        char       *raw = NULL;
-        int         n_raw = 0;
-        int         raw_cap = 0;
 
         for (int i = 0; i < n_roots; i++)
         {
@@ -350,71 +326,10 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
                                      -1, false, TYPALIGN_INT);
         args[0] = PointerGetDatum(normalized);
         args[1] = Int16GetDatum(physicality_type);
-        portal = SPI_cursor_open(NULL, batch_unpack_plan, args, nulls, true);
-        if (portal == NULL)
-            elog(ERROR, "geometry_successors_batch: unpack cursor failed: %s",
-                 SPI_result_code_string(SPI_result));
-
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 2048);
-            if (SPI_processed == 0)
-                break;
-
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                HeapTuple tuple = SPI_tuptable->vals[r];
-                TupleDesc desc = SPI_tuptable->tupdesc;
-                bool      wkb_null;
-                Datum     wkb_datum = SPI_getbinval(tuple, desc, 1, &wkb_null);
-                bytea    *wkb;
-                const unsigned char *b;
-                uint32    npoints;
-
-                if (wkb_null)
-                    continue;
-                wkb = DatumGetByteaPP(wkb_datum);
-                b = laplace_trajectory_wkb_points(wkb, &npoints);
-
-                size_t expanded = 0;
-                for (uint32 v = 0; v < npoints; v++)
-                {
-                    double vertex[4];
-                    mantissa_payload_t payload;
-                    memcpy(vertex, b + (Size) v * 32, 32);
-                    mantissa_unpack(vertex, &payload);
-                    size_t run = payload.run_length ? payload.run_length : 1;
-                    if (run > SIZE_MAX - expanded)
-                        ereport(ERROR, (errmsg("geometry_successors_batch: invalid RLE run total")));
-                    expanded += run;
-                }
-                ensure_raw_capacity(&raw, &raw_cap, expanded);
-                n_raw = 0;
-                for (uint32 v = 0; v < npoints; v++)
-                {
-                    double             vertex[4];
-                    mantissa_payload_t payload;
-
-                    memcpy(vertex, b + (Size) v * 32, 32);
-                    mantissa_unpack(vertex, &payload);
-                    int run = payload.run_length ? payload.run_length : 1;
-                    for (int j = 0; j < run; j++)
-                    {
-                        memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
-                        n_raw++;
-                    }
-                }
-                scan_batch_trajectory(raw, n_raw, roots, n_roots,
-                                      separators, pairs, window, backward);
-            }
-            SPI_freetuptable(SPI_tuptable);
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_cursor_close(portal);
-        (void) have_current;
-        (void) current;
-        if (raw != NULL)
-            pfree(raw);
+        Oid types[] = {BYTEAARRAYOID, INT2OID};
+        SuccessorRead read = {roots, separators, pairs, window, backward, 0};
+        laplace_spi_stream(batch_unpack_plan, 2, types, args, nulls,
+            receive_successor_trajectory, &read);
     }
 
     {
