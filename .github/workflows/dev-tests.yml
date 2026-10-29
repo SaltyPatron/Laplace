@@ -138,7 +138,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 3ab34eb9bdbf960abf09441194bb4d9c15afbf5d
+          ref: eed0a3fd2713a185047286a180cf6c05f1438fba
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract

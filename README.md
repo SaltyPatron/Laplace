@@ -275,8 +275,10 @@ same primary-key owner through `ops.entity_physicalities`. Request ordinals
 retain duplicates, missing IDs stay absent, and reads retain the caller's
 snapshot and installed namespaces.
 
-All-member containment delegates to `laplace_containers`, which shares Native
-GIN nomination and exact primary-key reads with provenance frontiers. The
+All-member containment delegates to `laplace_containers`; any-member queries
+delegate to `laplace_holders`. Both share Native GIN access, exact rechecks and
+installed-namespace ownership with provenance frontiers. CLI and MCP also use
+these owners, with their caller's connection and typed `laplace_standings` reads. The
 monorepo's membership consumer uses the shared PostgreSQL streaming executor,
 retaining its emitted-row boundary without an additional SPI tuple-table copy.
 
