@@ -45,9 +45,20 @@ def main():
         # Installed extension/cache paths may be database-scoped on Linux.
         # Carry their actual values into this database without changing schema
         # resolution, planner switches, roles, or the installed source database.
-        configure = """SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting)
-FROM pg_settings WHERE name IN ('extension_control_path','dynamic_library_path')
- OR name LIKE 'laplace.%'
+        configure = """WITH installed AS (
+ SELECT name,setting,3 AS priority FROM pg_settings
+ UNION ALL
+ SELECT split_part(value,'=',1),substr(value,strpos(value,'=')+1),
+        CASE WHEN s.setrole=0 THEN 1 ELSE 2 END
+ FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) value
+ WHERE s.setdatabase=(SELECT oid FROM pg_database WHERE datname=current_database())
+   AND s.setrole IN (0,(SELECT oid FROM pg_roles WHERE rolname=current_user))
+), selected AS (
+ SELECT DISTINCT ON (name) name,setting FROM installed
+ WHERE name IN ('extension_control_path','dynamic_library_path') OR name LIKE 'laplace.%'
+ ORDER BY name,priority DESC
+)
+SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM selected
 \\gexec
 """
         if run("psql", ["-X", "--no-password", "--dbname=" + args.source_database,
