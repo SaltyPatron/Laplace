@@ -17,6 +17,16 @@ function Denied([scriptblock]$Action,[string]$Expected){
 }
 $local=Parsed (New-LaplaceWindowsDatabaseConnection $selection)
 if($local.ContainsKey('Password') -or $local['Host'] -ne $env:COMPUTERNAME -or $local['SSL Mode'] -ne 'VerifyFull'){throw 'Local Windows identity or TLS contract changed.'}
+$policy=(Resolve-Path "$PSScriptRoot/../deploy/windows/database-connection.ps1").Path.Replace("'","''")
+$selectionJson=($selection|ConvertTo-Json -Compress).Replace("'","''")
+$program=". '$policy'; New-LaplaceWindowsDatabaseConnection (ConvertFrom-Json -AsHashtable '$selectionJson')"
+$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($program))
+$renderings=@(1..4|ForEach-Object {
+    $value=& pwsh -NoProfile -EncodedCommand $encoded
+    if($LASTEXITCODE){throw 'Fresh-process connection rendering failed.'}
+    $value
+}|Select-Object -Unique)
+if($renderings.Count -ne 1){throw 'Equivalent connection settings changed bytes across credential-rendering processes.'}
 $selection.host='hart-server'
 Denied {New-LaplaceWindowsDatabaseConnection $selection} 'requires this machine'
 $selection.host=$env:COMPUTERNAME

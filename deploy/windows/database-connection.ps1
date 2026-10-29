@@ -28,7 +28,7 @@ function New-LaplaceWindowsDatabaseConnection {
         throw 'The selected PostgreSQL trust certificate must be an existing absolute file.'
     }
     $connection=[Data.Common.DbConnectionStringBuilder]::new()
-    foreach($pair in @{Host=$hostName;Port=[string]$Database['port'];Database=$databaseName;Username=$role;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$Database['pool_max']}.GetEnumerator()){
+    foreach($pair in ([ordered]@{Host=$hostName;Port=[string]$Database['port'];Database=$databaseName;Username=$role;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$Database['pool_max']}).GetEnumerator()){
         $connection[$pair.Key]=$pair.Value
     }
     switch($authentication){
