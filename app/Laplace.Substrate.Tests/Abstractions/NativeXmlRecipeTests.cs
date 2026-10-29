@@ -23,15 +23,16 @@ public sealed class NativeXmlRecipeTests
                 "highway-identities", "propbank", name)
             : Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes", "xml", name);
         var document = XDocument.Load(path);
+        string? missingReference = source == "open-english-wordnet" ? "members oewn-hood-n" : null;
         string? previous = Environment.GetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES");
         try
         {
             // A token, an attribute and a complete record all cross these tiny
             // reads. The second run uses the normal production window.
             Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", "17");
-            string[] windowed = await Claims(source, path, 4);
+            string[] windowed = await Claims(source, path, 4, missingReference);
             Environment.SetEnvironmentVariable("LAPLACE_RECORD_WINDOW_BYTES", null);
-            string[] normal = await Claims(source, path, 1);
+            string[] normal = await Claims(source, path, 1, missingReference);
             Assert.Equal(normal.Order(StringComparer.Ordinal), windowed.Order(StringComparer.Ordinal));
 
             var claims = windowed.ToHashSet(StringComparer.Ordinal);
@@ -46,7 +47,8 @@ public sealed class NativeXmlRecipeTests
                 foreach (XElement entry in Elements("LexicalEntry"))
                 {
                     XElement lemma = entry.Elements().Single(node => node.Name.LocalName == "Lemma");
-                    Assert.Contains($"{Attr(lemma, "writtenForm")}\t{Attr(lemma, "partOfSpeech")}", claims);
+                    Assert.Contains($"{Attr(lemma, "writtenForm")}\tNOUN", claims);
+                    Assert.Contains($"[wordnet-pos, {Attr(lemma, "partOfSpeech")}]\tdenotes\tNOUN", claims);
                     Assert.Contains(claims, claim => claim.StartsWith(Attr(lemma, "writtenForm") + "\tlexical sense\t",
                         StringComparison.Ordinal));
                 }
@@ -91,7 +93,11 @@ public sealed class NativeXmlRecipeTests
                     Assert.Contains($"abandon\tsense\t{id}", claims);
                     Assert.Contains($"{id}\tsense description\t{Attr(roleset, "name")}", claims);
                     foreach (XElement role in roleset.Descendants().Where(node => node.Name.LocalName == "role"))
-                        Assert.Contains($"{id}\tmneumonic\t{Attr(role, "descr")}", claims);
+                    {
+                        string slot = $"[{id}, {Attr(role, "n")}]";
+                        Assert.Contains($"{id}\targument slot\t{slot}", claims);
+                        Assert.Contains($"{slot}\tmneumonic\t{Attr(role, "descr")}", claims);
+                    }
                 }
             }
         }
@@ -155,15 +161,26 @@ public sealed class NativeXmlRecipeTests
         Assert.Contains(Path.GetFileName(path), Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
     }
 
-    private static async Task<string[]> Claims(string source, string path, int threads)
+    private static async Task<string[]> Claims(string source, string path, int threads, string? missingReference = null)
     {
         using var output = new MemoryStream();
         using var error = new MemoryStream();
         int code = await NativeRecipeExecution.Configured().ExecuteAsync(
             new NativeRecipeRequest(NativeRecipeMode.Claims, source, [path], Threads: threads), output, error);
         string stdout = Encoding.UTF8.GetString(output.ToArray());
-        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()) + stdout);
-        Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
+        string stderr = Encoding.UTF8.GetString(error.ToArray());
+        if (missingReference is null)
+        {
+            Assert.True(code == 0, stderr + stdout);
+            Assert.Contains("unresolved obligations: 0", stdout, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Equal(1, code);
+            Assert.Contains("semantic_omissions=1", stderr, StringComparison.Ordinal);
+            Assert.Contains(missingReference, stderr, StringComparison.Ordinal);
+            Assert.Contains("unresolved obligations: 1", stdout, StringComparison.Ordinal);
+        }
         return stdout.Split('\n').Select(static line => line.TrimEnd('\r'))
             .Where(static line => line.StartsWith("claim\t", StringComparison.Ordinal))
             .Select(static line => line.Split('\t', 4)[3]).ToArray();
