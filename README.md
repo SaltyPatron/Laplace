@@ -274,6 +274,11 @@ Exact entity and physicality sets use `laplace_entities` and
 same primary-key owner through `ops.entity_physicalities`. Request ordinals
 retain duplicates, missing IDs stay absent, and reads retain the caller's
 snapshot and installed namespaces.
+Facets and display labels also read tiers through that Native indexed owner,
+with duplicate display occurrences and existing typed metadata preserved.
+Scored claim selection (`laplace_claims` / `laplace_claims_each`) shares the
+same GIN and primary-key kernels; masks, middle refusals and actual standings
+qualify responders before the fan, without per-partition SPI planning.
 
 All-member containment delegates to `laplace_containers`; any-member queries
 delegate to `laplace_holders`. Both share Native GIN access, exact rechecks and

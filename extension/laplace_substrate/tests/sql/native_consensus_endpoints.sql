@@ -74,6 +74,16 @@ BEGIN
     END IF;
     -- Single-entity inspection and the UI's batch geometry query share the
     -- Native exact-ID reader. A repeated request stays a repeated occurrence.
+    IF (SELECT count(*) FROM ops.entity_facets_batch(ARRAY[aa,bb,aa,
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),decode(repeat('00',16),'hex')]))<>3
+       OR (SELECT count(*) FROM realize.display_label_batch(ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),NULL,aa,decode(repeat('00',16),'hex'),
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]))<>4
+       OR (SELECT count(*) FROM realize.display_label_batch(ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),aa,
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]) WHERE tier=1)<>2 THEN
+        RAISE EXCEPTION 'shared facet/label reader lost unique facets, repeated labels or virtual/missing tiers';
+    END IF;
     IF (SELECT array_agg(p.ordinal ORDER BY p.ordinal)
         FROM ops.entity_physicalities(ARRAY[
           public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),

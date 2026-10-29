@@ -9,7 +9,14 @@ CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
 RETURNS TABLE(id bytea,label text,tier smallint)
 LANGUAGE sql STABLE STRICT PARALLEL SAFE SUPPORT @extschema@.array_length_rows_support
 AS $native$
-SELECT decode(d.entity::text,'hex'),d.content,coalesce(e.tier,CASE WHEN public.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
-FROM public.laplace_labels(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest(p_ids) u(id) WHERE id IS NOT NULL)) d
-LEFT JOIN public.entity e ON e.id=d.entity ORDER BY d.i
+WITH requested AS MATERIALIZED (
+ SELECT ARRAY(SELECT encode(id,'hex')::@extschema:laplace@.blake3
+             FROM unnest(p_ids) WITH ORDINALITY u(id,ordinal) WHERE id IS NOT NULL ORDER BY ordinal) AS ids
+), labels AS MATERIALIZED (
+ SELECT * FROM @extschema:laplace@.laplace_labels((SELECT ids FROM requested))
+), entities AS MATERIALIZED (
+ SELECT ordinal,tier FROM @extschema:laplace@.laplace_entities((SELECT ids FROM requested))
+)
+SELECT decode(d.entity::text,'hex'),d.content,coalesce(e.tier,CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
+FROM labels d LEFT JOIN entities e ON e.ordinal=d.i ORDER BY d.i
 $native$;
