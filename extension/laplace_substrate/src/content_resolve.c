@@ -413,22 +413,26 @@ typedef struct
     int       cap;
 } phrase_ctx;
 
-/* Tier-2 spans of the tree in its normalized-text offset space: non-empty,
- * not all White_Space, ascending by offset. */
+/* Word occurrences come from Native's UAX segment cut, independently of DAG
+ * altitude. A word can be a scalar, a one-level composition or a deeper tree;
+ * a sentence can itself be tier 2. Keep source order and repeated occurrences. */
 static int
 phrase_collect_from_tree(const tier_tree_t *tree,
                          const uint8_t *norm, size_t norm_len,
                          phrase_ctx *ctx)
 {
     size_t nc = tier_tree_node_count(tree);
+    size_t segment_count = 0;
+    const uint32_t *segments = tier_tree_word_segments(tree, &segment_count);
 
-    for (uint32_t idx = 0; idx < (uint32_t) nc; ++idx)
+    for (size_t occurrence = 0; occurrence < segment_count; ++occurrence)
     {
         tier_node_view_t node;
+        uint32_t idx = segments[occurrence];
 
-        if (tier_tree_get_node(tree, idx, &node) != 0)
-            continue;
-        if (node.tier != 2 || node.text_range_len == 0)
+        if (idx >= nc || tier_tree_get_node(tree, idx, &node) != 0)
+            return -1;
+        if (node.text_range_len == 0)
             continue;
         if ((size_t) node.text_range_off + node.text_range_len > norm_len)
             continue;
@@ -842,7 +846,7 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
  * where words end inside a run the text gave no boundary for.
  *
  * UAX #29 leaves scripts without spaces (and without dictionary segmentation)
- * as one tier-2 node per character. A maximal byte-contiguous run of tier-2
+ * as one word segment per character. A maximal byte-contiguous run of segments
  * nodes is covered by the longest, then leftmost, sub-spans that are stored
  * entities; uncovered nodes are emitted as themselves. Whitespace is excluded
  * from the spans, so it always separates runs. The rule names no script.
@@ -922,7 +926,7 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
     norm = (uint8_t *) palloc(norm_len > 0 ? norm_len : 1);
     memcpy(norm, tree_text, norm_len);
 
-    /* Maximal runs of byte-contiguous tier-2 nodes; a byte gap is a boundary
+    /* Maximal runs of byte-contiguous word segments; a byte gap is a boundary
      * the text supplied. */
     runs = (run_t *) palloc(sizeof(run_t) * ctx.n);
     {

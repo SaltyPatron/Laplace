@@ -14,7 +14,7 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ("bootstrap", "render_depth", "native_consensus_endpoints", "generation_corpus", "chess_read",
+CASES = ("bootstrap", "render_depth", "prompt_segments", "native_consensus_endpoints", "generation_corpus", "chess_read",
          "chess_fold_debt_repair", "highway_mask_deposit", "highway_mask_recovery")
 
 
