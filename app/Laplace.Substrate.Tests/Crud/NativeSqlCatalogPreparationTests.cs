@@ -240,7 +240,13 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await nativeTransaction.CommitAsync();
         // ALTER DATABASE cache settings apply to new sessions. Discard pooled
         // sessions created before migration rather than testing build defaults.
-        NpgsqlConnection.ClearPool(nativeConnection);
+        _source.Clear();
+        await using var configured = await _source.OpenConnectionAsync();
+        await using var verifyCachePaths = new NpgsqlCommand("""
+            SELECT current_setting('laplace.tier0')=current_setting('laplace_substrate.perfcache_path')
+               AND current_setting('laplace.highway')=current_setting('laplace_substrate.highway_perfcache_path')
+            """, configured);
+        Assert.Equal(true, await verifyCachePaths.ExecuteScalarAsync());
     }
 
     public async Task DisposeAsync()
