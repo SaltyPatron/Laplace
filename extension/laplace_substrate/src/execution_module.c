@@ -2,8 +2,8 @@
  * library owns them. Versioned SQL bindings name this library, so a new build is
  * selected by the catalog while the server keeps running.
  *
- * On Windows, both laplace_substrate.dll and laplace_execution_<hash>.dll link
- * laplace_core_static.lib, giving each DLL its own module-local perfcache statics.
+ * Each versioned execution module links its own static core and Native closure,
+ * giving it module-local perfcache state on every platform.
  * Redirecting laplace_perfcache_ready / laplace_highway_ready / laplace_vocabulary_ready /
  * laplace_chess_position_ready inside the execution module ensures the execution DLL's
  * static tables are populated on demand using the GUC paths owned by the host module. */
@@ -13,7 +13,6 @@
 #include "varatt.h"
 #include "laplace/core/qualifier_law.h"
 
-#ifdef WIN32
 #include "laplace/core/chess_position_table.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/highway_table.h"
@@ -108,7 +107,6 @@ laplace_chess_position_ready(void)
                         path, rc)));
     return true;
 }
-#endif
 
 PG_FUNCTION_INFO_V1(pg_laplace_hash128_lo);
 

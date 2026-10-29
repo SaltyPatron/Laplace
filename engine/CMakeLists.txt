@@ -288,7 +288,7 @@ add_subdirectory(synthesis)
 
 foreach(_laplace_engine_target IN ITEMS
         fathom_tb
-        laplace_core laplace_core_static
+        laplace_core_objects laplace_core laplace_core_static
         laplace_syzygy laplace_dynamics laplace_dynamics_static laplace_dynamics_pg_static
         laplace_synthesis
         laplace_core_tests laplace_dynamics_tests laplace_synthesis_tests)

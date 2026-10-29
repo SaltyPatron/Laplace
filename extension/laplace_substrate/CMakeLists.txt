@@ -65,6 +65,24 @@ file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LaplaceWindowsExports.cmake
 set(_execution_inputs CMakeLists.txt "${_exports_contract}" ${EXT_EXECUTION_SOURCES} ${_execution_headers}
     "${LAPLACE_POSTGRES_SOURCE}/include/laplace_pg/executor.h"
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.def)
+if(NOT WIN32)
+    # An execution image contains these implementations, not just their headers.
+    # Change its identity when its compiled core/Native closure changes.
+    file(GLOB_RECURSE _execution_core_inputs CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/*.hpp")
+    list(APPEND _execution_inputs ${_execution_core_inputs}
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/CMakeLists.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/CMakeLists.txt")
+    if(LAPLACE_NATIVE AND EXISTS "${LAPLACE_NATIVE}/CMakeLists.txt")
+        file(GLOB_RECURSE _execution_native_inputs CONFIGURE_DEPENDS
+            "${LAPLACE_NATIVE}/src/*.c" "${LAPLACE_NATIVE}/src/*.cpp"
+            "${LAPLACE_NATIVE}/src/*.h" "${LAPLACE_NATIVE}/include/*.h")
+        list(APPEND _execution_inputs ${_execution_native_inputs} "${LAPLACE_NATIVE}/CMakeLists.txt")
+    endif()
+endif()
 if(WIN32)
     get_target_property(_core_archive laplace_core IMPORTED_LOCATION)
     get_target_property(_dynamics_archive laplace_dynamics IMPORTED_LOCATION)
@@ -256,7 +274,12 @@ if(BUILD_TESTING)
 endif()
 set_target_properties(laplace_execution PROPERTIES PREFIX "" OUTPUT_NAME "${EXT_EXECUTION_MODULE}")
 target_include_directories(laplace_execution SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
-target_link_libraries(laplace_execution PRIVATE laplace_core laplace_dynamics laplace_pg_executor)
+if(TARGET laplace_core_static)
+    target_link_libraries(laplace_execution PRIVATE laplace_core_static laplace_pg_executor)
+else()
+    # Standalone Windows imports the static archive under this target name.
+    target_link_libraries(laplace_execution PRIVATE laplace_core laplace_pg_executor)
+endif()
 if(TARGET laplace_static)
     target_link_libraries(laplace_execution PRIVATE laplace_static)
 else()
@@ -267,7 +290,11 @@ if(UNIX AND NOT APPLE)
     # A backend can retain an earlier module version. Calls between execution
     # operations must resolve within this version, never interpose an older
     # module's identically named exported implementation.
-    target_link_options(laplace_execution PRIVATE "LINKER:-Bsymbolic-functions")
+    target_link_options(laplace_execution PRIVATE "LINKER:-Bsymbolic")
+    add_custom_command(TARGET laplace_execution POST_BUILD
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/check-execution-native-closure.sh"
+            "$<TARGET_FILE:laplace_execution>"
+        VERBATIM)
 endif()
 if(WIN32)
     set_target_properties(laplace_execution PROPERTIES SUFFIX ".dll" WINDOWS_EXPORT_ALL_SYMBOLS TRUE)

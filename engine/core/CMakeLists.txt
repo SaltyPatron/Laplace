@@ -236,21 +236,26 @@ if(NOT ICU_ROOT)
 endif()
 find_package(ICU 78 COMPONENTS uc i18n data REQUIRED)
 
-add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
-add_dependencies(laplace_core laplace_attestation_codegen)
-target_compile_definitions(laplace_core PRIVATE
+add_library(laplace_core_objects OBJECT ${LAPLACE_CORE_SOURCES})
+add_dependencies(laplace_core_objects laplace_attestation_codegen)
+target_compile_definitions(laplace_core_objects PRIVATE
     LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
+target_include_directories(laplace_core_objects PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(laplace_core_objects PRIVATE
+    laplace_eigen laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
+
+# Both consumers use the same PIC objects. A source edit compiles once, while
+# the PostgreSQL execution module can carry its own core instead of borrowing
+# whichever shared core the postmaster loaded before deployment.
+add_library(laplace_core SHARED $<TARGET_OBJECTS:laplace_core_objects>)
+add_library(laplace_core_static STATIC $<TARGET_OBJECTS:laplace_core_objects>)
+target_include_directories(laplace_core_static PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(laplace_core_static
+    PUBLIC laplace_eigen
+    PRIVATE laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
 
 if(WIN32)
-    add_library(laplace_core_static STATIC ${LAPLACE_CORE_SOURCES})
-    add_dependencies(laplace_core_static laplace_attestation_codegen)
-    target_compile_definitions(laplace_core_static PRIVATE
-        LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
-    target_include_directories(laplace_core_static PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-    target_link_libraries(laplace_core_static
-        PUBLIC  laplace_eigen
-        PRIVATE laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
     # The separate Windows extension build imports the static archive. Carry its
     # Native and external dependencies from this graph instead of naming old
     # archives in that consumer (notably the former _deps/blake3 directory).
@@ -306,9 +311,8 @@ add_custom_command(OUTPUT "${LAPLACE_RECIPE_RUNTIME}/.complete"
 add_custom_target(laplace_recipe_runtime DEPENDS "${LAPLACE_RECIPE_RUNTIME}/.complete")
 add_dependencies(laplace_core laplace_recipe_runtime)
 target_link_libraries(laplace_core PRIVATE laplace_text tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
-if(WIN32)
-    target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
-endif()
+target_link_libraries(laplace_core_objects PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
+target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/tier0.bin"
     CACHE FILEPATH "Canonical Native scalar cache for tests and installation" FORCE)
 add_executable(laplace_tier0 "${LAPLACE_NATIVE}/tools/tier0.c")
@@ -666,6 +670,8 @@ target_link_libraries(laplace_core
 if(NOT WIN32)
     find_package(Threads REQUIRED)
     target_link_libraries(laplace_core PRIVATE Threads::Threads)
+    target_link_libraries(laplace_core_static PRIVATE Threads::Threads)
+    target_link_libraries(laplace_core_objects PRIVATE Threads::Threads)
 endif()
 
 # The Syzygy prober is a separate shared library, not part of laplace_core (which is
