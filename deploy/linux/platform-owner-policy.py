@@ -130,9 +130,14 @@ def load_policy(path, missing_ok=False):
         if missing_ok:
             return {}
         raise ValueError('The explicitly selected owner policy file is missing') from None
+    # Operations shares runtime state with the declared runner group. A group
+    # restricted file remains private when that group is this process's own
+    # primary group; unrelated groups and world access are never admitted.
     if (not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES
-            or (os.name != 'nt' and (stat.S_IMODE(info.st_mode) != 0o600
-                                    or info.st_uid not in (0, os.geteuid())))):
+            or (os.name != 'nt' and (info.st_uid not in (0, os.geteuid())
+                or not (stat.S_IMODE(info.st_mode) == 0o600
+                        or (stat.S_IMODE(info.st_mode) in (0o640, 0o660)
+                            and info.st_gid == os.getegid()))))):
         raise ValueError('Owner policy file is not private or has an invalid size')
     value = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=unique_object)
     if not isinstance(value, dict) or not isinstance(value.get('owners'), list):

@@ -131,10 +131,23 @@ class OwnerTransportTests(unittest.TestCase):
             owner.load_policy(link)
 
     @unittest.skipIf(os.name == 'nt', 'POSIX file mode contract')
-    def test_shared_file_refused(self):
-        self.path.chmod(0o640)
-        with self.assertRaises(ValueError):
-            owner.load_policy(self.path)
+    def test_declared_runner_group_can_read_private_policy(self):
+        for mode in (0o600, 0o640, 0o660):
+            with self.subTest(mode=mode):
+                self.path.chmod(mode)
+                self.assertEqual(json.loads(owner.load_policy(self.path)[owner.POLICY_ENV]), self.policy)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX file mode contract')
+    def test_world_access_and_unrelated_groups_refused(self):
+        for mode in (0o604, 0o644, 0o666, 0o700, 0o770):
+            with self.subTest(mode=mode):
+                self.path.chmod(mode)
+                with self.assertRaises(ValueError):
+                    owner.load_policy(self.path)
+        self.path.chmod(0o660)
+        with patch.object(owner.os, 'getegid', return_value=self.path.stat().st_gid + 1):
+            with self.assertRaises(ValueError):
+                owner.load_policy(self.path)
 
     def test_child_gets_policy_and_private_values_are_not_printed(self):
         output = io.StringIO()
