@@ -51,15 +51,18 @@ public sealed class FactorLens4dTests
                 Assert.Equal(0, DynInterop.CenterColumnsF(pa, N, d));
         }
 
-        // Native SVD, one call at KMax; k-ladders slice U*S.
-        var U = new float[(long)N * KMax];
-        var S = new float[KMax];
-        var Vt = new float[(long)KMax * d];
+        // Retain the full decomposition at zero truncation budget. This test
+        // explicitly measures lossy k-dimensional nominations below; the native
+        // SVD must not silently discard modes to fit the nomination rank.
+        const int capacity = d;
+        var U = new float[(long)N * capacity];
+        var S = new float[capacity];
+        var Vt = new float[(long)capacity * d];
         nuint rank = 0;
         unsafe
         {
             fixed (float* pa = A) fixed (float* pu = U) fixed (float* ps = S) fixed (float* pv = Vt)
-                Assert.Equal(0, SynInterop.TensorSvdTruncate(pa, N, d, 0.0, &rank, pu, ps, pv, KMax));
+                Assert.Equal(0, SynInterop.TensorSvdTruncate(pa, N, d, 0.0, &rank, pu, ps, pv, capacity));
         }
         Assert.True((int)rank >= Ks[^1], $"SVD rank {rank} below requested ladder");
 
@@ -84,7 +87,7 @@ public sealed class FactorLens4dTests
             var Y = new double[(long)N * k];
             for (int i = 0; i < N; i++)
                 for (int j = 0; j < k; j++)
-                    Y[(long)i * k + j] = (double)U[(long)i * KMax + j] * S[j];
+                    Y[(long)i * k + j] = (double)U[(long)i * capacity + j] * S[j];
 
             double[] lens = ProbeScores(Y, k);
 

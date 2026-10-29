@@ -35,11 +35,14 @@ physicality trajectory; placement supplies coordinate/locality state such as cen
 and Hilbert index; source-scoped claims produced by the numeric reduction are retained
 as typed evidence.
 
-The current model circuit writer follows this law directly:
-`ModelTokenEdgeETL.BuildCircuitObservation` writes one
+The current `ModelTokenEdgeETL.BuildCircuitObservation` writes a
 `PhysicalityType.Projection` with `TrajectoryXyzm`, `CoordX/Y/Z/M`,
-`HilbertIndex`, and `NConstituents`, while the ingest receipt reports
-`raw_weight_bytes_retained=0`.
+`HilbertIndex`, and `NConstituents`. Those fields and a receipt saying
+`raw_weight_bytes_retained=0` do not establish faithful model ingestion.
+The current circuit walks summarize per-token salience; they do not retain a
+contextual attention/FFN computation that a native SQL forward pass can execute.
+This is an implementation gap, not a completed representation or an ingestion
+failure attributable to the model's vocabulary or the inventor's requirements.
 
 This is not generic binary-blob storage. SafeTensors/GGUF/checkpoint files are source
 packaging used by the decomposer. Tensor bytes and raw weight arrays may be decoded
@@ -50,6 +53,29 @@ separate from the Laplace-native circuit representation and must not be queried 
 semantic model state.
 
 Laplace must preserve enough decomposed structure to answer what source structure was observed, where a component occurs, and which canonical entities/paths that component couples to under the declared decomposition recipe. A separately requested model-execution measurement may also be witnessed, but executing prompts through the source model is not model ingestion.
+
+The requested serving result is stronger than circuit inspection: after ingestion,
+PostgreSQL must be able to execute a native forward operation over the admitted
+Laplace records and produce responses using that model's learned computation.
+Reading the checkpoint, reconstituting its tensors for an external inference
+runtime, returning circuit summaries, or querying stored sample completions does
+not demonstrate that result. Comparisons with a source runtime are measurements
+of the implementation; they are not the serving implementation.
+
+The ingestion input is the complete SafeTensors model package: configuration,
+tokenizer and its declared decoding rules, all weight shards and their index where
+present, and result-affecting metadata. A single tensor file is not the entire
+model. These package inputs remain distinct from the canonical content and the
+source occurrence that owns their provenance.
+
+Recover the source's logical structure before deriving effects. SafeTensors shape,
+dtype and data offsets describe flattened arrays; their row/column/higher-axis
+slices can be decoded on the CPU in bounded working windows. This structural
+decomposition does not need dimensionality reduction, pattern-based record
+elimination, a GPU, or one durable record per scalar. Relational normalization is
+the inventor's analogy: recover constituents and their wiring from the flattened
+tables, then compute their Laplace representation. Recovered float arrays alone
+are still transient operands, not the completed ingestion.
 
 ---
 
@@ -132,6 +158,24 @@ Examples:
 - target Q/K/V/O/FFN tensors may be materialized for export without requiring the native substrate to persist a dense V² world.
 
 Structural identity and measured functional behavior are separate. Two heads with the same ordinal are not “the same circuit”; two differently numbered components can be functionally correlated.
+
+For TinyLlama, structural sharing includes the declared grouped-query wiring:
+eight query heads share each key/value head. Q/K couplings depend on position,
+RoPE and the live contextual state; V/O effects must retain their output direction.
+Each SwiGLU unit couples one gate row, one up row and the matching down column.
+Its conditional effect cannot be recovered from three norms or independent
+per-token rankings. Norms, residual paths and the independent output readout also
+affect the response. The finite count of heads or units is not, by itself, a proof
+that their conditional functions have been extracted.
+
+Reductions must obey the operator-generation contract in `INVENTIONS.md` #106.
+In particular, an output dimension or buffer capacity is not permission to lose
+information. `tensor_svd_truncate` treats `kmax` as capacity: if its required rank
+exceeds that capacity under the caller's `rel_err_tol`, it returns `-3` and reports
+the required rank without writing factors. A zero truncation budget can still
+incur F32 decomposition arithmetic error; it is not a bit-perfectness claim.
+Any deliberately lossy construction or comparison must state and measure that
+loss rather than silently adopting it as the ingestion representation.
 
 ---
 
