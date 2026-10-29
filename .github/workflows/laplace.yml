@@ -182,6 +182,13 @@ jobs:
         run: |
           deploy/linux/site.sh database extensions migrate
 
+      - name: Verify installed shared SQL and native contracts
+        run: |
+          set -euo pipefail
+          source scripts/lib/database.sh
+          python3 tests/sql-native-foundation.py --pgbin "$LAPLACE_PG_PREFIX/bin" \
+            --results "$RUNNER_TEMP/native-sql-results"
+
       - name: Stage the API + SPA, publish, restart
         run: deploy/linux/site.sh app publish restart
 
@@ -211,6 +218,7 @@ jobs:
             ${{ runner.temp }}/native-recipe-results
             ${{ runner.temp }}/ingest-completion-results
             ${{ runner.temp }}/database-name-results
+            ${{ runner.temp }}/native-sql-results
           if-no-files-found: error
           retention-days: 14
 

@@ -242,7 +242,9 @@ BEGIN
 
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (src, 0, type_t),
-        (tal, 0, type_t), (botv, 0, type_t), (spas, 0, type_t),
+        (tal, 0, laplace.entity_type_id('Chess_Player')),
+        (botv, 0, laplace.entity_type_id('Chess_Player')),
+        (spas, 0, laplace.entity_type_id('Chess_Player')),
         (e1, 0, type_t), (e2, 0, type_t),
         (e3, 0, type_t), (e4, 0, type_t),
         (e_no_traj, 0, type_t),
@@ -447,7 +449,7 @@ BEGIN
     -- cell, Spassky a thin one, so the conservative estimate has to order them by strength
     -- rather than by games -- the thing a win percentage cannot express.
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
-        (public.laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
+        (public.laplace_hash128_blake3('t2/outcome_obj'), 0, type_t)
     ON CONFLICT DO NOTHING;
     -- Admit an additional observed type through the canonical facet owner;
     -- the scalar compatibility summary is not the membership relation.
@@ -539,7 +541,7 @@ BEGIN
     -- the same display-scale law on the rating columns.
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (cap_t, 0, type_t), (tname, 0, type_t),
-        (profile_only, 0, laplace.entity_type_id('Chess_Player'), src);
+        (profile_only, 0, laplace.entity_type_id('Chess_Player'));
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
@@ -602,7 +604,7 @@ BEGIN
     -- A declared type alone does not witness a player or a profile. Such
     -- identities can be staged before their evidence commits during ingestion.
     INSERT INTO laplace.entities(id,tier,type_id)
-    VALUES(chess.player_id('Unwitnessed, Placeholder'),2,laplace.entity_type_id('Chess_Player'),src);
+    VALUES(chess.player_id('Unwitnessed, Placeholder'),2,laplace.entity_type_id('Chess_Player'));
     IF EXISTS(SELECT 1 FROM chess.ranked(100,0,'games','asc')
               WHERE player_id=chess.player_id('Unwitnessed, Placeholder')) THEN
         RAISE EXCEPTION 'FAIL: player type without evidence became a standing';

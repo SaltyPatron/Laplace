@@ -98,21 +98,13 @@ BEGIN
     END;
 END $$;
 
--- A second tier is another interpretation of one canonical content entity.
-DO $facet_fixture$
-DECLARE
-    entity_id bytea;
-BEGIN
-    SELECT id INTO STRICT entity_id FROM deposit_fixtures WHERE name='entity_a';
-END
-$facet_fixture$;
+-- Mask writes preserve the canonical entity and its retained typed row.
 DO $$
 DECLARE
     n bigint;
     facets_before jsonb;
     facets_after jsonb;
-    expected_facets jsonb := jsonb_build_array(
-        jsonb_build_array(2,repeat('dc',16)),jsonb_build_array(3,repeat('dc',16)));
+    expected_facets jsonb := jsonb_build_array(2,repeat('dc',16));
     expected_mask bytea := consensus.highway_mask_from_bits(ARRAY[
         consensus.relation_highway_bit(laplace.relation_type_id('IS_A')),
         consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART')),

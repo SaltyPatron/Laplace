@@ -14,17 +14,10 @@ INSERT INTO highway_recovery_pairs VALUES
 INSERT INTO laplace.entities(id,tier,type_id)
 SELECT DISTINCT entity_id,2,decode('d673b68115514712b366347069127aff','hex')
 FROM highway_recovery_pairs;
-DO $recovery_facet$
-BEGIN
-END
-$recovery_facet$;
 CREATE TEMP TABLE highway_recovery_interpretations AS
 SELECT DISTINCT entity_id,2::smallint AS tier,
        decode('d673b68115514712b366347069127aff','hex') AS type_id
-FROM highway_recovery_pairs
-UNION ALL
-SELECT decode('d673b68115514712b366347069127a01','hex'),3::smallint,
-       decode('d673b68115514712b366347069127aff','hex');
+FROM highway_recovery_pairs;
 INSERT INTO laplace.highway_mask_pending SELECT * FROM highway_recovery_pairs;
 
 DO $$
@@ -130,7 +123,7 @@ DROP TABLE highway_recovery_interpretations;
 DROP TABLE highway_recovery_pairs;
 
 -- Refresh must use the same native relation/tuple machinery as admission,
--- including replacement (not merely OR), all interpretations and more than one SPI page.
+-- including replacement (not merely OR), retained entity rows and more than one former SPI page.
 BEGIN;
 CREATE TEMP TABLE highway_refresh_fixture(name text PRIMARY KEY,id bytea);
 INSERT INTO highway_refresh_fixture
@@ -138,31 +131,13 @@ SELECT name,public.laplace_hash128_blake3(convert_to('test/native-highway-refres
 FROM unnest(ARRAY['a','b','isolated','untouched','dynamic','unknown','type']) name;
 INSERT INTO highway_refresh_fixture VALUES ('zero',decode(repeat('00',16),'hex'));
 CREATE TEMP TABLE highway_refresh_interpretations AS
-SELECT f.id AS entity_id,t.tier::smallint AS tier,k.id AS type_id FROM highway_refresh_fixture f
-CROSS JOIN (VALUES(2),(3)) t(tier)
+SELECT f.id AS entity_id,2::smallint AS tier,k.id AS type_id FROM highway_refresh_fixture f
 CROSS JOIN highway_refresh_fixture k
 WHERE k.name='type' AND f.name IN ('a','b','isolated','untouched','zero');
 INSERT INTO laplace.entities(id,tier,type_id)
 SELECT DISTINCT ON (entity_id) entity_id,tier,type_id
 FROM highway_refresh_interpretations
 ORDER BY entity_id,tier,type_id;
-DO $refresh_facets$
-DECLARE
-    entity_ids bytea[];
-    tiers smallint[];
-    type_ids bytea[];
-    source_ids bytea[];
-    source_is_null boolean[];
-BEGIN
-    SELECT array_agg(entity_id ORDER BY entity_id,tier,type_id),
-           array_agg(tier ORDER BY entity_id,tier,type_id),
-           array_agg(type_id ORDER BY entity_id,tier,type_id),
-           array_agg(NULL::bytea ORDER BY entity_id,tier,type_id),
-           array_agg(true ORDER BY entity_id,tier,type_id)
-      INTO entity_ids,tiers,type_ids,source_ids,source_is_null
-      FROM highway_refresh_interpretations;
-END
-$refresh_facets$;
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
 SELECT laplace.consensus_id(s,r,o),s,r,o,

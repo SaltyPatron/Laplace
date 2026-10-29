@@ -150,13 +150,13 @@ DECLARE
     type_sent bytea := laplace.entity_type_id('Sentence');
     type_doc  bytea := laplace.entity_type_id('Document');
     src       bytea := public.laplace_hash128_blake3('test/corpus/source');
-    w_the     bytea := public.laplace_hash128_blake3('test/corpus/word-the');
-    w_capital bytea := public.laplace_hash128_blake3('test/corpus/word-capital');
-    w_of      bytea := public.laplace_hash128_blake3('test/corpus/word-of');
-    w_france  bytea := public.laplace_hash128_blake3('test/corpus/word-france');
-    w_end     bytea := public.laplace_hash128_blake3('test/corpus/word-end');
+    w_the     bytea := laplace.word_id('the');
+    w_capital bytea := laplace.word_id('capital');
+    w_of      bytea := laplace.word_id('of');
+    w_france  bytea := laplace.word_id('france');
+    w_end     bytea := laplace.word_id('end');
     w_target  bytea := laplace.word_id('β'); -- mapped floor, no database row
-    sp        bytea := public.laplace_hash128_blake3('test/corpus/space');
+    sp        bytea := laplace.word_id(' ');
     zs_cat    bytea := laplace.property_value_id('General_Category', 'Space_Separator');
     sent      bytea := public.laplace_hash128_blake3('test/corpus/sentence');
     sent2     bytea := public.laplace_hash128_blake3('test/corpus/sentence2');
@@ -179,10 +179,9 @@ BEGIN
         (sp, 2, type_word), (zs_cat, 2, type_word),
         (sent, 3, type_sent), (sent2, 3, type_sent), (doc, 4, type_doc);
 
-    -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
-    -- declares its space exactly the way the Unicode seed does —
-    -- gc → [General_Category, Space_Separator] — and
-    -- generation.separator_ids() resolves it.
+    -- The fixture uses the actual canonical space ID from the Unicode floor,
+    -- then records its source claim. A synthetic ID with a gc claim is not
+    -- interchangeable with that codepoint and must not become a separator.
     INSERT INTO laplace.attestations (id, subject_id, type_id, object_id, source_id,
                               context_id, outcome, last_observed_at, observation_count,
                               sum_score_fp1e9, opponent_rd_fp1e9)
@@ -191,7 +190,7 @@ BEGIN
             NULL, 2, now(), 1, 1000000000, 30000000000);
 
     IF NOT (sp = ANY (generation.separator_ids())) THEN
-        RAISE EXCEPTION 'FAIL: attested Zs token not in generation.separator_ids()';
+        RAISE EXCEPTION 'FAIL: canonical SPACE missing from generation.separator_ids()';
     END IF;
     IF (SELECT array_agg(vocab_idx ORDER BY vocab_idx)
         FROM generation.corpus_whitespace_vocab_indices(ARRAY[sp,w_the,sp]))
@@ -330,7 +329,37 @@ BEGIN
         RAISE EXCEPTION 'FAIL: context crossed an omitted separator';
     END IF;
 
-    -- Export plane, computed inline from the trajectories: of→france is P=1.0.
+    -- Export consumes registered Native paths. Stage its genuine canonical
+    -- operands there; application-carrier rows alone are not Native evidence.
+    INSERT INTO public.entity(id,tier,coord,hilbert)
+    SELECT public.laplace_id(content),public.laplace_tier(content),
+           public.laplace_coord(content),public.laplace_hilbert(content)
+    FROM unnest(ARRAY['the','capital','of','france']) word(content)
+    ON CONFLICT DO NOTHING;
+    INSERT INTO public.physicality(entity,tier,hilbert,path)
+    SELECT public.laplace_id(content),public.laplace_tier(content),public.laplace_hilbert(content),
+           public.laplace_path(ARRAY(SELECT public.laplace_cp_id(ascii(c))
+             FROM regexp_split_to_table(content,'') c))
+    FROM unnest(ARRAY['the','capital','of','france']) word(content)
+    ON CONFLICT DO NOTHING;
+    DECLARE
+        parts public.blake3[] := ARRAY[public.laplace_id('the'),public.laplace_cp_id(32),
+            public.laplace_id('capital'),public.laplace_cp_id(32),public.laplace_id('of'),
+            public.laplace_cp_id(32),public.laplace_id('france')];
+        root public.blake3 := public.laplace_compose(parts);
+        point public.geometry; altitude smallint; h bigint;
+    BEGIN
+        SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,
+                   public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))),
+               (max(coalesce(e.tier,0))+1)::smallint INTO point,altitude
+        FROM unnest(parts) p LEFT JOIN public.entity e ON e.id=p;
+        h:=public.laplace_hilbert4(point)#'-9223372036854775808'::bigint;
+        INSERT INTO public.entity(id,tier,coord,hilbert) VALUES(root,altitude,point,h);
+        INSERT INTO public.physicality(entity,tier,hilbert,path)
+        VALUES(root,altitude,h,public.laplace_path(parts));
+        INSERT INTO public.witness(id,trust) VALUES(root,0.85);
+    END;
+    -- Native export now has recorded evidence: of→france is P=1.0.
     IF NOT EXISTS (
         SELECT 1 FROM generation.relation_plane('traj', 'next') p
         WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
@@ -548,8 +577,8 @@ BEGIN
            public.laplace_hash128_blake3('test/corpus/wide-rle-entity'),1,
            public.ST_SetSRID(public.ST_MakePoint(0,0,0,0),0),decode(repeat('00',16),'hex'),
            public.ST_SetSRID(public.ST_MakeLine(ARRAY(
-             SELECT public.laplace_mantissa_pack(rle_root,n,65535,t2flag)
-             FROM generate_series(1,2048) n ORDER BY n) || ARRAY[
+             SELECT public.laplace_mantissa_pack(rle_root,series.ordinal,65535,t2flag)
+             FROM generate_series(1,2048) series(ordinal) ORDER BY series.ordinal) || ARRAY[
              public.laplace_mantissa_pack(sp,2049,1,t2flag),
              public.laplace_mantissa_pack(rle_next,2050,1,t2flag)]),4326),134215682;
     IF NOT EXISTS (SELECT FROM structural.geometry_successors_batch(
