@@ -48,6 +48,13 @@ BEGIN
     SELECT count(*) INTO n FROM consensus.explore_web_neighbors(ARRAY[aa],ARRAY[rr],100,false);
     IF n<>1 THEN RAISE EXCEPTION 'endpoint type restriction leaked another predicate: %',n; END IF;
     END LOOP;
+    -- The public query shape must consume these canonical claims as inspection
+    -- does, even though none of their source-defined predicates has a legacy
+    -- registry row. Unknown legacy labels must not manufacture an empty answer.
+    IF NOT EXISTS(SELECT FROM converse.recall_intent('describe',aa)
+        WHERE reply='δ: β' AND eff_mu=1400 AND witnesses=0) THEN
+        RAISE EXCEPTION 'describe discarded a canonical source-defined relation';
+    END IF;
 END $$;
 ROLLBACK;
 SELECT 'Native endpoint reads: direction, type, RLE, duplicate inputs and value claims passed';
