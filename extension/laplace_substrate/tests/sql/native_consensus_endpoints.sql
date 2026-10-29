@@ -33,6 +33,22 @@ BEGIN
     PERFORM pg_temp.endpoint_claim(ARRAY[a,a,b]); -- first two parts share an RLE vertex
     PERFORM pg_temp.endpoint_claim(ARRAY[c,a,b]); -- a is only the predicate
     PERFORM pg_temp.endpoint_claim(ARRAY[a,b]);   -- a value claim, not a binary relation
+    -- Single-entity inspection and the UI's batch geometry query share the
+    -- Native exact-ID reader. A repeated request stays a repeated occurrence.
+    IF (SELECT array_agg(p.ordinal ORDER BY p.ordinal)
+        FROM ops.entity_physicalities(ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),
+          NULL,
+          decode(repeat('00',16),'hex'),
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]) p WHERE p.type=1)
+       IS DISTINCT FROM ARRAY[1,4]::bigint[] THEN
+        RAISE EXCEPTION 'batch geometry lost duplicate positions or invented a missing entity';
+    END IF;
+    IF (SELECT count(*) FROM ops.entity_physicalities(
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))))<>1
+       OR EXISTS(SELECT FROM ops.entity_physicalities(ARRAY[]::bytea[])) THEN
+        RAISE EXCEPTION 'single and batch geometry projections disagree';
+    END IF;
     -- Reuse the actual SPI plans beyond PostgreSQL's custom-plan warmup.
     FOR reading IN 1..8 LOOP
     SELECT count(*) INTO n FROM consensus.explore_induced_edges(ARRAY[aa,bb,aa,NULL]);

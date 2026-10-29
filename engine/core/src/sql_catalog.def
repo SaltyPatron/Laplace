@@ -1108,7 +1108,7 @@ SQL_QUERY("ops.source_roster", "bytea,int4",
     "SELECT encode(subject_id, 'hex'), subject, relation,\n       encode(object_id, 'hex'), object, observations\nFROM ops.source_roster($1, $2)")
 
 SQL_QUERY("ops.entity_primary_forms_batch", "bytea[]",
-    "SELECT u.ord, f.x, f.y, f.z, f.m, f.radius, f.n_constituents\nFROM unnest($1::bytea[]) WITH ORDINALITY AS u(id, ord)\nJOIN LATERAL (\n    SELECT x, y, z, m, radius, n_constituents\n    FROM ops.entity_physicalities(u.id)\n    ORDER BY type\n    LIMIT 1\n) f ON true")
+    "SELECT DISTINCT ON (p.ordinal) p.ordinal,p.x,p.y,p.z,p.m,p.radius,p.n_constituents\nFROM ops.entity_physicalities($1::bytea[]) p ORDER BY p.ordinal,p.type")
 
 SQL_QUERY("structural.constellation_sample", "int4",
     "SELECT s.sample_ordinal, encode(s.entity_id, 'hex'), s.physicality_type,\n       s.x, s.y, s.z, s.m, s.radius, s.n_constituents,\n       encode(s.hilbert_index, 'hex')\nFROM structural.constellation_sample($1) s\nORDER BY s.sample_ordinal")
