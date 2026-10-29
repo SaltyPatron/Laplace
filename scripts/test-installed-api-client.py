@@ -103,8 +103,16 @@ class InstalledClientChecks(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0, '', '')
         return subprocess.CompletedProcess(arguments, 0, json.dumps(value), '')
 
-    def verify(self):
-        CHECK.verify(self.cli, 'https://example.test', self.root)
+    def verify(self, *, document_roundtrip=True):
+        CHECK.verify(self.cli, 'https://example.test', self.root,
+                     document_roundtrip=document_roundtrip)
+
+    def test_routine_verification_reads_without_admitting_documents_or_leaving_files(self):
+        with patch.object(CHECK.subprocess, 'run', side_effect=self.execute):
+            CHECK.verify(self.cli, 'https://example.test', self.root)
+        self.assertEqual([['ops'], ['op', 'ops.substrate_counts', '--max-rows', '20']], self.calls)
+        self.assertEqual([self.cli], list(self.root.iterdir()))
+        self.assertTrue(all(not key.exists() for key in self.key_paths))
 
     def test_complete_flow_keeps_credentials_out_of_arguments_and_cleans_temporary_key(self):
         with patch.object(CHECK.subprocess, 'run', side_effect=self.execute):

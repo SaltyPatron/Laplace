@@ -714,12 +714,15 @@ phase_smoke() {
     client_origin=$(python3 "$ROOT/deploy/linux/configure-nginx.py" \
       --configuration "${LAPLACE_PRIVATE_ORIGINS:-$ROOT/deploy/private-origins.json}" --print-origin) || return 1
   fi
+  # Routine verification reads the installed service without admitting synthetic
+  # corpus content or creating ingestion runs. Write/round-trip qualification uses
+  # --document-roundtrip explicitly against an isolated test installation.
   if python3 "$ROOT/scripts/run-authenticated-verification.py" --base "$client_origin" -- \
       python3 "$ROOT/scripts/verify-installed-api-client.py" --cli "$LAPLACE_APP_DIR/cli/Laplace.Cli" \
       --base "$client_origin" --work "$SITE_WORK"; then
-    echo '| Installed authenticated CLI admission and byte-exact export | passed |' >> "$SUMMARY"
+    echo '| Installed authenticated CLI catalog and substrate read | passed |' >> "$SUMMARY"
   else
-    echo '| Installed authenticated CLI admission and byte-exact export | FAILED |' >> "$SUMMARY"
+    echo '| Installed authenticated CLI catalog and substrate read | FAILED |' >> "$SUMMARY"
     rc=1
   fi
   {

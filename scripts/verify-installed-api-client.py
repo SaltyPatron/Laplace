@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the installed CLI against the selected authenticated service."""
+"""Read the installed service through its authenticated CLI without admitting test content."""
 import argparse
 import base64
 import json
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 DOCUMENT = 'Laplace installed client verification.\nUnicode: café λ 中.\n'.encode('utf-8')
 
 
-def verify(cli: Path, base: str, work: Path) -> None:
+def verify(cli: Path, base: str, work: Path, *, document_roundtrip: bool = False) -> None:
     if not cli.is_absolute() or not cli.is_file():
         raise ValueError('Select the absolute path of the installed CLI executable')
     if not work.is_absolute() or not work.is_dir():
@@ -61,6 +61,11 @@ def verify(cli: Path, base: str, work: Path) -> None:
         if counts.get('object') != 'op.result' or counts.get('name') != 'ops.substrate_counts':
             raise ValueError('Installed client returned the wrong typed operation result')
         print('Installed client substrate inventory: ' + json.dumps(counts.get('rows'), ensure_ascii=True))
+        # Routine deployment/health verification must not populate the operator's
+        # corpus or journal. Exercise admission explicitly on an isolated test
+        # installation; deleting shared content afterwards cannot undo provenance.
+        if not document_roundtrip:
+            return
         source = root / 'laplace-client-verification.txt'
         source.write_bytes(DOCUMENT)
         # Stable content, relative path and modification time keep the admitted fixture reusable.
@@ -86,13 +91,18 @@ def main() -> int:
     parser.add_argument('--cli', required=True, type=Path)
     parser.add_argument('--base', required=True)
     parser.add_argument('--work', required=True, type=Path)
+    parser.add_argument('--document-roundtrip', action='store_true',
+                        help='Admit and export a sample document; use an isolated test installation')
     args = parser.parse_args()
     try:
-        verify(args.cli, args.base, args.work)
+        verify(args.cli, args.base, args.work, document_roundtrip=args.document_roundtrip)
     except (OSError, ValueError, TypeError, AttributeError) as error:
         print(f'Installed API client verification failed: {error}')
         return 1
-    print('Installed API client: catalog, typed operation, document admission, JSON readback and exported bytes passed.')
+    checks = 'catalog and typed operation'
+    if args.document_roundtrip:
+        checks += ', document admission, JSON readback and exported bytes'
+    print(f'Installed API client: {checks} passed.')
     return 0
 
 
