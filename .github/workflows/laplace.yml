@@ -128,7 +128,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: d2bcf80559357d0b18d2b6f7f306caa15820902c
+          ref: a528d1addfeb608c8f74d0b3dca06a2d9c06a71a
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -335,7 +335,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: d2bcf80559357d0b18d2b6f7f306caa15820902c
+          ref: a528d1addfeb608c8f74d0b3dca06a2d9c06a71a
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
