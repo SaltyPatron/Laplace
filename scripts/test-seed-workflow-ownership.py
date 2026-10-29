@@ -26,12 +26,15 @@ def run_block(step_name: str) -> str:
 
 
 class WorkflowOwnership(unittest.TestCase):
-    def test_product_push_ignores_documentation_and_workflow_only_changes(self):
+    def test_product_push_ignores_docs_and_retains_dependency_workflow_changes(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("branches: [main]", text)
-        self.assertIn('- ".github/**"', text)
-        self.assertIn('- "docs/**"', text)
-        self.assertIn('- "**/*.md"', text)
+        self.assertIn('- "!.github/**"', text)
+        self.assertIn('- "!docs/**"', text)
+        self.assertIn('- "!**/*.md"', text)
+        # This workflow owns the exact Native closure. Pin-only repairs must
+        # reach delivery even when their only diff is the workflow itself.
+        self.assertIn('- ".github/workflows/laplace.yml"', text)
 
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
