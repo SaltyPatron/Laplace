@@ -27,6 +27,32 @@ public sealed class NativeRecipeExecution
     public string Tier0 { get; }
     public string Highway { get; }
 
+    // Query consumers use the same compiled producer declarations as the CLI.
+    // Compilation happens once per installed application, outside request reads.
+    private static readonly Lazy<Task<NativeQueryProgram>> QueryProgram = new(
+        () => Configured().CompileQueryProgramAsync(CancellationToken.None));
+
+    public static Task<NativeQueryProgram> QueryProgramAsync(CancellationToken ct = default)
+        => QueryProgram.Value.WaitAsync(ct);
+
+    public async Task<NativeQueryProgram> CompileQueryProgramAsync(CancellationToken ct = default)
+    {
+        var start = ProcessInfo(Executable, null);
+        start.ArgumentList.Add("firmware");
+        start.ArgumentList.Add("--operation");
+        start.ArgumentList.Add("pull");
+        start.ArgumentList.Add("--firmware");
+        start.ArgumentList.Add(Path.Combine(Directory.GetParent(Recipes)!.FullName, "firmware", "program.firmware"));
+        start.Environment["LAPLACE_RECIPES"] = Recipes;
+        start.Environment["LAPLACE_TIER0"] = Tier0;
+        start.Environment["LAPLACE_HIGHWAY"] = Highway;
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int result = await ExecuteAsync(start, output, error, ct).ConfigureAwait(false);
+        if (result != 0) throw new InvalidDataException($"Native query declarations failed ({result}): {Encoding.UTF8.GetString(error.ToArray())}");
+        return NativeQueryProgram.Parse(output.ToArray());
+    }
+
     public static NativeRecipeExecution Configured()
     {
         string executable = ConfiguredExecutable();

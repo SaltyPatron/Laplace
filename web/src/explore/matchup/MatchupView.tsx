@@ -120,20 +120,18 @@ function displayRelation(type: string, chessPlayer: boolean) {
 }
 
 function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' }) {
-  const topStanding = side.top_facts.length
-    ? Math.max(...side.top_facts.map((f) => Number(f.eff_mu)))
-    : null;
+  const readings = side.readings ?? [];
   const edgeCount = side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted;
   const chess = side.chess ?? null;
   const chessPlayer = chess !== null || side.entity_type === 'Chess_Player';
   const statValue = chess
     ? chess.peak_source_elo
-    : chessPlayer ? side.source_rating_peak ?? null : topStanding;
+    : chessPlayer ? side.source_rating_peak ?? null : readings.length;
   const statLabel = chess
     ? `peak source Elo · ${chess.games.toLocaleString()} witnessed games`
     : chessPlayer
       ? `peak source Elo · ${side.source_rating_observations ?? 0} rating observations`
-      : `top standing · ${edgeCount} rated edges`;
+      : `recorded meaning${readings.length === 1 ? '' : 's'} · ${edgeCount} direct claims`;
 
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
@@ -159,6 +157,30 @@ function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' 
         <span className={styles.topMu}>{statValue != null ? Number(statValue).toFixed(0) : '—'}</span>
         <span className={styles.topLabel}>{statLabel}</span>
       </div>
+      {!chessPlayer && (
+        <ul className={styles.facts}>
+          {readings.map((reading) => (
+            <li key={`${reading.entity_id}:${reading.definition_id}`}>
+              <RouterLink to={`/explore/entity/${reading.entity_id}`}>{reading.definition}</RouterLink>
+              <details>
+                <summary>Evidence · {reading.witnesses} witness{reading.witnesses === 1 ? '' : 'es'}</summary>
+                {reading.paths.map((path, index) => (
+                  <ol key={index}>
+                    {path.map((step) => (
+                      <li key={step.claim_id}>
+                        <span className={styles.factType}>{step.relation}</span>{' '}
+                        <RouterLink to={`/explore/entity/${step.entity_id}`}>{step.label}</RouterLink>
+                      </li>
+                    ))}
+                  </ol>
+                ))}
+              </details>
+            </li>
+          ))}
+          {readings.length === 0 && <li className={styles.tapeEmpty}>No recorded definitions were found for this entity.</li>}
+        </ul>
+      )}
+      {!chessPlayer && <Muted>Direct claims</Muted>}
       <ul className={styles.facts}>
         {side.top_facts.slice(0, 5).map((f, i) => (
           <li key={i}><span className={styles.factType}>{displayRelation(f.type, chessPlayer)}</span> {f.fact}</li>
@@ -195,7 +217,7 @@ function Tape({ tape, xLabel, yLabel }: { tape: TapeRow[]; xLabel: string; yLabe
   const xOnly = tape.filter((t) => t.holder === 'x-only');
   const yOnly = tape.filter((t) => t.holder === 'y-only');
   return (
-    <Panel title="Tale of the tape">
+    <Panel title="Direct claim overlap">
       <div className={styles.tapeGrid}>
         <TapeCol title={`only ${xLabel}`} rows={xOnly} />
         <TapeCol title="shared" rows={both} accent />

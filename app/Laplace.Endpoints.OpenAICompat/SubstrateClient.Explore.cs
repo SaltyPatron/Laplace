@@ -883,12 +883,10 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.SensesAsync(conn, id, ct);
-        var labels = await ReadDisplayLabelsAsync(
-            conn, rows.Select(r => r.SynsetIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
         var result = rows.Select(s => new ExploreSenseRow(
             SenseIdHex: s.SenseIdHex,
             SynsetIdHex: s.SynsetIdHex,
-            SynsetLabel: DisplayLabel(labels, s.SynsetIdHex, s.SynsetLabel),
+            SynsetLabel: s.SynsetLabel,
             EffMu: s.EffMu,
             Witnesses: s.Witnesses)).ToList();
         var ambiguous = AmbiguousDisplayLabels(

@@ -8,6 +8,26 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class NativeRecipeExecutionTests
 {
     [Fact]
+    public async Task QueryConsumersReceiveTheNativeCompiledProducerDeclarations()
+    {
+        var program = await NativeRecipeExecution.Configured().CompileQueryProgramAsync();
+        Assert.NotEmpty(program.Up);
+        Assert.All(program.Paths, path => Assert.All(path, relation =>
+        {
+            Assert.StartsWith("@", relation.Declaration);
+            Assert.Equal(16, relation.Entity.Length);
+        }));
+        Assert.Contains(program.Paths, path => path.Take(program.Up.Count)
+            .Select(r => Convert.ToHexString(r.Entity)).SequenceEqual(program.Up.Select(r => Convert.ToHexString(r.Entity))));
+    }
+
+    [Theory]
+    [InlineData("{\"up\":[],\"chains\":[]}")]
+    [InlineData("{\"up\":[{\"name\":\"@producer/field\",\"entity\":\"01\"}],\"chains\":[[{\"name\":\"@producer/field\",\"entity\":\"01\"}]]}")]
+    public void QueryConsumersRejectIncompleteNativePrograms(string json)
+        => Assert.Throws<InvalidDataException>(() => NativeQueryProgram.Parse(Encoding.UTF8.GetBytes(json)));
+
+    [Fact]
     public void NativeRuntimeWritesBelongToTheDeclaredWorkDirectory()
     {
         var execution = NativeRecipeExecution.Configured();

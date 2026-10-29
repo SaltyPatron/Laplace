@@ -33,7 +33,7 @@ export function EntityHeader({
       <div className={styles.titleBlock}>
         <h2>{preview.label}</h2>
         <Muted className={styles.meta}>
-          tier {preview.tier ?? '—'} · {preview.type ?? 'unknown'}{' '}
+          composition tier {preview.tier ?? '—'}{preview.type ? ` · ${preview.type}` : ''}{' '}
           <Button variant="ghost" size="sm" onClick={onCopyId}>
             {copied ? 'Reference copied' : 'Copy reference'}
           </Button>
