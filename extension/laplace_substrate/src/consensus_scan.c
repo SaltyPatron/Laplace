@@ -31,6 +31,29 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "laplace/core/sql_catalog.h"
+#include "laplace_pg/executor.h"
+
+typedef struct {
+    MemoryContext caller;LaplaceConsensusConsumer consume;void *context;
+    LaplaceConsensusScanStats *stats;
+} NativeConsensusRead;
+
+static bool native_consensus_row(TupleTableSlot *slot,void *context)
+{
+    NativeConsensusRead *read=context;Datum values[7];bool missing;
+    for(int i=0;i<7;i++){
+        values[i]=slot_getattr(slot,i+1,&missing);
+        if(missing)elog(ERROR,"Native consensus projection has a null field");
+    }
+    LaplaceConsensusRow row={
+        .subject=datum_to_hash128(values[0]),.type=datum_to_hash128(values[1]),.object=datum_to_hash128(values[2]),
+        .rating=DatumGetInt64(values[3]),.rd=DatumGetInt64(values[4]),
+        .volatility=DatumGetInt64(values[5]),.witnesses=DatumGetInt64(values[6])};
+    read->stats->rows_read++;read->stats->rows_matched++;
+    MemoryContext previous=MemoryContextSwitchTo(read->caller);
+    read->consume(&row,read->context);MemoryContextSwitchTo(previous);
+    return true;
+}
 
 /* The legacy cell layout is only a transport projection for typed Native
  * claims. Source value claims remain available through the claim readers;
@@ -51,30 +74,12 @@ scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types,
                                   CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0) elog(ERROR, "cannot prepare Native consensus cells");
     }
-    Datum args[] = {PointerGetDatum(subjects), PointerGetDatum(objects), PointerGetDatum(types)};
-    char nulls[] = {subjects ? ' ' : 'n', objects ? ' ' : 'n', types ? ' ' : 'n'};
-    if (SPI_execute_plan(plan, args, nulls, true, 0) != SPI_OK_SELECT)
-        elog(ERROR, "Native consensus cells failed");
-    SPITupleTable *table = SPI_tuptable;
-    uint64 rows = SPI_processed;
-    for (uint64 i = 0; i < rows; ++i)
-    {
-        HeapTuple tuple = table->vals[i]; TupleDesc desc = table->tupdesc;
-        bool absent;
-        LaplaceConsensusRow row = {0};
-        row.subject = datum_to_hash128(SPI_getbinval(tuple, desc, 1, &absent));
-        row.type = datum_to_hash128(SPI_getbinval(tuple, desc, 2, &absent));
-        row.object = datum_to_hash128(SPI_getbinval(tuple, desc, 3, &absent));
-        row.rating = DatumGetInt64(SPI_getbinval(tuple, desc, 4, &absent));
-        row.rd = DatumGetInt64(SPI_getbinval(tuple, desc, 5, &absent));
-        row.volatility = DatumGetInt64(SPI_getbinval(tuple, desc, 6, &absent));
-        row.witnesses = DatumGetInt64(SPI_getbinval(tuple, desc, 7, &absent));
-        ++stats->rows_read; ++stats->rows_matched;
-        MemoryContext spi = MemoryContextSwitchTo(caller);
-        consume(&row, context);
-        MemoryContextSwitchTo(spi);
-    }
-    SPI_freetuptable(table);
+    ArrayType *inputs[]={subjects,objects,types};ParamListInfo parameters=makeParamList(3);
+    for(int i=0;i<3;i++)parameters->params[i]=(ParamExternData){
+        .value=PointerGetDatum(inputs[i]),.isnull=inputs[i]==NULL,.pflags=PARAM_FLAG_CONST,.ptype=BYTEAARRAYOID};
+    NativeConsensusRead read={caller,consume,context,stats};
+    lp_pg_execute_stream_until(plan,parameters,true,native_consensus_row,&read);
+    pfree(parameters);
     laplace_spi_finish(finish);
 }
 

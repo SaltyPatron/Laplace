@@ -6,7 +6,7 @@ WITH input AS MATERIALIZED (
  SELECT u.ordinal,pg_catalog.encode(u.id,'hex')::public.blake3 AS id FROM pg_catalog.unnest(p_ids) WITH ORDINALITY u(id,ordinal)
 ), claims AS MATERIALIZED (
  SELECT c.i,c.entity FROM public.laplace_claims_each(ARRAY(SELECT id FROM input ORDER BY ordinal),
-   NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+   NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],1::smallint) c
  JOIN input u ON u.ordinal=c.i WHERE public.laplace_path_starts(c.path,u.id)
 ), provenance AS MATERIALIZED (
  SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT DISTINCT entity FROM claims),false) a WHERE a.witness

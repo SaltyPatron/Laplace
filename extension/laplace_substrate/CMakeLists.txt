@@ -38,6 +38,8 @@ set(EXT_EXECUTION_SOURCES
     src/attestation_response.c
     src/observation_read.c
     src/conversation_session.c
+    src/recall.c
+    src/recall_route.c
     src/consensus_scan.c
     src/consensus_neighbors.c
     src/query_evidence.c
@@ -186,8 +188,6 @@ set(EXT_C_SOURCES
     src/graph_contrast.c
     src/graph_cascade.c
     src/foundry_crawl.c
-    src/recall.c
-    src/recall_route.c
     src/perfcache.c
     src/grammar_source.c
     src/descent_probe.c

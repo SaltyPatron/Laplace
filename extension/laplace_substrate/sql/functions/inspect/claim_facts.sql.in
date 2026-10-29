@@ -31,7 +31,7 @@ BEGIN ATOMIC
 WITH subject AS (SELECT encode(p_subject,'hex')::@extschema:laplace@.blake3 AS id), page AS MATERIALIZED (
  SELECT c.entity,c.rating,c.deviation,c.volatility
  FROM subject s CROSS JOIN LATERAL @extschema:laplace@.laplace_claims_each(ARRAY[s.id],NULL::bigint,
-   ARRAY[@extschema:laplace@.laplace_bank_bit('kind','claim')],'{}'::@extschema:laplace@.blake3[]) c
+   ARRAY[@extschema:laplace@.laplace_bank_bit('kind','claim')],'{}'::@extschema:laplace@.blake3[],(CASE WHEN p_inbound THEN 2 ELSE 1 END)::smallint) c
  WHERE CASE WHEN p_inbound THEN @extschema:laplace@.laplace_path_ends(c.path,s.id)
             ELSE @extschema:laplace@.laplace_path_starts(c.path,s.id) END
  ORDER BY c.rating-2*c.deviation DESC,c.entity LIMIT p_limit

@@ -45,21 +45,22 @@ internal static class QueryCommands
         if (!string.IsNullOrWhiteSpace(prompt))
             return await ConverseTurnAsync(conn, prompt);
 
+        byte[] session = RandomNumberGenerator.GetBytes(16);
         Console.WriteLine("laplace converse — one turn per line, empty line or Ctrl+D to leave.");
         while (true)
         {
             Console.Write("you      : ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await ConverseTurnAsync(conn, line, echoPrompt: false);
+            await ConverseTurnAsync(conn, line, echoPrompt: false, session: session);
         }
         return 0;
     }
 
-    private static async Task<int> ConverseTurnAsync(NpgsqlConnection conn, string prompt, bool echoPrompt = true)
+    private static async Task<int> ConverseTurnAsync(NpgsqlConnection conn, string prompt, bool echoPrompt = true, byte[]? session = null)
     {
         var sw = Stopwatch.StartNew();
-        var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session: null, default);
+        var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session, default);
         if (echoPrompt) Console.WriteLine($"you      : {prompt}");
         bool any = false;
         foreach (var row in rows)

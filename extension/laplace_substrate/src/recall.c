@@ -1306,23 +1306,16 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
+    /* An absent session is a stateless read, never a backend-owned identity.
+     * Reusing the PID leaked context across pooled callers and produced short
+     * byte strings that were not valid entity IDs. Explicit sessions retain
+     * their opaque token; their serialization belongs to the session owner. */
     if (PG_ARGISNULL(1))
     {
-        
-
-
-
-
-        char   pidbuf[32];
-        int    len = snprintf(pidbuf, sizeof(pidbuf), "%d", MyProcPid);
-        bytea *b = (bytea *) palloc(VARHDRSZ + len);
-
-        SET_VARSIZE(b, VARHDRSZ + len);
-        memcpy(VARDATA(b), pidbuf, len);
-        session = PointerGetDatum(b);
+        pfree(prompt);
+        return pg_laplace_recall(fcinfo);
     }
-    else
-        session = PG_GETARG_DATUM(1);
+    session = PG_GETARG_DATUM(1);
 
     {
         ReplyBuf buf;

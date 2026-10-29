@@ -45,7 +45,7 @@ BEGIN ATOMIC
     native_claims AS MATERIALIZED (
         SELECT c.* FROM key k CROSS JOIN LATERAL public.laplace_claims_each(
             ARRAY[k.id],NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],
-            '{}'::public.blake3[]) c
+            '{}'::public.blake3[],(CASE p_direction WHEN 'out' THEN 1 WHEN 'in' THEN 2 ELSE 3 END)::smallint) c
         WHERE (p_direction IN ('out','both') AND public.laplace_path_starts(c.path,k.id))
            OR (p_direction IN ('in','both') AND public.laplace_path_ends(c.path,k.id))
     ), parts AS MATERIALIZED (

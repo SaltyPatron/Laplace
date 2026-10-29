@@ -20,4 +20,4 @@ CREATE OR REPLACE FUNCTION converse.recall_intent(
         p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE C STABLE
-    AS 'MODULE_PATHNAME', 'pg_laplace_recall_intent';
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_recall_intent';
