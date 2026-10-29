@@ -97,6 +97,9 @@ foreach(_input IN LISTS _execution_inputs)
     if(NOT IS_ABSOLUTE "${_input}")
         set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${_input}")
     endif()
+    # Ninja also registers parsed CMakeLists files. A second spelling containing
+    # ../.. creates duplicate regeneration outputs even though it is one file.
+    file(REAL_PATH "${_input}" _input)
     file(SHA256 "${_input}" _hash)
     string(APPEND _execution_hashes "${_hash}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_input}")
