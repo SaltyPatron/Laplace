@@ -47,6 +47,11 @@ if($usesInstalledRuntime){
 }
 $MigrationRuntime=[IO.Path]::GetFullPath($MigrationRuntime)
 if(-not(Test-Path -LiteralPath $MigrationRuntime -PathType Leaf)){throw "Installed migrations are missing: $MigrationRuntime. Publish a package containing migrations or explicitly supply -MigrationRuntime from the matching release."}
+$runtimeGrants=$null
+if($Database -eq 'substrate' -and $Operation -ne 'status'){
+    $runtimeGrants=Join-Path (Split-Path -Parent $MigrationRuntime) 'db/migrations/20261015000000_substrate_runtime_grants.sql'
+    if(-not(Test-Path -LiteralPath $runtimeGrants -PathType Leaf)){throw "The selected runtime is missing its canonical substrate grants: $runtimeGrants"}
+}
 $psql=$access.psql
 if(-not(Test-Path -LiteralPath $psql -PathType Leaf)){throw 'The declared PostgreSQL client is missing.'}
 if(-not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){throw 'The declared PostgreSQL root certificate is missing.'}
@@ -200,9 +205,13 @@ try {
             $schemas=@('app')
             $owners=@($owner,$access.admin_role)
         }else{
-            $null=Query "GRANT pg_read_all_stats, pg_signal_backend TO `"$role`";"
-            $schemas=(Query "SELECT nspname FROM pg_namespace WHERE nspname !~ '^pg_' AND nspname NOT IN ('information_schema','app') ORDER BY nspname;" $selected) -split "`n"
-            $owners=@($access.admin_role)
+            # Extension updates can add objects after substrate-up. Reuse the
+            # selected package's canonical, delta-only grants for those objects;
+            # a second blanket GRANT stack blocks active UNLOGGED ingest tables.
+            $null=Query ([IO.File]::ReadAllText($runtimeGrants)) $selected
+            $receipt.substrate_runtime_grants=$runtimeGrants
+            $receipt.substrate_runtime_grants_sha256=(Get-FileHash -LiteralPath $runtimeGrants -Algorithm SHA256).Hash
+            $schemas=@()
         }
         foreach($schema in $schemas){
             if($schema -notmatch '^[A-Za-z0-9_]+$'){throw 'Unexpected schema identifier.'}

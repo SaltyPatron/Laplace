@@ -16,6 +16,9 @@ try {
     $env:LAPLACE_PG_SERVICE_ACCOUNT=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $env:TEST_EVENTS="$work/events.txt";$env:TEST_DATA=$env:LAPLACE_PGDATA
     'runtime fixture' | Set-Content "$work/site/web/releases/abc1234/migrations/Laplace.Migrations.dll"
+    $null=New-Item -ItemType Directory -Path "$work/site/web/releases/abc1234/migrations/db/migrations"
+    $grantsFile="$work/site/web/releases/abc1234/migrations/db/migrations/20261015000000_substrate_runtime_grants.sql"
+    '-- canonical runtime grants fixture' | Set-Content $grantsFile
     'certificate fixture' | Set-Content "$work/root.crt"
     '<configuration><system.webServer><aspNetCore processPath=".\releases\abc1234\Laplace.Endpoints.OpenAICompat.exe"/></system.webServer></configuration>' | Set-Content "$work/site/web/web.config"
     $declaration=@{
@@ -88,7 +91,8 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
         $grants=@($events | Where-Object {$_ -like 'sql:GRANT*' -or $_ -like 'sql:REVOKE*'})
         Assert ($grants.Count -gt 0) 'Runtime grants were not applied.'
         if($case[0] -eq 'substrate'){
-            Assert (@($events | Where-Object {$_ -like 'sql:GRANT EXECUTE*'}).Count -gt 0) 'Substrate function permissions were not restored.'
+            Assert (@($events | Where-Object {$_ -ceq 'sql:-- canonical runtime grants fixture'}).Count -eq 1) 'Substrate grants did not reuse the selected migration package.'
+            Assert (@($events | Where-Object {$_ -match '^sql:GRANT .*ON ALL (TABLES|SEQUENCES|FUNCTIONS)'}).Count -eq 0) 'A parallel blanket grant stack still touches substrate objects.'
             Assert (@($events | Where-Object {$_ -like 'sql:SET ROLE*laplace.word_id*'}).Count -eq 1) 'Substrate tables and cache were not checked as the runtime role.'
         }
         Assert ($env:LAPLACE_DB -ceq 'ambient-connection' -and $env:PGPASSWORD -ceq 'ambient-secret-fixture') 'Process environment was not restored.'
