@@ -435,3 +435,40 @@ executor receiver instead of a cursor fetch loop; its storage contract is distin
 Foundry consensus exports delegate to the installed consensus plane owners.
 Carrier relations are explicitly qualified; readers no longer create a
 transaction solely to change `search_path`.
+
+## Shared native execution and occurrence reads
+
+`Laplace-postgres/include/laplace_pg/executor.h` owns the SELECT receiver used by
+the monorepo's `spi_stream.h` adapter. A callback borrows one executor slot;
+retained datums must be copied into the caller's memory context. The receiver
+does not open a portal, fetch pages, or retain a second SPI tuple table. Its
+early-stop variant is for a completed selection. Read-only snapshot semantics
+are explicit; a repair that reads its own preceding writes requests writable SPI
+execution. SQL statement text and parameter contracts belong to `sql_catalog.def`.
+
+`laplace_content_membership_read` owns indexed content containment. It validates
+the partial GIN expression and type predicate, checks SELECT access and row
+security, and rechecks lossy bitmap candidates under the active snapshot.
+`structural.geometry_successors_batch` uses this reader for the whole requested
+point set. A generic SQL plan no longer has to infer a partial-index predicate
+from a physicality-type parameter. The native walk reads compressed runs
+directly, counts each physical observation once per requested point, and charges
+separator multiplicities against the logical window. It allocates no expanded
+array of repeated constituent IDs. Geometry binary conversion uses the stored
+column type's send function; the common trajectory decoder accepts ISO ZM WKB
+and ZM EWKB with an optional SRID.
+
+The application-carrier `realize.render_text_batch` and `render_bytes_batch`
+share an explicit occurrence stack over one constituent closure. They retain
+results for requested roots rather than an intermediate text buffer for every
+ancestor. Repeated composites are rendered once and copied by their run count;
+active-path cycle markers are cleared before processing another root. A scalar
+is decoded only from its canonical ID in the Tier-0 reverse index. An atom flag
+with a different or missing ID cannot manufacture a character. Bytea realization
+preserves U+0000; PostgreSQL text realization returns NULL for that content.
+Positive depth limits are explicit previews, and incomplete roots return NULL.
+
+These application-carrier operators still read `laplace.physicalities`. They do
+not make that representation interchangeable with Native `public.physicality`,
+nor replace Native `laplace_text_batch` or `laplace_labels`. Moving tables into
+one schema would not reconcile those identity and manifest contracts.
