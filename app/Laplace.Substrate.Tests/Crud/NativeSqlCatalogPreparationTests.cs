@@ -445,9 +445,10 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         }
         // Foundry consumes the same Native carriers, including their actual
         // identity in path evidence and in scoped database royalty settlement.
+        foreach (string selector in new[] { "!", "IS_ANTONYM_OF" })
         foreach (bool reverse in new[] { false, true })
         {
-            string steps = reverse ? "[{\"types\":[\"!\"],\"reverse\":true}]" : "[{\"types\":[\"!\"]}]";
+            string steps = System.Text.Json.JsonSerializer.Serialize(new[] { new { types = new[] { selector }, reverse } });
             await using var path = NpgsqlCatalog.Command(connection, transaction, "generation.path_plane",
                 new[] { (reverse ? value : x).Id.ToBytes() }, steps, 10, 10, false, DBNull.Value);
             await using var rows = await path.ExecuteReaderAsync();
