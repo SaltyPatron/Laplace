@@ -13,4 +13,8 @@ if [[ "$imports" =~ [[:space:]](lp_|tier_tree_|native_text_|text_identity_)[[:al
     echo 'execution module still imports Native text or tree algorithms' >&2
     exit 1
 fi
+if [[ "$imports" =~ [[:space:]]laplace_substrate_[[:alnum:]_]*perfcache_path ]]; then
+    echo 'execution module still imports cache-path helpers from the preloaded host' >&2
+    exit 1
+fi
 echo 'Execution Native closure is module-local; no shared core or Native text imports.'

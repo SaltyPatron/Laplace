@@ -10,6 +10,7 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "varatt.h"
 #include "laplace/core/qualifier_law.h"
 
@@ -27,7 +28,7 @@ laplace_perfcache_ready(void)
 
     if (codepoint_table_is_loaded())
         return true;
-    path = laplace_substrate_perfcache_path();
+    path = GetConfigOptionByName("laplace_substrate.perfcache_path", NULL, true);
     if (path == NULL || path[0] == '\0')
         return false;
     rc = codepoint_table_load_perfcache(path);
@@ -57,7 +58,7 @@ laplace_highway_ready(void)
 
     if (highway_table_is_loaded())
         return true;
-    path = laplace_substrate_highway_perfcache_path();
+    path = GetConfigOptionByName("laplace_substrate.highway_perfcache_path", NULL, true);
     if (path == NULL || path[0] == '\0')
         return false;
     if (highway_table_load(path) != 0)
@@ -76,7 +77,7 @@ laplace_vocabulary_ready(void)
 
     if (vocabulary_table_is_loaded())
         return true;
-    path = laplace_substrate_vocabulary_perfcache_path();
+    path = GetConfigOptionByName("laplace_substrate.vocabulary_perfcache_path", NULL, true);
     if (path == NULL || path[0] == '\0')
         return false;
     rc = vocabulary_table_load(path);
@@ -96,7 +97,7 @@ laplace_chess_position_ready(void)
 
     if (chess_position_table_is_loaded())
         return true;
-    path = laplace_substrate_chess_position_perfcache_path();
+    path = GetConfigOptionByName("laplace_substrate.chess_position_perfcache_path", NULL, true);
     if (path == NULL || path[0] == '\0')
         return false;
     rc = chess_position_table_load(path);
