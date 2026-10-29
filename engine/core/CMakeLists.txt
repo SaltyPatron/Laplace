@@ -297,6 +297,7 @@ set(LAPLACE_RECIPE_RUNTIME "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine/runtime")
 file(GLOB_RECURSE _recipe_runtime_sources CONFIGURE_DEPENDS
     "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*.recipe"
     "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*.format"
+    "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/vocabularies/*.tsv"
     "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*/source")
 file(GLOB _recipe_runtime_grammars CONFIGURE_DEPENDS
     "${LAPLACE_GRAMMARS}/libtree-sitter-*${CMAKE_SHARED_LIBRARY_SUFFIX}")
