@@ -271,7 +271,18 @@ if(WIN32)
         "${LAPLACE_PG_INCLUDEDIR_SERVER}/port/win32"
         "${LAPLACE_PG_INCLUDEDIR}")
     target_compile_definitions(laplace_execution PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS WIN32)
-    target_link_libraries(laplace_execution PRIVATE ${EXT_NAME} "${LAPLACE_PG_LIBDIR}/postgres.lib")
+    # Resolve the complete Native closure before the host import library. The
+    # host also exports those archive symbols; resolving them there would bind
+    # this versioned module to the postmaster's older Native implementation and
+    # make an additive Native API change require a PostgreSQL restart.
+    target_link_libraries(laplace_execution PRIVATE
+        ${LAPLACE_CORE_STATIC_DEPENDENCIES}
+        ${EXT_NAME} "${LAPLACE_PG_LIBDIR}/postgres.lib")
+    add_custom_command(TARGET laplace_execution POST_BUILD
+        COMMAND pwsh -NoProfile -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/win/verify-execution-native-closure.ps1"
+            -Module "$<TARGET_FILE:laplace_execution>"
+        VERBATIM)
     # 128-bit integer conversions (__floattidf) come from the compiler's own runtime, which link.exe does not find by itself
     target_link_libraries(laplace_execution PRIVATE "${_laplace_compiler_builtins}")
 endif()
