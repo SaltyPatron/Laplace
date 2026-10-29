@@ -275,6 +275,11 @@ same primary-key owner through `ops.entity_physicalities`. Request ordinals
 retain duplicates, missing IDs stay absent, and reads retain the caller's
 snapshot and installed namespaces.
 
+All-member containment delegates to `laplace_containers`, which shares Native
+GIN nomination and exact primary-key reads with provenance frontiers. The
+monorepo's membership consumer uses the shared PostgreSQL streaming executor,
+retaining its emitted-row boundary without an additional SPI tuple-table copy.
+
 CLI inspection and UI provenance share `ops.evidence_series_receipt` over
 `ops.claim_witness_series`. Native containment supplies each registered
 witness's record count (`games`), occurrences (`tokens`), total outcome score,

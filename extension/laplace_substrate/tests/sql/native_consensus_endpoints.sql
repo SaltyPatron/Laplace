@@ -88,6 +88,12 @@ BEGIN
        OR EXISTS(SELECT FROM ops.entity_physicalities(ARRAY[]::bytea[])) THEN
         RAISE EXCEPTION 'single and batch geometry projections disagree';
     END IF;
+    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[aa,bb,aa]))<>5
+       OR EXISTS(SELECT FROM structural.containers_containing_all(ARRAY[aa,NULL]::bytea[]))
+       OR EXISTS(SELECT FROM structural.containers_containing_all(ARRAY[]::bytea[]))
+       OR (SELECT count(*) FROM structural.containers_of(aa,1,2))<>2 THEN
+        RAISE EXCEPTION 'shared Native membership lost set semantics or emitted beyond its boundary';
+    END IF;
     -- Reuse the actual SPI plans beyond PostgreSQL's custom-plan warmup.
     FOR reading IN 1..8 LOOP
     SELECT count(*) INTO n FROM consensus.explore_induced_edges(ARRAY[aa,bb,aa,NULL]);

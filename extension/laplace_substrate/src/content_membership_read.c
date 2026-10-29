@@ -33,6 +33,24 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "laplace/core/sql_catalog.h"
+#include "laplace_pg/executor.h"
+
+typedef struct {
+    MemoryContext caller;LaplaceContentMembershipConsumer consume;void *context;
+    uint64 maximum,rows;bool complete;
+} NativeMembership;
+static bool native_membership_row(TupleTableSlot *slot,void *context)
+{
+    NativeMembership *read=context;
+    if(read->maximum && read->rows>=read->maximum){read->complete=false;return false;}
+    bool missing;Datum id=slot_getattr(slot,1,&missing);
+    if(missing)elog(ERROR,"Native membership identity is null");
+    Datum path=slot_getattr(slot,2,&missing);
+    if(missing)elog(ERROR,"Native membership path is null");
+    MemoryContext previous=MemoryContextSwitchTo(read->caller);
+    read->consume(id,id,path,read->context);read->rows++;
+    MemoryContextSwitchTo(previous);return true;
+}
 
 /* Native paths use their own indexed codec. Never decode them through the
  * historical trajectory expression index. Keep the frontier walk in C and
@@ -58,24 +76,15 @@ native_membership(ArrayType *members, bool require_all, ArrayType *required,
     }
     Datum args[] = {PointerGetDatum(members), PointerGetDatum(required), Int64GetDatum((int64)maximum)};
     char nulls[] = {' ', required ? ' ' : 'n', ' '};
-    if (SPI_execute_plan(plans[which], args, nulls, true, 0) != SPI_OK_SELECT)
-        elog(ERROR, "Native membership failed");
-    SPITupleTable *table = SPI_tuptable;
-    uint64 rows = SPI_processed;
-    bool complete = maximum == 0 || rows <= maximum;
-    *matched = complete ? rows : maximum;
-    for (uint64 i = 0; i < *matched; ++i)
-    {
-        bool absent;
-        Datum id = SPI_getbinval(table->vals[i], table->tupdesc, 1, &absent);
-        Datum path = SPI_getbinval(table->vals[i], table->tupdesc, 2, &absent);
-        MemoryContext spi = MemoryContextSwitchTo(caller);
-        consume(id, id, path, context);
-        MemoryContextSwitchTo(spi);
-    }
-    SPI_freetuptable(table);
+    ParamListInfo parameters=makeParamList(3);
+    Oid types[]={BYTEAARRAYOID,BYTEAARRAYOID,INT8OID};
+    for(int i=0;i<3;i++)parameters->params[i]=(ParamExternData){
+        .value=args[i],.isnull=nulls[i]=='n',.pflags=PARAM_FLAG_CONST,.ptype=types[i]};
+    NativeMembership read={caller,consume,context,maximum,0,true};
+    lp_pg_execute_stream_until(plans[which],parameters,true,native_membership_row,&read);
+    pfree(parameters);*matched=read.rows;
     laplace_spi_finish(finish);
-    return complete;
+    return read.complete;
 }
 
 static bool
