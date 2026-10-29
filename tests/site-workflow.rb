@@ -72,6 +72,7 @@ class SiteWorkflow < Minitest::Test
     assert_equal false, job.fetch('concurrency').fetch('cancel-in-progress')
     step = job.fetch('steps').find { |candidate| candidate['env']&.key?('OPERATION') }
     assert_equal '${{ inputs.operation }}', step.fetch('env').fetch('OPERATION')
+    assert_equal '${{ inputs.stockfish_source }}', step.fetch('env').fetch('LAPLACE_STOCKFISH_SOURCE')
     assert_includes step.fetch('run'), 'bash deploy/linux/site.sh "$OPERATION"'
     assert_includes step.fetch('run'), 'set -euo pipefail'
   end

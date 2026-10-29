@@ -20,6 +20,10 @@ on:
         description: "Optional access or persistent installation owner request file (default owners are seeded by SQL migration)"
         type: string
         required: false
+      stockfish_source:
+        description: "For chess-lab: existing absolute official Stockfish checkout to build and retain as the runtime source"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -323,6 +327,7 @@ jobs:
       - name: Operate on the selected installed runtime
         env:
           OPERATION: ${{ inputs.operation }}
+          LAPLACE_STOCKFISH_SOURCE: ${{ inputs.stockfish_source }}
           LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || 'wait' }}
         run: |
           set -euo pipefail

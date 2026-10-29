@@ -33,6 +33,7 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/platform-access-enroll.py",
     "scripts/platform-owner-enroll.py",
     "web/scripts/capture-ui-diagnostics.mjs",
+    "web/scripts/verify-live-runtime.mjs",
     "scripts/ci-impact-plan.py",
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
