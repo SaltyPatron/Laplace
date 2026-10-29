@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+include(cmake/LaplaceWindowsExports.cmake)
 
 # Select the ABI before Laplace-Native first creates MKL::MKL. Eigen's LAPACKE
 # pivot arrays use 32-bit integers; selecting LP64 later in dynamics cannot

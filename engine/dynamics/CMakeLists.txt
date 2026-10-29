@@ -56,6 +56,7 @@ set_target_properties(laplace_dynamics PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
     OUTPUT_NAME laplace_dynamics
 )
+laplace_refresh_windows_exports(laplace_dynamics)
 
 target_include_directories(laplace_dynamics
     PUBLIC

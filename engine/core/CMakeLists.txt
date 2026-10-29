@@ -248,6 +248,7 @@ target_link_libraries(laplace_core_objects PRIVATE
 # the PostgreSQL execution module can carry its own core instead of borrowing
 # whichever shared core the postmaster loaded before deployment.
 add_library(laplace_core SHARED $<TARGET_OBJECTS:laplace_core_objects>)
+laplace_refresh_windows_exports(laplace_core)
 add_library(laplace_core_static STATIC $<TARGET_OBJECTS:laplace_core_objects>)
 target_include_directories(laplace_core_static PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -679,6 +680,7 @@ endif()
 # loaded into every PostgreSQL backend through laplace_substrate). It is loaded by the
 # ingest side as a calculation witness and never by the database.
 add_library(laplace_syzygy SHARED src/syzygy.c)
+laplace_refresh_windows_exports(laplace_syzygy)
 target_include_directories(laplace_syzygy
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

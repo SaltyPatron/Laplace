@@ -53,6 +53,7 @@ set_target_properties(laplace_synthesis PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
     OUTPUT_NAME laplace_synthesis
 )
+laplace_refresh_windows_exports(laplace_synthesis)
 
 target_include_directories(laplace_synthesis
     PUBLIC
