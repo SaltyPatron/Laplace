@@ -29,6 +29,7 @@ function Set-LaplaceDefault([string]$Name, [string]$Value) {
     if (-not $values.Contains($Name)) { $values[$Name] = [Environment]::GetEnvironmentVariable($Name) }
 }
 Set-LaplaceDefault LAPLACE_SRC ([IO.Path]::Combine($env:USERPROFILE, 'source\repos'))
+Set-LaplaceDefault LAPLACE_NATIVE ([IO.Path]::Combine($env:LAPLACE_SRC, 'Laplace-Native'))
 Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace', 'work'))
 # Corpus/model roots are declared independently in machine.env; never derive them from state.
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))
@@ -40,6 +41,11 @@ Set-LaplaceDefault LAPLACE_BUILD_ROOT $buildDefault
 Set-LaplaceDefault LAPLACE_DEPS ([IO.Path]::Combine($env:LAPLACE_BUILD, 'dependencies'))
 Set-LaplaceDefault LAPLACE_DEPSRC ([IO.Path]::Combine($env:LAPLACE_DEPS, 'src'))
 Set-LaplaceDefault LAPLACE_EXTERNAL $env:LAPLACE_DEPSRC
+Set-LaplaceDefault LAPLACE_BLAKE3_DIR ([IO.Path]::Combine($env:LAPLACE_DEPSRC, 'blake3/c'))
+Set-LaplaceDefault LAPLACE_COREMATH ([IO.Path]::Combine($env:LAPLACE_DEPSRC, 'core-math'))
+Set-LaplaceDefault LAPLACE_TREESITTER ([IO.Path]::Combine($env:LAPLACE_DEPSRC, 'tree-sitter'))
+Set-LaplaceDefault LAPLACE_OPERATIONS ([IO.Path]::Combine($env:LAPLACE_SRC, 'Laplace-Operations'))
+Set-LaplaceDefault LAPLACE_TIER0 ([IO.Path]::Combine($env:LAPLACE_WORK, 'tier0/tier0.bin'))
 Set-LaplaceDefault LAPLACE_ENGINE_BUILD ([IO.Path]::Combine($env:LAPLACE_BUILD_ROOT, 'build-win'))
 Set-LaplaceDefault LAPLACE_PGDATA ([IO.Path]::Combine($env:LAPLACE_WORK, 'pgdata'))
 Set-LaplaceDefault LAPLACE_PGWAL ([IO.Path]::Combine($env:LAPLACE_PGDATA, 'pg_wal'))
@@ -59,6 +65,7 @@ if (Test-Path -LiteralPath $env:LAPLACE_DEPENDENCY_MANIFEST -PathType Leaf) {
         if ($fields[0] -eq 'postgresql') { Set-LaplaceDefault LAPLACE_PG_DIR $prefix }
         if (Test-Path -LiteralPath $prefix -PathType Container) { $prefixes += $prefix }
         if ($fields[0] -eq 'icu') {
+            Set-LaplaceDefault LAPLACE_ICU_DIR $prefix
             Set-LaplaceDefault ICU_ROOT $prefix
             Set-LaplaceDefault CMAKE_LIBRARY_PATH ([IO.Path]::Combine($prefix, 'lib64'))
         }

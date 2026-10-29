@@ -9,5 +9,5 @@
 -- per-position attestation join is involved.
 CREATE OR REPLACE FUNCTION chess.syzygy_transition(p_position bytea)
     RETURNS TABLE(move_id bytea, next_position bytea, wdl integer, dtz integer)
-    AS 'MODULE_PATHNAME', 'pg_laplace_chess_syzygy_transition'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_chess_syzygy_transition'
     LANGUAGE C STABLE ROWS 1;

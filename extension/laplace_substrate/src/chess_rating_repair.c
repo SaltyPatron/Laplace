@@ -6,6 +6,7 @@
 #include "spi_common.h"
 #include "laplace/core/sql_catalog.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
 
 /* Refolds the consensus cells of selected subjects and relation types from their
  * retained attestations. One set read selects the evidence; C orders it per
@@ -23,6 +24,43 @@ typedef struct {
     RepairEvidence key;
     glicko2_state_t state;
 } RepairCell;
+
+typedef struct {
+    RepairEvidence *items;
+    Size count, capacity;
+    MemoryContext owner;
+} RepairRead;
+
+static void
+repair_receive_evidence(TupleTableSlot *row, void *opaque)
+{
+    RepairRead *read = opaque;
+    if (read->count == read->capacity) {
+        Size maximum = MaxAllocSize / sizeof(RepairEvidence);
+        if (read->count == maximum)
+            elog(ERROR, "chess repair: selected evidence exceeds batch allocation capacity");
+        read->capacity = Min(read->capacity ? read->capacity * 2 : 1024, maximum);
+        MemoryContext previous = MemoryContextSwitchTo(read->owner);
+        read->items = read->items ? repalloc(read->items, read->capacity * sizeof(*read->items))
+            : palloc(read->capacity * sizeof(*read->items));
+        MemoryContextSwitchTo(previous);
+    }
+    RepairEvidence *e = &read->items[read->count++];
+    bool isnull;
+    memset(e, 0, sizeof(*e));
+    e->subject = datum_to_hash128(slot_getattr(row,1,&isnull));
+    e->type = datum_to_hash128(slot_getattr(row,2,&isnull));
+    Datum object = slot_getattr(row,3,&e->object_null);
+    if (!e->object_null) e->object = datum_to_hash128(object);
+    e->id = datum_to_hash128(slot_getattr(row,4,&isnull));
+    e->games = DatumGetInt64(slot_getattr(row,5,&isnull));
+    e->score = DatumGetInt64(slot_getattr(row,6,&isnull));
+    e->rating = DatumGetInt64(slot_getattr(row,10,&isnull));
+    e->rd = DatumGetInt64(slot_getattr(row,7,&isnull));
+    e->time = DatumGetTimestampTz(slot_getattr(row,8,&isnull));
+    if (!DatumGetBool(slot_getattr(row,9,&isnull)))
+        ereport(ERROR, (errmsg("chess repair: transient calibration evidence is not replayable")));
+}
 
 static int
 cell_compare(const RepairEvidence *a, const RepairEvidence *b)
@@ -74,41 +112,13 @@ repair_cells(ArrayType *subjects, ArrayType *relations, bool normalize)
     const char *read = laplace_sql_query_text("consensus.repair_evidence");
     SPIPlanPtr p = SPI_prepare(read, 2, types);
     if (p == NULL) elog(ERROR, "chess repair: cannot prepare evidence read");
-    Portal cursor = SPI_cursor_open(NULL, p, args, NULL, false);
-    if (cursor == NULL) elog(ERROR, "chess repair: cannot open evidence read");
-    RepairEvidence *evidence = NULL;
-    Size n = 0, cap = 0;
-    for (;;) {
-        CHECK_FOR_INTERRUPTS();
-        SPI_cursor_fetch(cursor, true, 1024);
-        uint64 fetched = SPI_processed;
-        if (n + fetched > MaxAllocSize / sizeof(RepairEvidence))
-            elog(ERROR, "chess repair: selected evidence exceeds batch allocation capacity");
-        if (n + fetched > cap) {
-            cap = Min(Max(n + fetched, cap ? cap * 2 : 1024), MaxAllocSize / sizeof(RepairEvidence));
-            evidence = evidence ? repalloc(evidence, cap * sizeof(RepairEvidence)) : palloc(cap * sizeof(RepairEvidence));
-        }
-        for (uint64 i = 0; i < fetched; ++i) {
-            HeapTuple t = SPI_tuptable->vals[i]; TupleDesc d = SPI_tuptable->tupdesc;
-            bool isnull;
-            RepairEvidence *e = &evidence[n++]; memset(e, 0, sizeof(*e));
-            e->subject = datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
-            e->type = datum_to_hash128(SPI_getbinval(t,d,2,&isnull));
-            Datum object = SPI_getbinval(t,d,3,&e->object_null);
-            if (!e->object_null) e->object = datum_to_hash128(object);
-            e->id = datum_to_hash128(SPI_getbinval(t,d,4,&isnull));
-            e->games = DatumGetInt64(SPI_getbinval(t,d,5,&isnull));
-            e->score = DatumGetInt64(SPI_getbinval(t,d,6,&isnull));
-            e->rating = DatumGetInt64(SPI_getbinval(t,d,10,&isnull));
-            e->rd = DatumGetInt64(SPI_getbinval(t,d,7,&isnull));
-            e->time = DatumGetTimestampTz(SPI_getbinval(t,d,8,&isnull));
-            if (!DatumGetBool(SPI_getbinval(t,d,9,&isnull)))
-                ereport(ERROR, (errmsg("chess repair: transient calibration evidence is not replayable")));
-        }
-        SPI_freetuptable(SPI_tuptable);
-        if (fetched == 0) break;
-    }
-    SPI_cursor_close(cursor); SPI_freeplan(p);
+    RepairRead selected = {.owner = CurrentMemoryContext};
+    /* The normalization above is part of this same operation. Writable SPI
+     * advances the command counter so the fold reads the corrected evidence. */
+    laplace_spi_stream_mode(p, 2, types, args, NULL, false, repair_receive_evidence, &selected);
+    SPI_freeplan(p);
+    RepairEvidence *evidence = selected.items;
+    Size n = selected.count;
     if (n == 0) { laplace_spi_finish(spi_top); return; }
     qsort(evidence, n, sizeof(RepairEvidence), evidence_compare);
     if (n > MaxAllocSize / sizeof(RepairCell)) elog(ERROR, "chess repair: cell batch exceeds allocation capacity");

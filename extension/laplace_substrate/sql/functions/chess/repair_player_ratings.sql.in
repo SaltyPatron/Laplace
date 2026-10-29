@@ -12,7 +12,7 @@ CREATE OR REPLACE PROCEDURE chess.repair_player_ratings_batch(
     p_played bytea,
     p_rating bytea,
     p_subjects bytea[])
-AS 'MODULE_PATHNAME', 'pg_laplace_repair_player_ratings_batch'
+AS 'EXECUTION_LIBRARY', 'pg_laplace_repair_player_ratings_batch'
 LANGUAGE C;
 
 DROP PROCEDURE IF EXISTS chess.repair_player_ratings(bytea, bytea, bytea);
@@ -21,5 +21,5 @@ DROP PROCEDURE IF EXISTS chess.repair_player_ratings(bytea, bytea, bytea);
 -- Recorded order is subject/type/object/observed timestamp/attestation id, with
 -- one retained record per native period. No historical period grouping is invented.
 CREATE OR REPLACE PROCEDURE consensus.repair_cells_batch(p_subjects bytea[], p_relations bytea[])
-    AS 'MODULE_PATHNAME', 'pg_laplace_repair_consensus_cells_batch'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_repair_consensus_cells_batch'
     LANGUAGE C;

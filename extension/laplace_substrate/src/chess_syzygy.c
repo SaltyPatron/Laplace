@@ -9,6 +9,9 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
+#include "trajectory_wkb.h"
+#include "laplace/core/sql_catalog.h"
 
 #include "laplace/core/mantissa.h"
 
@@ -23,16 +26,6 @@
  * the zigzag-coded DTZ (flags bits 16+) of the position vertex. The first match
  * ends the read.
  */
-static const char *SYZYGY_CHUNK_QUERY =
-    "SELECT public.ST_AsBinary(p.trajectory) "
-    "FROM laplace.physicalities p "
-    "WHERE EXISTS (SELECT 1 FROM laplace.attestations sy_witness "
-    " WHERE sy_witness.source_id = laplace.source_id('ChessSyzygy') "
-    "   AND sy_witness.subject_id = p.entity_id) "
-    "  AND p.type = 3::smallint "
-    "  AND p.trajectory IS NOT NULL "
-    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1 "
-    "ORDER BY p.entity_id";
 
 static SPIPlanPtr syzygy_chunk_plan = NULL;
 
@@ -45,7 +38,7 @@ ensure_syzygy_plan(void)
     {
         Oid argtypes[1] = { BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare_cursor(
-            SYZYGY_CHUNK_QUERY, 1, argtypes, CURSOR_OPT_PARALLEL_OK);
+            laplace_sql_query_text("chess.syzygy_carriers"), 1, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "chess_syzygy_transition: SPI_prepare failed: %s",
@@ -66,6 +59,44 @@ id_bytea(const hash128_t *id)
     return out;
 }
 
+typedef struct {
+    ReturnSetInfo *result;
+    hash128_t position;
+} SyzygyRead;
+
+static bool
+receive_syzygy_transition(TupleTableSlot *row, void *opaque)
+{
+    SyzygyRead *read = opaque;
+    bool isnull;
+    Datum value = slot_getattr(row, 1, &isnull);
+    if (isnull) return true;
+    uint32 count;
+    const unsigned char *points = laplace_trajectory_wkb_points(DatumGetByteaPP(value), &count);
+    for (uint32 v = 0; v + 2 < count; v++) {
+        CHECK_FOR_INTERRUPTS();
+        double vertex[4]; mantissa_payload_t from, move, next;
+        memcpy(vertex, points + (Size)v * 32, sizeof(vertex));
+        mantissa_unpack(vertex, &from);
+        if (((from.flags >> 8) & 3u) != 0 ||
+            memcmp(&from.entity_id, &read->position, sizeof(read->position)) != 0) continue;
+        memcpy(vertex, points + (Size)(v + 1) * 32, sizeof(vertex));
+        mantissa_unpack(vertex, &move);
+        memcpy(vertex, points + (Size)(v + 2) * 32, sizeof(vertex));
+        mantissa_unpack(vertex, &next);
+        if (((move.flags >> 8) & 3u) != 1 || ((next.flags >> 8) & 3u) != 2) continue;
+        uint32 zigzag = (uint32)(from.flags >> 16);
+        int32 dtz = (int32)(zigzag >> 1) ^ -((int32)zigzag & 1);
+        Datum values[] = {PointerGetDatum(id_bytea(&move.entity_id)),
+            PointerGetDatum(id_bytea(&next.entity_id)),
+            Int32GetDatum((int32)((from.flags >> 10) & 7u)), Int32GetDatum(dtz)};
+        bool nulls[] = {false, false, false, false};
+        tuplestore_putvalues(read->result->setResult, read->result->setDesc, values, nulls);
+        return false;
+    }
+    return true;
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_chess_syzygy_transition);
 
 Datum
@@ -79,8 +110,6 @@ pg_laplace_chess_syzygy_transition(PG_FUNCTION_ARGS)
     Datum          args[1];
     char           nulls[1] = { ' ' };
     bool           spi_top = false;
-    Portal         portal;
-    bool           found = false;
 
     InitMaterializedSRF(fcinfo, 0);
     if (PG_ARGISNULL(0))
@@ -102,97 +131,11 @@ pg_laplace_chess_syzygy_transition(PG_FUNCTION_ARGS)
         elog(ERROR, "chess_syzygy_transition: SPI_connect failed");
     ensure_syzygy_plan();
 
-    portal = SPI_cursor_open(NULL, syzygy_chunk_plan, args, nulls, true);
-    if (portal == NULL)
-        elog(ERROR, "chess_syzygy_transition: cursor open failed: %s",
-             SPI_result_code_string(SPI_result));
-
-    while (!found)
-    {
-        SPI_cursor_fetch(portal, true, 32);
-        if (SPI_processed == 0)
-            break;
-
-        for (uint64 row = 0; row < SPI_processed && !found; row++)
-        {
-            HeapTuple tuple = SPI_tuptable->vals[row];
-            TupleDesc desc = SPI_tuptable->tupdesc;
-            bool      isnull;
-            Datum     wkb_datum = SPI_getbinval(tuple, desc, 1, &isnull);
-            bytea    *wkb;
-            const unsigned char *body;
-            const unsigned char *start;
-            Size      len;
-            uint32    wkb_type;
-            uint32    npoints;
-            Size      header;
-
-            if (isnull)
-                continue;
-            wkb = DatumGetByteaPP(wkb_datum);
-            start = (const unsigned char *) VARDATA_ANY(wkb);
-            body = start;
-            len = VARSIZE_ANY_EXHDR(wkb);
-            if (len < 9 || body[0] != 1)
-                ereport(ERROR,
-                        (errmsg("chess.syzygy_transition: unexpected WKB framing")));
-            memcpy(&wkb_type, body + 1, 4);
-            if (wkb_type != 3002u)
-                continue;
-            memcpy(&npoints, body + 5, 4);
-            header = 9;
-            if ((Size) npoints > (len - header) / 32)
-                ereport(ERROR,
-                        (errmsg("chess.syzygy_transition: truncated trajectory WKB")));
-            body += header;
-
-            for (uint32 v = 0; v + 2 < npoints; v++)
-            {
-                double             xyzm[4];
-                mantissa_payload_t from;
-                mantissa_payload_t move;
-                mantissa_payload_t next;
-                int                role_from;
-                int                role_move;
-                int                role_next;
-                uint32             zigzag;
-                int32              dtz;
-                Datum              values[4];
-                bool               out_nulls[4] = { false, false, false, false };
-
-                memcpy(xyzm, body + (Size) v * 32, 32);
-                mantissa_unpack(xyzm, &from);
-                role_from = (int) ((from.flags >> 8) & 3u);
-                if (role_from != 0 ||
-                    memcmp(&from.entity_id, VARDATA_ANY(position), 16) != 0)
-                    continue;
-
-                memcpy(xyzm, body + (Size) (v + 1) * 32, 32);
-                mantissa_unpack(xyzm, &move);
-                memcpy(xyzm, body + (Size) (v + 2) * 32, 32);
-                mantissa_unpack(xyzm, &next);
-                role_move = (int) ((move.flags >> 8) & 3u);
-                role_next = (int) ((next.flags >> 8) & 3u);
-                if (role_move != 1 || role_next != 2)
-                    continue;
-
-                zigzag = (uint32) (from.flags >> 16);
-                dtz = (int32) (zigzag >> 1) ^ -((int32) zigzag & 1);
-                values[0] = PointerGetDatum(id_bytea(&move.entity_id));
-                values[1] = PointerGetDatum(id_bytea(&next.entity_id));
-                values[2] = Int32GetDatum((int32) ((from.flags >> 10) & 7u));
-                values[3] = Int32GetDatum(dtz);
-                tuplestore_putvalues(
-                    rsinfo->setResult, rsinfo->setDesc, values, out_nulls);
-                found = true;
-                break;
-            }
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_freetuptable(SPI_tuptable);
-    }
-
-    SPI_cursor_close(portal);
+    SyzygyRead read = {.result = rsinfo};
+    memcpy(&read.position, VARDATA_ANY(position), sizeof(read.position));
+    Oid types[] = {BYTEAARRAYOID};
+    laplace_spi_stream_until(syzygy_chunk_plan, 1, types, args, nulls,
+        receive_syzygy_transition, &read);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

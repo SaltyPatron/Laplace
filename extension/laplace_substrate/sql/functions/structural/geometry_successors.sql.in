@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
         p_window   int DEFAULT 8,
         p_backward boolean DEFAULT false)
     RETURNS TABLE(point_id bytea, successor_id bytea, seen bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors_batch'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_geometry_successors_batch'
     LANGUAGE C STABLE;
 
 -- Retired with the chess request-time trajectory scan. Leaving either typed

@@ -22,6 +22,7 @@
 
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
+#include "executor/tuptable.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgrprotos.h"
@@ -43,6 +44,16 @@ copy_bytea_datum(Datum d)
 
     memcpy(dst, src, len);
     return PointerGetDatum(dst);
+}
+
+/* Optional bytea fields must be checked before detoasting. A nullable object
+ * endpoint is a normal unary claim, not a pointer that can be dereferenced. */
+static inline bytea *
+spi_slot_bytea(TupleTableSlot *slot, AttrNumber column)
+{
+    bool isnull;
+    Datum value = slot_getattr(slot, column, &isnull);
+    return isnull ? NULL : DatumGetByteaPP(value);
 }
 
 static inline bool

@@ -740,10 +740,25 @@ BEGIN
              public.laplace_mantissa_pack(bad_next, 3, 1, bad_flags | (2::bigint << 8))]),
          3, now());
 
+    INSERT INTO laplace.attestations
+        (id,subject_id,type_id,object_id,source_id,outcome,last_observed_at,
+         sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9)
+    VALUES
+        (public.laplace_hash128_blake3('test/syzygy/good-witness'),good_chunk,
+         laplace.relation_type_id('HAS_NAME'),good_chunk,syz_src,2,now(),
+         1000000000,350000000000,1500000000000),
+        (public.laplace_hash128_blake3('test/syzygy/other-witness'),bad_chunk,
+         laplace.relation_type_id('HAS_NAME'),bad_chunk,other_src,2,now(),
+         1000000000,350000000000,1500000000000);
+    IF (SELECT count(*) FROM chess.syzygy_transition(pos)) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: Syzygy exact-match reader must emit one witnessed transition';
+    END IF;
+
     SELECT move_id, next_position, wdl, dtz
       INTO got_move, got_next, got_wdl, got_dtz
       FROM chess.syzygy_transition(pos);
-    IF got_move <> good_move OR got_next <> good_next OR got_wdl <> 4 OR got_dtz <> -7 THEN
+    IF got_move IS DISTINCT FROM good_move OR got_next IS DISTINCT FROM good_next
+       OR got_wdl IS DISTINCT FROM 4 OR got_dtz IS DISTINCT FROM -7 THEN
         RAISE EXCEPTION 'FAIL: Syzygy transition ignored entity provenance: %/%/%/%',
             encode(got_move, 'hex'), encode(got_next, 'hex'), got_wdl, got_dtz;
     END IF;

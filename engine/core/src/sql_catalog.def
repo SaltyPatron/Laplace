@@ -1,5 +1,38 @@
 /* Query key, positional PostgreSQL parameter types, statement text.
  * This is the sole statement owner for migrated native and app query paths. */
+SQL_QUERY("prompt.coherence_edges_forward", "bytea[]",
+    "SELECT c.subject_id,c.object_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.subject_id=ANY($1)")
+SQL_QUERY("prompt.coherence_edges_reverse", "bytea[]",
+    "SELECT c.object_id,c.subject_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.object_id=ANY($1)")
+SQL_QUERY("prompt.coherence_candidates", "text",
+    "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
+    "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
+    "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)), "
+    "     s AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT b.sense_id "
+    "         FROM b WHERE b.sense_id IS NOT NULL ORDER BY b.sense_id) AS ids), "
+    "     lr AS MATERIALIZED (SELECT l.word, l.lang, "
+    "         row_number() OVER (PARTITION BY l.word ORDER BY l.mu DESC, l.lang) AS rn "
+    "         FROM s CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l) "
+    "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
+    "       b.witnesses::bigint, p.language, lr.lang "
+    "FROM p JOIN b ON b.term = p.id "
+    "LEFT JOIN lr ON lr.word = b.sense_id AND lr.rn = 1 "
+    "WHERE p.id IS NOT NULL AND b.synset_id IS NOT NULL")
+SQL_QUERY("prompt.coherence_relation_mass", "bytea[],bytea[],bytea[]",
+    "SELECT c.subject_id, c.type_id, c.rating, c.rd "
+    "FROM laplace.consensus c "
+    "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
+    "UNION ALL "
+    "SELECT c.object_id, c.type_id, c.rating, c.rd "
+    "FROM laplace.consensus c "
+    "WHERE c.object_id = ANY($1) AND c.type_id = ANY($2) "
+    "  AND c.object_id IS NOT NULL "
+    "  AND c.subject_id <> c.object_id "
+    "  AND c.type_id = ANY($3)")
+SQL_QUERY("prompt.language_edges", "bytea[]",
+    "SELECT c.object_id,c.rating,c.rd FROM laplace.consensus c "
+    "WHERE c.subject_id=ANY($1) "
+    "AND c.type_id=laplace.relation_type_id('HAS_LANGUAGE') AND c.object_id IS NOT NULL")
 /* Native retained-database acceptance uses the same canonical identity and
  * containment operations as the installed Engine, with no legacy projection. */
 SQL_QUERY("verify.blake3_transport", "public.blake3,public.blake3[]",
@@ -140,9 +173,12 @@ SQL_QUERY("entities.mask_pending", "bytea[],bytea[]",
     "SELECT p.entity_id,p.type_id FROM unnest($1,$2) AS p(entity_id,type_id) "
     "WHERE p.entity_id IS NOT NULL AND p.type_id IS NOT NULL "
     "ORDER BY p.entity_id,p.type_id ON CONFLICT(entity_id,type_id) DO NOTHING")
-SQL_QUERY("entities.mask_incident_types", "bytea[]",
+SQL_QUERY("entities.mask_incident_families", "bytea[],bytea",
+    "WITH incident AS MATERIALIZED ("
     "SELECT subject_id AS entity_id,type_id FROM laplace.consensus WHERE subject_id=ANY($1) "
-    "UNION SELECT object_id AS entity_id,type_id FROM laplace.consensus WHERE object_id=ANY($1)")
+    "UNION SELECT object_id AS entity_id,type_id FROM laplace.consensus WHERE object_id=ANY($1)) "
+    "SELECT i.entity_id,i.type_id,f.object_id FROM incident i "
+    "LEFT JOIN laplace.consensus f ON f.subject_id=i.type_id AND f.type_id=$2")
 SQL_QUERY("entities.mask_dirty", "bytea[]",
     "INSERT INTO laplace.highway_mask_dirty(id) SELECT DISTINCT id FROM unnest($1) AS u(id) "
     "WHERE id IS NOT NULL ORDER BY id ON CONFLICT(id) DO NOTHING")
@@ -1815,3 +1851,20 @@ SQL_QUERY("generation.export_type_plane", "bytea[],int4,bytea[]",
 SQL_QUERY("generation.export_adjacency", "bytea[],int4",
     "SELECT subject_id,object_id,w FROM generation.consensus_adjacency($1,$2) "
     "ORDER BY subject_id,abs(w) DESC,object_id")
+
+SQL_QUERY("geometry.successor_carriers", "bytea[],int2",
+    "SELECT public.ST_AsBinary(p.trajectory) FROM laplace.physicalities p "
+    "WHERE p.type=$2 AND p.trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1")
+SQL_QUERY("geometry.separators", "", "SELECT generation.separator_ids()")
+
+SQL_QUERY("chess.syzygy_carriers", "bytea[]",
+    "SELECT public.ST_AsBinary(p.trajectory) "
+    "FROM laplace.physicalities p "
+    "WHERE EXISTS (SELECT 1 FROM laplace.attestations sy_witness "
+    " WHERE sy_witness.source_id = laplace.source_id('ChessSyzygy') "
+    "   AND sy_witness.subject_id = p.entity_id) "
+    "  AND p.type = 3::smallint "
+    "  AND p.trajectory IS NOT NULL "
+    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1 "
+    "ORDER BY p.entity_id")

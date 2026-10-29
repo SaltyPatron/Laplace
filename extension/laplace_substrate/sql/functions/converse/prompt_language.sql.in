@@ -35,7 +35,7 @@
 DROP FUNCTION IF EXISTS laplace.prompt_language(text);
 CREATE OR REPLACE FUNCTION converse.prompt_language(p_prompt text)
     RETURNS TABLE(lang_id bytea, mass numeric)
-    AS 'MODULE_PATHNAME', 'pg_laplace_prompt_language'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_language'
     LANGUAGE C STABLE;
 
 -- The winner alone, for callers that just want to pin a rendering language.

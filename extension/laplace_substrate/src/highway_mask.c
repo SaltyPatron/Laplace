@@ -15,6 +15,7 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
 
 #include "laplace/core/highway_table.h"
 #include "laplace/core/entity_type_law.h"
@@ -615,141 +616,63 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(updated);
 }
 
-/* Refresh recomputes each requested entity's mask from every consensus cell
- * incident to it, as subject or object. The cursor is read in pages to bound
- * marshalling, to exhaustion; each distinct relation resolves once per
- * request. An entity with no incident cells gets a zero mask, which clears it. */
-#define HIGHWAY_REFRESH_PAGE 8192
-
-typedef struct highway_refresh_pair
-{
-    unsigned char entity[HASH128_BYTES];
-    unsigned char type[HASH128_BYTES];
-} highway_refresh_pair;
-
-
+/* Refresh one locked entity set. The indexed incident/family join is one
+ * selection; Native folds its borrowed rows directly into the caller's masks.
+ * No per-page relation query or incident-pair staging is required. */
 typedef struct HighwayRefreshContext
 {
     highway_deposit_entity *masks;
     int requested;
     ArrayType *ids;
-    MemoryContext owner;
-    bool *spi_top;
 } HighwayRefreshContext;
 
-/* Called by the writer after it has locked the whole target set. A read-only
- * SPI cursor would otherwise see the outer statement's snapshot, taken before
- * those lock waits, so a fresh snapshot is pushed (READ COMMITTED only) and
- * popped on success or error. */
+static void
+highway_refresh_receive(TupleTableSlot *row, void *opaque)
+{
+    HighwayRefreshContext *context = opaque;
+    bool entity_null, type_null, family_null;
+    Datum entity = slot_getattr(row, 1, &entity_null);
+    Datum type = slot_getattr(row, 2, &type_null);
+    Datum family = slot_getattr(row, 3, &family_null);
+    unsigned char id[HASH128_BYTES]; hash128_t relation;
+    uint8_t bit, band; float rank;
+    if (entity_null || type_null)
+        elog(ERROR, "highway_mask_refresh: incident row has a null identity");
+    deposit_read_id(entity, id, "entity id");
+    highway_deposit_entity *target = bsearch(id, context->masks, context->requested,
+        sizeof(*context->masks), deposit_id_cmp);
+    if (!target) elog(ERROR, "highway_mask_refresh: incident row outside requested workset");
+    deposit_read_id(type, (unsigned char *)&relation, "relation id");
+    if (highway_table_relation_by_hash(&relation, &bit, &rank, &band) == 0)
+        deposit_mask_set(&target->mask, bit);
+    else if (!family_null) {
+        deposit_read_id(family, (unsigned char *)&relation, "relation family id");
+        if (highway_table_relation_by_hash(&relation, &bit, &rank, &band) == 0)
+            deposit_mask_set(&target->mask, bit);
+    }
+}
+
+/* Lock waits finish before this callback. READ COMMITTED refreshes its
+ * snapshot here so a concurrent completed fold cannot leave a stale mask. */
 static void
 highway_refresh_recompute(void *value)
 {
     HighwayRefreshContext *context = value;
-    highway_deposit_entity *masks = context->masks;
-    int requested = context->requested;
-    MemoryContext owner = context->owner;
-    MemoryContext page;
-    HASHCTL ctl = {0};
-    HTAB *resolved_types;
-    Portal cursor;
-    static SPIPlanPtr incident_plan = NULL;
-    Oid argtypes[1] = {BYTEAARRAYOID};
-    Datum args[1] = {PointerGetDatum(context->ids)};
-
+    static SPIPlanPtr incident_plan;
+    hash128_t isa;
+    if (laplace_relation_type_id("IS_A", &isa) < 0)
+        elog(ERROR, "highway_mask_refresh: cannot derive IS_A relation id");
+    Oid types[] = {BYTEAARRAYOID, BYTEAOID};
+    Datum args[] = {PointerGetDatum(context->ids), hash128_to_datum(&isa)};
     PushActiveSnapshot(GetTransactionSnapshot());
-    PG_TRY();
-    {
-        if (!incident_plan)
-        {
-            incident_plan = SPI_prepare_cursor(
-                laplace_sql_query_text("entities.mask_incident_types"), 1, argtypes,
-                CURSOR_OPT_PARALLEL_OK);
-            if (!incident_plan || SPI_keepplan(incident_plan) != 0)
-                elog(ERROR, "highway_mask_refresh: incident prepare failed");
-        }
-        cursor = SPI_cursor_open(NULL, incident_plan, args, NULL, true);
-        if (!cursor)
-            elog(ERROR, "highway_mask_refresh: incident cursor failed");
-        ctl.keysize = HASH128_BYTES;
-        ctl.entrysize = sizeof(highway_deposit_type);
-        ctl.hcxt = owner;
-        resolved_types = hash_create("Highway refresh relation masks", 256, &ctl,
-                                     HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        page = AllocSetContextCreate(owner, "Highway refresh page", ALLOCSET_DEFAULT_SIZES);
-        for (;;)
-        {
-            MemoryContext previous;
-            highway_refresh_pair *pairs;
-            highway_deposit_type *missing;
-            uint64 rows;
-            int missing_count = 0;
-
-            CHECK_FOR_INTERRUPTS();
-            SPI_cursor_fetch(cursor, true, HIGHWAY_REFRESH_PAGE);
-            rows = SPI_processed;
-            if (!rows)
-            {
-                if (SPI_tuptable) SPI_freetuptable(SPI_tuptable);
-                break;
-            }
-            previous = MemoryContextSwitchTo(page);
-            pairs = palloc(sizeof(*pairs) * rows);
-            missing = palloc0(sizeof(*missing) * rows);
-            for (uint64 i = 0; i < rows; ++i)
-            {
-                HeapTuple tuple = SPI_tuptable->vals[i];
-                TupleDesc desc = SPI_tuptable->tupdesc;
-                bool entity_null, type_null, found;
-                Datum entity = SPI_getbinval(tuple, desc, 1, &entity_null);
-                Datum type = SPI_getbinval(tuple, desc, 2, &type_null);
-                highway_deposit_type *entry;
-
-                if (entity_null || type_null)
-                    elog(ERROR, "highway_mask_refresh: incident row has a null identity");
-                deposit_read_id(entity, pairs[i].entity, "entity id");
-                deposit_read_id(type, pairs[i].type, "relation id");
-                entry = hash_search(resolved_types, pairs[i].type, HASH_ENTER, &found);
-                if (!found)
-                {
-                    memset(&entry->mask, 0, sizeof(entry->mask));
-                    memcpy(missing[missing_count++].id, pairs[i].type, HASH128_BYTES);
-                }
-            }
-            /* Tuples are freed before the nested family read reuses SPI. */
-            SPI_freetuptable(SPI_tuptable);
-            if (missing_count)
-            {
-                qsort(missing, missing_count, sizeof(*missing), deposit_id_cmp);
-                deposit_resolve_types(missing, missing_count, context->spi_top);
-                for (int i = 0; i < missing_count; ++i)
-                {
-                    highway_deposit_type *entry = hash_search(
-                        resolved_types, missing[i].id, HASH_FIND, NULL);
-                    entry->mask = missing[i].mask;
-                }
-            }
-            for (uint64 i = 0; i < rows; ++i)
-            {
-                highway_deposit_entity *target = bsearch(
-                    pairs[i].entity, masks, requested, sizeof(*masks), deposit_id_cmp);
-                highway_deposit_type *type = hash_search(
-                    resolved_types, pairs[i].type, HASH_FIND, NULL);
-                if (!target || !type)
-                    elog(ERROR, "highway_mask_refresh: incident row outside requested workset");
-                deposit_mask_or(&target->mask, &type->mask);
-            }
-            MemoryContextSwitchTo(previous);
-            MemoryContextReset(page);
-        }
-        SPI_cursor_close(cursor);
-        hash_destroy(resolved_types);
-        MemoryContextDelete(page);
-    }
-    PG_FINALLY();
-    {
+    PG_TRY(); {
+        laplace_spi_stream(spi_common_ensure_plan(&incident_plan,
+            laplace_sql_query_text("entities.mask_incident_families"), 2, types),
+            2, types, args, NULL, highway_refresh_receive, context);
+    } PG_FINALLY(); {
         PopActiveSnapshot();
-    }
-    PG_END_TRY();
+    } PG_END_TRY();
+    pfree(DatumGetPointer(args[1]));
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_refresh);
@@ -837,7 +760,7 @@ pg_laplace_highway_mask_refresh(PG_FUNCTION_ARGS)
         MemoryContextDelete(owner);
         PG_RETURN_INT64(0);
     }
-    HighwayRefreshContext refresh = {masks, requested, ids, owner, &spi_top};
+    HighwayRefreshContext refresh = {masks, requested, ids};
     updated = laplace_entity_masks_refresh(masks, requested,
                                            highway_refresh_recompute, &refresh);
     laplace_spi_finish(spi_top);

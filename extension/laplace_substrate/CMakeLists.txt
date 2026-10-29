@@ -51,6 +51,12 @@ set(EXT_EXECUTION_SOURCES
     src/word_adjacency.c
     src/realize_batch.c
     src/prompt_coherence.c
+    src/prompt_language.c
+    src/geometry_successors.c
+    src/highway_mask.c
+    src/entity_mask_write.c
+    src/chess_rating_repair.c
+    src/chess_syzygy.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
