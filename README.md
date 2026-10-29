@@ -274,6 +274,11 @@ Exact entity and physicality sets use `laplace_entities` and
 same primary-key owner through `ops.entity_physicalities`. Request ordinals
 retain duplicates, missing IDs stay absent, and reads retain the caller's
 snapshot and installed namespaces.
+The common managed datasource retains idle serving connections for five minutes
+so Native bindings and prepared reads survive normal reading pauses; ingestion
+releases surplus idle connections after 30 seconds. Explicit installation pool
+limits and idle lifetimes remain authoritative, and neither policy reserves a
+permanent minimum connection.
 Facets and display labels also read tiers through that Native indexed owner,
 with duplicate display occurrences and existing typed metadata preserved.
 Scored claim selection (`laplace_claims` / `laplace_claims_each`) shares the

@@ -36,11 +36,11 @@ public static class LaplaceDataSource
     /// </summary>
     public const int ServingCommandTimeoutSeconds = 120;
 
-    // Ingest fans out briefly, then spends long CPU-only intervals composing the next
-    // unit, so surplus pooled sessions are pruned quickly. Idle-pool retention and an
-    // in-flight command budget are separate limits. MinPoolSize=0 means the pool holds
-    // no permanent sessions.
-    public const int PoolIdleLifetimeSeconds = 30;
+    // Ingest releases surplus sessions between CPU-heavy working windows. Serving
+    // retains initialized Native bindings and prepared reads across normal reading
+    // pauses. Both policies retain MinPoolSize=0 and honor installation overrides.
+    public const int IngestPoolIdleLifetimeSeconds = 30;
+    public const int ServingPoolIdleLifetimeSeconds = 300;
     public const int PoolPruningIntervalSeconds = 5;
 
     /// <summary>
@@ -59,7 +59,9 @@ public static class LaplaceDataSource
                 ? PostgresResourcePlan.Current.IngestConnectionOwners
                 : PostgresResourcePlan.Current.ServingConnectionOwners;
         if (!b.ShouldSerialize("Minimum Pool Size")) b.MinPoolSize = 0;
-        if (!b.ShouldSerialize("Connection Idle Lifetime")) b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
+        if (!b.ShouldSerialize("Connection Idle Lifetime"))
+            b.ConnectionIdleLifetime = access == SubstrateAccess.Ingest
+                ? IngestPoolIdleLifetimeSeconds : ServingPoolIdleLifetimeSeconds;
         if (!b.ShouldSerialize("Connection Pruning Interval")) b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
 
         // The installed connection string may carry `Command Timeout=0` (unbounded) for

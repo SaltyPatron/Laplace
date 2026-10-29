@@ -43,7 +43,7 @@ public sealed class LaplaceDataSourceTests
         Assert.Equal(0, b.MaxAutoPrepare);
         Assert.Equal(PostgresResourcePlan.Current.IngestConnectionOwners, b.MaxPoolSize);
         Assert.Equal(0, b.MinPoolSize);
-        Assert.Equal(LaplaceDataSource.PoolIdleLifetimeSeconds, b.ConnectionIdleLifetime);
+        Assert.Equal(LaplaceDataSource.IngestPoolIdleLifetimeSeconds, b.ConnectionIdleLifetime);
         Assert.Equal(LaplaceDataSource.PoolPruningIntervalSeconds, b.ConnectionPruningInterval);
     }
 
@@ -77,7 +77,7 @@ public sealed class LaplaceDataSourceTests
         Assert.Equal(0, b.MaxAutoPrepare);
         Assert.Equal(PostgresResourcePlan.Current.ServingConnectionOwners, b.MaxPoolSize);
         Assert.Equal(0, b.MinPoolSize);
-        Assert.Equal(LaplaceDataSource.PoolIdleLifetimeSeconds, b.ConnectionIdleLifetime);
+        Assert.Equal(LaplaceDataSource.ServingPoolIdleLifetimeSeconds, b.ConnectionIdleLifetime);
         Assert.Equal(LaplaceDataSource.PoolPruningIntervalSeconds, b.ConnectionPruningInterval);
     }
 
