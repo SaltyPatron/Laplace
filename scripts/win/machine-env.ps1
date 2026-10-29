@@ -30,6 +30,8 @@ function Set-LaplaceDefault([string]$Name, [string]$Value) {
 }
 Set-LaplaceDefault LAPLACE_SRC ([IO.Path]::Combine($env:USERPROFILE, 'source\repos'))
 Set-LaplaceDefault LAPLACE_NATIVE ([IO.Path]::Combine($env:LAPLACE_SRC, 'Laplace-Native'))
+Set-LaplaceDefault LAPLACE_DATA_ROOT ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace'))
+Set-LaplaceDefault LAPLACE_DEPLOY ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'deploy'))
 Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace', 'work'))
 # Corpus/model roots are declared independently in machine.env; never derive them from state.
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))

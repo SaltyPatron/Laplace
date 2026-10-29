@@ -17,7 +17,7 @@ rem Installation roots come from machine.env; derived paths do not choose a driv
 
 if not defined LAPLACE_BUILD_ROOT if defined LAPLACE_BUILD set "LAPLACE_BUILD_ROOT=%LAPLACE_BUILD%\Laplace"
 
-if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_WORK%\deploy"
+if not defined LAPLACE_DEPLOY set "LAPLACE_DEPLOY=%LAPLACE_DATA_ROOT%\deploy"
 rem geos/proj/gdal (and sqlite for PROJ) from external/ — scripts\win\build-deps.cmd
 if not defined LAPLACE_DEPS_PREFIX set "LAPLACE_DEPS_PREFIX=%LAPLACE_DEPS%"
 if not defined LAPLACE_DEPS_BUILD set "LAPLACE_DEPS_BUILD=%LAPLACE_BUILD_ROOT%\build-deps"

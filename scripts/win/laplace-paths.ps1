@@ -48,6 +48,12 @@ function Get-LaplaceWorkRoot {
     throw 'LAPLACE_WORK is missing from the installation configuration'
 }
 
+function Get-LaplaceDeploymentRoot {
+    Import-LaplaceEnv
+    if ($env:LAPLACE_DEPLOY) { return $env:LAPLACE_DEPLOY }
+    throw 'LAPLACE_DEPLOY is missing from the installation configuration'
+}
+
 function Resolve-LaplaceTreePath {
     param([Parameter(Mandatory = $true)][string]$Name)
     Import-LaplaceEnv
