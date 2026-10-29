@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ci_product_scope import GITHUB_PATH_IGNORES, candidate_equivalent, ignored
+from ci_product_scope import candidate_equivalent, ignored
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ci-product-freshness.py"
 SPEC = importlib.util.spec_from_file_location("ci_product_freshness", SCRIPT)
@@ -64,6 +64,14 @@ class ProductFreshnessTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertFalse(MODULE.ignored(path))
+
+    def test_pinned_delivery_closure_is_a_product_input(self):
+        path = ".github/workflows/laplace.yml"
+        self.assertFalse(ignored(path))
+        self.assertFalse(candidate_equivalent(path))
+        value = MODULE.product_delta([path])
+        self.assertFalse(value["product_equivalent"])
+        self.assertEqual(value["product_paths"], [path])
 
     def test_shared_scope_function_is_the_freshness_function(self):
         for path in ("scripts/test-ci-workspace.py", "scripts/product-ci.sh"):

@@ -67,7 +67,8 @@ on:
       - "!scripts/validate-pipeline.py"
       - "!vault-data-inventory.tsv"
       - "!vault-data-directories.list"
-      # This file owns the pinned Native dependency closure as well as delivery.
+      # Re-include the pinned Native closure after .github/**. The shared
+      # ci_product_scope policy also invalidates candidates for this input.
       - ".github/workflows/laplace.yml"
 
 permissions:

@@ -549,8 +549,15 @@ def validate_layer_order(manifest: dict, gates: dict) -> list[str]:
         for src in stage.get("sources", [])
     }
     workflow = read_text(ROOT / ".github" / "workflows" / "seed-foundation.yml")
-    if not re.search(r"^      source:\n(?:^        .*\n)*?^        type: string$", workflow, re.M):
-        errs.append("seed-foundation.yml must accept catalog names and aliases without duplicating source options")
+    source_input = re.search(r"^      source:\n((?:^        .*\n)*)", workflow, re.M)
+    body = source_input.group(1) if source_input else ""
+    choices = re.search(r"^        options: *\[([^\]]*)\]$", body, re.M)
+    options = [value.strip() for value in choices.group(1).split(",")] if choices else []
+    selected = {canonical_source(value) for value in options if value != "ladder"}
+    if (not re.search(r"^        type: choice$", body, re.M)
+            or "ladder" not in options or len(options) != len(set(options))
+            or selected != {canonical_source(value) for value in foundation}):
+        errs.append("seed-foundation.yml source dropdown must offer the ladder and every canonical foundation source")
 
     ingest_text = read_text(ROOT / "scripts" / "ingest-source.sh")
     other = re.search(r'^OTHER_SOURCES="([^"]*)"', ingest_text, re.M)

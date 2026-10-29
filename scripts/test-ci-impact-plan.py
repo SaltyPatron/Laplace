@@ -22,6 +22,16 @@ def plan(*paths: str) -> dict:
 
 
 class ImpactPlanTests(unittest.TestCase):
+    def test_delivery_dependency_pins_qualify_and_install_native_consumers(self):
+        value = plan(".github/workflows/laplace.yml")
+        self.assertEqual(value["components"], ["database", "managed", "native", "uci"])
+        self.assertEqual(value["build_components"], ["managed", "native"])
+        self.assertEqual(value["db_suites"], ["db-health", "native-db", "managed-db"])
+        self.assertEqual(value["delivery_actions"], ["install", "database", "publish"])
+        self.assertEqual(value["publish_scope"], "full")
+        self.assertEqual(value["unknown_paths"], [])
+        self.assertFalse(value["full_qualification"])
+
     def test_windows_deployment_changes_do_not_rebuild_or_promote_linux(self):
         value = plan('scripts/win/install-extensions.cmd', 'deploy/windows/Publish-IisRuntime.ps1',
                      'scripts/web-artifact.py', 'scripts/test-web-artifact.py')

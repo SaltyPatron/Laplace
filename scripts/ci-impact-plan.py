@@ -8,6 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ci_product_scope import PRODUCT_INPUT_FILES
 from ci_product_scope import ignored as product_ignored, managed_test_path
 from ci_managed_projects import (
     load_projects as load_managed_projects,
@@ -290,10 +291,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             invalidate(("db-health", "native-db"), path)
             continue
 
-        if path.startswith(("engine/core/", "engine/dynamics/", "engine/synthesis/")):
+        if path in PRODUCT_INPUT_FILES or path.startswith(("engine/core/", "engine/dynamics/", "engine/synthesis/")):
             matched = product_change = True
             managed_build_required.update(FULL_PUBLISH_PROJECTS)
-            native_family = path.split("/", 2)[1]
+            # The delivery workflow pins the Native/extension/Engine closure.
+            # Qualify its consumers exactly as a core change, without rebuilding
+            # the unchanged SPA or scheduling unrelated whole-product suites.
+            native_family = "core" if path in PRODUCT_INPUT_FILES else path.split("/", 2)[1]
             managed_changed_paths.append(
                 "app/Laplace.Core.Tests/Laplace.Core.Tests.csproj"
             )

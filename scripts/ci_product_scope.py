@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import fnmatch
 
+PRODUCT_INPUT_FILES = frozenset({".github/workflows/laplace.yml"})
+
 PRODUCT_IGNORED_PREFIXES = (
     ".github/",
     "docs/",
@@ -80,70 +82,10 @@ PRODUCT_IGNORED_GLOBS = (
     "web/e2e/**",
 )
 
-# These are the equivalent GitHub Actions paths-ignore entries. A contract test
-# keeps the workflow trigger synchronized with ignored().
-GITHUB_PATH_IGNORES = (
-    "vault-data-inventory.tsv",
-    "vault-data-directories.list",
-    "docs/**",
-    "deploy/windows/**",
-    "scripts/win/**",
-    "**/*.md",
-    ".github/**",
-    "scripts/api-diagnostics.py",
-    "scripts/site-status.py",
-    "scripts/platform-access-audit.py",
-    "scripts/platform-access-enroll.py",
-    "scripts/platform-owner-enroll.py",
-    "web/scripts/capture-ui-diagnostics.mjs",
-    "scripts/ci-impact-plan.py",
-    "scripts/ci-qualification-cache.py",
-    "scripts/ci-product-freshness.py",
-    "scripts/ci_product_scope.py",
-    "scripts/ci_managed_projects.py",
-    "scripts/product-ci.sh",
-    "scripts/pipeline.sh",
-    "scripts/bootstrap-chess-lab.sh",
-    "scripts/check-deployed-revision.sh",
-    "scripts/test-parallel.sh",
-    "scripts/publish-applications.sh",
-    "scripts/db-migrations.sh",
-    "scripts/verify-api-payload.py",
-    "scripts/web-artifact.py",
-    "scripts/windows-components.py",
-    "scripts/verify-application-release.py",
-    "scripts/check-application-runtime.py",
-    "scripts/check-database-health.sh",
-    "scripts/configure-laplace-environment.py",
-    "deploy/linux/deploy.sh",
-    "deploy/linux/payload-sync.sh",
-    "deploy/linux/managed-publish.sh",
-    "deploy/linux/bootstrap-host.sh",
-    "deploy/linux/laplace-managed-deploy",
-    "deploy/linux/nginx-laplace.conf",
-    "scripts/test-*.py",
-    "scripts/test-*.sh",
-    "scripts/tests/**",
-    "web/scripts/test-*.mjs",
-    "web/scripts/verify-*.mjs",
-    "web/e2e/**",
-    "scripts/test-workflow-architecture.py",
-    "scripts/test-seed-workflow-ownership.py",
-    "scripts/test-product-ci-artifact-ownership.py",
-    "scripts/test-benchmark-suite.py",
-    "scripts/validate-pipeline.py",
-    "scripts/setup-host.sh",
-    "scripts/bootstrap-stripe-dev.sh",
-    "scripts/bootstrap-laplace-runner.sh",
-    "scripts/configure-github-repo.sh",
-    "scripts/laplace",
-    "deploy/linux/laplace-api.env.example",
-    "deploy/linux/managed-services/laplace-stripe.service",
-    "config/agents.json",
-)
-
 
 def ignored(path: str) -> bool:
+    if path in PRODUCT_INPUT_FILES:
+        return False
     return (
         path.startswith(PRODUCT_IGNORED_PREFIXES)
         or path.endswith(PRODUCT_IGNORED_SUFFIXES)

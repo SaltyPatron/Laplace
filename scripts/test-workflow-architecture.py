@@ -18,6 +18,15 @@ def code(body: str) -> str:
 
 
 class WorkflowArchitecture(unittest.TestCase):
+    def test_delivery_trigger_includes_its_pinned_dependency_closure(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        push = lifecycle.split("\n  push:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("\n    paths:\n", push)
+        self.assertNotIn("paths-ignore:", push)
+        self.assertLess(push.index('- "**"'), push.index('- "!.github/**"'))
+        self.assertLess(push.index('- "!.github/**"'),
+                        push.index('- ".github/workflows/laplace.yml"'))
+
     def test_delivery_cleanup_follows_consumers_and_keeps_cloud_lease(self):
         delivery = (WORKFLOWS / 'laplace.yml').read_text()
         staging = delivery.split('\n  cloud-host:\n', 1)[0]
@@ -81,7 +90,7 @@ class WorkflowArchitecture(unittest.TestCase):
         scope = importlib.util.module_from_spec(scope_spec)
         scope_spec.loader.exec_module(scope)
         self.assertTrue(scope.ignored('scripts/platform-access-audit.py'))
-        self.assertIn('- "scripts/platform-access-audit.py"', (WORKFLOWS / 'laplace.yml').read_text())
+        self.assertIn('- "!scripts/platform-access-audit.py"', (WORKFLOWS / 'laplace.yml').read_text())
 
     def test_initial_access_enrollment_selects_a_reviewed_request_and_reserves_the_host(self):
         maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
@@ -102,7 +111,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("Review one enrollment request per operation", maintenance)
         self.assertIn("Initial enrollment supports staging only", maintenance)
         self.assertIn('scripts/platform-access-enroll.py', (ROOT / 'scripts/ci_product_scope.py').read_text())
-        self.assertIn('- "scripts/platform-access-enroll.py"', (WORKFLOWS / 'laplace.yml').read_text())
+        self.assertIn('- "!scripts/platform-access-enroll.py"', (WORKFLOWS / 'laplace.yml').read_text())
 
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
@@ -207,7 +216,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/test-benchmark-suite.py",
             "scripts/validate-pipeline.py",
         ):
-            self.assertIn(f'- "{path}"', lifecycle)
+            self.assertIn(f'- "!{path}"', lifecycle)
 
     def test_managed_project_impact_drives_build_and_test_selection(self):
         pipeline = (ROOT / "scripts" / "pipeline.sh").read_text(encoding="utf-8")
@@ -327,7 +336,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("LAPLACE_LIVE_SUITES", fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn('- "scripts/product-ci.sh"', lifecycle)
+        self.assertIn('- "!scripts/product-ci.sh"', lifecycle)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
