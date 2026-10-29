@@ -214,8 +214,12 @@ public static class LaplaceLogging
         try
         {
             var info = new DirectoryInfo(full);
-            info.UnixFileMode |= UnixFileMode.GroupRead | UnixFileMode.GroupWrite
+            const UnixFileMode shared = UnixFileMode.GroupRead | UnixFileMode.GroupWrite
                 | UnixFileMode.GroupExecute | UnixFileMode.SetGroup;
+            var current = info.UnixFileMode;
+            // Provisioning may own this shared directory. A group writer can
+            // append logs but cannot chmod it, even to its existing mode.
+            if ((current & shared) != shared) info.UnixFileMode = current | shared;
         }
         catch (UnauthorizedAccessException ex)
         {
