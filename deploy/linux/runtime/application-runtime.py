@@ -122,13 +122,45 @@ def verify(config, *, stdout_only=False):
     print(json.dumps(receipt))
 
 
-def main():
+def database_sql(config, statement, target=None):
+    result = subprocess.run(['runuser', '-u', config['pg_os_user'], '--', str(Path(config['pgbin']) / 'psql'),
+        '-X', '-w', '-At', '-v', 'ON_ERROR_STOP=1', '-h', config['pgsocket'], '-p', str(config['port']),
+        '-d', target or config['database'], '-f', '-'], input=statement, text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise RuntimeError('Runtime database operation failed; inspect the database server log')
+    return result.stdout.strip()
+
+
+def resource_environment(config, sql):
+    data = Path(sql('SHOW data_directory'))
+    if data.resolve() != Path(config['database_data']).resolve():
+        raise ValueError('The declared application cluster differs from the connected database')
+    service_pid = subprocess.check_output(['systemctl', 'show', config['database_service'], '-p', 'MainPID', '--value'], text=True).strip()
+    if service_pid == '0' or service_pid != (data / 'postmaster.pid').read_text().splitlines()[0]:
+        raise ValueError('The declared service does not own the connected database process')
+    resource_keys = {'LAPLACE_PG_SERVING', 'LAPLACE_PG_WORK_NODES', 'LAPLACE_PG_RESERVED', 'LAPLACE_PG_BUFFERS_MAX'}
+    if set(config['resource_settings']) != resource_keys:
+        raise ValueError('Incomplete application resource declaration')
+    # A caller's fixture values must never override facts on a serving host.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith('TUNE_FACT_')}
+    environment.update(config['resource_settings'])
+    environment.update(LAPLACE_PG_PROFILE='app', LAPLACE_PGDATA=str(data), LAPLACE_PGWAL=str(data / 'pg_wal'),
+        LAPLACE_PG_DIR=str(Path(config['pgbin']).parent), LAPLACE_PGUSER=config['pg_os_user'],
+        LAPLACE_PGSERVICE=config['database_service'], TUNE_SOCKET=config['pgsocket'], TUNE_PORT=str(config['port']),
+        TUNE_CONN=f"host={config['pgsocket']} port={config['port']} user={config['pg_os_user']} dbname=postgres",
+        TUNE_PGDATA=str(data), PGWAL=str(data / 'pg_wal'), PGBIN=config['pgbin'], PGUSER=config['pg_os_user'],
+        SERVICE=config['database_service'],
+        LAPLACE_CONNINFO=f"host={config['pgsocket']} port={config['port']} user={config['pg_os_user']} dbname={config['database']}")
+    return data, environment
+
+
+def main(argv=None, *, resource_tuner=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase', choices=('prepare', 'activate', 'verify', 'resources', 'resources-check'), required=True)
     parser.add_argument('--stdout-only', action='store_true', help='Verify without writing a remote receipt')
-    args = parser.parse_args()
-    if args.stdout_only and args.phase != 'verify':
-        raise ValueError('--stdout-only applies only to verification')
+    args = parser.parse_args(argv)
+    if args.stdout_only and args.phase not in ('verify', 'resources-check'):
+        raise ValueError('--stdout-only applies only to verify and resources-check')
     config = json.load(sys.stdin)
     if os.geteuid() != 0:
         raise ValueError('The authorized host administrator must install the runtime identity')
@@ -145,6 +177,25 @@ def main():
     if args.phase == 'verify':
         verify(config, stdout_only=args.stdout_only)
         return
+    if args.phase == 'resources-check':
+        # Readback must not import installers, create scratch/locks or copy code
+        # into the serving host. The caller supplies the selected tuning owner.
+        with open(config['host_lock'], 'r') as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            sql = lambda statement, target=None: database_sql(config, statement, target)
+            if sql('SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=' + literal(config['database']), 'postgres') != config['database_owner']:
+                raise ValueError('The declared application database owner does not match the installation')
+            _, environment = resource_environment(config, sql)
+            if resource_tuner is None:
+                resource_tuner = Path(__file__).with_name('tune-pg.sh').read_text()
+            result = subprocess.run(['bash', '-c', 'source /dev/stdin; tune_main --check'],
+                                    input=resource_tuner, text=True, capture_output=True, env=environment, timeout=30)
+            if result.returncode:
+                raise RuntimeError('Application resource readback failed: ' + (result.stderr or result.stdout).strip())
+            print(result.stdout, end='')
+            print(json.dumps({'application_resources': 'verified', 'database_service': config['database_service'],
+                              'resource_settings': config['resource_settings']}))
+        return
     spec = importlib.util.spec_from_file_location('substrate_sync', Path(__file__).with_name('database-sync.py'))
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)
@@ -156,44 +207,15 @@ def main():
         database, role, owner = (config[name] for name in ('database', 'role', 'database_owner'))
 
         def sql(statement, target=database):
-            result = subprocess.run(['runuser', '-u', config['pg_os_user'], '--', str(Path(config['pgbin']) / 'psql'),
-                '-X', '-w', '-At', '-v', 'ON_ERROR_STOP=1', '-h', config['pgsocket'], '-p', str(config['port']),
-                '-d', target, '-f', '-'], input=statement, text=True, capture_output=True, timeout=30)
-            if result.returncode:
-                raise RuntimeError('Runtime database operation failed; inspect the database server log')
-            return result.stdout.strip()
+            return database_sql(config, statement, target)
 
         if sql('SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=' + literal(database), 'postgres') != owner:
             raise ValueError('The declared application database owner does not match the installation')
-        if args.phase in ('resources', 'resources-check'):
-            data = Path(sql('SHOW data_directory'))
-            if data.resolve() != Path(config['database_data']).resolve():
-                raise ValueError('The declared application cluster differs from the connected database')
-            service_pid = subprocess.check_output(['systemctl', 'show', config['database_service'], '-p', 'MainPID', '--value'], text=True).strip()
-            if service_pid == '0' or service_pid != (data / 'postmaster.pid').read_text().splitlines()[0]:
-                raise ValueError('The declared service does not own the connected database process')
-            resource_keys = {'LAPLACE_PG_SERVING', 'LAPLACE_PG_WORK_NODES', 'LAPLACE_PG_RESERVED', 'LAPLACE_PG_BUFFERS_MAX'}
-            if set(config['resource_settings']) != resource_keys:
-                raise ValueError('Incomplete application resource declaration')
-            environment = dict(os.environ)
-            # A caller's fixture values must never override facts on a serving host.
-            environment = {key: value for key, value in environment.items() if not key.startswith('TUNE_FACT_')}
-            environment.update(config['resource_settings'])
-            environment.update(LAPLACE_PG_PROFILE='app', LAPLACE_PGDATA=str(data), LAPLACE_PGWAL=str(data / 'pg_wal'),
-                LAPLACE_PG_DIR=str(Path(config['pgbin']).parent), LAPLACE_PGUSER=config['pg_os_user'],
-                LAPLACE_PGSERVICE=config['database_service'], TUNE_SOCKET=config['pgsocket'],
-                TUNE_CONN=f"host={config['pgsocket']} port={config['port']} user={config['pg_os_user']} dbname=postgres",
-                TUNE_PGDATA=str(data), PGWAL=str(data / 'pg_wal'), PGBIN=config['pgbin'], PGUSER=config['pg_os_user'],
-                SERVICE=config['database_service'],
-                LAPLACE_CONNINFO=f"host={config['pgsocket']} port={config['port']} user={config['pg_os_user']} dbname={database}")
+        if args.phase == 'resources':
+            data, environment = resource_environment(config, sql)
             tuner = str(Path(__file__).with_name('tune-pg.sh'))
             subprocess.run(['bash', '-c', 'source "$1"; tune_validate_plan', 'application-resources', tuner],
                 env=environment, check=True, timeout=30)
-            if args.phase == 'resources-check':
-                subprocess.run(['bash', tuner, '--check'], env=environment, check=True, timeout=30)
-                print(json.dumps({'application_resources': 'verified', 'database_service': config['database_service'],
-                                  'resource_settings': config['resource_settings']}))
-                return
             def recover_resources():
                 subprocess.run(['systemctl', 'restart', config['database_service']], check=True, timeout=60)
                 sync.activate(config['runtime_user'], prefix, config['public_base'])
