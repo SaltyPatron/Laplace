@@ -23,7 +23,9 @@ public sealed class NativeWordFrameNetTests
             "claim\t0\t1\tAbounding_with\t[brushed, eng, [WordNet, 1.6, 01105125, a]]\ta\thaving soft nap produced by brushing",
             "claim\t0\t1\tAbounding_with\t[cloaked, eng, [WordNet, 1.6, 01644908, a]]\ta\thaving its true character concealed with the intent of misleading",
             "claim\t0\t1\tAbounding_with\t[gilded, eng, [WordNet, 1.6, 00357392, a]]\ta\thaving the deep slightly brownish color of gold",
-            "claim\t0\t1\tAbusing\t[abusive, eng, [WordNet, 1.6, 01114176, a]]\ta\t0\tby physical or psychological maltreatment"
+            "claim\t0\t1\tAbounding_with\tidentifier vocabulary\tfnframe",
+            "claim\t0\t1\tAbusing\t[abusive, eng, [WordNet, 1.6, 01114176, a]]\ta\t0\tby physical or psychological maltreatment",
+            "claim\t0\t1\tAbusing\tidentifier vocabulary\tfnframe"
         }, (await fixture.Claims("wordframenet", path)).Claims());
     }
 
@@ -36,7 +38,8 @@ public sealed class NativeWordFrameNetTests
         Assert.Equal(new[]
         {
             "claim\t0\t1\tAbounding_with\t[fleecy, eng, [WordNet, 1.6, 01105125, a]]\ta",
-            "claim\t0\t1\tAbounding_with\t[napped, eng, [WordNet, 1.6, 01105125, a]]\ta"
+            "claim\t0\t1\tAbounding_with\t[napped, eng, [WordNet, 1.6, 01105125, a]]\ta",
+            "claim\t0\t1\tAbounding_with\tidentifier vocabulary\tfnframe"
         }, (await fixture.Claims("wordframenet", path)).Claims());
     }
 
@@ -46,7 +49,10 @@ public sealed class NativeWordFrameNetTests
         using var fixture = new NativeCorpus();
         string path = fixture.Write("XWFN/eXtendedWFN",
             "Frame: Motion\nback_and_forth r 00114809-r\nback and forth r 00114809-r\n");
-        string[][] claims = (await fixture.Claims("wordframenet", path)).Claims()
+        string[] observations = (await fixture.Claims("wordframenet", path)).Claims();
+        const string vocabulary = "claim\t0\t1\tMotion\tidentifier vocabulary\tfnframe";
+        Assert.Contains(vocabulary, observations);
+        string[][] claims = observations.Where(line => line != vocabulary)
             .Select(line => line.Split('\t')).ToArray();
         Assert.NotEmpty(claims);
         foreach (string[] claim in claims)
@@ -60,7 +66,8 @@ public sealed class NativeWordFrameNetTests
         using var fixture = new NativeCorpus();
         string path = fixture.Write("WFN/WordFrameNet",
             "Frame: Activity\nprepared|a 01771525-s 0 ready beforehand\n");
-        Assert.Equal(new[] { "claim\t0\t1\tActivity\t[prepared, eng, [WordNet, 1.6, 01771525, s]]\ta\t0\tready beforehand" },
+        Assert.Equal(new[] { "claim\t0\t1\tActivity\t[prepared, eng, [WordNet, 1.6, 01771525, s]]\ta\t0\tready beforehand",
+            "claim\t0\t1\tActivity\tidentifier vocabulary\tfnframe" },
             (await fixture.Claims("wordframenet", path)).Claims());
     }
 
