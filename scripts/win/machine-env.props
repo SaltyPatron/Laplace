@@ -9,6 +9,8 @@
     <LAPLACE_SRC Condition="'$(LAPLACE_SRC)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_SRC\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_SRC>
     <LAPLACE_DATA Condition="'$(LAPLACE_DATA)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_DATA\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_DATA>
     <LAPLACE_WORK Condition="'$(LAPLACE_WORK)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_WORK\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_WORK>
+    <LAPLACE_DATA_ROOT Condition="'$(LAPLACE_DATA_ROOT)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_DATA_ROOT\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_DATA_ROOT>
+    <LAPLACE_DEPLOY Condition="'$(LAPLACE_DEPLOY)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_DEPLOY\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_DEPLOY>
     <LAPLACE_BUILD Condition="'$(LAPLACE_BUILD)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_BUILD\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_BUILD>
     <LAPLACE_MODELS Condition="'$(LAPLACE_MODELS)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_MODELS\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_MODELS>
     <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_BUILD_ROOT\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_BUILD_ROOT>
@@ -26,8 +28,10 @@
     <LAPLACE_EXTERNAL Condition="'$(LAPLACE_EXTERNAL)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceMachineText)', `(?m)^\s*(?:export\s+)?LAPLACE_EXTERNAL\s*=\s*['&quot;]?([^'&quot;\r\n]*?)['&quot;]?\s*$`).Groups[1].Value)</LAPLACE_EXTERNAL>
     <LAPLACE_SRC Condition="'$(LAPLACE_SRC)' == ''">$(USERPROFILE)\source\repos</LAPLACE_SRC>
     <LAPLACE_WORK Condition="'$(LAPLACE_WORK)' == ''">$(LOCALAPPDATA)\Laplace\work</LAPLACE_WORK>
+    <LAPLACE_DATA_ROOT Condition="'$(LAPLACE_DATA_ROOT)' == ''">$(LOCALAPPDATA)\Laplace</LAPLACE_DATA_ROOT>
+    <LAPLACE_DEPLOY Condition="'$(LAPLACE_DEPLOY)' == ''">$(LAPLACE_DATA_ROOT)\deploy</LAPLACE_DEPLOY>
     <LAPLACE_BUILD Condition="'$(LAPLACE_BUILD)' == ''">$(LAPLACE_WORK)\build</LAPLACE_BUILD>
-    <LAPLACE_PGDATA Condition="'$(LAPLACE_PGDATA)' == ''">$(LAPLACE_WORK)\pgdata</LAPLACE_PGDATA>
+    <LAPLACE_PGDATA Condition="'$(LAPLACE_PGDATA)' == ''">$(LAPLACE_DATA_ROOT)\pgdata</LAPLACE_PGDATA>
     <LAPLACE_PGWAL Condition="'$(LAPLACE_PGWAL)' == ''">$(LAPLACE_PGDATA)\pg_wal</LAPLACE_PGWAL>
     <LAPLACE_ROLE Condition="'$(LAPLACE_ROLE)' == ''">laplace</LAPLACE_ROLE>
     <_LaplaceCheckout>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..').TrimEnd('\').ToLowerInvariant())</_LaplaceCheckout>

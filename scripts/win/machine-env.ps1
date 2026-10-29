@@ -49,7 +49,7 @@ Set-LaplaceDefault LAPLACE_TREESITTER ([IO.Path]::Combine($env:LAPLACE_DEPSRC, '
 Set-LaplaceDefault LAPLACE_OPERATIONS ([IO.Path]::Combine($env:LAPLACE_SRC, 'Laplace-Operations'))
 Set-LaplaceDefault LAPLACE_TIER0 ([IO.Path]::Combine($env:LAPLACE_WORK, 'tier0/tier0.bin'))
 Set-LaplaceDefault LAPLACE_ENGINE_BUILD ([IO.Path]::Combine($env:LAPLACE_BUILD_ROOT, 'build-win'))
-Set-LaplaceDefault LAPLACE_PGDATA ([IO.Path]::Combine($env:LAPLACE_WORK, 'pgdata'))
+Set-LaplaceDefault LAPLACE_PGDATA ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'pgdata'))
 Set-LaplaceDefault LAPLACE_PGWAL ([IO.Path]::Combine($env:LAPLACE_PGDATA, 'pg_wal'))
 Set-LaplaceDefault LAPLACE_ROLE 'laplace'
 Set-LaplaceDefault LAPLACE_PGUSER $env:LAPLACE_ROLE

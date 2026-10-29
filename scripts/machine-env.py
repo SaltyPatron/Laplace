@@ -141,12 +141,22 @@ def paths(path, process, checkout):
         result[name] = values[name] = str(Path(value))
         return values[name]
 
-    identity = hashlib.sha256(os.fsencode(Path(checkout).resolve())).hexdigest()[:16]
+    checkout_key = str(Path(checkout).resolve()).rstrip('\\/').lower() if os.name == 'nt' else str(Path(checkout).resolve())
+    identity = hashlib.sha256(checkout_key.encode('utf-8') if os.name == 'nt' else os.fsencode(Path(checkout).resolve())).hexdigest()[:12 if os.name == 'nt' else 16]
+    if os.name == 'nt':
+        state = directory('LAPLACE_DATA_ROOT', str(Path(values['LOCALAPPDATA']) / 'Laplace') if values.get('LOCALAPPDATA') else None)
+        directory('LAPLACE_DEPLOY', str(Path(state) / 'deploy'))
+        pgdata = directory('LAPLACE_PGDATA', str(Path(state) / 'pgdata'))
+        directory('LAPLACE_PGWAL', str(Path(pgdata) / 'pg_wal'))
     # Installed commands do not need a compiler workspace. Resolve the roots
     # declared for this host; consumers require only the directories they use.
     if values.get('LAPLACE_BUILD') or values.get('LAPLACE_BUILD_VOLUME') or values.get('LAPLACE_BUILD_ROOT'):
         build = directory('LAPLACE_BUILD', values.get('LAPLACE_BUILD_VOLUME') or values.get('LAPLACE_BUILD_ROOT'))
-        build_root = directory('LAPLACE_BUILD_ROOT', str(Path(build) / 'laplace-mono' / 'worktrees' / identity))
+        default_build = Path(build) / 'laplace-mono' / 'worktrees' / identity
+        if os.name == 'nt':
+            canonical = str((Path(values['LAPLACE_SRC']) / 'Laplace').resolve()).rstrip('\\/').lower() if values.get('LAPLACE_SRC') else None
+            default_build = Path(build) / 'Laplace' if checkout_key == canonical else Path(build) / 'worktrees' / (Path(checkout_key).name + '-' + identity)
+        build_root = directory('LAPLACE_BUILD_ROOT', str(default_build))
         directory('LAPLACE_BUILD_DIRECTORY', str(Path(build_root) / 'build'))
         directory('LAPLACE_DEPS_BUILD', str(Path(build) / 'laplace-mono' / 'dependencies'))
     if values.get('LAPLACE_WORK') or values.get('LAPLACE_WORK_ROOT'):
