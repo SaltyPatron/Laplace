@@ -57,7 +57,7 @@ set "SRC=%~1"
 set "BASE=%~nx1"
 if not exist "%SRC%" ( echo missing build artifact: "%SRC%" & exit /b 1 )
 if exist "%DEST%\%BASE%" (
-  fc /b "%SRC%" "%DEST%\%BASE%" >nul 2>nul
+  comp "%SRC:/=\%" "%DEST:/=\%\%BASE:/=\%" /M >nul 2>nul
   if not errorlevel 1 exit /b 0
 )
 set "RUNTIME_CHANGED=1"

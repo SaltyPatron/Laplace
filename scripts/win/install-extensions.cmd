@@ -232,23 +232,23 @@ for %%P in (
   )
 )
 if "%OK%"=="0" exit /b 1
-fc /b "%LAPLACE_PG_EXTENSION_BUILD%\laplace.dll" "%PG_MODULE_DIR%\laplace.dll" >nul 2>&1 || (
+comp "%LAPLACE_PG_EXTENSION_BUILD:/=\%\laplace.dll" "%PG_MODULE_DIR:/=\%\laplace.dll" /M >nul 2>&1 || (
   echo ERROR: deployed Native PostgreSQL module does not match build output
   exit /b 1
 )
-fc /b "%T0_SRC%" "%T0_DST%" >nul 2>&1 || (
+comp "%T0_SRC:/=\%" "%T0_DST:/=\%" /M >nul 2>&1 || (
   echo ERROR: deployed T0 perfcache does not match build output
   exit /b 1
 )
-for %%F in ("%FLAGS_SRC%" "%FLAGS_SRC%.layout") do fc /b "%%~F" "%DEPLOY%\share\%%~nxF" >nul 2>&1 || (
+for %%F in ("%FLAGS_SRC%" "%FLAGS_SRC%.layout") do comp "%%~fF" "%DEPLOY:/=\%\share\%%~nxF" /M >nul 2>&1 || (
   echo ERROR: deployed Tier-0 flags do not match build output
   exit /b 1
 )
-fc /b "%HW_SRC%" "%HW_DST%" >nul 2>&1 || (
+comp "%HW_SRC:/=\%" "%HW_DST:/=\%" /M >nul 2>&1 || (
   echo ERROR: deployed highway perfcache does not match build output
   exit /b 1
 )
-fc /b "%CHESS_SRC%" "%CHESS_DST%" >nul 2>&1 || (
+comp "%CHESS_SRC:/=\%" "%CHESS_DST:/=\%" /M >nul 2>&1 || (
   echo ERROR: deployed chess position perfcache does not match build output
   exit /b 1
 )
@@ -267,7 +267,7 @@ echo missing build artifact: "%SRC%"
 exit /b 1
 :sc_copy
 if exist "%DESTDIR%\%BASE%" (
-  fc /b "%SRC%" "%DESTDIR%\%BASE%" >nul 2>nul
+  comp "%SRC:/=\%" "%DESTDIR:/=\%\%BASE:/=\%" /M >nul 2>nul
   if not errorlevel 1 exit /b 0
 )
 set "RUNTIME_CHANGED=1"

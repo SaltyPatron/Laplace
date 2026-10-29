@@ -57,13 +57,13 @@ if not exist "%HW_DST%" (
 )
 
 if exist "%T0_SRC%" if exist "%T0_DST%" (
-  fc /b "%T0_SRC%" "%T0_DST%" >nul 2>&1 || (
+  comp "%T0_SRC:/=\%" "%T0_DST:/=\%" /M >nul 2>&1 || (
     echo STALE: T0 perfcache deploy != build-win ^(re-run install-extensions.cmd^)
     set "OK=0"
   )
 )
 if exist "%HW_SRC%" if exist "%HW_DST%" (
-  fc /b "%HW_SRC%" "%HW_DST%" >nul 2>&1 || (
+  comp "%HW_SRC:/=\%" "%HW_DST:/=\%" /M >nul 2>&1 || (
     echo STALE: highway perfcache deploy != build-win ^(re-run install-extensions.cmd^)
     set "OK=0"
   )
