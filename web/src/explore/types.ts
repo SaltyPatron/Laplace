@@ -230,12 +230,20 @@ export interface LabeledEvidenceItem {
   type_label: string;
   object_id: string;
   object_label: string;
-  source_id: string;
+  source_id: string | null;
   source_label: string;
   context_id?: string | null;
-  outcome: number;
-  observation_count: number;
+  outcome: number | null;
+  observation_count: number | null;
   eff_mu?: number | null;
+  witness_count?: number | null;
+  claim_id?: string | null;
+  games?: number | null;
+  tokens?: number | null;
+  score?: number | null;
+  trust?: number | null;
+  dependence_root?: string | null;
+  position?: number | null;
 }
 export interface ExploreEntityResponse {
   id_hex: string;

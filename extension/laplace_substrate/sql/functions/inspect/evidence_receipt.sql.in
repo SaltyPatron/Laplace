@@ -1,12 +1,48 @@
+-- One Native witness-series owner serves both detailed and aggregate reads.
+CREATE OR REPLACE FUNCTION ops.claim_witness_series(p_claims @extschema:laplace@.blake3[])
+RETURNS TABLE(claim @extschema:laplace@.blake3,trunk @extschema:laplace@.blake3,
+ games double precision,tokens double precision,score double precision,trust double precision,
+ dependence_root @extschema:laplace@.blake3,"position" integer,source_label text)
+LANGUAGE sql STABLE STRICT
+BEGIN ATOMIC
+WITH series AS MATERIALIZED (
+ SELECT a.* FROM @extschema:laplace@.laplace_attested_series(p_claims) a WHERE a.witness
+), names AS MATERIALIZED (
+ SELECT c.entity,c.child FROM @extschema:laplace@.laplace_constituents(
+   ARRAY(SELECT DISTINCT trunk FROM series)) c WHERE c.ordinal=1
+), labels AS MATERIALIZED (
+ SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(SELECT DISTINCT child FROM names))
+)
+SELECT a.claim,a.trunk,a.games,a.tokens,a.score,a.trust,a.dependence_root,a.position,
+ coalesce(nullif(l.content,''),a.trunk::text)
+FROM series a LEFT JOIN names n ON n.entity OPERATOR(@extschema:laplace@.=) a.trunk
+LEFT JOIN labels l ON l.entity OPERATOR(@extschema:laplace@.=) n.child;
+END;
+
+CREATE OR REPLACE FUNCTION ops.evidence_series_receipt(p_id bytea,p_limit integer DEFAULT 25,p_inbound boolean DEFAULT false)
+RETURNS TABLE(claim_id bytea,type_id bytea,object_id bytea,type_label text,object_label text,
+ eff_mu numeric,source_id bytea,source_label text,games double precision,tokens double precision,
+ score double precision,trust double precision,dependence_root bytea,"position" integer)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts(p_id,p_limit,p_inbound)),
+series AS MATERIALIZED (SELECT * FROM ops.claim_witness_series(ARRAY(SELECT claim FROM facts)))
+SELECT decode(f.claim::text,'hex'),decode(f.predicate::text,'hex'),decode(f.object::text,'hex'),f.type,f.fact,f.eff_mu,
+ decode(a.trunk::text,'hex'),a.source_label,a.games,a.tokens,a.score,a.trust,
+ decode(a.dependence_root::text,'hex'),a.position
+FROM facts f JOIN series a ON a.claim OPERATOR(@extschema:laplace@.=) f.claim
+ORDER BY f.eff_mu DESC,f.claim,a.trunk;
+END;
+
 CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea,p_limit integer DEFAULT 25)
 RETURNS TABLE(type_id bytea,object_id bytea,type_label text,object_label text,eff_mu numeric,witness_count bigint,source_labels text)
 LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts(p_id,p_limit)), provenance AS MATERIALIZED (
- SELECT DISTINCT a.claim,a.trunk FROM @extschema:laplace@.laplace_attested(ARRAY(SELECT claim FROM facts),false) a WHERE a.witness
+ SELECT DISTINCT s.claim,s.trunk,s.source_label FROM ops.claim_witness_series(ARRAY(SELECT claim FROM facts)) s
 )
 SELECT decode(f.predicate::text,'hex'),decode(f.object::text,'hex'),f.type,f.fact,f.eff_mu,
- count(p.trunk)::bigint,string_agg(p.trunk::text,', ' ORDER BY p.trunk)
+ count(p.trunk)::bigint,string_agg(p.source_label,', ' ORDER BY p.trunk)
 FROM facts f LEFT JOIN provenance p ON p.claim OPERATOR(@extschema:laplace@.=) f.claim
 GROUP BY f.claim,f.predicate,f.type,f.object,f.fact,f.eff_mu ORDER BY f.eff_mu DESC,f.claim;
 END;

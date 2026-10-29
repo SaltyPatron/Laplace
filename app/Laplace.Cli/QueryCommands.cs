@@ -471,9 +471,24 @@ internal static class QueryCommands
         }
 
         static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
+        static async Task<int> NativeEvidenceAsync(NpgsqlConnection connection, byte[] entity, bool inbound)
+        {
+            var rows = await NpgsqlSubstrateReads.EvidenceSeriesReceiptAsync(connection, entity, 40, inbound, default);
+            foreach (var e in rows)
+            {
+                string outcome = e.Games <= 0 ? "no scored records"
+                    : e.Score == 0 ? "refutes" : e.Score == e.Games ? "confirms"
+                    : $"mean outcome {e.Score / e.Games:F3}";
+                Console.WriteLine($"    [{(string.IsNullOrEmpty(e.TypeLabel) ? "value" : e.TypeLabel)}] → {e.ObjectLabel}");
+                Console.WriteLine($"      {e.SourceLabel}: {outcome}, records={e.Games:G17}, occurrences={e.Tokens:G17}, trust={e.Trust:G17}");
+                Console.WriteLine($"      claim={e.ClaimId}  witness={e.SourceId}"
+                    + (e.DependenceRoot is null ? "" : $"  dependence={e.DependenceRoot}"));
+            }
+            return rows.Count;
+        }
         {
             Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
-            int n = 0;
+            int n = await NativeEvidenceAsync(conn, id.ToBytes(), false);
             foreach (var a in await NpgsqlSubstrateReads.AttestationsOutDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;
@@ -487,7 +502,7 @@ internal static class QueryCommands
 
         {
             Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
-            int n = 0;
+            int n = await NativeEvidenceAsync(conn, id.ToBytes(), true);
             foreach (var a in await NpgsqlSubstrateReads.AttestationsInDisplayAsync(conn, id.ToBytes(), default))
             {
                 n++;

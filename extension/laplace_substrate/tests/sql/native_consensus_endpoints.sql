@@ -18,6 +18,27 @@ BEGIN
     VALUES(id,1500,50,0.06,1);
     RETURN id;
 END $$;
+CREATE FUNCTION pg_temp.evidence_source(parts public.blake3[], metadata bigint[]) RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE id public.blake3:=public.laplace_compose(parts); point public.geometry;
+        path public.geometry:=public.laplace_path(parts); vertex public.geometry; altitude smallint;
+BEGIN
+ SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,
+   public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))),
+   (max(coalesce(e.tier,0))+1)::smallint INTO point,altitude
+ FROM unnest(parts) p LEFT JOIN public.entity e ON e.id=p;
+ FOR i IN 1..cardinality(metadata) LOOP
+  vertex:=public.ST_PointN(path,i);
+  path:=public.ST_SetPoint(path,i-1,public.ST_MakePoint(public.ST_X(vertex),public.ST_Y(vertex),
+    public.ST_Z(vertex),public.ST_M(vertex)+metadata[i]));
+ END LOOP;
+ INSERT INTO public.entity(id,tier,coord,hilbert,mask)
+ VALUES(id,altitude,point,public.laplace_hilbert4(point),public.laplace_mask_slot('kind','file'));
+ INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
+ VALUES(id,altitude,public.laplace_hilbert4(point),path,public.laplace_mask_slot('kind','file'));
+ INSERT INTO public.witness(id,trust) VALUES(id,0.75);
+ RETURN id;
+END $$;
 DO $$
 DECLARE a public.blake3:=public.laplace_cp_id(ascii('α'));
         b public.blake3:=public.laplace_cp_id(ascii('β'));
@@ -26,6 +47,8 @@ DECLARE a public.blake3:=public.laplace_cp_id(ascii('α'));
         aa bytea:=public.blake3_send(a);
         bb bytea:=public.blake3_send(b);
         rr bytea:=public.blake3_send(r);
+        claim public.blake3;
+        witness public.blake3;
         n bigint;
 BEGIN
     PERFORM pg_temp.endpoint_claim(ARRAY[a,r,b]);
@@ -33,6 +56,21 @@ BEGIN
     PERFORM pg_temp.endpoint_claim(ARRAY[a,a,b]); -- first two parts share an RLE vertex
     PERFORM pg_temp.endpoint_claim(ARRAY[c,a,b]); -- a is only the predicate
     PERFORM pg_temp.endpoint_claim(ARRAY[a,b]);   -- a value claim, not a binary relation
+    claim:=public.laplace_compose(ARRAY[a,r,b]);
+    -- Two actual source records: one affirmation and one refutation of the
+    -- same canonical claim. One witness is not two observations, and the
+    -- combined series must never be presented as a confirmation.
+    witness:=pg_temp.evidence_source(ARRAY[public.laplace_cp_id(ascii('Ω')),claim,c,claim],
+        ARRAY[0,2147483648,0,19327352832]::bigint[]);
+    IF NOT EXISTS(SELECT FROM ops.evidence_series_receipt(aa,100,false)
+        WHERE claim_id=public.blake3_send(claim) AND source_id=public.blake3_send(witness)
+          AND games=2 AND tokens=2 AND score=1 AND trust=0.75 AND source_label='Ω')
+       OR NOT EXISTS(SELECT FROM ops.evidence_series_receipt(bb,100,true)
+        WHERE claim_id=public.blake3_send(claim) AND object_id=aa AND games=2 AND score=1)
+       OR NOT EXISTS(SELECT FROM ops.evidence_receipt(aa,100)
+        WHERE type_id=rr AND object_id=bb AND witness_count=1 AND source_labels='Ω') THEN
+        RAISE EXCEPTION 'shared evidence receipt lost direction, source, series or witness cardinality';
+    END IF;
     -- Single-entity inspection and the UI's batch geometry query share the
     -- Native exact-ID reader. A repeated request stays a repeated occurrence.
     IF (SELECT array_agg(p.ordinal ORDER BY p.ordinal)
@@ -68,7 +106,7 @@ BEGIN
     -- does, even though none of their source-defined predicates has a legacy
     -- registry row. Unknown legacy labels must not manufacture an empty answer.
     IF NOT EXISTS(SELECT FROM converse.recall_intent('describe',aa)
-        WHERE reply='δ: β' AND eff_mu=1400 AND witnesses=0) THEN
+        WHERE reply='δ: β' AND eff_mu=1400 AND witnesses=1) THEN
         RAISE EXCEPTION 'describe discarded a canonical source-defined relation';
     END IF;
 END $$;

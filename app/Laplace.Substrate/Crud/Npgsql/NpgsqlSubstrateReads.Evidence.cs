@@ -80,6 +80,32 @@ public static partial class NpgsqlSubstrateReads
         string TypeLabel, string? PeerLabel, string SourceLabel, byte[]? ContextId,
         short Outcome, long ObservationCount);
 
+    /// <summary>
+    /// One registered witness's Native series for a canonical claim. Score is
+    /// the total outcome score across Games; Tokens counts occurrences.
+    /// Neither quantity is the number of distinct witnesses.
+    /// </summary>
+    public readonly record struct EvidenceSeriesRow(
+        string ClaimId, string? TypeId, string ObjectId, string TypeLabel, string ObjectLabel,
+        decimal EffMu, string SourceId, string SourceLabel, double Games, double Tokens,
+        double Score, double Trust, string? DependenceRoot, int? Position);
+
+    public static Task<IReadOnlyList<EvidenceSeriesRow>> EvidenceSeriesReceiptAsync(
+        NpgsqlConnection conn, byte[] id, int limit, bool inbound, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ops.evidence_series_receipt"),
+            static r => new EvidenceSeriesRow(
+                r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2),
+                r.GetString(3), r.GetString(4), r.GetDecimal(5), r.GetString(6), r.GetString(7),
+                r.GetDouble(8), r.GetDouble(9), r.GetDouble(10), r.GetDouble(11),
+                r.IsDBNull(12) ? null : r.GetString(12), r.IsDBNull(13) ? null : r.GetInt32(13)),
+            p =>
+            {
+                p.Add("id", NpgsqlDbType.Bytea).Value = id;
+                p.AddWithValue("limit", limit);
+                p.AddWithValue("inbound", inbound);
+            }, ct: ct, label: "evidence_series_receipt", onError: onError);
+
     /// <summary><c>ops.attestations_out(id)</c> with bounded display labels after evidence election.</summary>
     public static Task<IReadOnlyList<AttestationDisplayRow>> AttestationsOutDisplayAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,

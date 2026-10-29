@@ -931,18 +931,22 @@ internal sealed partial class SubstrateClient
     private static async Task<IReadOnlyList<LabeledEvidenceItem>> ReadEvidenceItemsAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.EvidenceReceiptAsync(conn, id, limit, ct);
+        var rows = await NpgsqlSubstrateReads.EvidenceSeriesReceiptAsync(conn, id, limit, false, ct);
         var result = rows.Select(e => new LabeledEvidenceItem(
-            TypeId: e.TypeIdHex,
+            TypeId: e.TypeId,
             TypeLabel: e.TypeLabel,
-            ObjectId: e.ObjectIdHex,
+            ObjectId: e.ObjectId,
             ObjectLabel: e.ObjectLabel,
-            SourceId: "",
-            SourceLabel: e.SourceLabels ?? "",
+            SourceId: e.SourceId,
+            SourceLabel: e.SourceLabel,
             ContextId: null,
-            Outcome: 2,
-            ObservationCount: e.WitnessCount,
-            EffMu: e.EffMu)).ToList();
+            Outcome: null,
+            ObservationCount: null,
+            EffMu: e.EffMu,
+            WitnessCount: 1,
+            ClaimId: e.ClaimId,
+            Games: e.Games, Tokens: e.Tokens, Score: e.Score, Trust: e.Trust,
+            DependenceRoot: e.DependenceRoot, Position: e.Position)).ToList();
         var ambiguous = AmbiguousDisplayLabels(
             result, r => r.ObjectLabel, r => r.ObjectId);
         return [.. result.Select(r => ambiguous.Count == 0 ? r : r with

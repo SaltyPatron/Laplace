@@ -445,12 +445,13 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                     TypeLabel: r.TypeLabel!,
                     ObjectId: r.ObjectIdHex!,
                     ObjectLabel: r.ObjectLabel!,
-                    SourceId: "",
+                    SourceId: null,
                     SourceLabel: r.SourceLabels ?? "",
                     ContextId: null,
-                    Outcome: 2,
-                    ObservationCount: r.WitnessCount ?? 0L,
-                    EffMu: r.EffMu ?? 0m));
+                    Outcome: null,
+                    ObservationCount: null,
+                    EffMu: r.EffMu ?? 0m,
+                    WitnessCount: r.WitnessCount));
             }
 
             if (entityId is null)

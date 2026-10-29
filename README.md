@@ -266,6 +266,23 @@ SELECT * FROM ops.api('walk');
 
 See [docs/guides/installed-mono-client.md](docs/guides/installed-mono-client.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the guides under [docs/guides/](docs/guides/) for the complete operational surface.
 
+## Native read contracts
+
+Exact entity and physicality sets use `laplace_entities` and
+`laplace_physicalities` from Laplace-postgres. Engine and MCP share
+`Laplace-Engine/src/read_ids.c`; monorepo inspection and batch geometry use the
+same primary-key owner through `ops.entity_physicalities`. Request ordinals
+retain duplicates, missing IDs stay absent, and reads retain the caller's
+snapshot and installed namespaces.
+
+CLI inspection and UI provenance share `ops.evidence_series_receipt` over
+`ops.claim_witness_series`. Native containment supplies each registered
+witness's record count (`games`), occurrences (`tokens`), total outcome score,
+trust, dependence root and position. The score divided by games is a mean
+outcome, not a categorical confirmation. `ops.evidence_receipt` aggregates
+those same series into distinct witness counts for descriptions and summary
+receipts. Source IDs and claim IDs remain available beside their labels.
+
 ## License
 
 See [LICENSE](LICENSE). Seeded sources retain their own licenses and attribution/provenance in the substrate.

@@ -1115,6 +1115,10 @@ SQL_QUERY("structural.constellation_sample", "int4",
 
 SQL_QUERY("ops.evidence_receipt", "bytea,int4",
     "SELECT encode(type_id,'hex'),type_label,encode(object_id,'hex'),object_label,source_labels,witness_count,eff_mu FROM ops.evidence_receipt($1,$2)")
+SQL_QUERY("ops.evidence_series_receipt", "bytea,int4,bool",
+    "SELECT encode(claim_id,'hex'),encode(type_id,'hex'),encode(object_id,'hex'),type_label,object_label,eff_mu,"
+    "encode(source_id,'hex'),source_label,games,tokens,score,trust,encode(dependence_root,'hex'),\"position\" "
+    "FROM ops.evidence_series_receipt($1,$2,$3)")
 
 SQL_QUERY("ops.eval_ingest_fidelity_positives", "text,text,int4",
     "SELECT score FROM ops.eval_ingest_fidelity_positives($1, $2, $3)")

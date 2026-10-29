@@ -23,7 +23,7 @@ BEGIN ATOMIC
  SELECT content FROM @extschema:laplace@.laplace_labels(ARRAY[p_id]);
 END;
 
-CREATE OR REPLACE FUNCTION ops.claim_facts(p_subject bytea,p_limit integer DEFAULT NULL)
+CREATE OR REPLACE FUNCTION ops.claim_facts(p_subject bytea,p_limit integer,p_inbound boolean)
 RETURNS TABLE(claim @extschema:laplace@.blake3,predicate @extschema:laplace@.blake3,object @extschema:laplace@.blake3,type text,fact text,
  eff_mu numeric,rating double precision,deviation double precision,volatility double precision)
 LANGUAGE sql STABLE
@@ -32,17 +32,33 @@ WITH subject AS (SELECT encode(p_subject,'hex')::@extschema:laplace@.blake3 AS i
  SELECT c.entity,c.rating,c.deviation,c.volatility
  FROM subject s CROSS JOIN LATERAL @extschema:laplace@.laplace_claims_each(ARRAY[s.id],NULL::bigint,
    ARRAY[@extschema:laplace@.laplace_bank_bit('kind','claim')],'{}'::@extschema:laplace@.blake3[]) c
- WHERE @extschema:laplace@.laplace_path_starts(c.path,s.id)
+ WHERE CASE WHEN p_inbound THEN @extschema:laplace@.laplace_path_ends(c.path,s.id)
+            ELSE @extschema:laplace@.laplace_path_starts(c.path,s.id) END
  ORDER BY c.rating-2*c.deviation DESC,c.entity LIMIT p_limit
 ), parts AS MATERIALIZED (
  SELECT * FROM @extschema:laplace@.laplace_claim_preview(ARRAY(SELECT entity FROM page))
+), subjects AS MATERIALIZED (
+ SELECT entity,child FROM @extschema:laplace@.laplace_constituents(
+   ARRAY(SELECT entity FROM page WHERE p_inbound)) WHERE ordinal=1
+), subject_labels AS MATERIALIZED (
+ SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(SELECT DISTINCT child FROM subjects))
 ), relation_metadata AS MATERIALIZED (
  SELECT * FROM consensus.relation_metadata(ARRAY(SELECT DISTINCT decode(predicate::text,'hex') FROM parts WHERE predicate IS NOT NULL))
 )
-SELECT p.entity,p.predicate,p.object,
- coalesce(CASE WHEN NOT m.inverse AND m.qualifier_bit<0 THEN m.canonical END,p.type_label,''),p.fact,
+SELECT p.entity,p.predicate,CASE WHEN p_inbound THEN sub.child ELSE p.object END,
+ coalesce(CASE WHEN NOT m.inverse AND m.qualifier_bit<0 THEN m.canonical END,p.type_label,''),CASE WHEN p_inbound THEN sl.content ELSE p.fact END,
  (s.rating-2*s.deviation)::numeric,s.rating,s.deviation,s.volatility
 FROM page s JOIN parts p ON p.entity OPERATOR(@extschema:laplace@.=) s.entity
 LEFT JOIN relation_metadata m ON m.surface_id=decode(p.predicate::text,'hex')
+LEFT JOIN subjects sub ON sub.entity OPERATOR(@extschema:laplace@.=) p.entity
+LEFT JOIN subject_labels sl ON sl.entity OPERATOR(@extschema:laplace@.=) sub.child
 ORDER BY s.rating-2*s.deviation DESC,p.entity;
+END;
+
+CREATE OR REPLACE FUNCTION ops.claim_facts(p_subject bytea,p_limit integer DEFAULT NULL)
+RETURNS TABLE(claim @extschema:laplace@.blake3,predicate @extschema:laplace@.blake3,object @extschema:laplace@.blake3,type text,fact text,
+ eff_mu numeric,rating double precision,deviation double precision,volatility double precision)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+ SELECT * FROM ops.claim_facts(p_subject,p_limit,false);
 END;
