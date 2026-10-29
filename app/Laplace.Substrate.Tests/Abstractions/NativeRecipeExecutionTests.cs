@@ -8,6 +8,43 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class NativeRecipeExecutionTests
 {
     [Fact]
+    public async Task NativeFailedProgressPreservesTheProducerExitStatus()
+    {
+        var configured = NativeRecipeExecution.Configured();
+        string root = Path.Combine(Path.GetTempPath(), "native-terminal-progress-" + Guid.NewGuid().ToString("N"));
+        string recipes = Path.Combine(root, "recipes"), source = Path.Combine(recipes, "terminal-progress");
+        Directory.CreateDirectory(source);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(recipes, "formats"));
+            File.Copy(Path.Combine(configured.Recipes, "formats", "xml.format"), Path.Combine(recipes, "formats", "xml.format"));
+            File.WriteAllText(Path.Combine(recipes, "order"), "terminal-progress\n");
+            File.WriteAllText(Path.Combine(source, "source"),
+                "name terminal-progress\nwitness Native terminal progress\nclass UserCuratedResource\n");
+            File.WriteAllText(Path.Combine(source, "entry.recipe"),
+                "name terminal-entry\nmatch *.xml\nformat xml\nthing Entry id\ncontent *\n"
+                + "relation \"description\" name\nattest Entry *\n");
+            string input = Path.Combine(root, "entry.xml");
+            File.WriteAllText(input, "<Root><Entry id=\"entry\" name=\"known\" unknown=\"uninterpreted\"/></Root>");
+            var execution = new NativeRecipeExecution(configured.Executable, recipes, configured.Grammars,
+                configured.Tier0, configured.Highway);
+            // Exercise the real producer and progress pipe without writing a database.
+            var start = execution.StartInfo(new NativeRecipeRequest(NativeRecipeMode.NoLoad,
+                "terminal-progress", [input], Threads: 2, ExpandPrerequisites: false));
+            var observations = new List<NativeRecipeProgress>();
+            using var output = new MemoryStream(); using var error = new MemoryStream();
+            int code = await NativeRecipeExecution.ExecuteAsync(start, output, error, progress: observations.Add);
+            Assert.True(code == 1, Encoding.UTF8.GetString(error.ToArray()) + Encoding.UTF8.GetString(output.ToArray()));
+            Assert.Equal("failed", observations[^1].Event);
+            Assert.DoesNotContain(observations, p => p.Event == "complete");
+            Assert.Equal("inventory", observations[0].Event);
+            Assert.All(observations, observation => Assert.Equal(1, observation.FilesTotal));
+            Assert.Contains("unresolved obligations: 1 ", Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task QueryConsumersReceiveTheNativeCompiledProducerDeclarations()
     {
         var program = await NativeRecipeExecution.Configured().CompileQueryProgramAsync();
