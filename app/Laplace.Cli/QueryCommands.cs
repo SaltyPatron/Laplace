@@ -367,6 +367,9 @@ internal static class QueryCommands
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
+        // Facets, standings and witness series describe one database snapshot.
+        await using var transaction = await conn.BeginTransactionAsync(
+            System.Data.IsolationLevel.RepeatableRead);
         bool exists = false;
         {
             var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id.ToBytes(), default);
@@ -480,7 +483,7 @@ internal static class QueryCommands
                     : e.Score == 0 ? "refutes" : e.Score == e.Games ? "confirms"
                     : $"mean outcome {e.Score / e.Games:F3}";
                 Console.WriteLine($"    [{(string.IsNullOrEmpty(e.TypeLabel) ? "value" : e.TypeLabel)}] → {e.ObjectLabel}");
-                Console.WriteLine($"      {e.SourceLabel}: {outcome}, records={e.Games:G17}, occurrences={e.Tokens:G17}, trust={e.Trust:G17}");
+                Console.WriteLine($"      {e.SourceLabel}: {outcome}, records={e.Games:G17}, occurrences={e.Tokens:G17}, trust={e.Trust:G}");
                 Console.WriteLine($"      claim={e.ClaimId}  witness={e.SourceId}"
                     + (e.DependenceRoot is null ? "" : $"  dependence={e.DependenceRoot}"));
             }
@@ -514,6 +517,7 @@ internal static class QueryCommands
             if (n == 0) Console.WriteLine("    (none)");
         }
 
+        await transaction.CommitAsync();
         return 0;
     }
 }

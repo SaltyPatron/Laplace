@@ -8,8 +8,12 @@ BEGIN ATOMIC
 WITH series AS MATERIALIZED (
  SELECT a.* FROM @extschema:laplace@.laplace_attested_series(p_claims) a WHERE a.witness
 ), names AS MATERIALIZED (
- SELECT c.entity,c.child FROM @extschema:laplace@.laplace_constituents(
-   ARRAY(SELECT DISTINCT trunk FROM series)) c WHERE c.ordinal=1
+ -- Source trunks have a named record before their file tree. An arbitrary
+ -- registered witness has no such label contract: retain its own ID.
+ SELECT r.entity,(@extschema:laplace@.laplace_vertex_ids(
+   @extschema:postgis@.ST_PointN(r.path,1)))[1] AS child
+ FROM @extschema:laplace@.laplace_physicalities(ARRAY(SELECT DISTINCT trunk FROM series)) r
+ WHERE @extschema:laplace@.laplace_mask_has(r.mask,@extschema:laplace@.laplace_bank_bit('kind','file'))
 ), labels AS MATERIALIZED (
  SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(SELECT DISTINCT child FROM names))
 )

@@ -18,10 +18,11 @@ BEGIN
     VALUES(id,1500,50,0.06,1);
     RETURN id;
 END $$;
-CREATE FUNCTION pg_temp.evidence_source(parts public.blake3[], metadata bigint[]) RETURNS public.blake3
+CREATE FUNCTION pg_temp.evidence_source(parts public.blake3[], metadata bigint[], named boolean DEFAULT true) RETURNS public.blake3
 LANGUAGE plpgsql AS $$
 DECLARE id public.blake3:=public.laplace_compose(parts); point public.geometry;
         path public.geometry:=public.laplace_path(parts); vertex public.geometry; altitude smallint;
+        mask bit(64):=CASE WHEN named THEN public.laplace_mask_slot('kind','file') ELSE B'0'::bit(64) END;
 BEGIN
  SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,
    public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))),
@@ -33,9 +34,9 @@ BEGIN
     public.ST_Z(vertex),public.ST_M(vertex)+metadata[i]));
  END LOOP;
  INSERT INTO public.entity(id,tier,coord,hilbert,mask)
- VALUES(id,altitude,point,public.laplace_hilbert4(point),public.laplace_mask_slot('kind','file'));
+ VALUES(id,altitude,point,public.laplace_hilbert4(point),mask);
  INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
- VALUES(id,altitude,public.laplace_hilbert4(point),path,public.laplace_mask_slot('kind','file'));
+ VALUES(id,altitude,public.laplace_hilbert4(point),path,mask);
  INSERT INTO public.witness(id,trust) VALUES(id,0.75);
  RETURN id;
 END $$;
@@ -108,6 +109,11 @@ BEGIN
     IF NOT EXISTS(SELECT FROM converse.recall_intent('describe',aa)
         WHERE reply='δ: β' AND eff_mu=1400 AND witnesses=1) THEN
         RAISE EXCEPTION 'describe discarded a canonical source-defined relation';
+    END IF;
+    witness:=pg_temp.evidence_source(ARRAY[claim,c],ARRAY[1073741824,0]::bigint[],false);
+    IF NOT EXISTS(SELECT FROM ops.evidence_series_receipt(aa,100,false)
+        WHERE source_id=public.blake3_send(witness) AND source_label=witness::text) THEN
+        RAISE EXCEPTION 'an unnamed witness was mislabeled as its first claim';
     END IF;
 END $$;
 ROLLBACK;
