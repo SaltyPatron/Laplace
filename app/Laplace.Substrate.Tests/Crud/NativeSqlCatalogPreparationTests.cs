@@ -238,6 +238,9 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         await using (var native = NpgsqlCatalog.Command(nativeConnection, nativeTransaction, "migration.canonical_substrate"))
             await native.ExecuteNonQueryAsync();
         await nativeTransaction.CommitAsync();
+        // ALTER DATABASE cache settings apply to new sessions. Discard pooled
+        // sessions created before migration rather than testing build defaults.
+        NpgsqlConnection.ClearPool(nativeConnection);
     }
 
     public async Task DisposeAsync()
