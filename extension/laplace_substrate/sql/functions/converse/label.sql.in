@@ -10,6 +10,6 @@ RETURNS TABLE(id bytea,label text,tier smallint)
 LANGUAGE sql STABLE STRICT PARALLEL SAFE SUPPORT @extschema@.array_length_rows_support
 AS $native$
 SELECT decode(d.entity::text,'hex'),d.content,coalesce(e.tier,CASE WHEN public.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
-FROM public.laplace_labels(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest(p_ids) u(id))) d
+FROM public.laplace_labels(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest(p_ids) u(id) WHERE id IS NOT NULL)) d
 LEFT JOIN public.entity e ON e.id=d.entity ORDER BY d.i
 $native$;

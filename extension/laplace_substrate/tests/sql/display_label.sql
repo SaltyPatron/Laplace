@@ -43,6 +43,15 @@ BEGIN
  IF got IS DISTINCT FROM ARRAY[decode(dog::text,'hex'),decode(scalar::text,'hex')] THEN
   RAISE EXCEPTION 'Native display changed IDs for a non-default array lower bound';
  END IF;
+ -- A binary value claim has no relation ID. Mixed endpoint batches must keep
+ -- its actual endpoints without passing absent relation IDs to Native.
+ SELECT array_agg(d.id ORDER BY d.ordinal) INTO got
+ FROM realize.display_label_batch(ARRAY[NULL::bytea,decode(dog::text,'hex'),NULL::bytea,
+ decode(scalar::text,'hex')]) WITH ORDINALITY d(id,label,tier,ordinal);
+ IF got IS DISTINCT FROM ARRAY[decode(dog::text,'hex'),decode(scalar::text,'hex')]
+ OR EXISTS(SELECT FROM realize.display_label_batch(ARRAY[NULL::bytea])) THEN
+  RAISE EXCEPTION 'Native display did not preserve the non-null endpoint batch';
+ END IF;
  IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=1 AND type_id IS NULL) THEN
   RAISE EXCEPTION 'Native facet guessed a semantic type';
  END IF;
