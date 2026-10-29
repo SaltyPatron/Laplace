@@ -19,12 +19,6 @@ public static partial class NativeInterop
     public static unsafe partial int BasisRefine(double* embedding,nuint rows,nuint width,nuint rank,double* coordinates,int* input,BasisReceipt* receipt);
     [LibraryImport(Library,EntryPoint="laplace_spectral_embed")]
     public static unsafe partial int SpectralEmbed(nuint rows,nuint width,int* input,double* coordinates,int* rowsIndex,int* colsIndex,double* weights,nuint count,double* embedding,nuint* features,SpectralReceipt* receipt);
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe struct SourceObservation {public fixed byte SourceId[16];public fixed byte ClaimId[16];public long Games,Rating,Rd,OpponentRating,OpponentRd;}
-    [StructLayout(LayoutKind.Sequential)]
-    public unsafe struct SourceShare {public fixed byte SourceId[16];public ulong ClaimsTouched,Games;public double FisherWeight;public uint ShareBp;}
-    [LibraryImport(Library,EntryPoint="laplace_source_attribution")]
-    public static unsafe partial int SourceAttribution(SourceObservation* observations,nuint count,SourceShare* shares,nuint capacity,nuint* written);
     [LibraryImport(Library, EntryPoint="laplace_program_create")]
     public static unsafe partial IntPtr ProgramCreate(nuint vocab,nuint width,double* embedding,int bos,int eos,double epsilon,double ropeBase,double ropeScale,double attentionGain,double residualGain,nuint layers);
     [LibraryImport(Library, EntryPoint="laplace_program_tie_embeddings")]

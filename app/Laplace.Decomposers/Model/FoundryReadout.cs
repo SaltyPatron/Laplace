@@ -150,12 +150,12 @@ internal static class FoundryReadout
     }
 
     internal static async Task<Program> ReadAsync(NpgsqlDataSource ds,RecipeDescriptor recipe,
-        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,int vocab)
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,int vocab,byte[][]? sources=null)
     {
         if(recipe.LmHead.Op!="path") throw new InvalidOperationException("lookup compile requires an explicit lm_head path operator");
         var bindings=Bind(tokens,vocab);
         var rows=await NpgsqlFoundryReads.PathPlaneAsync(ds,bindings.Operands.Keys.Select(id=>id.ToBytes()).ToArray(),
-            recipe.LmHead.PathJson,recipe.Vocab.Fanout,128,true);
+            recipe.LmHead.PathJson,recipe.Vocab.Fanout,128,true,sources);
         var rr=new List<int>(); var cc=new List<int>(); var ww=new List<double>();
         foreach(var edge in rows) {
             if(!bindings.Operands.TryGetValue(Hash128.FromBytes(edge.SubjectId),out var x) ||
@@ -168,7 +168,7 @@ internal static class FoundryReadout
     }
 
     internal static async Task<List<(string surface,long weight)>> SelectVocabularyAsync(
-        NpgsqlDataSource ds,RecipeDescriptor recipe)
+        NpgsqlDataSource ds,RecipeDescriptor recipe,byte[][]? sources=null)
     {
         var chosen=new Dictionary<Hash128,double>();
         var seeds=recipe.Vocab.Seeds.Select(s=>TextDecomposer.ContentRootId(s) ?? throw new InvalidOperationException("empty seed")).ToHashSet();
@@ -176,7 +176,7 @@ internal static class FoundryReadout
         var frontier=seeds.ToArray();
         for(int hop=0;hop<recipe.Vocab.Hops && frontier.Length>0;hop++) {
             var rows=await NpgsqlFoundryReads.PathPlaneAsync(ds,frontier.Select(id=>id.ToBytes()).ToArray(),
-                recipe.LmHead.PathJson,recipe.Vocab.Fanout,recipe.Vocab.Fanout,false);
+                recipe.LmHead.PathJson,recipe.Vocab.Fanout,recipe.Vocab.Fanout,false,sources);
             var fresh=new HashSet<Hash128>();
             foreach(var edge in rows) {
                 var id=Hash128.FromBytes(edge.ObjectId);

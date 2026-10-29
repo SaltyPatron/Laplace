@@ -70,7 +70,7 @@ BEGIN ATOMIC
             ELSE c.rating-2*c.deviation END DESC,c.entity LIMIT p_limit
     ), provenance AS MATERIALIZED (
         SELECT a.claim,count(*) AS witnesses
-        FROM public.laplace_attribution(ARRAY(SELECT entity FROM native_edges)) a GROUP BY a.claim
+        FROM public.laplace_attested(ARRAY(SELECT entity FROM native_edges),false) a WHERE a.witness GROUP BY a.claim
     )
     SELECT e.direction, e.type_id, e.neighbour_id,
            e.rating, e.rd, e.volatility, e.witness_count

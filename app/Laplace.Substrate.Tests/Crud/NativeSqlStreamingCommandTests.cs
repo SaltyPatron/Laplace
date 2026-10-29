@@ -118,14 +118,14 @@ public sealed class NativeSqlStreamingCommandTests
     }
 
     [Fact]
-    public void SourceScopedInitializationBindsTheWholeScopeAsOneBinaryArray()
+    public void SourceAttributionBindsTheWholeScopeAsOneBinaryArray()
     {
         using var connection = new NpgsqlConnection("Host=127.0.0.1;Port=1;Database=unused");
         byte[][] ids = [Enumerable.Repeat((byte)0xff, 16).ToArray(), new byte[16]];
-        using var command = NpgsqlCatalog.Command(connection, null, "foundry.initialize_scope", ids);
-        Assert.Single(command.Parameters);
-        Assert.Same(ids, command.Parameters[0].Value);
-        Assert.Equal("bytea[]", command.Parameters[0].DataTypeName);
+        using var command = NpgsqlCatalog.Command(connection, null, "generation.export_source_attribution", ids, ids);
+        Assert.Equal(2, command.Parameters.Count);
+        Assert.Same(ids, command.Parameters[1].Value);
+        Assert.Equal("bytea[]", command.Parameters[1].DataTypeName);
         Assert.DoesNotContain(Convert.ToHexString(ids[0]), command.CommandText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(';', command.CommandText);
     }
@@ -134,9 +134,12 @@ public sealed class NativeSqlStreamingCommandTests
     [InlineData(0)]
     [InlineData(15)]
     [InlineData(17)]
-    public void SourceScopedDatasourceRejectsMalformedIdsBeforeAnyConnection(int length)
-        => Assert.Throws<ArgumentException>(() => NpgsqlFoundryReads.CreateIngestDataSource(
-            "Host=127.0.0.1;Port=1;Database=unused", [new byte[length]]));
+    public async Task SourceScopedPathRejectsMalformedIdsBeforeAnyConnection(int length)
+    {
+        await using var source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=unused");
+        await Assert.ThrowsAsync<ArgumentException>(() => NpgsqlFoundryReads.PathPlaneAsync(
+            source, [], "[]", 10, 10, false, [new byte[length]]));
+    }
 
     [Theory]
     [InlineData("consensus.upsert", false, false)]

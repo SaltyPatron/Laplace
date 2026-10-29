@@ -1,5 +1,4 @@
 set(LAPLACE_SYNTHESIS_HEADERS
-    include/laplace/synthesis/attribution.h
     include/laplace/synthesis/basis.h
     include/laplace/synthesis/program.h
     include/laplace/synthesis/lookup_compile.h
@@ -22,7 +21,6 @@ set(LAPLACE_SYNTHESIS_HEADERS
 )
 
 set(LAPLACE_SYNTHESIS_SOURCES
-    src/attribution.cpp
     src/basis.cpp
     src/target_ops.cpp
     src/program.cpp

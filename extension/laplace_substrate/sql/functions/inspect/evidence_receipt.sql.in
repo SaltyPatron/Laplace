@@ -1,3 +1,23 @@
+-- One registered witness catalog supplies actual trunk identities and labels.
+CREATE OR REPLACE FUNCTION ops.witness_catalog(p_ids @extschema:laplace@.blake3[] DEFAULT NULL)
+RETURNS TABLE(id @extschema:laplace@.blake3,source_label text,trust double precision,lineage @extschema:laplace@.blake3)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+WITH sources AS MATERIALIZED (
+ SELECT w.id,w.trust,w.lineage FROM @extschema:laplace@.witness w
+ WHERE p_ids IS NULL OR w.id OPERATOR(@extschema:laplace@.=) ANY(p_ids)
+), names AS MATERIALIZED (
+ SELECT r.entity,(@extschema:laplace@.laplace_vertex_ids(@extschema:postgis@.ST_PointN(r.path,1)))[1] AS child
+ FROM @extschema:laplace@.laplace_physicalities(ARRAY(SELECT id FROM sources ORDER BY id)) r
+ WHERE @extschema:laplace@.laplace_mask_has(r.mask,@extschema:laplace@.laplace_bank_bit('kind','file'))
+), labels AS MATERIALIZED (
+ SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(SELECT DISTINCT child FROM names))
+)
+SELECT s.id,coalesce(nullif(l.content,''),s.id::text),s.trust,s.lineage
+FROM sources s LEFT JOIN names n ON n.entity OPERATOR(@extschema:laplace@.=) s.id
+LEFT JOIN labels l ON l.entity OPERATOR(@extschema:laplace@.=) n.child;
+END;
+
 -- One Native witness-series owner serves both detailed and aggregate reads.
 CREATE OR REPLACE FUNCTION ops.claim_witness_series(p_claims @extschema:laplace@.blake3[])
 RETURNS TABLE(claim @extschema:laplace@.blake3,trunk @extschema:laplace@.blake3,
@@ -7,20 +27,11 @@ LANGUAGE sql STABLE STRICT
 BEGIN ATOMIC
 WITH series AS MATERIALIZED (
  SELECT a.* FROM @extschema:laplace@.laplace_attested_series(p_claims) a WHERE a.witness
-), names AS MATERIALIZED (
- -- Source trunks have a named record before their file tree. An arbitrary
- -- registered witness has no such label contract: retain its own ID.
- SELECT r.entity,(@extschema:laplace@.laplace_vertex_ids(
-   @extschema:postgis@.ST_PointN(r.path,1)))[1] AS child
- FROM @extschema:laplace@.laplace_physicalities(ARRAY(SELECT DISTINCT trunk FROM series)) r
- WHERE @extschema:laplace@.laplace_mask_has(r.mask,@extschema:laplace@.laplace_bank_bit('kind','file'))
-), labels AS MATERIALIZED (
- SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(SELECT DISTINCT child FROM names))
+), sources AS MATERIALIZED (
+ SELECT * FROM ops.witness_catalog(ARRAY(SELECT DISTINCT trunk FROM series))
 )
-SELECT a.claim,a.trunk,a.games,a.tokens,a.score,a.trust,a.dependence_root,a.position,
- coalesce(nullif(l.content,''),a.trunk::text)
-FROM series a LEFT JOIN names n ON n.entity OPERATOR(@extschema:laplace@.=) a.trunk
-LEFT JOIN labels l ON l.entity OPERATOR(@extschema:laplace@.=) n.child;
+SELECT a.claim,a.trunk,a.games,a.tokens,a.score,a.trust,a.dependence_root,a.position,s.source_label
+FROM series a JOIN sources s ON s.id OPERATOR(@extschema:laplace@.=) a.trunk;
 END;
 
 CREATE OR REPLACE FUNCTION ops.evidence_series_receipt(p_id bytea,p_limit integer DEFAULT 25,p_inbound boolean DEFAULT false)

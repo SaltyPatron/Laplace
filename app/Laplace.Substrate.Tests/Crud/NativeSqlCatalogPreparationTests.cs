@@ -436,6 +436,54 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             games.Parameters.AddWithValue(xc.Id);
             Assert.Equal(3L, await games.ExecuteScalarAsync());
         }
+        await using (var registry = NpgsqlCatalog.Command(connection, transaction, "foundry.source_ids",
+            Convert.ToHexString(witness.Id.ToBytes())))
+        await using (var rows = await registry.ExecuteReaderAsync())
+        {
+            Assert.True(await rows.ReadAsync()); Assert.Equal(witness.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+            Assert.False(await rows.ReadAsync());
+        }
+        // Foundry consumes the same Native carriers, including their actual
+        // identity in path evidence and in scoped database royalty settlement.
+        foreach (bool reverse in new[] { false, true })
+        {
+            string steps = reverse ? "[{\"types\":[\"!\"],\"reverse\":true}]" : "[{\"types\":[\"!\"]}]";
+            await using var path = NpgsqlCatalog.Command(connection, transaction, "generation.path_plane",
+                new[] { (reverse ? value : x).Id.ToBytes() }, steps, 10, 10, false, DBNull.Value);
+            await using var rows = await path.ExecuteReaderAsync();
+            int found = 0;
+            while (await rows.ReadAsync())
+            {
+                using var evidence = System.Text.Json.JsonDocument.Parse(rows.GetString(3));
+                foreach (var route in evidence.RootElement.EnumerateArray())
+                foreach (var claim in route.GetProperty("claims").EnumerateArray())
+                {
+                    string id = claim.GetProperty("claim_id").GetString()!;
+                    Assert.Contains(id, new[] { "\\x" + Convert.ToHexStringLower(xc.Id.ToBytes()), "\\x" + Convert.ToHexStringLower(yc.Id.ToBytes()) });
+                    found++;
+                }
+            }
+            Assert.Equal(reverse ? 2 : 1, found);
+        }
+        foreach (bool present in new[] { true, false })
+        {
+            await using var scoped = NpgsqlCatalog.Command(connection, transaction, "generation.path_plane",
+                new[] { x.Id.ToBytes() }, "[{\"types\":[\"!\"]}]", 10, 10, false,
+                new[] { present ? witness.Id.ToBytes() : new byte[16] });
+            await using var rows = await scoped.ExecuteReaderAsync();
+            Assert.Equal(present, await rows.ReadAsync());
+            Assert.False(await rows.ReadAsync());
+        }
+        await using (var royalty = NpgsqlCatalog.Command(connection, transaction, "generation.export_source_attribution",
+            new[] { xc.Id.ToBytes(), yc.Id.ToBytes(), xc.Id.ToBytes() }, new[] { witness.Id.ToBytes() }))
+        await using (var rows = await royalty.ExecuteReaderAsync())
+        {
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(witness.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+            Assert.Equal(2L, rows.GetInt64(1)); Assert.Equal(4L, rows.GetInt64(2));
+            Assert.True(rows.GetDouble(3) > 0); Assert.Equal(10000, rows.GetInt32(4));
+            Assert.False(await rows.ReadAsync());
+        }
         // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
         await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.entity_evidence_count", x.Id.ToBytes()))
             Assert.Equal(1L, await evidence.ExecuteScalarAsync());

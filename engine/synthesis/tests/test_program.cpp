@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include "laplace/synthesis/program.h"
-#include "laplace/synthesis/attribution.h"
 #include "laplace/synthesis/lookup_compile.h"
 #include <algorithm>
 #include <cmath>
@@ -103,14 +102,6 @@ TEST(LaplaceSynthesisProgram, SetScoringPreservesAllMembersWithoutUsingTheirRela
   double supported=2*std::exp(floors[x]+deltas[offsets[x]]),excluded=(f.n-2)*std::exp(floors[x]);
   EXPECT_NEAR(excluded/(supported+excluded),1e-6,1e-15);
  }
-}
-TEST(LaplaceSynthesisAttribution, GamesDetermineInformationAndExactBasisPointSettlement){
- laplace_source_observation o[3]{};for(auto&x:o){x.games=1;x.rating=1500000000000LL;x.rd=350000000000LL;x.opponent_rating=1500000000000LL;x.opponent_rd=350000000000LL;}
- o[0].source_id[0]=1;o[1].source_id[0]=2;o[2].source_id[0]=2;o[2].games=2;
- laplace_source_share shares[3];size_t count=0;ASSERT_EQ(laplace_source_attribution(o,3,shares,3,&count),0);ASSERT_EQ(count,2);
- EXPECT_EQ(shares[0].share_bp,2500);EXPECT_EQ(shares[1].share_bp,7500);EXPECT_EQ(shares[1].games,3);EXPECT_EQ(shares[1].claims_touched,1);
- EXPECT_NEAR(shares[1].fisher_weight,shares[0].fisher_weight*3,1e-12);
- o[0].games=-1;EXPECT_NE(laplace_source_attribution(o,3,shares,3,&count),0);
 }
 TEST(LaplaceSynthesisProgram, TiedEmbeddingConstraintUsesTheConstructedInputWeights){
  Fixture f(4);for(int i=0;i<4;i++)ASSERT_EQ(f.layer(),0);ASSERT_EQ(laplace_program_tie_embeddings(f.program.get(),1),0);

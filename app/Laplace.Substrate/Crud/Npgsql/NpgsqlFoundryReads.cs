@@ -30,10 +30,12 @@ public static class NpgsqlFoundryReads
     public readonly record struct PathEdgeRow(byte[] SubjectId, byte[] ObjectId, double W, string Paths);
 
     public static async Task<IReadOnlyList<PathEdgeRow>> PathPlaneAsync(
-        NpgsqlDataSource ds, byte[][] roots, string stepsJson, int fanout, int cap, bool visibleOnly)
+        NpgsqlDataSource ds, byte[][] roots, string stepsJson, int fanout, int cap, bool visibleOnly, byte[][]? sources=null)
     {
+        ValidateSourceScope(sources);
+        if(sources is {Length:0})return Array.Empty<PathEdgeRow>();
         await using var connection=await ds.OpenConnectionAsync();
-        await using var command=NpgsqlCatalog.Command(connection,null,"generation.path_plane",roots,stepsJson,fanout,cap,visibleOnly);
+        await using var command=NpgsqlCatalog.Command(connection,null,"generation.path_plane",roots,stepsJson,fanout,cap,visibleOnly,(object?)sources??DBNull.Value);
         command.CommandTimeout=600;
         await using var reader=await command.ExecuteReaderAsync();
         var rows=new List<PathEdgeRow>();
@@ -51,13 +53,21 @@ public static class NpgsqlFoundryReads
         return rows;
     }
 
-    public readonly record struct SourceObservationRow(byte[] SourceId,byte[] ClaimId,long Games,long Rating,long Rd,long OpponentRating,long OpponentRd);
-    public static async Task<IReadOnlyList<SourceObservationRow>> ExportSourceObservationsAsync(NpgsqlDataSource ds,string touched,byte[][]? sources=null)
+    public readonly record struct SourceAttributionRow(byte[] SourceId,long ClaimsTouched,long Games,double FisherWeight,int ShareBp);
+    public static async Task<IReadOnlyList<SourceAttributionRow>> ExportSourceAttributionAsync(NpgsqlDataSource ds,byte[][] claims,byte[][]? sources=null)
     {
-        await using var connection=await ds.OpenConnectionAsync();await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_source_observations",touched,(object?)sources??DBNull.Value);
-        command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync();var rows=new List<SourceObservationRow>();
-        while(await reader.ReadAsync())rows.Add(new((byte[])reader[0],(byte[])reader[1],reader.GetInt64(2),reader.GetInt64(3),reader.GetInt64(4),reader.GetInt64(5),reader.GetInt64(6)));
+        ValidateSourceScope(sources);
+        if(sources is {Length:0})return Array.Empty<SourceAttributionRow>();
+        await using var connection=await ds.OpenConnectionAsync();await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_source_attribution",claims,(object?)sources??DBNull.Value);
+        command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync();var rows=new List<SourceAttributionRow>();
+        while(await reader.ReadAsync())rows.Add(new((byte[])reader[0],reader.GetInt64(1),reader.GetInt64(2),reader.GetDouble(3),reader.GetInt32(4)));
         return rows;
+    }
+
+    private static void ValidateSourceScope(byte[][]? sources)
+    {
+        if(sources is not null && sources.Any(id=>id is null || id.Length!=16))
+            throw new ArgumentException("Source IDs must contain exactly 16 bytes.",nameof(sources));
     }
 
     private static NpgsqlParameter ByteaArray(string name, object value) =>
@@ -290,10 +300,10 @@ public static class NpgsqlFoundryReads
                 p.AddWithValue("fanout", fanout);
             }, timeoutSeconds: 0, ct: ct, label: "foundry_vocab_crawl");
 
-    public static Task<byte[]?> SourceIdAsync(
+    public static Task<IReadOnlyList<byte[]>> SourceIdsAsync(
         NpgsqlDataSource ds, string source, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteScalarAsync<byte[]>(ds, SqlCatalog.Get("foundry.source_id"),
-            p => p.AddWithValue("s", source), ct: ct, label: "source_id");
+        NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("foundry.source_ids"),
+            static r => (byte[])r[0], p => p.AddWithValue("s", source), ct: ct, label: "source_ids");
 
     /// <summary>
     /// Realized surfaces of the inputs that resolve to a word entity; unresolved inputs are
@@ -312,47 +322,6 @@ public static class NpgsqlFoundryReads
                     NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
                 });
             }, timeoutSeconds: 120, ct: ct, label: "render_resolved_word_surfaces");
-
-    /// <summary>
-    /// Ingest datasource; when <paramref name="scopeSourceIds"/> is set, every physical
-    /// connection installs the source-scoped consensus temp table. NoResetOnClose keeps the
-    /// pool reset from dropping it, which would silently unscope later readers.
-    /// </summary>
-    public static NpgsqlDataSource CreateIngestDataSource(
-        string? connString, IReadOnlyList<byte[]>? scopeSourceIds = null)
-    {
-        if (scopeSourceIds is null || scopeSourceIds.Count == 0)
-            return LaplaceDataSource.Create(SubstrateAccess.Ingest, connString);
-        // The datasource retains a fixed scope for every physical connection.
-        // Snapshot the caller's buffers before the initializer captures them.
-        var sources = new byte[scopeSourceIds.Count][];
-        for (int i = 0; i < sources.Length; i++)
-        {
-            var id = scopeSourceIds[i];
-            if (id is null || id.Length != 16)
-                throw new ArgumentException("Source IDs must contain exactly 16 bytes.", nameof(scopeSourceIds));
-            sources[i] = (byte[])id.Clone();
-        }
-        return LaplaceDataSource.Create(SubstrateAccess.Ingest, dsb =>
-        {
-            dsb.ConnectionStringBuilder.NoResetOnClose = true;
-            dsb.UsePhysicalConnectionInitializer(
-                conn =>
-                {
-                    using var c = NpgsqlCatalog.Command(conn, null, "foundry.initialize_scope", sources);
-                    c.ExecuteNonQuery();
-                    using var index = NpgsqlCatalog.Command(conn, null, "foundry.index_scope");
-                    index.ExecuteNonQuery();
-                },
-                async conn =>
-                {
-                    await using var c = NpgsqlCatalog.Command(conn, null, "foundry.initialize_scope", sources);
-                    await c.ExecuteNonQueryAsync();
-                    await using var index = NpgsqlCatalog.Command(conn, null, "foundry.index_scope");
-                    await index.ExecuteNonQueryAsync();
-                });
-        }, connString);
-    }
 
     public readonly record struct AttributeOutRow(byte[] SubjectId, byte[] NeighbourId, double W);
 

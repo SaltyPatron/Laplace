@@ -300,6 +300,16 @@ outcome, not a categorical confirmation. `ops.evidence_receipt` aggregates
 those same series into distinct witness counts for descriptions and summary
 receipts. Source IDs and claim IDs remain available beside their labels.
 
+Foundry path evidence retains those actual claim IDs and reads the same Native
+claim carriers. Source selection is an explicit binary array passed to
+`laplace_source_standings` and `laplace_source_attribution`; connections do not
+create a shadow consensus table or retain scope through pool settings.
+`ops.witness_catalog` supplies registered trunk IDs and labels for both source
+selection and UI evidence. Royalty information comes from the Native rooted
+posterior used for standings, with dependent copies sharing one precision
+contribution and final settlement totaling 10000 basis points. The client
+transports the resulting source rows instead of recalculating observations.
+
 ## License
 
 See [LICENSE](LICENSE). Seeded sources retain their own licenses and attribution/provenance in the substrate.

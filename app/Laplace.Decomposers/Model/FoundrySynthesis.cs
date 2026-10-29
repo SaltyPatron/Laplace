@@ -1098,9 +1098,7 @@ public static class FoundrySynthesis
 
 
 
-        // --scope-source: every physical connection re-folds only the named sources'
-        // attestations (consensus.scoped_consensus) into pg_temp.consensus. pg_temp
-        // resolves first, so every plane function reads that scoped standing unchanged.
+        // Source selection is carried into Native path and attribution calls.
         IReadOnlyList<byte[]>? scopeSourceIds = null;
         if (!string.IsNullOrWhiteSpace(scopeSource))
         {
@@ -1110,16 +1108,16 @@ public static class FoundrySynthesis
             {
                 foreach (var name in names)
                 {
-                    var sid = await NpgsqlFoundryReads.SourceIdAsync(probeDs, name);
-                    if (sid is null)
-                        return Fail($"--scope-source: unknown source '{name}' (short names — see source registry)");
-                    ids.Add(sid);
+                    var sourceIds = await NpgsqlFoundryReads.SourceIdsAsync(probeDs, name);
+                    if (sourceIds.Count == 0)
+                        return Fail($"--scope-source: unknown source '{name}' (use a registered source label or trunk ID)");
+                    ids.AddRange(sourceIds);
                 }
             }
             scopeSourceIds = ids;
-            Console.WriteLine($"  scope: {names.Length} source(s) — synthesis reads a re-folded scoped consensus ({scopeSource})");
+            Console.WriteLine($"  scope: {names.Length} source(s) — Native paths and attribution select those registered witnesses ({scopeSource})");
         }
-        await using var ds = NpgsqlFoundryReads.CreateIngestDataSource(ConnString, scopeSourceIds);
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         int degreeCap = FoundryDefaults.LeDegree;
 
         string tokenizerPath;
@@ -1134,7 +1132,7 @@ public static class FoundrySynthesis
             Console.WriteLine($"  vocab: substrate-native (source={desc.Vocab.Source}, size={desc.Vocab.Size}, "
                 + $"seeds={desc.Vocab.Seeds.Count}, hops={desc.Vocab.Hops})");
             var selected = desc.Vocab.Source=="paths"
-                ? await FoundryReadout.SelectVocabularyAsync(ds,desc) : null;
+                ? await FoundryReadout.SelectVocabularyAsync(ds,desc,scopeSourceIds?.ToArray()) : null;
             string? moldCfg = await MaterializeNativeMoldAsync(
                 desc.Vocab.Size > 0 ? desc.Vocab.Size : 2000,
                 moldDim, nLayers, nHeads, nKv, intermR,
@@ -1163,7 +1161,7 @@ public static class FoundrySynthesis
             int lookupDim=desc.HiddenSizeAuto
                 ? Math.Max(moldDim,((vocab+nHeads*64-1)/(nHeads*64))*(nHeads*64)) : moldDim;
             if(lookupDim<vocab) return Fail($"lookup compile requires hidden_size >= vocab ({lookupDim} < {vocab})");
-            var program=await FoundryReadout.ReadAsync(ds,desc,tokens,vocab);
+            var program=await FoundryReadout.ReadAsync(ds,desc,tokens,vocab,scopeSourceIds?.ToArray());
             byte[] lookupConfig=BuildHfConfigJson(lookupDim,nLayers,nHeads,nKv,intermR,vocab);
             var lookupRecipe=LlamaRecipeExtractor.ParseBytes(lookupConfig,"lookup architecture");
             using var lookupManifest=SynthInterop.ArchTemplateManifestMaterialize(lookupConfig,"llama",out var lookupError);
@@ -1204,7 +1202,7 @@ public static class FoundrySynthesis
             FoundryExport.PlaneCoo plane;
             if(opKey.StartsWith("path:",StringComparison.Ordinal)) {
                 var spec=desc.Layers.SelectMany(l=>l.Heads.Append(l.Ffn).Concat(l.Experts)).Append(desc.LmHead).Append(desc.Embed).First(op=>op.Key==opKey);
-                var program=await FoundryReadout.ReadAsync(ds,desc with {LmHead=spec},tokens,vocab);
+                var program=await FoundryReadout.ReadAsync(ds,desc with {LmHead=spec},tokens,vocab,scopeSourceIds?.ToArray());
                 pathPrograms[opKey]=program;
                 var rr=new List<int>(); var cc=new List<int>(); var ww=new List<double>();
                 var aliases=Enumerable.Range(0,vocab).GroupBy(i=>program.Bindings.InputOperand[i]).ToDictionary(g=>g.Key,g=>g.ToArray());

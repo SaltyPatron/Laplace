@@ -301,7 +301,7 @@ SQL_QUERY("leaders.native_named", "int4[],int4",
     "WITH leaders AS MATERIALIZED (SELECT * FROM ops.claim_leaders($1,$2) WITH ORDINALITY)\nSELECT b.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory\nFROM converse.relation_band_catalog() b LEFT JOIN leaders n ON n.band=b.band\nWHERE b.band=ANY($1) ORDER BY b.band,n.ordinality")
 
 SQL_QUERY("leaders.native_page", "text[],int8,int4",
-    "WITH selectors AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT public.laplace_id(surface) FROM unnest($1::text[]) surface) AS ids\n), page AS MATERIALIZED (\n SELECT c.claim,p.path,public.laplace_confidence(c.rating,c.deviation,2) AS confidence\n FROM public.physicality p JOIN public.consensus c ON c.claim=p.entity CROSS JOIN selectors s\n WHERE p.path && s.ids AND public.laplace_middle_any(p.path,s.ids)\n AND public.laplace_confidence(c.rating,c.deviation,-2)>=0.5\n ORDER BY public.laplace_confidence(c.rating,c.deviation,2) DESC,c.claim LIMIT $2\n), vertices AS MATERIALIZED (\n SELECT p.claim,ordinal,(public.laplace_vertex_ids(ST_PointN(p.path,ordinal)))[1] AS id,\n public.laplace_path_length(ST_PointN(p.path,ordinal)) AS run\n FROM page p CROSS JOIN LATERAL generate_series(1,ST_NPoints(p.path)) ordinal\n), labels AS MATERIALIZED (\n SELECT entity,content FROM public.laplace_labels(ARRAY(SELECT DISTINCT id FROM vertices))\n), attribution AS MATERIALIZED (\n SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attribution(ARRAY(SELECT claim FROM page)) a\n)\nSELECT $3::int4,decode(p.claim::text,'hex'),\n (SELECT jsonb_agg(jsonb_build_object('id',v.id::text,'label',l.content,'run',v.run) ORDER BY v.ordinal)\n FROM vertices v JOIN labels l ON l.entity=v.id WHERE v.claim=p.claim),p.confidence,\n (SELECT count(*) FROM attribution a WHERE a.claim=p.claim),encode(ST_AsEWKB(p.path),'hex')\nFROM page p ORDER BY p.confidence DESC,p.claim")
+    "WITH selectors AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT public.laplace_id(surface) FROM unnest($1::text[]) surface) AS ids\n), page AS MATERIALIZED (\n SELECT c.claim,p.path,public.laplace_confidence(c.rating,c.deviation,2) AS confidence\n FROM public.physicality p JOIN public.consensus c ON c.claim=p.entity CROSS JOIN selectors s\n WHERE p.path && s.ids AND public.laplace_middle_any(p.path,s.ids)\n AND public.laplace_confidence(c.rating,c.deviation,-2)>=0.5\n ORDER BY public.laplace_confidence(c.rating,c.deviation,2) DESC,c.claim LIMIT $2\n), vertices AS MATERIALIZED (\n SELECT p.claim,ordinal,(public.laplace_vertex_ids(ST_PointN(p.path,ordinal)))[1] AS id,\n public.laplace_path_length(ST_PointN(p.path,ordinal)) AS run\n FROM page p CROSS JOIN LATERAL generate_series(1,ST_NPoints(p.path)) ordinal\n), labels AS MATERIALIZED (\n SELECT entity,content FROM public.laplace_labels(ARRAY(SELECT DISTINCT id FROM vertices))\n), attribution AS MATERIALIZED (\n SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT claim FROM page),false) a WHERE a.witness\n)\nSELECT $3::int4,decode(p.claim::text,'hex'),\n (SELECT jsonb_agg(jsonb_build_object('id',v.id::text,'label',l.content,'run',v.run) ORDER BY v.ordinal)\n FROM vertices v JOIN labels l ON l.entity=v.id WHERE v.claim=p.claim),p.confidence,\n (SELECT count(*) FROM attribution a WHERE a.claim=p.claim),encode(ST_AsEWKB(p.path),'hex')\nFROM page p ORDER BY p.confidence DESC,p.claim")
 
 SQL_QUERY("leaders.page", "int4[],int4",
     "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
@@ -1096,7 +1096,7 @@ SQL_QUERY("ops.entity_record", "bytea",
     "SELECT confirmed,contested,refuted,thin FROM ops.entity_record($1)")
 
 SQL_QUERY("consensus.salient_facts_rendered", "bytea,int4",
-    "WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts($1,$2)), provenance AS MATERIALIZED (SELECT a.claim,count(*) AS witnesses FROM public.laplace_attribution(ARRAY(SELECT claim FROM facts)) a GROUP BY a.claim) SELECT f.type,f.fact,f.eff_mu,coalesce(p.witnesses,0)::bigint FROM facts f LEFT JOIN provenance p USING(claim) ORDER BY f.eff_mu DESC,f.claim")
+    "WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts($1,$2)), provenance AS MATERIALIZED (SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT claim FROM facts),false) a WHERE a.witness GROUP BY a.claim) SELECT f.type,f.fact,f.eff_mu,coalesce(p.witnesses,0)::bigint FROM facts f LEFT JOIN provenance p USING(claim) ORDER BY f.eff_mu DESC,f.claim")
 
 SQL_QUERY("converse.contrast", "bytea,bytea,int4",
     "WITH xf AS MATERIALIZED(SELECT * FROM ops.claim_facts($1,NULL)),yf AS MATERIALIZED(SELECT * FROM ops.claim_facts($2,NULL)) SELECT CASE WHEN xf.claim IS NULL THEN 'y-only' WHEN yf.claim IS NULL THEN 'x-only' ELSE 'both' END,coalesce(xf.type,yf.type),coalesce(xf.fact,yf.fact),greatest(xf.eff_mu,yf.eff_mu) FROM xf FULL JOIN yf ON xf.predicate IS NOT DISTINCT FROM yf.predicate AND xf.object=yf.object ORDER BY (xf.claim IS NOT NULL AND yf.claim IS NOT NULL) DESC,greatest(xf.eff_mu,yf.eff_mu) DESC,coalesce(xf.predicate,yf.predicate),coalesce(xf.object,yf.object) LIMIT $3")
@@ -1465,14 +1465,8 @@ SQL_QUERY("generation.corpus_word_vocab", "int4,int4",
 SQL_QUERY("generation.foundry_vocab_crawl", "text[],int4,int4,int4",
     "SELECT surface, weight FROM generation.foundry_vocab_crawl($1, $2, $3, $4)")
 
-SQL_QUERY("foundry.source_id", "text",
-    "SELECT laplace.source_id($1)")
-
-SQL_QUERY("foundry.initialize_scope", "bytea[]",
-    "CREATE TEMP TABLE IF NOT EXISTS consensus AS "
-    "SELECT * FROM consensus.scoped_consensus($1::bytea[])")
-SQL_QUERY("foundry.index_scope", "",
-    "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)")
+SQL_QUERY("foundry.source_ids", "text",
+    "SELECT decode(id::text,'hex') FROM ops.witness_catalog() WHERE lower(source_label)=lower($1) OR id::text=lower($1) ORDER BY id")
 
 SQL_QUERY("realize.resolved_word_surfaces", "text[]",
     "SELECT realize.render_text(laplace.word_id(s))\nFROM unnest($1::text[]) AS s\nWHERE laplace.word_id(s) IS NOT NULL")
@@ -1785,47 +1779,8 @@ SQL_QUERY("migration.cutover_sessions", "text[]",
     "SELECT pg_terminate_backend(pid,5000) FROM pg_stat_activity WHERE datname=ANY($1) AND pid<>pg_backend_pid()")
 
 
-SQL_QUERY("generation.path_plane", "bytea[],text,int4,int4,bool",
-    "WITH RECURSIVE "
-    "steps AS MATERIALIZED ( "
-    " SELECT ord::int AS depth, "
-    "   ARRAY(SELECT laplace.relation_type_id(t) FROM jsonb_array_elements_text(s->'types') t) AS tids, "
-    "   COALESCE((s->>'reverse')::boolean,false) AS reverse, "
-    "   COALESCE((s->>'optional')::boolean,false) AS optional "
-    " FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY q(s,ord) "
-    "), "
-    "walk(root,id,depth,weight,ids,claims) AS ( "
-    " SELECT DISTINCT id,id,0,1::float8,ARRAY[id],'[]'::jsonb FROM unnest($1::bytea[]) v(id) "
-    " UNION ALL "
-    " SELECT w.root,e.id,w.depth+1,w.weight*e.weight,w.ids||e.id,w.claims||CASE WHEN e.claim IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(e.claim) END "
-    " FROM walk w JOIN steps s ON s.depth=w.depth+1 "
-    " CROSS JOIN LATERAL ( "
-    "  SELECT edge.id,edge.weight,edge.claim FROM ( "
-    "   SELECT w.id AS id,1::float8 AS weight,NULL::jsonb AS claim WHERE s.optional "
-    "   UNION ALL "
-    "   SELECT c.object_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
-    "   FROM laplace.consensus c "
-    "   WHERE NOT s.reverse AND c.subject_id=w.id AND c.type_id=ANY(s.tids) AND c.object_id IS NOT NULL "
-    "   UNION ALL "
-    "   SELECT c.subject_id,consensus.walk_edge_weight(c.rating,c.rd),jsonb_build_object('subject_id',c.subject_id,'type_id',c.type_id,'object_id',c.object_id,'rating',c.rating,'rd',c.rd,'witness_count',c.witness_count) "
-    "   FROM laplace.consensus c "
-    "   WHERE s.reverse AND c.object_id=w.id AND c.type_id=ANY(s.tids) "
-    "  ) edge WHERE edge.weight>0 "
-    "  ORDER BY edge.weight DESC,edge.id LIMIT $3 "
-    " ) e "
-    "), "
-    "aggregated AS ( "
-    " SELECT root AS subject_id,id AS object_id,sum(weight) AS w, "
-    "   jsonb_agg(jsonb_build_object('ids',ids,'claims',claims,'weight',weight) ORDER BY ids) AS paths "
-    " FROM walk "
-    " WHERE depth=(SELECT count(*) FROM steps) AND root<>id "
-    "   AND (NOT $5 OR id=ANY($1::bytea[])) "
-    " GROUP BY root,id "
-    "), ranked AS ( "
-    " SELECT *,row_number() OVER(PARTITION BY subject_id ORDER BY w DESC,object_id) AS rn "
-    " FROM aggregated "
-    ") "
-    "SELECT subject_id,object_id,w,paths FROM ranked WHERE rn<=$4 ORDER BY subject_id,rn ")
+SQL_QUERY("generation.path_plane", "bytea[],text,int4,int4,bool,bytea[]",
+    "WITH RECURSIVE steps AS MATERIALIZED (\n SELECT ord::int AS depth,ARRAY(SELECT public.laplace_text_id(t) FROM jsonb_array_elements_text(s->'types') t) AS tids,\n coalesce((s->>'reverse')::boolean,false) AS reverse,coalesce((s->>'optional')::boolean,false) AS optional\n FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY q(s,ord)\n), walk(root,id,depth,weight,ids,claims) AS (\n SELECT DISTINCT id,id,0,1::float8,ARRAY[id],'[]'::jsonb FROM unnest($1::bytea[]) v(id)\n UNION ALL\n SELECT w.root,e.id,w.depth+1,w.weight*e.weight,w.ids||e.id,\n w.claims||CASE WHEN e.claim IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(e.claim) END\n FROM walk w JOIN steps s ON s.depth=w.depth+1 CROSS JOIN LATERAL (\n SELECT edge.* FROM (\n SELECT w.id AS id,1::float8 AS weight,NULL::jsonb AS claim WHERE s.optional\n UNION ALL\n SELECT decode((CASE WHEN s.reverse THEN (public.laplace_vertex_ids(ST_PointN(c.path,1)))[1] ELSE c.object END)::text,'hex'),\n consensus.walk_edge_weight(round(c.rating::numeric*1e9)::bigint,round(c.deviation::numeric*1e9)::bigint),\n jsonb_build_object('claim_id',decode(c.entity::text,'hex'),'subject_id',decode((public.laplace_vertex_ids(ST_PointN(c.path,1)))[1]::text,'hex'),\n 'type_id',decode(c.predicate::text,'hex'),'object_id',decode(c.object::text,'hex'),'rating',c.rating,'rd',c.deviation)\n FROM (\n WITH selected AS MATERIALIZED (\n SELECT * FROM public.laplace_claims(ARRAY[encode(w.id,'hex')::public.blake3],NULL,'{}','{}')\n ), scoped AS MATERIALIZED (\n SELECT * FROM public.laplace_source_standings(ARRAY(SELECT entity FROM selected ORDER BY entity),\n ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($6::bytea[]) u(id))) WHERE $6 IS NOT NULL\n ), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT entity FROM selected ORDER BY entity))\n )\n SELECT c.entity,c.path,\n CASE WHEN $6 IS NULL THEN c.rating ELSE scoped.rating END AS rating,\n CASE WHEN $6 IS NULL THEN c.deviation ELSE scoped.deviation END AS deviation,p.object,p.predicate\n FROM selected c JOIN preview p ON p.entity=c.entity LEFT JOIN scoped ON scoped.claim=c.entity\n WHERE $6 IS NULL OR scoped.claim IS NOT NULL\n ) c\n WHERE public.laplace_path_length(c.path)=3 AND c.predicate=ANY(s.tids)\n AND CASE WHEN s.reverse THEN public.laplace_path_ends(c.path,encode(w.id,'hex')::public.blake3)\n ELSE public.laplace_path_starts(c.path,encode(w.id,'hex')::public.blake3) END\n ) edge WHERE edge.weight>0 ORDER BY edge.weight DESC,edge.id LIMIT $3\n ) e\n), aggregated AS (\n SELECT root AS subject_id,id AS object_id,sum(weight) AS w,\n jsonb_agg(jsonb_build_object('ids',ids,'claims',claims,'weight',weight) ORDER BY ids) AS paths\n FROM walk WHERE depth=(SELECT count(*) FROM steps) AND root<>id AND (NOT $5 OR id=ANY($1::bytea[])) GROUP BY root,id\n), ranked AS (\n SELECT *,row_number() OVER(PARTITION BY subject_id ORDER BY w DESC,object_id) AS rn FROM aggregated\n) SELECT subject_id,object_id,w,paths FROM ranked WHERE rn<=$4 ORDER BY subject_id,rn")
 
 SQL_QUERY("generation.export_sequences", "bytea[],int4,int4,bytea[]",
     "SELECT p.entity_id,p.id,public.laplace_trajectory_constituent_ids(p.trajectory) "
@@ -1837,15 +1792,8 @@ SQL_QUERY("generation.export_sequences", "bytea[],int4,int4,bytea[]",
     "WHERE a.subject_id=p.entity_id AND a.source_id=ANY($4))) "
     "ORDER BY p.entity_id,p.id LIMIT $2")
 
-SQL_QUERY("generation.export_source_observations", "jsonb,bytea[]",
-    "WITH touched AS (SELECT DISTINCT decode(s,'hex') s,decode(t,'hex') t,decode(o,'hex') o "
-    "FROM jsonb_to_recordset($1) AS x(s text,t text,o text)) "
-    "SELECT a.source_id,c.id,a.observation_count,c.rating,c.rd,"
-    "a.opponent_rating_fp1e9,a.opponent_rd_fp1e9 FROM touched q "
-    "JOIN laplace.consensus c ON c.subject_id=q.s AND c.type_id=q.t AND c.object_id=q.o "
-    "JOIN laplace.attestations a ON a.subject_id=q.s AND a.type_id=q.t AND a.object_id=q.o "
-    "WHERE a.observation_count>0 AND ($2 IS NULL OR a.source_id=ANY($2)) "
-    "ORDER BY a.source_id,c.id,a.id")
+SQL_QUERY("generation.export_source_attribution", "bytea[],bytea[]",
+    "SELECT decode(source_id::text,'hex'),claims_touched,games,fisher_weight,share_bp FROM public.laplace_source_attribution(ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)),ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($2::bytea[]) u(id))) ORDER BY source_id")
 
 SQL_QUERY("generation.export_type_plane", "bytea[],int4,bytea[]",
     "SELECT subject_id,object_id,w,type_id,layer_rank "
@@ -1873,7 +1821,7 @@ SQL_QUERY("readback.constituent_edges", "bytea[],int4",
     "SELECT parent_id,child_id,run_length FROM realize.constituents_closure($1,$2) ORDER BY parent_id,ordinal")
 
 SQL_QUERY("query.declared_paths_step", "int4[],bytea[],bytea[],int4",
-    "WITH wanted AS MATERIALIZED (\n SELECT w.slot,encode(w.node,'hex')::public.blake3 AS node,\n encode(w.relation,'hex')::public.blake3 AS relation\n FROM unnest($1::int4[],$2::bytea[],$3::bytea[]) AS w(slot,node,relation)\n), selected AS MATERIALIZED (\n SELECT w.slot,w.relation,p.entity,p.rating,p.deviation\n FROM wanted w CROSS JOIN LATERAL (\n SELECT p.entity,c.rating,c.deviation FROM public.physicality p\n JOIN public.consensus c ON c.claim=p.entity\n WHERE p.path @> ARRAY[w.node,w.relation] AND p.mask ? public.laplace_bank_bit('kind','claim')\n AND public.laplace_path_starts(p.path,w.node) AND public.laplace_path_length(p.path)=3\n AND public.laplace_middle_any(p.path,ARRAY[w.relation])\n ORDER BY c.rating-2*c.deviation DESC,p.entity LIMIT $4\n ) p ORDER BY w.slot,p.rating-2*p.deviation DESC,p.entity LIMIT $4\n), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity))\n), provenance AS MATERIALIZED (\n SELECT a.claim,count(*) AS witnesses FROM public.laplace_attribution(\n ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity)) a GROUP BY a.claim\n) SELECT s.slot,decode(s.entity::text,'hex'),decode(v.object::text,'hex'),v.type_label,v.fact,\n (s.rating-2*s.deviation)::numeric,coalesce(p.witnesses,0)::bigint\n FROM selected s JOIN preview v ON v.entity=s.entity AND v.predicate=s.relation\n LEFT JOIN provenance p ON p.claim=s.entity ORDER BY s.slot,s.rating-2*s.deviation DESC,s.entity")
+    "WITH wanted AS MATERIALIZED (\n SELECT w.slot,encode(w.node,'hex')::public.blake3 AS node,\n encode(w.relation,'hex')::public.blake3 AS relation\n FROM unnest($1::int4[],$2::bytea[],$3::bytea[]) AS w(slot,node,relation)\n), selected AS MATERIALIZED (\n SELECT w.slot,w.relation,p.entity,p.rating,p.deviation\n FROM wanted w CROSS JOIN LATERAL (\n SELECT p.entity,c.rating,c.deviation FROM public.physicality p\n JOIN public.consensus c ON c.claim=p.entity\n WHERE p.path @> ARRAY[w.node,w.relation] AND p.mask ? public.laplace_bank_bit('kind','claim')\n AND public.laplace_path_starts(p.path,w.node) AND public.laplace_path_length(p.path)=3\n AND public.laplace_middle_any(p.path,ARRAY[w.relation])\n ORDER BY c.rating-2*c.deviation DESC,p.entity LIMIT $4\n ) p ORDER BY w.slot,p.rating-2*p.deviation DESC,p.entity LIMIT $4\n), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity))\n), provenance AS MATERIALIZED (\n SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(\n ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity),false) a WHERE a.witness GROUP BY a.claim\n) SELECT s.slot,decode(s.entity::text,'hex'),decode(v.object::text,'hex'),v.type_label,v.fact,\n (s.rating-2*s.deviation)::numeric,coalesce(p.witnesses,0)::bigint\n FROM selected s JOIN preview v ON v.entity=s.entity AND v.predicate=s.relation\n LEFT JOIN provenance p ON p.claim=s.entity ORDER BY s.slot,s.rating-2*s.deviation DESC,s.entity")
 
 SQL_QUERY("native.membership_any", "bytea[],bytea[],int8",
     "WITH keys AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id) WHERE id IS NOT NULL) AS ids), required AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL) AS ids)\nSELECT decode(p.entity::text,'hex'),p.path FROM keys k CROSS JOIN required r\nCROSS JOIN LATERAL public.laplace_holders(k.ids,r.ids) p\nORDER BY p.entity LIMIT CASE WHEN $3=0 THEN NULL ELSE $3+1 END")
@@ -1885,4 +1833,4 @@ SQL_QUERY("native.membership_all", "bytea[],bytea[],int8",
  * predicate must not turn a subject read into an unbounded membership walk.
  * Separate orientations preserve index conditions in generic prepared plans. */
 SQL_QUERY("native.consensus_cells", "bytea[],bytea[],bytea[]",
-    "WITH keys AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest(coalesce($1::bytea[],$2::bytea[])) u(id) WHERE id IS NOT NULL) AS ids\n), endpoints AS MATERIALIZED (\n SELECT u.id,coalesce(e.tier,CASE WHEN public.laplace_codepoint(u.id) IS NOT NULL THEN 0 END) AS tier\n FROM keys k CROSS JOIN LATERAL unnest(k.ids) u(id) LEFT JOIN public.entity e ON e.id OPERATOR(public.=) u.id\n), paths AS MATERIALIZED (\n SELECT p.entity,p.path FROM endpoints k JOIN public.physicality p\n ON p.tier>k.tier AND p.path OPERATOR(public.^@) k.id\n WHERE $1 IS NOT NULL AND public.laplace_mask_has_all(p.mask,ARRAY[public.laplace_bank_bit('kind','claim')]) AND public.laplace_path_length(p.path)=3\n UNION ALL\n SELECT p.entity,p.path FROM endpoints k JOIN public.physicality p\n ON p.tier>k.tier AND p.path OPERATOR(public.@^) k.id\n WHERE $1 IS NULL AND public.laplace_mask_has_all(p.mask,ARRAY[public.laplace_bank_bit('kind','claim')]) AND public.laplace_path_length(p.path)=3\n), claims AS MATERIALIZED (\n SELECT p.entity,p.path,s.rating,s.deviation,s.volatility FROM paths p JOIN public.consensus s ON s.claim OPERATOR(public.=) p.entity\n), parts AS MATERIALIZED (\n SELECT p.entity,array_agg(p.child ORDER BY p.ordinal,g.i) AS ids\n FROM public.laplace_constituents(ARRAY(SELECT entity FROM claims ORDER BY entity)) p\n CROSS JOIN LATERAL generate_series(1,p.run_length) g(i) GROUP BY p.entity\n), selected AS MATERIALIZED (\n SELECT c.*,p.ids FROM claims c JOIN parts p USING(entity)\n WHERE ($1 IS NULL OR decode(p.ids[1]::text,'hex')=ANY($1))\n AND ($2 IS NULL OR decode(p.ids[3]::text,'hex')=ANY($2))\n AND ($3 IS NULL OR decode(p.ids[2]::text,'hex')=ANY($3))\n), provenance AS MATERIALIZED (\n SELECT a.claim,count(*) AS witnesses FROM public.laplace_attribution(ARRAY(SELECT entity FROM selected ORDER BY entity)) a GROUP BY a.claim\n) SELECT decode(s.ids[1]::text,'hex'),decode(s.ids[2]::text,'hex'),decode(s.ids[3]::text,'hex'),\n round(s.rating::numeric*1e9)::bigint,round(s.deviation::numeric*1e9)::bigint,round(s.volatility::numeric*1e9)::bigint,coalesce(p.witnesses,0)::bigint\n FROM selected s LEFT JOIN provenance p ON p.claim=s.entity ORDER BY s.rating-2*s.deviation DESC,s.entity")
+    "WITH keys AS MATERIALIZED (\n SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest(coalesce($1::bytea[],$2::bytea[])) u(id) WHERE id IS NOT NULL) AS ids\n), endpoints AS MATERIALIZED (\n SELECT u.id,coalesce(e.tier,CASE WHEN public.laplace_codepoint(u.id) IS NOT NULL THEN 0 END) AS tier\n FROM keys k CROSS JOIN LATERAL unnest(k.ids) u(id) LEFT JOIN public.entity e ON e.id OPERATOR(public.=) u.id\n), paths AS MATERIALIZED (\n SELECT p.entity,p.path FROM endpoints k JOIN public.physicality p\n ON p.tier>k.tier AND p.path OPERATOR(public.^@) k.id\n WHERE $1 IS NOT NULL AND public.laplace_mask_has_all(p.mask,ARRAY[public.laplace_bank_bit('kind','claim')]) AND public.laplace_path_length(p.path)=3\n UNION ALL\n SELECT p.entity,p.path FROM endpoints k JOIN public.physicality p\n ON p.tier>k.tier AND p.path OPERATOR(public.@^) k.id\n WHERE $1 IS NULL AND public.laplace_mask_has_all(p.mask,ARRAY[public.laplace_bank_bit('kind','claim')]) AND public.laplace_path_length(p.path)=3\n), claims AS MATERIALIZED (\n SELECT p.entity,p.path,s.rating,s.deviation,s.volatility FROM paths p JOIN public.consensus s ON s.claim OPERATOR(public.=) p.entity\n), parts AS MATERIALIZED (\n SELECT p.entity,array_agg(p.child ORDER BY p.ordinal,g.i) AS ids\n FROM public.laplace_constituents(ARRAY(SELECT entity FROM claims ORDER BY entity)) p\n CROSS JOIN LATERAL generate_series(1,p.run_length) g(i) GROUP BY p.entity\n), selected AS MATERIALIZED (\n SELECT c.*,p.ids FROM claims c JOIN parts p USING(entity)\n WHERE ($1 IS NULL OR decode(p.ids[1]::text,'hex')=ANY($1))\n AND ($2 IS NULL OR decode(p.ids[3]::text,'hex')=ANY($2))\n AND ($3 IS NULL OR decode(p.ids[2]::text,'hex')=ANY($3))\n), provenance AS MATERIALIZED (\n SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM selected ORDER BY entity),false) a WHERE a.witness GROUP BY a.claim\n) SELECT decode(s.ids[1]::text,'hex'),decode(s.ids[2]::text,'hex'),decode(s.ids[3]::text,'hex'),\n round(s.rating::numeric*1e9)::bigint,round(s.deviation::numeric*1e9)::bigint,round(s.volatility::numeric*1e9)::bigint,coalesce(p.witnesses,0)::bigint\n FROM selected s LEFT JOIN provenance p ON p.claim=s.entity ORDER BY s.rating-2*s.deviation DESC,s.entity")

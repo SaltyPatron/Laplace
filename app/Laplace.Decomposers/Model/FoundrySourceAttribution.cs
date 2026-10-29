@@ -1,43 +1,47 @@
-using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
-using Native=Laplace.Engine.Synthesis.NativeInterop;
+
 namespace Laplace.Decomposers.Model;
+
 internal static class FoundrySourceAttribution
 {
-    public static async Task<object> ReadAsync(NpgsqlDataSource data,IReadOnlyDictionary<string,FoundryReadout.Program> paths,byte[][]? sources)
+    public static async Task<object> ReadAsync(NpgsqlDataSource data,
+        IReadOnlyDictionary<string,FoundryReadout.Program> paths,byte[][]? sources)
     {
-        var touched=new HashSet<(string s,string t,string o)>();
-        foreach(var program in paths.Values)foreach(var evidence in program.Evidence){
+        var touched=new SortedSet<string>(StringComparer.Ordinal);
+        foreach(var program in paths.Values)
+        foreach(var evidence in program.Evidence)
+        {
             using var doc=JsonAstDocument.Parse(evidence.Paths);
             if(!doc.Root.IsArray)throw new InvalidDataException("Foundry evidence paths must be a JSON array");
-            foreach(var path in doc.Root.Items()) {
+            foreach(var path in doc.Root.Items())
+            {
                 var claims=path.Property("claims");
                 if(!claims.IsArray)throw new InvalidDataException("Foundry evidence path has no claims array");
                 foreach(var cell in claims.Items())
-                    touched.Add(((cell.String("subject_id") ?? throw new InvalidDataException("claim has no subject_id"))[2..],
-                        (cell.String("type_id") ?? throw new InvalidDataException("claim has no type_id"))[2..],
-                        (cell.String("object_id") ?? throw new InvalidDataException("claim has no object_id"))[2..]));
+                {
+                    string id=cell.String("claim_id")??throw new InvalidDataException("Foundry evidence has no canonical claim_id");
+                    if(id.StartsWith("\\x",StringComparison.Ordinal))id=id[2..];
+                    byte[] bytes=Convert.FromHexString(id);
+                    if(bytes.Length!=16)throw new InvalidDataException("Foundry claim_id must contain 16 bytes");
+                    touched.Add(Convert.ToHexStringLower(bytes));
+                }
             }
         }
         if(touched.Count==0)return new{covered_operators=Array.Empty<string>(),claims_touched=0,sources=Array.Empty<object>()};
-        string json=JsonSerializer.Serialize(touched.OrderBy(c=>c.s,StringComparer.Ordinal).ThenBy(c=>c.t,StringComparer.Ordinal).ThenBy(c=>c.o,StringComparer.Ordinal).Select(c=>new{c.s,c.t,c.o}));
-        var observations=await NpgsqlFoundryReads.ExportSourceObservationsAsync(data,json,sources);
-        return Compute(paths.Keys.ToArray(),touched.Count,observations);
-    }
-    private static unsafe object Compute(string[] keys,int claims,IReadOnlyList<NpgsqlFoundryReads.SourceObservationRow> rows)
-    {
-        if(rows.Count==0)throw new InvalidOperationException("selected path cells have no attributable witness observations");
-        var input=new Native.SourceObservation[rows.Count];var output=new Native.SourceShare[rows.Count];
-        fixed(Native.SourceObservation* p=input)for(int x=0;x<rows.Count;x++){
-            var r=rows[x];r.SourceId.CopyTo(new Span<byte>(p[x].SourceId,16));r.ClaimId.CopyTo(new Span<byte>(p[x].ClaimId,16));
-            p[x].Games=r.Games;p[x].Rating=r.Rating;p[x].Rd=r.Rd;p[x].OpponentRating=r.OpponentRating;p[x].OpponentRd=r.OpponentRd;
-        }
-        nuint count=0;int rc;fixed(Native.SourceObservation* i=input)fixed(Native.SourceShare* o=output)rc=Native.SourceAttribution(i,(nuint)input.Length,o,(nuint)output.Length,&count);
-        if(rc!=0)throw new InvalidOperationException($"native witness attribution failed ({rc})");
-        var shares=new List<object>();fixed(Native.SourceShare* o=output)for(int x=0;x<(int)count;x++)shares.Add(new{
-            source_id=Convert.ToHexStringLower(new ReadOnlySpan<byte>(o[x].SourceId,16)),claims_touched=o[x].ClaimsTouched,games=o[x].Games,fisher_weight=o[x].FisherWeight,share_bp=o[x].ShareBp});
-        return new{covered_operators=keys,claims_touched=claims,method="games * g(opponent_phi)^2 * E * (1-E); native fixed-point Glicko-2; largest remainder to 10000 basis points",sources=shares};
+        var rows=await NpgsqlFoundryReads.ExportSourceAttributionAsync(data,
+            touched.Select(Convert.FromHexString).ToArray(),sources);
+        if(rows.Count==0||rows.Sum(r=>(long)r.ShareBp)!=10000)
+            throw new InvalidOperationException("Selected path claims have no informative witnessed attribution");
+        if(rows.Any(r=>r.SourceId.Length!=16||r.ClaimsTouched<=0||r.Games<=0||
+            !double.IsFinite(r.FisherWeight)||r.FisherWeight<0||r.ShareBp<0||r.ShareBp>10000))
+            throw new InvalidDataException("Database returned invalid source attribution");
+        return new{
+            covered_operators=paths.Keys.Order(StringComparer.Ordinal).ToArray(),claims_touched=touched.Count,
+            method="Native rooted-series posterior information; shared dependence roots; largest remainder to 10000 basis points",
+            sources=rows.Select(r=>new{source_id=Convert.ToHexStringLower(r.SourceId),
+                claims_touched=r.ClaimsTouched,games=r.Games,fisher_weight=r.FisherWeight,share_bp=r.ShareBp}).ToArray()
+        };
     }
 }
