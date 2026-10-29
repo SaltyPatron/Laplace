@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 . "$PSScriptRoot/../deploy/windows/iis-runtime.ps1"
 $root=Join-Path ([IO.Path]::GetFullPath($Work)) ('database-connection-'+[Guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $root
+try {
 $trust=Join-Path $root 'postgres-root.crt'
 [IO.File]::WriteAllText($trust,'connection-construction-fixture')
 $selection=@{host=$env:COMPUTERNAME;port=5432;database='laplace-mono';role='laplace_desktop_db';pool_max=4;authentication='sspi';root_certificate=$trust}
@@ -105,3 +106,7 @@ foreach($kind in 'substrate','appdb'){
 $environment=Get-IisEnvironment $iis $records
 if((Parsed $environment.LAPLACE_DB)['Password'] -ne ('c'*64) -or (Parsed $environment.LAPLACE_APP_DB)['Password'] -ne ('c'*64)){throw 'Existing IIS credential rendering changed.'}
 'Windows connection and IIS rendering checks passed: local password-free selection, remote-target refusal, scoped credentials, separate application/substrate databases, and TLS requirements. No live database was changed.'
+}finally{
+    if([IO.Path]::GetDirectoryName($root) -ne [IO.Path]::GetFullPath($Work).TrimEnd('\','/')){throw 'Invalid database connection fixture cleanup root.'}
+    Remove-Item -LiteralPath $root -Recurse -Force
+}
