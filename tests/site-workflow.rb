@@ -79,7 +79,13 @@ class SiteWorkflow < Minitest::Test
 
   def test_active_runtime_changes_are_not_ignored
     triggers = @workflow['on'] || @workflow[true]
-    ignored = triggers.fetch('push').fetch('paths-ignore')
+    push = triggers.fetch('push')
+    if push.key?('paths')
+      assert_includes push.fetch('paths'), '**'
+      ignored = push.fetch('paths').select { |pattern| pattern.start_with?('!') }.map { |pattern| pattern.delete_prefix('!') }
+    else
+      ignored = push.fetch('paths-ignore')
+    end
     %w[deploy/linux/site.sh app/Laplace.Migrations/Program.cs db/migrations/example.sql engine/core/src/example.c].each do |path|
       refute ignored.any? { |pattern| File.fnmatch?(pattern, path, File::FNM_PATHNAME | File::FNM_DOTMATCH) }, path
     end
