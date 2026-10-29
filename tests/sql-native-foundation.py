@@ -76,6 +76,15 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
             if name == "bootstrap" and result:
                 break
         if receipt["cases"][0]["exit_code"] == 0:
+            native = Path(os.environ.get("LAPLACE_POSTGRES_SOURCE", ROOT.parent / "Laplace-postgres"))
+            started = time.monotonic()
+            with (args.results / "native_load_lifecycle.log").open("w", encoding="utf-8") as output:
+                result = subprocess.run([sys.executable, str(native / "tests/stage-lifecycle.py"),
+                    "--psql", str(args.pgbin / ("psql" + suffix)), "--connection", "dbname=" + database],
+                    cwd=ROOT, text=True, stdout=output, stderr=subprocess.STDOUT, timeout=120).returncode
+            receipt["cases"].append({"name": "native_load_lifecycle", "exit_code": result,
+                "elapsed_ms": round((time.monotonic() - started) * 1000)})
+            print(f"native_load_lifecycle: {'passed' if result == 0 else 'FAILED'}", flush=True)
             grants = ROOT / "db/migrations/20261015000000_substrate_runtime_grants.sql"
             options = ["-X", "--no-password", "--dbname=" + database, "--set=ON_ERROR_STOP=1"]
             result = run("psql", [*options, "--file=" + str(grants)], args.results / "runtime_grants.log")
@@ -102,7 +111,7 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
                         except subprocess.TimeoutExpired:
                             holder.kill()
                             holder.communicate()
-        receipt["passed"] = len(receipt["cases"]) == len(CASES) + 2 and all(
+        receipt["passed"] = len(receipt["cases"]) == len(CASES) + 3 and all(
             case["exit_code"] == 0 for case in receipt["cases"])
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
         receipt.update(passed=False, error=str(error))
