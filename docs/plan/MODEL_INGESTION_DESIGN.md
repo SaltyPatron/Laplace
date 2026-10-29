@@ -253,6 +253,110 @@ Ingestion does not need to execute every opcode or produce external realization.
 
 A model-analysis request that asks Laplace to determine what matters must let the full admitted observation/circuit/query state participate in `COUPLE` before unconstrained provider/relation policy is frozen.
 
+### Dependency order through the existing implementation
+
+Source trace, 2026-10-29. The inventor's current direction is CPU file-scrape ETL
+with limited calculations, developed one dependency at a time. The tokenizer
+decomposer is an existing input to this work. The implementation task starts by
+connecting its output to the recognized model structure.
+The table names the existing owners and the required handoff between them;
+the product column defines what to carry forward as the wiring is completed.
+
+| Order | Existing entry points | Product consumed by the next step |
+| --- | --- | --- |
+| 1. Hold the complete source package | `SafetensorSnapshotWitness.ResolveCompleteDir`; `SourceEntityIdConventions.OpenModelContentSnapshot` | A selected package and held source handles. Enumerate config, tokenizer, weight shards, their index and result-affecting metadata; retain their association with the source trunk. |
+| 2. Read source structure | `SafetensorsContainerParser.ParseModel`; `ModelConfigReader.Read`; `LlamaTokenizerParser.IdSpace`; `ModelManifest.Recognize` | `TensorReference` offsets/dtypes/shapes and `ModelAnatomy`/`TensorRole` bindings. The tokenizer's id space constrains the vocabulary axis; shared axes and declared configuration constrain heads, FFN units and other source components. `engine/manifest/model_operators.toml` owns recognition templates. |
+| 3. Consume the tokenizer decomposition | `LlamaTokenizerParser.Parse`; `ModelDecomposer.VocabPhase` and `MergesPhase`; `LlamaTokenizerParser.StageVocabulary` | Shared canonical content plus the source-local vocabulary order, decoded piece roles and merge occurrences. Use the existing text decomposition and perf-cache; carry source index-to-content bindings into the calculation. Corpus attestations can join through the same canonical identities. |
+| 4. Decode connected components | `TensorReference` ranges; the current whole-tensor reader `WeightTensorETL.LoadTensorF32`; bindings consumed by `ModelCircuitEstate` | Use the recognized ranges to decode bounded native operands for a complete connected component. TinyLlama FFN unit j binds gate row j, up row j and down column j. Attention binds Q/K and V/O with the declared shared-KV layout. Activation, bias, norms, position and residual connections travel with the component they affect. |
+| 5. Calculate the Laplace result | Native kernels in `engine/dynamics` and `engine/synthesis`; evidence and geometry contracts in §§4–6 and §9 | Final typed physicality/trajectory and relationship evidence over canonical content, with its applicable conditions and source scope. Carry intermediate arithmetic through to this result in native working memory. The next boundary receives the result rather than a saved dot-product table or an operator catalog. |
+| 6. Compose, deduplicate and stage | Shared ordered composition and ingestion executor; `tier0.bin` and `highway.bin`; the tier traversal and streaming laws in `AGENTS.md` | Canonical result records composed bottom-up, known subtrees pruned top-down, novel records streamed in bounded sets. Pack the model's contributions under its containing source trunk; identical content and claims reuse identities across models. |
+| 7. Fold and publish | Shared substrate writer and database-side Native standing fold | Graded contributions under the model witness, common consensus, and a source receipt. Follow the current `AGENTS.md` assembly-line order for staged updates and atomic source publication. Replay replaces/reuses the same source contribution. |
+| 8. Inspect, compare and expand | Source-scoped A, B and pooled A+B reads; the native forward program (§10 and specs 36/37) | Inspect one connected result through PostgreSQL, then add Phi's independently attributed contribution to shared content. Expand by component family and measure complete-model CPU ETL after the component-to-record handoff is settled. Query execution and export consume the admitted results downstream. |
+
+Execute these dependencies as a streaming pipeline. Read metadata once, carry
+the tokenizer bindings and recognized axes forward in memory, and
+decode the required source slices in bounded native windows. The source's fixed
+component connections determine the work to schedule. Indexed containment and
+existing relations provide targeted joins; a vocabulary-wide pair matrix is not
+a prerequisite to building the component representation. Model-derived content
+can also introduce relationships that the corpus has not yet witnessed.
+The numerical stage consumes the carried bindings directly; PostgreSQL receives
+the composed results rather than serving as an intermediate numerical scratchpad.
+
+The current call chain supplies concrete integration points:
+
+```text
+ModelDecomposer.RunIngestAsync
+  -> ParseModel + ModelConfigReader.Read + IdSpace + ModelManifest.Recognize
+  -> StageCheckpoint + VocabPhase + MergesPhase + StageVocabulary
+  -> ModelTokenEdgeETL.EmitAsync
+       -> ModelCircuitEstate.Enumerate
+       -> BuildCircuitObservation
+       -> EmitSignificantClaims
+  -> shared ingestion executor / substrate writer
+```
+
+The first implementation boundary to flesh out is the handoff from the recognized
+`TensorRole`/`TensorReference` bindings and tokenizer content map to the native
+component result in step 5. In the current caller, `BuildCircuitObservation`
+receives a whole-vocabulary salience order and `EmitSignificantClaims` invokes
+`bilinear_contraction_significant_pairs`. The direct connected-component
+decomposition belongs at this junction. Keep the tokenizer and role recognizer
+as inputs while replacing that reduction, rather than starting another model
+parser or using a single similarity plane as the package's representation.
+
+### Where the geometric calculations belong
+
+The input to each calculation determines its place in the sequence:
+
+| Calculation | Required input | Result passed onward |
+| --- | --- | --- |
+| Cosine / dot / contraction | Compatible, role-bound source operands and the applicable component conditions | A measured component effect used to construct the declared relationship or physicality. Basis changes must carry through the connected operands. |
+| Laplacian eigenmaps | An established affinity graph | Graph-derived coordinates/functions. `laplacian_eigenmaps_from_sparse_graph` accepts that graph directly. |
+| QR / Gram–Schmidt | The functions or vectors whose basis is being conditioned | An orthonormal basis and the transformation needed by dependent calculations. |
+| Procrustes alignment | Corresponding anchors in the source and target frames | An aligned frame, with residuals and the complementary information required by the representation. Canonical entity coordinates remain content-derived. |
+| Glicko-2 | The final declared relationship outcome, its witness/dependence root and governed trust | Consensus standing over the admitted evidence. |
+
+Eigenmaps therefore follow graph construction; alignment follows correspondence
+resolution; standing follows evidence derivation. There is no universal
+"cosine first, dot products second" pass over every token. Each component recipe
+selects the calculations its inputs and output require.
+
+The Native implementations already exist: `engine/dynamics/src/eigenmaps.cpp`,
+`gram_schmidt.cpp`, `procrustes.cpp`, and `engine/synthesis/src/basis.cpp`.
+`FoundryBasis` and `FoundryExport.BuildBasis` are current export-side callers.
+Their call order is useful implementation evidence; the ingestion recipe must
+name its own operands and durable result. The four anchor coordinates orient
+the geometry; the physicality's constituent identities, order, connections and
+grades carry the rest of its admitted structure.
+
+### History that fixes the order
+
+- `02ce54f59` (2026-08-16) already separated tokenizer decomposition from the
+  downstream admission problem. Its old admission policy was subsequently
+  superseded; §3 above controls canonical content and source references.
+- `0a7f1e3a` (2026-09-14) replaced the reduction that a model only votes on
+  pre-existing corpus edges with the structured model-source contract.
+- `4d009f2fc` (2026-09-25) added the governed shape recognizer and ordered
+  vocabulary composition used by the current caller. It also introduced the
+  exhaustive significance scan discussed in the roadmap's October 27 audit;
+  that scan is an implementation choice to replace at the component-result
+  boundary, not a dependency of tokenizer decomposition.
+- `1313de5d0` (2026-10-18) corrected composition floors and config claim
+  predicates. Preserve those source semantics when wiring the stages.
+- `042a92d16` (2026-10-29) made SVD capacity obey the declared truncation budget.
+  Geometry experiments select and measure their numerical contract explicitly.
+
+Implementation references:
+[model orchestration](../../app/Laplace.Decomposers/Model/ModelDecomposer.cs),
+[tokenizer decomposition](../../app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs),
+[container parser](../../app/Laplace.Decomposers/Model/SafetensorsContainerParser.cs),
+[role recognition](../../app/Laplace.Decomposers/Model/ModelOperatorRecognizer.cs),
+[operator templates](../../engine/manifest/model_operators.toml),
+[circuit bindings](../../app/Laplace.Decomposers/Model/ModelCircuitEstate.cs),
+[current result handoff](../../app/Laplace.Decomposers/Model/ModelTokenEdgeETL.cs),
+[native geometry](../../engine/synthesis/src/basis.cpp).
+
 ---
 
 ## 8. Native execution grain is mandatory for model scale
