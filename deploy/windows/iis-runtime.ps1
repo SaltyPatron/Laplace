@@ -266,7 +266,7 @@ function Test-IisEndpoint($c,[string]$OperatorToken='',[string]$ApiKey='',[strin
     if($health.status -ne 'ok'){throw 'IIS application liveness failed.'}
     $ready=Invoke-WebRequest "$base/health/ready" -NoProxy -TimeoutSec 20 -SkipHttpErrorCheck
     $state=$ready.Content | ConvertFrom-Json
-    if($state.substrate_reachable -ne $true -or $state.perfcache_ready -ne $true){throw 'IIS substrate or native perfcache is unavailable.'}
+    if([int]$ready.StatusCode -ne 200 -or $state.ready -ne $true -or $state.substrate_reachable -ne $true -or $state.perfcache_ready -ne $true){throw 'IIS application readiness, substrate or native perfcache is unavailable.'}
     $page=Invoke-WebRequest $base -NoProxy -TimeoutSec 20
     if($page.Content -notmatch '<html'){throw 'The installed UI was not served.'}
     $assets=Get-IisPageAssets $page.Content
