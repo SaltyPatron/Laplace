@@ -12,14 +12,20 @@ public sealed class OmwNativeRecipeTests
         Assert.Equal(new[]
         {
             "tenda per doccia\tlexical sense\t[tenda per doccia, language:ita, i58874]",
-            "tenda per doccia\tn",
+            "tenda per doccia\tNOUN",
             "[tenda per doccia, language:ita, i58874]\treference\tomw-it-04209239-n",
             "[tenda per doccia, language:ita, i58874]\tis lexicalized\tfalse",
             "omw-it-04209239-n\ttenda per doccia",
             "omw-it-04209239-n\ti58874",
-            "omw-it-04209239-n\tn",
+            "omw-it-04209239-n\tNOUN",
             "omw-it-04209239-n\tis lexicalized\tfalse",
             "omw-it-04209239-n\tdefinition of the synset\tle tende che impediscono all'acqua di uscire dall'area della doccia",
+            "[wordnet-pos, n]\tdenotes\tNOUN",
+            "[wordnet-pos, n]\tdenotes\tNOUN",
+            "omw-it-04209239-n\tidentifier vocabulary\tSynset",
+            "omw-it-04209239-n\tidentifier vocabulary\tSynset",
+            "i58874\tidentifier vocabulary\tili",
+            "language:ita\tidentifier vocabulary\tlanguage",
         }.Order(StringComparer.Ordinal), claims.Select(Product).Order(StringComparer.Ordinal));
     }
 
@@ -44,7 +50,7 @@ public sealed class OmwNativeRecipeTests
                 StringComparison.Ordinal)).ToArray();
             Assert.Equal(expected, properties.Length);
             Assert.All(properties, product => Assert.EndsWith("\t" + value, product));
-            Assert.Equal(7 + expected, claims.Length);
+            Assert.Equal(13 + expected, claims.Length);
         }
         finally
         {

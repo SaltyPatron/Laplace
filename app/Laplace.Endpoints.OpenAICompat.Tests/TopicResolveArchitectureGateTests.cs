@@ -32,8 +32,8 @@ public sealed class TopicResolveArchitectureGateTests
         Assert.Contains("SQL_QUERY(\"conversation.resolve_refs_with_labels\"", catalog);
         Assert.Contains("FROM ops.resolve_refs($1,$2)", catalog);
         var owner = Read("extension/laplace_substrate/sql/functions/converse/resolve_ref.sql.in");
-        Assert.Contains("public.entity e ON e.id=k.key", owner);
-        Assert.Contains("public.laplace_labels", owner);
+        Assert.Contains("@extschema:laplace@.laplace_resolve_refs(p_ids,p_labels)", owner);
+        Assert.Contains("LANGUAGE sql STABLE PARALLEL SAFE", owner);
         Assert.DoesNotContain("laplace.entities", owner);
         Assert.DoesNotContain("render_text_fast", owner);
         Assert.DoesNotContain("OpenConnectionAsync", text);

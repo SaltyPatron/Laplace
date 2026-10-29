@@ -16,6 +16,11 @@ public sealed class SemLinkIngestPipelineTests
         "claim\t0\t1\t[abandon.01, vnclass:leave-51.2]\tARG0\ttheme",
         "claim\t0\t1\tabandon.02\tvnclass:leave-51.2",
         "claim\t0\t1\t[abandon.02, vnclass:leave-51.2]\tARG0\ttheme",
+        "claim\t0\t1\tabandon.01\t[pbroleset, cross-resource mapping, vnclass]\t51.2",
+        "claim\t0\t1\tabandon.02\t[pbroleset, cross-resource mapping, vnclass]\t51.2",
+        "claim\t0\t1\tabandon.01\tidentifier vocabulary\tpbroleset",
+        "claim\t0\t1\tabandon.02\tidentifier vocabulary\tpbroleset",
+        "claim\t0\t1\tvnclass:leave-51.2\tidentifier vocabulary\tvnclass",
     ];
 
     [Fact]

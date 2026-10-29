@@ -20,7 +20,8 @@ public sealed class MapNetNativeRecipeTests
             string[] actual = await NativeCorpusAssertions.ClaimsAsync("mapnet", frames, units);
             string[] products = actual.Select(static line => string.Join('\t', line.Split('\t').Skip(3)))
                 .Order(StringComparer.Ordinal).ToArray();
-            Assert.Equal(new[] { "Buildings\tn#01234567", "[Buildings, hall.n]\tn#01234567" }
+            Assert.Equal(new[] { "Buildings\tn#01234567", "[Buildings, hall.n]\tn#01234567",
+                "Buildings\tidentifier vocabulary\tfnframe", "Buildings\tidentifier vocabulary\tfnframe" }
                 .Order(StringComparer.Ordinal), products);
         }
         finally

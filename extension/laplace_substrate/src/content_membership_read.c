@@ -69,8 +69,8 @@ native_membership(ArrayType *members, bool require_all, ArrayType *required,
     if (plans[which] == NULL)
     {
         Oid types[] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8OID};
-        plans[which] = SPI_prepare(laplace_sql_query_text(require_all ?
-            "native.membership_all" : "native.membership_any"), 3, types);
+        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(require_all ?
+            "native.membership_all" : "native.membership_any"), 3, types, CURSOR_OPT_PARALLEL_OK);
         if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
             elog(ERROR, "cannot prepare Native membership");
     }

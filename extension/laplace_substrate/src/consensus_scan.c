@@ -47,7 +47,8 @@ scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types,
     if (plan == NULL)
     {
         Oid args[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID};
-        plan = SPI_prepare(laplace_sql_query_text("native.consensus_cells"), 3, args);
+        plan = SPI_prepare_cursor(laplace_sql_query_text("native.consensus_cells"), 3, args,
+                                  CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0) elog(ERROR, "cannot prepare Native consensus cells");
     }
     Datum args[] = {PointerGetDatum(subjects), PointerGetDatum(objects), PointerGetDatum(types)};

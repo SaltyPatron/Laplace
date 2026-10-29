@@ -11,7 +11,9 @@ public sealed class WordNetNativeRecipeTests
     {
         string[] claims = await NativeCorpusAssertions.ClaimsAsync("princeton-wordnet",
             Fixture("data.noun"), Fixture("data.verb"));
-        Assert.Equal(24, claims.Length);
+        Assert.Equal(41, claims.Length);
+        Assert.Equal(14, claims.Count(claim => claim.Contains("\tidentifier vocabulary\tili", StringComparison.Ordinal)));
+        Assert.Equal(3, claims.Count(claim => claim.Contains("\tdenotes\t", StringComparison.Ordinal)));
         Assert.Contains("claim\t0\t1\tili:i35545\twords in the synset\t[entity, eng, ili:i35545]", claims);
         Assert.Contains("claim\t0\t1\tili:i35546\twords in the synset\t[physical entity, eng, ili:i35546]", claims);
         Assert.Contains("claim\t0\t1\tili:i35546\t@\tili:i35545", claims);
@@ -26,14 +28,18 @@ public sealed class WordNetNativeRecipeTests
     public async Task NativeVerbFrameRecordsUseTheirDeclaredNumericIdentifiers()
     {
         string[] claims = await NativeCorpusAssertions.ClaimsAsync("princeton-wordnet", Fixture("frames.vrb"));
-        Assert.Equal(new[]
+        var frames = new (string Id, string Text)[]
         {
-            "claim\t0\t1\t1\tgeneric verb sentence frame\tSomething ----s",
-            "claim\t0\t1\t2\tgeneric verb sentence frame\tSomebody ----s",
-            "claim\t0\t1\t8\tgeneric verb sentence frame\tSomebody ----s something",
-            "claim\t0\t1\t10\tgeneric verb sentence frame\tSomething ----s somebody",
-            "claim\t0\t1\t13\tgeneric verb sentence frame\tSomebody ----s on something",
-        }, claims);
+            ("1", "Something ----s"), ("2", "Somebody ----s"), ("8", "Somebody ----s something"),
+            ("10", "Something ----s somebody"), ("13", "Somebody ----s on something"),
+        };
+        Assert.Equal(frames.SelectMany(frame => new[]
+        {
+            $"claim\t0\t1\t{frame.Id}\tgeneric verb sentence frame\t{frame.Text}",
+            $"claim\t0\t1\t{frame.Id}\tidentifier vocabulary\twnframe",
+            $"claim\t0\t1\t[wnframe, {frame.Id}]\tidentifies\t{frame.Id}",
+            $"claim\t0\t1\t[wnframe, {frame.Text}]\tidentifies\t{frame.Id}",
+        }), claims);
     }
 
     private static string Fixture(string name)

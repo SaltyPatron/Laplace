@@ -14,11 +14,14 @@ public sealed class CILIReferenceAdmissionTests
         string fixture = Path.Combine(Directory.GetParent(EtlManifest.RecipesRoot)!.FullName, "tests",
             "fixtures", "highway-identities", "cili", "ili.ttl");
         string[] claims = await NativeCorpusAssertions.ClaimsAsync("cili", fixture);
-        Assert.Equal(2, claims.Length);
+        Assert.Equal(6, claims.Length);
         Assert.Contains(claims, claim => claim.Contains("\ti46360\ta\tConcept", StringComparison.Ordinal));
         Assert.Contains(claims, claim => claim.Contains("\ti46360\tskos:definition\t[", StringComparison.Ordinal)
             && claim.EndsWith(", language:eng]", StringComparison.Ordinal));
-        Assert.All(claims, claim => Assert.StartsWith("claim\t0\t1\ti46360\t", claim, StringComparison.Ordinal));
+        Assert.Contains("claim\t0\t1\ti46360\tidentifier vocabulary\tili", claims);
+        Assert.Contains("claim\t0\t1\t[ili, i46360]\tidentifies\ti46360", claims);
+        Assert.Contains("claim\t0\t1\t[ili, 02084071-n]\tidentifies\ti46360", claims);
+        Assert.Contains("claim\t0\t1\tlanguage:eng\tidentifier vocabulary\tlanguage", claims);
     }
 
     [Fact]

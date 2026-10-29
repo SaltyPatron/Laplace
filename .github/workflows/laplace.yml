@@ -31,41 +31,44 @@ on:
         default: false
   push:
     branches: [main]
-    paths-ignore:
-      - ".github/**"
-      - "docs/**"
-      - "deploy/windows/**"
-      - "scripts/win/**"
-      - "**/*.md"
-      - "scripts/ci-impact-plan.py"
-      - "scripts/ci-qualification-cache.py"
-      - "scripts/ci-product-freshness.py"
-      - "scripts/ci_product_scope.py"
-      - "scripts/web-artifact.py"
-      - "scripts/windows-components.py"
-      - "scripts/site-status.py"
-      - "scripts/platform-access-audit.py"
-      - "scripts/platform-access-enroll.py"
-      - "scripts/platform-owner-enroll.py"
-      - "scripts/test-parallel.sh"
-      - "scripts/product-ci.sh"
-      - "deploy/linux/deploy.sh"
-      - "scripts/publish-applications.sh"
-      - "scripts/test-suites/**"
-      - "scripts/ci_managed_projects.py"
-      - "scripts/test-*.py"
-      - "scripts/test-*.sh"
-      - "scripts/tests/**"
-      - "web/scripts/test-*.mjs"
-      - "web/e2e/**"
-      - "scripts/test-workflow-architecture.py"
-      - "scripts/test-seed-workflow-ownership.py"
-      - "scripts/native-ingest-idempotency.sql"
-      - "scripts/test-product-ci-artifact-ownership.py"
-      - "scripts/test-benchmark-suite.py"
-      - "scripts/validate-pipeline.py"
-      - "vault-data-inventory.tsv"
-      - "vault-data-directories.list"
+    paths:
+      - "**"
+      - "!.github/**"
+      - "!docs/**"
+      - "!deploy/windows/**"
+      - "!scripts/win/**"
+      - "!**/*.md"
+      - "!scripts/ci-impact-plan.py"
+      - "!scripts/ci-qualification-cache.py"
+      - "!scripts/ci-product-freshness.py"
+      - "!scripts/ci_product_scope.py"
+      - "!scripts/web-artifact.py"
+      - "!scripts/windows-components.py"
+      - "!scripts/site-status.py"
+      - "!scripts/platform-access-audit.py"
+      - "!scripts/platform-access-enroll.py"
+      - "!scripts/platform-owner-enroll.py"
+      - "!scripts/test-parallel.sh"
+      - "!scripts/product-ci.sh"
+      - "!deploy/linux/deploy.sh"
+      - "!scripts/publish-applications.sh"
+      - "!scripts/test-suites/**"
+      - "!scripts/ci_managed_projects.py"
+      - "!scripts/test-*.py"
+      - "!scripts/test-*.sh"
+      - "!scripts/tests/**"
+      - "!web/scripts/test-*.mjs"
+      - "!web/e2e/**"
+      - "!scripts/test-workflow-architecture.py"
+      - "!scripts/test-seed-workflow-ownership.py"
+      - "!scripts/native-ingest-idempotency.sql"
+      - "!scripts/test-product-ci-artifact-ownership.py"
+      - "!scripts/test-benchmark-suite.py"
+      - "!scripts/validate-pipeline.py"
+      - "!vault-data-inventory.tsv"
+      - "!vault-data-directories.list"
+      # This file owns the pinned Native dependency closure as well as delivery.
+      - ".github/workflows/laplace.yml"
 
 permissions:
   contents: read
@@ -117,14 +120,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: b78d592043523beb6a885954ce36828642295a93
+          ref: 9486ad3fe58d55a637afafdb80d0afef38010734
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 09f7ac0de81241852ba6c45f371ebcef35c64800
+          ref: 71b2ec57b33e65d10c04fb0ca2c61674fc48c2a3
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -324,14 +327,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: b78d592043523beb6a885954ce36828642295a93
+          ref: 9486ad3fe58d55a637afafdb80d0afef38010734
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 09f7ac0de81241852ba6c45f371ebcef35c64800
+          ref: 71b2ec57b33e65d10c04fb0ca2c61674fc48c2a3
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
