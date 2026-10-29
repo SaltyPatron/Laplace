@@ -61,7 +61,7 @@ def verify_workload(config):
             'shared_identity_secrets': 'denied', 'revoked_token': 'denied'}
 
 
-def verify(config):
+def verify(config, *, stdout_only=False):
     account = pwd.getpwnam(config['runtime_user'])
     service_user = subprocess.check_output(['systemctl', 'show', 'laplace-api', '-p', 'User', '--value'], text=True).strip()
     if service_user != account.pw_name or subprocess.call(['systemctl', 'is-active', '--quiet', 'laplace-api']):
@@ -116,15 +116,19 @@ def verify(config):
     checks['openbao'] = verify_workload(config)
     receipt = {'passed': True, 'runtime_user': account.pw_name, 'runtime_uid': account.pw_uid,
                'database_role': config['role'], 'credential_roles': sorted(roles), 'checks': checks}
-    output = Path(config['work']) / 'runtime-verification.json'
-    output.write_text(json.dumps(receipt, indent=2) + '\n')
+    if not stdout_only:
+        output = Path(config['work']) / 'runtime-verification.json'
+        output.write_text(json.dumps(receipt, indent=2) + '\n')
     print(json.dumps(receipt))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase', choices=('prepare', 'activate', 'verify', 'resources', 'resources-check'), required=True)
+    parser.add_argument('--stdout-only', action='store_true', help='Verify without writing a remote receipt')
     args = parser.parse_args()
+    if args.stdout_only and args.phase != 'verify':
+        raise ValueError('--stdout-only applies only to verification')
     config = json.load(sys.stdin)
     if os.geteuid() != 0:
         raise ValueError('The authorized host administrator must install the runtime identity')
@@ -139,7 +143,7 @@ def main():
     if not state.is_absolute() or state == Path('/') or state.is_symlink() or state == prefix or state in prefix.parents or prefix in state.parents:
         raise ValueError('Runtime state must be an independent absolute directory')
     if args.phase == 'verify':
-        verify(config)
+        verify(config, stdout_only=args.stdout_only)
         return
     spec = importlib.util.spec_from_file_location('substrate_sync', Path(__file__).with_name('database-sync.py'))
     sync = importlib.util.module_from_spec(spec)
