@@ -79,7 +79,8 @@ if(NOT WIN32)
     if(LAPLACE_NATIVE AND EXISTS "${LAPLACE_NATIVE}/CMakeLists.txt")
         file(GLOB_RECURSE _execution_native_inputs CONFIGURE_DEPENDS
             "${LAPLACE_NATIVE}/src/*.c" "${LAPLACE_NATIVE}/src/*.cpp"
-            "${LAPLACE_NATIVE}/src/*.h" "${LAPLACE_NATIVE}/include/*.h")
+            "${LAPLACE_NATIVE}/src/*.h" "${LAPLACE_NATIVE}/include/*.h"
+            "${LAPLACE_NATIVE}/cmake/*.cmake")
         list(APPEND _execution_inputs ${_execution_native_inputs} "${LAPLACE_NATIVE}/CMakeLists.txt")
     endif()
 endif()
