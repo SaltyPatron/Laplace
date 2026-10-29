@@ -1,6 +1,8 @@
 #include "laplace/synthesis/tensor_decompose.h"
 
 #include <cstring>
+#include <cmath>
+#include <limits>
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
@@ -16,12 +18,19 @@ int tensor_svd_truncate(
 {
     if (!A || !out_rank || !U || !S || !Vt) return -1;
     if (m == 0 || n == 0)                   return -1;
-    if (rel_err_tol < 0.0 || rel_err_tol >= 1.0) return -1;
+    if (!std::isfinite(rel_err_tol) || rel_err_tol < 0.0 || rel_err_tol >= 1.0) return -1;
 
     const size_t k = (m < n) ? m : n;
     if (kmax == 0) return -1;
+    if (n > std::numeric_limits<size_t>::max() / m / sizeof(float)
+        || kmax > std::numeric_limits<size_t>::max() / m / sizeof(float)
+        || kmax > std::numeric_limits<size_t>::max() / n / sizeof(float)) return -1;
 
 #ifdef LAPLACE_HAS_MKL
+    if (m > static_cast<size_t>(std::numeric_limits<lapack_int>::max())
+        || n > static_cast<size_t>(std::numeric_limits<lapack_int>::max())) return -1;
+    for (size_t i = 0; i < m * n; ++i)
+        if (!std::isfinite(A[i])) return -1;
     std::vector<float> Acopy(A, A + m * n);
     std::vector<float> Ufull(m * k);
     std::vector<float> Sfull(k);
@@ -51,7 +60,7 @@ int tensor_svd_truncate(
         r = i - 1;
     }
     if (r == 0) r = 1;
-    if (r > kmax) r = kmax;
+    if (r > kmax) { *out_rank = r; return -3; }
 
     for (size_t row = 0; row < m; ++row)
         std::memcpy(U + row * kmax, Ufull.data() + row * k, r * sizeof(float));
