@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pgbin", type=Path, required=True)
     parser.add_argument("--results", type=Path, required=True)
+    parser.add_argument("--source-database", default=os.environ.get("PGDATABASE", "postgres"))
     args = parser.parse_args()
     args.results.mkdir(parents=True, exist_ok=True)
     database = "laplace_sql_native_" + uuid.uuid4().hex[:16]
@@ -30,16 +31,29 @@ def main():
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), "cases": []}
     created = False
 
-    def run(tool, options, log, env=None):
+    def run(tool, options, log, env=None, sql=None):
         with log.open("w", encoding="utf-8") as output:
             return subprocess.run([str(args.pgbin / (tool + suffix)), *options],
-                cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=600).returncode
+                cwd=ROOT, env=env, input=sql, text=True,
+                stdout=output, stderr=subprocess.STDOUT, timeout=600).returncode
 
     try:
         if run("createdb", ["--no-password", "--maintenance-db=postgres", database],
                args.results / "create.log"):
             raise RuntimeError("Could not create the isolated SQL verification database")
         created = True
+        # Installed extension/cache paths may be database-scoped on Linux.
+        # Carry their actual values into this database without changing schema
+        # resolution, planner switches, roles, or the installed source database.
+        configure = """SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting)
+FROM pg_settings WHERE name IN ('extension_control_path','dynamic_library_path')
+ OR name LIKE 'laplace.%'
+\\gexec
+"""
+        if run("psql", ["-X", "--no-password", "--dbname=" + args.source_database,
+                "--set=ON_ERROR_STOP=1", "--set=target=" + database],
+                args.results / "configuration.log", sql=configure):
+            raise RuntimeError("Could not carry installed extension/cache configuration into the verification database")
         for name in CASES:
             started = time.monotonic()
             sql = ROOT / "extension/laplace_substrate/tests/sql" / (name + ".sql")
