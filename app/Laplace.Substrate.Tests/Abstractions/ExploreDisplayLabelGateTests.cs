@@ -16,7 +16,7 @@ public sealed class ExploreDisplayLabelGateTests
         var sql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "converse", "label.sql.in"));
         var adapter = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
-        Assert.Contains("FROM public.laplace_labels(", sql, StringComparison.Ordinal);
+        Assert.Contains("FROM @extschema:laplace@.laplace_labels(", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("SPI_execute", adapter, StringComparison.Ordinal);
         Assert.DoesNotContain("batch_text", adapter, StringComparison.Ordinal);
@@ -71,8 +71,9 @@ public sealed class ExploreDisplayLabelGateTests
         var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "realize", "realize_synset_lemma.sql.in"));
 
-        Assert.Contains("public.entity e ON e.id=i.key", facetsSql, StringComparison.Ordinal);
-        Assert.Contains("public.laplace_codepoint", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("FROM @extschema:laplace@.laplace_entities(", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("LEFT JOIN native e ON e.id=i.key", facetsSql, StringComparison.Ordinal);
+        Assert.Contains("@extschema:laplace@.laplace_codepoint", facetsSql, StringComparison.Ordinal);
         // Preserve observed semantic roles without inferring Word from a tier.
         // Native scalar identity is the only implicit type; other unknowns stay NULL.
         Assert.Contains("coalesce(type_id,CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') END)", facetsSql, StringComparison.Ordinal);
