@@ -57,6 +57,7 @@ set(EXT_EXECUTION_SOURCES
     src/entity_mask_write.c
     src/chess_rating_repair.c
     src/chess_syzygy.c
+    src/generate_walk.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"

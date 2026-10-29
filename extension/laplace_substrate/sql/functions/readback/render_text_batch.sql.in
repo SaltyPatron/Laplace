@@ -2,5 +2,5 @@
 -- a positive depth is caller-owned preview policy, never an infrastructure cap.
 CREATE OR REPLACE FUNCTION realize.render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 0)
     RETURNS text[]
-    AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_render_text_batch'
     LANGUAGE C STABLE;

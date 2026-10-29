@@ -2,27 +2,29 @@
 #include "miscadmin.h"
 
 #include "catalog/pg_type.h"
+#include "catalog/namespace.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/lsyscache.h"
 
 #include "spi_common.h"
 #include "spi_nested.h"
-#include "spi_stream.h"
+#include "content_membership_read.h"
 #include "laplace/core/sql_catalog.h"
 #include "trajectory_wkb.h"
 
 #include "laplace/core/mantissa.h"
 
 /*
- * structural.geometry_successors_batch(points, limit, window, backward, type)
+ * structural.geometry_successors_batch(points, limit, window, backward)
  *   -> TABLE(point_id bytea, successor_id bytea, seen bigint)
  *
  * Sequence projection over the trajectory face: for each requested point, every
- * trajectory of the given physicality type that contains it yields the nearest
+ * content trajectory that contains it yields the nearest
  * non-separator constituent after (or before) the point's first occurrence,
  * within `window` positions. Successors are counted per point and the top
  * `limit` per point are returned by count. Separators are the ids
@@ -35,7 +37,6 @@
  * scanned as compressed ordered runs without materializing repeated occurrences.
  */
 
-static SPIPlanPtr batch_unpack_plan = NULL;
 static SPIPlanPtr separator_plan = NULL;
 
 typedef struct IdEntry { char key[16]; } IdEntry;
@@ -63,26 +64,6 @@ typedef struct BatchResult
 static void
 ensure_plans(void)
 {
-    if (batch_unpack_plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAARRAYOID, INT2OID };
-        /*
-         * SPI_prepare plans with parallelism disabled. The containment
-         * predicate is on constituents while physicalities is hash-partitioned
-         * by id, so nothing prunes and every partition is scanned; a read-only
-         * CURSOR_OPT_PARALLEL_OK plan lets that scan run as a Parallel Append.
-         */
-        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("geometry.successor_carriers"), 2, argtypes,
-                                            CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "geometry_successors: SPI_prepare_cursor(batch unpack) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "geometry_successors: SPI_keepplan(batch unpack) failed");
-        batch_unpack_plan = plan;
-    }
-
     if (separator_plan == NULL)
     {
         SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("geometry.separators"), 0, NULL, CURSOR_OPT_PARALLEL_OK);
@@ -167,20 +148,23 @@ typedef struct {
     int window;
     bool backward;
     uint64 generation;
+    FmgrInfo geometry_send;
+    MemoryContext row;
 } SuccessorRead;
 
 /* Read compressed occurrences directly. A run containing millions of equal
  * children stays one run; separator counts consume the logical window in one
  * step. The first occurrence of each requested root still owns its successor. */
 static void
-receive_successor_trajectory(TupleTableSlot *row, void *opaque)
+receive_successor_trajectory(Datum physicality, Datum entity, Datum geometry, void *opaque)
 {
     SuccessorRead *read = opaque;
-    bool isnull;
-    Datum value = slot_getattr(row, 1, &isnull);
-    if (isnull) return;
+    (void)physicality;
+    (void)entity;
+    MemoryContext previous = MemoryContextSwitchTo(read->row);
+    bytea *wkb = SendFunctionCall(&read->geometry_send, geometry);
     uint32 count;
-    const unsigned char *points = laplace_trajectory_wkb_points(DatumGetByteaPP(value), &count);
+    const unsigned char *points = laplace_trajectory_wkb_points(wkb, &count);
     if (++read->generation == 0)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
             errmsg("geometry_successors_batch: trajectory generation overflow")));
@@ -209,6 +193,8 @@ receive_successor_trajectory(TupleTableSlot *row, void *opaque)
             remaining -= run;
         }
     }
+    MemoryContextSwitchTo(previous);
+    MemoryContextReset(read->row);
 }
 
 static int
@@ -237,7 +223,6 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     int32          limit_rows;
     int32          window;
     bool           backward;
-    int16          physicality_type;
     bool           spi_top = false;
     HASHCTL        ctl;
     HTAB          *roots;
@@ -253,7 +238,6 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     limit_rows = PG_ARGISNULL(1) ? 20 : PG_GETARG_INT32(1);
     window = PG_ARGISNULL(2) ? 8 : PG_GETARG_INT32(2);
     backward = (PG_NARGS() > 3 && !PG_ARGISNULL(3)) ? PG_GETARG_BOOL(3) : false;
-    physicality_type = (PG_NARGS() > 4 && !PG_ARGISNULL(4)) ? PG_GETARG_INT16(4) : 1;
     if (limit_rows < 0)
         ereport(ERROR, (errmsg("geometry_successors_batch: limit must not be negative")));
     if (window < 0)
@@ -311,8 +295,6 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     {
         Datum     *normalized_datums = (Datum *) palloc(sizeof(Datum) * (Size) n_roots);
         ArrayType *normalized;
-        Datum      args[2];
-        char       nulls[2] = { ' ', ' ' };
 
         for (int i = 0; i < n_roots; i++)
         {
@@ -324,12 +306,20 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
         }
         normalized = construct_array(normalized_datums, n_roots, BYTEAOID,
                                      -1, false, TYPALIGN_INT);
-        args[0] = PointerGetDatum(normalized);
-        args[1] = Int16GetDatum(physicality_type);
-        Oid types[] = {BYTEAARRAYOID, INT2OID};
         SuccessorRead read = {roots, separators, pairs, window, backward, 0};
-        laplace_spi_stream(batch_unpack_plan, 2, types, args, nulls,
-            receive_successor_trajectory, &read);
+        Oid relation = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+        Oid geometry = get_atttype(relation, get_attnum(relation, "trajectory"));
+        Oid sender;
+        bool varlena;
+        getTypeBinaryOutputInfo(geometry, &sender, &varlena);
+        fmgr_info(sender, &read.geometry_send);
+        read.row = AllocSetContextCreate(CurrentMemoryContext,
+            "geometry successor trajectory", ALLOCSET_SMALL_SIZES);
+        /* The common reader validates the typed partial GIN index and performs
+         * MVCC/lossy-bitmap rechecks. Selection does not depend on generic-plan
+         * inference of a parameterized type predicate. */
+        laplace_content_membership_read(normalized, false, receive_successor_trajectory, &read);
+        MemoryContextDelete(read.row);
     }
 
     {

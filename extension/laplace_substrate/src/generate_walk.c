@@ -19,6 +19,8 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "spi_stream.h"
+#include "laplace/core/sql_catalog.h"
 #include "perfcache_native.h"
 #include "walk_score.h"
 #include "relation_symmetry.h"
@@ -920,25 +922,18 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 }
 
 
-#define VFLAG_HAS_ATOM   ((int64) 1)
-#define VFLAG_ATOM_SHIFT 31
-#define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
 /* REALIZE of compositions to content: one closure read
  * (realize.constituents_closure, constituents_closure.c) returns every
  * reachable parent's ordered children with run lengths and flags; the
- * renderer expands them recursively into bytes, emitting atoms by codepoint. */
-static const char *CLOSURE_QUERY =
-    "SELECT parent_id, child_id, run_length, flags "
-    "FROM realize.constituents_closure($1, $2) "
-    "ORDER BY parent_id, ordinal";
+ * renderer follows an explicit occurrence stack and emits atoms by their actual
+ * canonical identities. Packed annotation flags never manufacture a scalar. */
 
 static SPIPlanPtr closure_plan = NULL;
 
 typedef struct RenderMemoKey
 {
     char id[16];
-    int32 depth;
 } RenderMemoKey;
 
 typedef struct RenderMemoEntry
@@ -952,7 +947,6 @@ typedef struct ClosureChild
 {
     Datum child;
     int32 run;
-    int64 flags;
 } ClosureChild;
 
 typedef struct ClosureParent
@@ -961,6 +955,7 @@ typedef struct ClosureParent
     ClosureChild *kids;
     int           n;
     int           cap;
+    bool          rendering;
 } ClosureParent;
 
 static void
@@ -969,7 +964,7 @@ ensure_render_plans(void)
     if (closure_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare_cursor(CLOSURE_QUERY, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
+        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("readback.constituent_edges"), 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "render_text: SPI_prepare(constituents_closure) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -1006,22 +1001,8 @@ append_codepoint_utf8(StringInfo out, uint32 cp)
     appendBinaryStringInfo(out, (char *) buf, 4);
 }
 
-static bool
-append_codepoint_render(StringInfo out, Datum id)
-{
-    bytea   *idb = DatumGetByteaPP(id);
-    uint32_t cp;
-
-    if (VARSIZE_ANY_EXHDR(idb) != 16)
-        return false;
-    if (!laplace_perfcache_codepoint_for_id((const uint8 *) VARDATA_ANY(idb), &cp))
-        return false;
-    append_codepoint_utf8(out, cp);
-    return true;
-}
-
 static void
-closure_parent_push(ClosureParent *p, Datum child, int32 run, int64 flags)
+closure_parent_push(ClosureParent *p, Datum child, int32 run)
 {
     if (p->n >= p->cap)
     {
@@ -1034,7 +1015,6 @@ closure_parent_push(ClosureParent *p, Datum child, int32 run, int64 flags)
     }
     p->kids[p->n].child = child;
     p->kids[p->n].run = (run < 1) ? 1 : run;
-    p->kids[p->n].flags = flags;
     p->n++;
 }
 
@@ -1042,149 +1022,145 @@ closure_parent_push(ClosureParent *p, Datum child, int32 run, int64 flags)
  * The constituent DAG of every root in one SPI call, as an HTAB keyed by
  * parent id (16 bytes) holding ordered children.
  */
+typedef struct {
+    HTAB *parents;
+    MemoryContext owner;
+} ClosureRead;
+
+static void
+receive_closure_edge(TupleTableSlot *row, void *opaque)
+{
+    ClosureRead *read = opaque;
+    bytea *parent = spi_slot_bytea(row, 1), *child = spi_slot_bytea(row, 2);
+    bool isnull, found;
+    Datum count = slot_getattr(row, 3, &isnull);
+    if (!parent || !child || VARSIZE_ANY_EXHDR(parent) != 16 ||
+        VARSIZE_ANY_EXHDR(child) != 16 || isnull || DatumGetInt32(count) <= 0)
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("render_text: malformed constituent edge")));
+    ClosureParent *entry = hash_search(read->parents, VARDATA_ANY(parent), HASH_ENTER, &found);
+    if (!found) {
+        entry->kids = NULL; entry->n = entry->cap = 0; entry->rendering = false;
+    }
+    MemoryContext previous = MemoryContextSwitchTo(read->owner);
+    closure_parent_push(entry, copy_bytea_datum(PointerGetDatum(child)), DatumGetInt32(count));
+    MemoryContextSwitchTo(previous);
+}
+
 static HTAB *
 fetch_constituents_closure(Datum *roots, int n_roots, int32 max_depth)
 {
-    HASHCTL ctl;
-    HTAB   *map;
-    Datum   args[2];
-    int     rc;
-    uint64  nrows;
-    ArrayType *root_arr;
+    HASHCTL control = {0};
+    control.keysize = 16; control.entrysize = sizeof(ClosureParent);
+    control.hcxt = CurrentMemoryContext;
+    HTAB *parents = hash_create("render closure", 1024, &control, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    if (n_roots <= 0) return parents;
+    ArrayType *ids = construct_array(roots, n_roots, BYTEAOID, -1, false, TYPALIGN_INT);
+    Oid types[] = {BYTEAARRAYOID, INT4OID};
+    Datum args[] = {PointerGetDatum(ids), Int32GetDatum(max_depth)};
+    ClosureRead read = {parents, CurrentMemoryContext};
+    laplace_spi_stream(closure_plan, 2, types, args, NULL, receive_closure_edge, &read);
+    pfree(ids);
+    return parents;
+}
 
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 16;
-    ctl.entrysize = sizeof(ClosureParent);
-    map = hash_create("render closure", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
+typedef struct {
+    char id[16];
+    ClosureParent *parent;
+    int child, depth, start;
+    int32 run;
+    bool entered;
+} RenderFrame;
 
-    if (n_roots <= 0)
-        return map;
-
-    root_arr = construct_array(roots, n_roots, BYTEAOID, -1, false, TYPALIGN_INT);
-    args[0] = PointerGetDatum(root_arr);
-    args[1] = Int32GetDatum(max_depth);
-
-    rc = SPI_execute_plan(closure_plan, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "render_text: constituents_closure failed: %s",
-             SPI_result_code_string(rc));
-
-    nrows = SPI_processed;
-    for (uint64 r = 0; r < nrows; r++)
-    {
-        HeapTuple tup = SPI_tuptable->vals[r];
-        TupleDesc td = SPI_tuptable->tupdesc;
-        bool isnull;
-        Datum parent_d;
-        Datum child_d;
-        bytea *parent_b;
-        char key[16];
-        bool found;
-        ClosureParent *pe;
-        int32 run;
-        int64 flags;
-
-        parent_d = SPI_getbinval(tup, td, 1, &isnull);
-        if (isnull)
-            continue;
-        parent_b = DatumGetByteaPP(parent_d);
-        if (VARSIZE_ANY_EXHDR(parent_b) != 16)
-            continue;
-        memcpy(key, VARDATA_ANY(parent_b), 16);
-
-        child_d = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
-        run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
-        flags = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-
-        pe = (ClosureParent *) hash_search(map, key, HASH_ENTER, &found);
-        if (!found)
-        {
-            pe->kids = NULL;
-            pe->n = 0;
-            pe->cap = 0;
-        }
-        closure_parent_push(pe, child_d, run, flags);
+/* Duplicate an already-rendered tail by doubling copies. Work follows output
+ * bytes, not the logical occurrence count, and no intermediate-node text
+ * buffers are retained. enlargeStringInfo may move its buffer, so retain an
+ * offset rather than a pointer into it. */
+static void
+repeat_render_tail(StringInfo output, int start, int32 run)
+{
+    Size length = output->len - start;
+    if (!length || run <= 1) return;
+    uint64 extra = (uint64)length * (uint64)(run - 1);
+    if (extra >= MaxAllocSize || extra > (uint64)(MaxAllocSize - output->len - 1))
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("render_text: realized content exceeds PostgreSQL allocation capacity")));
+    enlargeStringInfo(output, (int)extra);
+    Size copied = length, total = length + (Size)extra;
+    while (copied < total) {
+        CHECK_FOR_INTERRUPTS();
+        Size take = Min(copied, total - copied);
+        memcpy(output->data + start + copied, output->data + start, take);
+        copied += take;
     }
-    SPI_freetuptable(SPI_tuptable);
-    return map;
+    output->len += (int)extra;
+    output->data[output->len] = '\0';
 }
 
 static const char *
-render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth, int *length)
+render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, int *length)
 {
-    RenderMemoKey key = {0};
-    bool found;
-    RenderMemoEntry *e;
-    bytea *idb = DatumGetByteaPP(id);
-
-    if (VARSIZE_ANY_EXHDR(idb) != 16)
+    bytea *bytes = DatumGetByteaPP(id);
+    if (VARSIZE_ANY_EXHDR(bytes) != 16)
         ereport(ERROR, (errmsg("render_text: entity id must be 16 bytes")));
-    memcpy(key.id, VARDATA_ANY(idb), 16);
-    // Full renders share results by identity; previews depend on remaining depth.
-    key.depth = max_depth == 0 ? 0 : depth;
-
-    e = (RenderMemoEntry *) hash_search(memo, &key, HASH_ENTER, &found);
-    if (found) {
-        *length = e->length;
-        return e->text;
-    }
-    e->text = NULL;
-    e->length = 0;
-    *length = 0;
-
-    if (max_depth == 0 || depth < max_depth)
-    {
-        ClosureParent *pe = (ClosureParent *) hash_search(closure, key.id, HASH_FIND, &found);
-
-        if (found && pe->n > 0)
-        {
-            StringInfoData out;
-            bool ok = true;
-
-            initStringInfo(&out);
-            for (int r = 0; r < pe->n && ok; r++)
-            {
-                if (pe->kids[r].flags & VFLAG_HAS_ATOM)
-                {
-                    uint32 cp = (uint32) ((pe->kids[r].flags >> VFLAG_ATOM_SHIFT) & VFLAG_ATOM_MASK);
-                    for (int32 k = 0; k < pe->kids[r].run; k++)
-                        append_codepoint_utf8(&out, cp);
-                }
-                else
-                {
-                    int child_length;
-                    const char *child_text = render_node(closure, memo, pe->kids[r].child,
-                                                         depth + 1, max_depth, &child_length);
-                    if (child_text != NULL)
-                        for (int32 k = 0; k < pe->kids[r].run; k++)
-                            appendBinaryStringInfo(&out, child_text, child_length);
-                    else if (!append_codepoint_render(&out, pe->kids[r].child))
-                        ok = false;
-                }
+    RenderMemoKey key = {0}; bool found;
+    memcpy(key.id, VARDATA_ANY(bytes), 16);
+    RenderMemoEntry *entry = hash_search(memo, &key, HASH_ENTER, &found);
+    if (found) { *length = entry->length; return entry->text; }
+    entry->text = NULL; entry->length = 0;
+    Size capacity = 32, used = 1;
+    RenderFrame *stack = palloc0(capacity * sizeof(*stack));
+    memcpy(stack[0].id, key.id, 16); stack[0].run = 1;
+    StringInfoData output; initStringInfo(&output);
+    bool complete = true;
+    while (used) {
+        CHECK_FOR_INTERRUPTS();
+        RenderFrame *frame = &stack[used - 1];
+        if (!frame->entered) {
+            frame->start = output.len;
+            uint32_t codepoint;
+            if (laplace_perfcache_codepoint_for_id((const uint8 *)frame->id, &codepoint)) {
+                append_codepoint_utf8(&output, codepoint);
+                repeat_render_tail(&output, frame->start, frame->run);
+                used--; continue;
             }
-
-            e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
-            Assert(found);
-            e->text = ok ? out.data : NULL;
-            e->length = ok ? out.len : 0;
-            *length = e->length;
-            return e->text;
+            frame->parent = hash_search(closure, frame->id, HASH_FIND, NULL);
+            if (!frame->parent || !frame->parent->n || frame->parent->rendering ||
+                (max_depth > 0 && frame->depth >= max_depth)) {
+                complete = false; break;
+            }
+            frame->entered = true;
+            frame->parent->rendering = true;
         }
-    }
-
-    {
-        StringInfoData out;
-        initStringInfo(&out);
-        if (append_codepoint_render(&out, id))
-        {
-            e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
-            Assert(found);
-            e->text = out.data;
-            e->length = out.len;
+        if (frame->child == frame->parent->n) {
+            repeat_render_tail(&output, frame->start, frame->run);
+            frame->parent->rendering = false; used--; continue;
         }
-        *length = e->length;
-        return e->text;
+        ClosureChild child = frame->parent->kids[frame->child++];
+        int depth = frame->depth;
+        if (depth == PG_INT32_MAX)
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("render_text: depth exceeds addressable state")));
+        if (used == capacity) {
+            Size maximum = MaxAllocSize / sizeof(*stack);
+            if (capacity == maximum)
+                ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("render_text: occurrence stack exceeds allocation capacity")));
+            capacity = Min(capacity * 2, maximum);
+            stack = repalloc(stack, capacity * sizeof(*stack));
+        }
+        RenderFrame *next = &stack[used++];
+        memset(next, 0, sizeof(*next));
+        memcpy(next->id, VARDATA_ANY(DatumGetByteaPP(child.child)), 16);
+        next->depth = depth + 1; next->run = child.run;
     }
+    /* An incomplete/cyclic root must not poison other selected roots that
+     * share one of its descendants. Only active frames own these markers. */
+    for (Size i = 0; i < used; i++)
+        if (stack[i].entered) stack[i].parent->rendering = false;
+    pfree(stack);
+    if (complete) { entry->text = output.data; entry->length = output.len; }
+    else pfree(output.data);
+    *length = entry->length;
+    return entry->text;
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_render_text);
@@ -1341,7 +1317,7 @@ render_batch(FunctionCallInfo fcinfo, bool as_bytes)
             continue;
         }
         int rendered_length;
-        rendered = render_node(closure, memo, elems[i], 0, max_depth, &rendered_length);
+        rendered = render_root(closure, memo, elems[i], max_depth, &rendered_length);
         // text cannot hold U+0000; such content is NULL as text and whole as
         // bytea, never truncated.
         if (rendered == NULL || rendered_length == 0
