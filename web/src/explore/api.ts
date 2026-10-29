@@ -112,7 +112,7 @@ export function exploreContainers(idHex: string, maxHops = 3, limit = 50, opts: 
   return apiGet<{
     containers: {
       id_hex: string;
-      containers: { entity_id_hex: string; entity_label: string; tier: number; type: string; hops: number }[];
+      containers: { entity_id_hex: string; entity_label: string; tier: number; type: string | null; hops: number }[];
     };
     billing?: BillingReceipt | null;
   }>(`/v1/explore/entities/${idHex}/containers?max_hops=${maxHops}&limit=${limit}`, opts);

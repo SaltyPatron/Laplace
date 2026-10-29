@@ -125,7 +125,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("k", limit);
             }, ct: ct, label: "structural_neighbors", onError: onError);
 
-    public readonly record struct ContainerRow(string IdHex, short Tier, string Type, int Hops, string Label);
+    public readonly record struct ContainerRow(string IdHex, short Tier, string? Type, int Hops, string Label);
 
     public static async Task<IReadOnlyList<ContainerRow>> ContainersAsync(
         NpgsqlConnection conn, byte[] id, int hops, int limit, CancellationToken ct,
@@ -133,7 +133,7 @@ public static partial class NpgsqlSubstrateReads
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("containers.page"),
             static r => (Id: r.GetFieldValue<byte[]>(0), Tier: r.GetInt16(1),
-                Type: r.GetFieldValue<byte[]>(2), Hops: r.GetInt32(3)),
+                Type: r.IsDBNull(2) ? null : r.GetFieldValue<byte[]>(2), Hops: r.GetInt32(3)),
             p =>
             {
                 p.Add("id", NpgsqlDbType.Bytea).Value = id;
@@ -142,7 +142,7 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "containers", onError: onError);
         if (rows.Count == 0) return [];
         var types = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("types.labels"),
-            static r => r.GetFieldValue<string[]>(0),
+            static r => r.GetFieldValue<string?[]>(0),
             p => p.Add("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = rows.Select(r => r.Type).ToArray(),
             ct: ct, label: "container_types", onError: onError);
         return rows.Select((r, i) => new ContainerRow(

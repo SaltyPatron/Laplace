@@ -176,6 +176,16 @@ class OwnerTransportTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('private-subject', result.stderr + result.stdout)
+        self.assertIn('run migration (JSONDecodeError)', result.stderr)
+
+    def test_environment_write_failure_identifies_phase_without_private_path(self):
+        destination = self.path.with_name('private-api-environment')
+        result = subprocess.run([os.sys.executable, str(MODULE), '--policy-file', str(self.path),
+                                 '--apply-api-env', str(destination)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('apply API environment (FileNotFoundError; errno=2)', result.stderr)
+        self.assertNotIn(str(destination), result.stderr + result.stdout)
+        self.assertNotIn('private-subject', result.stderr + result.stdout)
 
     def test_machine_path_convention(self):
         with patch.dict(os.environ, {'LAPLACE_WORK': self.directory.name}, clear=True):

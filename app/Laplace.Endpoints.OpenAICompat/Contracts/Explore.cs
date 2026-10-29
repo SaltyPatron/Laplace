@@ -280,7 +280,7 @@ public sealed record ExploreContainerRow(
     [property: JsonPropertyName("entity_id_hex")] string EntityIdHex,
     [property: JsonPropertyName("entity_label")] string EntityLabel,
     [property: JsonPropertyName("tier")] short Tier,
-    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("hops")] int Hops);
 
 public sealed record ExploreContainersResponse(

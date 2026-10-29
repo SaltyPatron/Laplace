@@ -81,7 +81,8 @@ export function StructureTab({
             <ul className={styles.list}>
               {containers.containers.map((c) => (
                 <li key={c.entity_id_hex}>
-                  <EntityLink idHex={c.entity_id_hex} label={c.entity_label} /> tier {c.tier} · {c.type} ·{' '}
+                  <EntityLink idHex={c.entity_id_hex} label={c.entity_label} /> composition tier {c.tier}
+                  {c.type ? <> · {c.type}</> : null} ·{' '}
                   {c.hops} hop{c.hops === 1 ? '' : 's'}
                 </li>
               ))}

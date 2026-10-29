@@ -196,14 +196,22 @@ if __name__ == '__main__':
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
     if not command and not args.apply_api_env:
         parser.error('a migration command is required')
+    phase = 'select policy'
     try:
         path = Path(args.policy_file) if args.policy_file else policy_path()
         missing_ok = not (args.policy_file or os.environ.get('LAPLACE_PLATFORM_OWNER_POLICY_FILE'))
         if args.apply_api_env:
+            phase = 'load policy'
             values = load_policy(path, missing_ok)
+            phase = 'apply API environment'
             apply_api_environment(args.apply_api_env, values)
             print('Platform owner policy: ' + ('configured' if POLICY_ENV in values else 'no-owner-config'))
         else:
+            phase = 'run migration'
             sys.exit(run(path, command, missing_ok))
-    except (OSError, ValueError, TypeError):
-        raise SystemExit('Owner policy transport failed; private configuration was not printed.') from None
+    except (OSError, ValueError, TypeError) as error:
+        reason = type(error).__name__
+        if isinstance(error, OSError) and error.errno is not None:
+            reason += '; errno=' + str(error.errno)
+        raise SystemExit('Owner policy transport failed during ' + phase + ' (' + reason
+                         + '); private configuration was not printed.') from None
