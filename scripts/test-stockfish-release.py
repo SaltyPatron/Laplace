@@ -207,6 +207,8 @@ class StockfishSourceTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "Linux bootstrap environment persistence")
     def test_bootstrap_republication_keeps_selected_source_without_reexporting_it(self):
         script = (ROOT / "scripts/bootstrap-chess-lab.sh").read_text()
+        script = script.replace('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/installation.sh"',
+                                'source "$SOURCE_SELECTION_TEST_SCRIPTS/lib/installation.sh"')
         script = script.replace('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
                                 'SCRIPT_DIR="$SOURCE_SELECTION_TEST_SCRIPTS"')
         script = script.replace('main "$@"', 'id() { printf "1\n"; }\nwrite_api_env')
@@ -221,12 +223,14 @@ class StockfishSourceTests(unittest.TestCase):
         cutechess.chmod(0o755)
         environment = dict(os.environ, SOURCE_SELECTION_TEST_SCRIPTS=str(ROOT / "scripts"),
                            LAPLACE_STOCKFISH_SOURCE=str(self.source))
-        subprocess.run(["bash", "-c", script], env=environment, check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(["bash", "-c", script], env=environment,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
         environment.pop("LAPLACE_STOCKFISH_SOURCE")
         environment["LAPLACE_EXTERNAL"] = str(self.base / "different-external")
-        subprocess.run(["bash", "-c", script], env=environment, check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(["bash", "-c", script], env=environment,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
         content = (prefix / "app/laplace-api.env").read_text()
         self.assertEqual(1, content.count("LAPLACE_STOCKFISH_SOURCE="))
         self.assertEqual(1, content.count("LAPLACE_STOCKFISH="))
