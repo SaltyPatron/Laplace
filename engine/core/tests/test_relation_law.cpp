@@ -134,8 +134,12 @@ TEST(LaplaceRelationLaw, WordNetHashPointersPreserveTheirSurfaces) {
         EXPECT_EQ(laplace_qualifier_bit("meronymy", qualifiers[i % 3]), laplace_relation_surface_qualifier(surfaces[i]));
     }
     EXPECT_NE(0, laplace_relation_resolve_surface("", &tid, &rank, &sym, &flip, &parent));
-    for (size_t i = 0; i < laplace_relation_alias_table_count; ++i)
-        EXPECT_NE('\0', laplace_relation_alias_table[i].surface[0]);
+    for (size_t i = 0; i < laplace_relation_alias_count(); ++i) {
+        const auto* alias = laplace_relation_alias_at(i);
+        ASSERT_NE(nullptr, alias);
+        EXPECT_NE('\0', alias->surface[0]);
+    }
+    EXPECT_EQ(nullptr, laplace_relation_alias_at(laplace_relation_alias_count()));
 }
 
 // How a word descends and which subevent an event states are qualifiers of one element.

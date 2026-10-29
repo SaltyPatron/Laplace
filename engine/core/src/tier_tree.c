@@ -7,6 +7,8 @@ struct tier_tree {
     size_t count;
     size_t capacity;
     int native_text;
+    uint32_t* word_segments;
+    size_t word_segment_count;
 
     uint8_t*      tier;
     uint8_t*      role;
@@ -29,7 +31,7 @@ struct tier_tree {
 
 size_t tier_tree_resident_bytes(const tier_tree_t* t) {
     if (!t) return 0;
-    return sizeof(*t) + t->text_len + t->capacity *
+    return sizeof(*t) + t->text_len + t->word_segment_count * sizeof(uint32_t) + t->capacity *
         (sizeof(uint8_t) * (t->role ? 2 : 1) + 6 * sizeof(uint32_t) + sizeof(hash128_t)
          + 4 * sizeof(double) + sizeof(hilbert128_t));
 }
@@ -107,6 +109,7 @@ void tier_tree_free(tier_tree_t* tree) {
     if (!tree) return;
     free(tree->tier);
     free(tree->role);
+    free(tree->word_segments);
     free(tree->parent_idx);
     free(tree->first_child_idx);
     free(tree->child_count);
@@ -245,6 +248,31 @@ int tier_tree_preserve_roles(tier_tree_t* tree) {
     if (tree->count) memcpy(role, tree->tier, tree->count);
     tree->role = role;
     return 0;
+}
+
+int tier_tree_set_word_segments(tier_tree_t* tree, const uint32_t* nodes, size_t count) {
+    if (!tree || (!nodes && count) || count > SIZE_MAX / sizeof(uint32_t)) return -1;
+    size_t offset = 0;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t node = nodes[i];
+        if (node >= tree->count || tree->text_range_off[node] != offset
+            || !tree->text_range_len[node]) return -1;
+        offset += tree->text_range_len[node];
+        if (offset > tree->text_len) return -1;
+    }
+    if (offset != tree->text_len) return -1;
+    uint32_t* owned = count ? malloc(count * sizeof(uint32_t)) : NULL;
+    if (count && !owned) return -1;
+    if (count) memcpy(owned, nodes, count * sizeof(uint32_t));
+    free(tree->word_segments);
+    tree->word_segments = owned;
+    tree->word_segment_count = count;
+    return 0;
+}
+
+const uint32_t* tier_tree_word_segments(const tier_tree_t* tree, size_t* count) {
+    if (count) *count = tree ? tree->word_segment_count : 0;
+    return tree ? tree->word_segments : NULL;
 }
 
 int tier_tree_set_tier(tier_tree_t* tree, uint32_t idx, uint8_t tier) {

@@ -288,6 +288,8 @@ extern const size_t laplace_relation_table_count;
 
 extern const laplace_relation_alias_t* laplace_relation_alias_table;
 extern const size_t laplace_relation_alias_table_count;
+size_t laplace_relation_alias_count(void);
+const laplace_relation_alias_t* laplace_relation_alias_at(size_t index);
 
 int laplace_relation_type_id(const char* canonical_name, hash128_t* out_type_id);
 int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id,
@@ -365,6 +367,10 @@ const laplace_relation_def_t* laplace_relation_table = k_relations;
 const size_t laplace_relation_table_count = {len(canon_names)};
 const laplace_relation_alias_t* laplace_relation_alias_table = k_alias_storage;
 const size_t laplace_relation_alias_table_count = {len(alias_entries)};
+size_t laplace_relation_alias_count(void) {{ return laplace_relation_alias_table_count; }}
+const laplace_relation_alias_t* laplace_relation_alias_at(size_t index) {{
+    return index < laplace_relation_alias_table_count ? laplace_relation_alias_table + index : NULL;
+}}
 
 static int cmp_str(const char* a, const char* b) {{
     return strcmp(a, b);

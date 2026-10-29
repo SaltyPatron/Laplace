@@ -27,20 +27,20 @@ BEGIN
         RAISE EXCEPTION 'FAIL: baseline forward program produced no receipt';
     END IF;
 
-    -- Reconstruct the exact tier-2 execution cut owned by laplace_prompt_input.
-    -- Whitespace or lower-tier leaves remain present whenever no tier-2 parent
-    -- covers them, so the observed sequence is the exact admitted operand order.
+    -- Independently spell the actual word segments of this prompt. A fixed
+    -- tier cut would select the sentence root instead of these three operands.
     WITH tree AS MATERIALIZED (
         SELECT * FROM converse.prompt_tree(prompt,false)
+    ), words AS (
+        SELECT id,ord,sum(octet_length(word)) OVER (ORDER BY ord)-octet_length(word) AS byte_offset,
+               octet_length(word) AS byte_length
+        FROM converse.word_segment(prompt)
     ), cut AS (
-        SELECT t.id,t.tier,t.byte_offset,t.node_index
-          FROM tree t
-          LEFT JOIN tree parent ON parent.node_index=t.parent_index
-         WHERE t.tier <= 2
-           AND (t.parent_index IS NULL OR parent.tier > 2)
+        SELECT w.id,w.ord,(SELECT min(t.tier) FROM tree t
+            WHERE t.id=w.id AND t.byte_offset=w.byte_offset AND t.byte_length=w.byte_length) AS tier
+        FROM words w
     )
-    SELECT array_agg(id ORDER BY byte_offset,node_index),
-           array_agg(tier ORDER BY byte_offset,node_index)
+    SELECT array_agg(id ORDER BY ord),array_agg(tier ORDER BY ord)
       INTO context_ids,context_tiers
       FROM cut;
     context_count := cardinality(context_ids);

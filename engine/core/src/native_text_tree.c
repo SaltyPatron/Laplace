@@ -9,6 +9,7 @@
 #include <string.h>
 
 typedef struct { size_t first; uint32_t count, bytes; } Definition;
+typedef struct { lp_id id; uint32_t offset, bytes, node; } Segment;
 typedef struct {
     lp_ref value;
     uint32_t first, count, offset, bytes, atom;
@@ -18,6 +19,8 @@ typedef struct {
     lp_idmap *definitions;
     lp_ref *children;
     size_t count, capacity;
+    Segment *segments;
+    size_t segment_count, segment_capacity;
     int error;
 } Recording;
 
@@ -38,6 +41,15 @@ static uint32_t content_bytes(Recording *recording, const lp_ref *value, uint32_
     if (cp < 0) { recording->error = -7; return 0; }
     uint8_t utf8[4]; if (atom) *atom = (uint32_t)cp;
     return (uint32_t)lp_utf8_put((uint32_t)cp, utf8);
+}
+
+static void record_segment(void *sink, size_t offset, size_t bytes, const lp_ref *value) {
+    Recording *recording = sink;
+    if (recording->error) return;
+    if (!room((void **)&recording->segments, &recording->segment_capacity,
+              recording->segment_count + 1, sizeof(Segment))) { recording->error = -3; return; }
+    recording->segments[recording->segment_count++] =
+        (Segment){value->id, (uint32_t)offset, (uint32_t)bytes, TIER_TREE_INVALID};
 }
 
 static lp_ref record_composition(void *sink, const lp_ref *children, uint32_t count, uint8_t tier) {
@@ -80,7 +92,8 @@ int native_text_tree_build(const uint8_t *utf8, size_t length, tier_tree_t **out
     const lp_tier0_record *floor = text_identity_scalar_floor();
     if (!text || !floor) return -3;
     Recording recording = { .floor = floor, .definitions = lp_idmap_sized(sizeof(Definition)) };
-    lp_ref root = lp_text_decompose(text, utf8, length, record_composition, &recording);
+    lp_ref root = lp_text_decompose_segments(text, utf8, length,
+        record_composition, &recording, record_segment, &recording);
     int error = recording.error;
     Occurrence *nodes = NULL; size_t count = 0, capacity = 0;
     uint32_t *previous = NULL, *current = NULL, *stack = NULL;
@@ -116,6 +129,7 @@ int native_text_tree_build(const uint8_t *utf8, size_t length, tier_tree_t **out
     for (uint32_t level = 0; level <= root.tier; level++) {
         size_t size = frontier(nodes, level, current, stack), child = 0;
         uint32_t base = (uint32_t)tier_tree_node_count(tree);
+        size_t segment_at = 0;
         for (size_t i = 0; i < size; i++) {
             const Occurrence *node = nodes + current[i]; uint32_t index;
             if (!level) index = tier_tree_add_leaf(tree, 0, node->atom, node->offset, node->bytes);
@@ -131,15 +145,28 @@ int native_text_tree_build(const uint8_t *utf8, size_t length, tier_tree_t **out
             hilbert128_t hilbert; hilbert4d_encode(coord, &hilbert);
             tier_tree_set_id(tree, index, (const hash128_t *)&node->value.id);
             tier_tree_set_coord(tree, index, coord); tier_tree_set_hilbert(tree, index, &hilbert);
+            while (segment_at < recording.segment_count && recording.segments[segment_at].offset < node->offset)
+                segment_at++;
+            if (segment_at < recording.segment_count) {
+                Segment *segment = recording.segments + segment_at;
+                if (segment->node == TIER_TREE_INVALID && segment->offset == node->offset
+                    && segment->bytes == node->bytes && lp_id_eq(&segment->id, &node->value.id))
+                    segment->node = index;
+            }
         }
         previous_count = size; previous_base = base;
         uint32_t *swap = previous; previous = current; current = swap;
     }
     tier_tree_finalize(tree);
+    for (size_t i = 0; i < recording.segment_count; i++) {
+        if (recording.segments[i].node == TIER_TREE_INVALID) { error = -7; goto done; }
+        stack[i] = recording.segments[i].node;
+    }
+    if (tier_tree_set_word_segments(tree, stack, recording.segment_count)) { error = -7; goto done; }
     if (laplace_text_decomposer_validate_roundtrip(tree)) { error = -7; goto done; }
     tier_tree_mark_native_text(tree); *out_tree = tree; tree = NULL;
 done:
     tier_tree_free(tree); free(nodes); free(previous); free(current); free(stack);
-    free(recording.children); lp_idmap_free(recording.definitions);
+    free(recording.children); free(recording.segments); lp_idmap_free(recording.definitions);
     return error;
 }

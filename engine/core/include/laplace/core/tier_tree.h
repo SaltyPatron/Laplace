@@ -55,6 +55,10 @@ uint32_t tier_tree_add_node(
 int tier_tree_finalize(tier_tree_t* tree);
 void tier_tree_mark_native_text(tier_tree_t* tree);
 int tier_tree_is_native_text(const tier_tree_t* tree);
+/* Native UAX word-segment occurrences, in byte order, including separators.
+ * These are semantic boundaries, independent of recursive DAG height. */
+int tier_tree_set_word_segments(tier_tree_t* tree, const uint32_t* nodes, size_t count);
+const uint32_t* tier_tree_word_segments(const tier_tree_t* tree, size_t* count);
 
 int tier_tree_get_node(const tier_tree_t* tree, uint32_t idx, tier_node_view_t* out);
 

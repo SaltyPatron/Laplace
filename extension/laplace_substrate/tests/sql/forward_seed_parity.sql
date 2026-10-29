@@ -6,6 +6,24 @@
 SET client_min_messages=warning;
 
 BEGIN;
+-- Prompt operands use Native word boundaries, not a fixed numeric tier cut.
+-- No synthetic claims or reader fixtures are needed to expose this failure.
+DO $prompt_segments$
+DECLARE test record; actual int;
+BEGIN
+    FOR test IN SELECT * FROM (VALUES
+        ('What is a cat?',8), ('cat',1), ('a a',3),
+        (U&'cafe\0301 cat',3), (E'One.\n\nTwo!',6)
+    ) AS cases(prompt,expected) LOOP
+        SELECT p.ordered_context_count INTO actual
+        FROM generation.forward_program(test.prompt,1,0,0,1,7,0,1,NULL,NULL) p
+        WHERE p.event='resolve';
+        IF actual IS DISTINCT FROM test.expected THEN
+            RAISE EXCEPTION 'word occurrences for %: expected %, got %',test.prompt,test.expected,actual;
+        END IF;
+    END LOOP;
+END
+$prompt_segments$;
 -- Exercise the real native selector with eight simultaneously eligible typed
 -- results. A single successor or spread=0 would conceal a broken seed policy.
 -- This independent SQL spelling preserves the former text/chat byte contract;

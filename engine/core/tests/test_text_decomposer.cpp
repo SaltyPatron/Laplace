@@ -109,6 +109,41 @@ TEST(LaplaceCoreTextDecomposer, MultiLanguageInputSegmentsCleanly) {
     EXPECT_EQ(17, classify(tree).leaves);
     tier_tree_free(tree);
 }
+TEST(LaplaceCoreTextDecomposer, WordOccurrencesAreIndependentOfDagHeight) {
+    const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
+        {"What is a cat?", {"What", " ", "is", " ", "a", " ", "cat", "?"}},
+        {"cat", {"cat"}},
+        {"a a", {"a", " ", "a"}},
+        {"cafe\xcc\x81 cat", {"cafe\xcc\x81", " ", "cat"}},
+        {"One.\n\nTwo!", {"One", ".", "\n", "\n", "Two", "!"}},
+    };
+    for (const auto& [text, expected] : cases) {
+        SCOPED_TRACE(text);
+        tier_tree_t* tree = nullptr;
+        ASSERT_EQ(0, laplace_text_decomposer_run((const uint8_t*)text.data(), text.size(), &tree));
+        size_t count = 0;
+        const uint32_t* words = tier_tree_word_segments(tree, &count);
+        ASSERT_EQ(expected.size(), count);
+        size_t offset = 0;
+        for (size_t i = 0; i < count; i++) {
+            tier_node_view_t node{};
+            ASSERT_EQ(0, tier_tree_get_node(tree, words[i], &node));
+            EXPECT_EQ(offset, node.text_range_off);
+            EXPECT_EQ(expected[i].size(), node.text_range_len);
+            EXPECT_EQ(expected[i], text.substr(node.text_range_off, node.text_range_len));
+            hash128_t standalone{};
+            ASSERT_EQ(0, laplace_content_root_id((const uint8_t*)expected[i].data(), expected[i].size(), &standalone));
+            EXPECT_TRUE(hash128_equals(&standalone, &node.id));
+            offset += node.text_range_len;
+        }
+        EXPECT_EQ(text.size(), offset);
+        if (text == "a a") {
+            EXPECT_NE(words[0], words[2]);
+            EXPECT_TRUE(hash128_equals(tier_tree_id_array(tree) + words[0], tier_tree_id_array(tree) + words[2]));
+        }
+        tier_tree_free(tree);
+    }
+}
 TEST(LaplaceCoreTextDecomposer, GraphemeCompositionPreservesBothScalars) {
     const uint8_t text[] = {0x65, 0xCC, 0x81};
     tier_tree_t* tree = nullptr;

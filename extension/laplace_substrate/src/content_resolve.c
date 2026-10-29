@@ -241,7 +241,6 @@ laplace_prompt_input(text *input)
     tree = prepared->tree;
     {
         size_t count = tier_tree_node_count(tree);
-        const uint8_t *tiers = tier_tree_tier_array(tree);
         const uint32_t *parents = tier_tree_parent_idx_array(tree);
         const uint32_t *offsets = tier_tree_text_off_array(tree);
         const hash128_t *ids = tier_tree_id_array(tree);
@@ -252,6 +251,8 @@ laplace_prompt_input(text *input)
         ArrayBuildState *nodes = NULL;
         HASHCTL ctl = {0};
         HTAB *seen;
+        size_t segment_count;
+        const uint32_t *segments = tier_tree_word_segments(tree, &segment_count);
         if (count > INT_MAX || count > MaxAllocSize / sizeof(PromptOperand) ||
             content_witness_tree_root_id(tree, &root) != 0)
             ereport(ERROR, (errmsg("prompt_operands: invalid canonical composition")));
@@ -263,22 +264,24 @@ laplace_prompt_input(text *input)
         seen = hash_create("prompt probe identities", 64, &ctl, HASH_ELEM | HASH_BLOBS);
         hash_search(seen, &root, HASH_ENTER, NULL);
         seed_ids[0] = root;
-        for (uint32_t i = 0; i < count; ++i)
+        bool *ancestors = palloc0(sizeof(bool) * Max(count, 1));
+        for (size_t word = 0; word < segment_count; ++word)
         {
-            bool boundary, found;
-            if (parents[i] != TIER_TREE_INVALID && parents[i] >= count)
-                ereport(ERROR, (errmsg("prompt_operands: invalid parent index")));
-            boundary = tiers[i] <= 2 &&
-                (parents[i] == TIER_TREE_INVALID || tiers[parents[i]] > 2);
-            if (boundary)
-                operands[n_operands++] = (PromptOperand) {ids[i], i, offsets[i]};
-            if (boundary || tiers[i] >= 2)
+            uint32_t i = segments[word];
+            if (i >= count) ereport(ERROR, (errmsg("prompt_operands: invalid segment index")));
+            operands[n_operands++] = (PromptOperand) {ids[i], i, offsets[i]};
+            for (uint32_t node = i; node != TIER_TREE_INVALID; node = parents[node])
             {
-                hash_search(seen, &ids[i], HASH_ENTER, &found);
-                if (!found)
-                    seed_ids[n_seeds++] = ids[i];
+                if (node >= count) ereport(ERROR, (errmsg("prompt_operands: invalid parent index")));
+                if (ancestors[node]) break;
+                ancestors[node] = true;
             }
-            if ((i & 4095) == 0) CHECK_FOR_INTERRUPTS();
+            if ((word & 4095) == 0) CHECK_FOR_INTERRUPTS();
+        }
+        for (uint32_t i = 0; i < count; ++i) if (ancestors[i]) {
+            bool found;
+            hash_search(seen, &ids[i], HASH_ENTER, &found);
+            if (!found) seed_ids[n_seeds++] = ids[i];
         }
         qsort(operands, n_operands, sizeof(PromptOperand), prompt_operand_order);
         for (int i = 0; i < n_operands; ++i)
@@ -297,6 +300,7 @@ laplace_prompt_input(text *input)
         pfree(operands);
         pfree(context_ids);
         pfree(seed_ids);
+        pfree(ancestors);
     }
     return prepared;
 }
