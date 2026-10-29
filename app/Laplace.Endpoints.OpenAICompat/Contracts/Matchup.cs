@@ -72,7 +72,22 @@ public sealed record MatchupSide(
     [property: JsonPropertyName("entity_type")] string? EntityType = null,
     [property: JsonPropertyName("source_rating_peak")] int? SourceRatingPeak = null,
     [property: JsonPropertyName("source_rating_observations")] long SourceRatingObservations = 0,
-    [property: JsonPropertyName("chess")] ChessMatchupSide? Chess = null);
+    [property: JsonPropertyName("chess")] ChessMatchupSide? Chess = null,
+    [property: JsonPropertyName("readings")] IReadOnlyList<MatchupReading>? Readings = null);
+
+public sealed record MatchupReading(
+    [property: JsonPropertyName("entity_id")] string EntityId,
+    [property: JsonPropertyName("definition_id")] string DefinitionId,
+    [property: JsonPropertyName("definition")] string Definition,
+    [property: JsonPropertyName("eff_mu")] decimal EffMu,
+    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("paths")] IReadOnlyList<IReadOnlyList<MatchupReadingStep>> Paths);
+
+public sealed record MatchupReadingStep(
+    [property: JsonPropertyName("claim_id")] string ClaimId,
+    [property: JsonPropertyName("relation")] string Relation,
+    [property: JsonPropertyName("entity_id")] string EntityId,
+    [property: JsonPropertyName("label")] string Label);
 
 /// <summary>A matchup's two side cards and the tape.</summary>
 public sealed record MatchupResponse(

@@ -41,14 +41,51 @@ CREATE OR REPLACE FUNCTION consensus.edges_raw(
                   rating bigint, rd bigint, volatility bigint, witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
+    WITH key AS (SELECT encode(p_subject,'hex')::public.blake3 AS id),
+    native_claims AS MATERIALIZED (
+        SELECT c.* FROM key k CROSS JOIN LATERAL public.laplace_claims_each(
+            ARRAY[k.id],NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],
+            '{}'::public.blake3[]) c
+        WHERE (p_direction IN ('out','both') AND public.laplace_path_starts(c.path,k.id))
+           OR (p_direction IN ('in','both') AND public.laplace_path_ends(c.path,k.id))
+    ), parts AS MATERIALIZED (
+        SELECT * FROM public.laplace_constituents(ARRAY(SELECT entity FROM native_claims))
+    ), previews AS MATERIALIZED (
+        SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT entity FROM native_claims))
+    ), native_edges AS MATERIALIZED (
+        SELECT c.entity,
+               CASE WHEN public.laplace_path_starts(c.path,k.id) AND p_direction<>'in' THEN 'out' ELSE 'in' END AS direction,
+               decode(v.predicate::text,'hex') AS type_id,
+               CASE WHEN public.laplace_path_starts(c.path,k.id) AND p_direction<>'in'
+                    THEN decode(v.object::text,'hex') ELSE decode(s.child::text,'hex') END AS neighbour_id,
+               round(c.rating::numeric*1e9)::bigint AS rating,
+               round(c.deviation::numeric*1e9)::bigint AS rd,
+               round(c.volatility::numeric*1e9)::bigint AS volatility
+        FROM native_claims c CROSS JOIN key k JOIN previews v ON v.entity=c.entity
+        JOIN parts s ON s.entity=c.entity AND s.ordinal=1
+        WHERE (p_types IS NULL OR decode(v.predicate::text,'hex')=ANY(p_types))
+          AND (p_refuted OR NOT consensus.refuted(round(c.rating::numeric*1e9)::bigint,round(c.deviation::numeric*1e9)::bigint))
+        ORDER BY CASE WHEN p_rank='edge_rank' THEN consensus.edge_rank(
+            decode(v.predicate::text,'hex'),round((c.rating-2*c.deviation)::numeric*1e9)::bigint)
+            ELSE c.rating-2*c.deviation END DESC,c.entity LIMIT p_limit
+    ), provenance AS MATERIALIZED (
+        SELECT a.claim,count(*) AS witnesses
+        FROM public.laplace_attribution(ARRAY(SELECT entity FROM native_edges)) a GROUP BY a.claim
+    )
     SELECT e.direction, e.type_id, e.neighbour_id,
            e.rating, e.rd, e.volatility, e.witness_count
     FROM (
+        SELECT n.direction,n.type_id,n.neighbour_id,n.rating,n.rd,n.volatility,
+               coalesce(p.witnesses,0)::bigint AS witness_count
+        FROM native_edges n LEFT JOIN provenance p ON p.claim=n.entity
+        WHERE p_refuted OR NOT consensus.refuted(n.rating,n.rd)
+        UNION ALL
         SELECT 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
                c.rating, c.rd, c.volatility, c.witness_count
         FROM laplace.consensus c
         WHERE p_direction IN ('out', 'both')
           AND c.subject_id = p_subject
+          AND NOT EXISTS(SELECT FROM public.entity WHERE id=encode(p_subject,'hex')::public.blake3)
           AND c.object_id IS NOT NULL
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
           AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
@@ -58,6 +95,7 @@ BEGIN ATOMIC
         FROM laplace.consensus c
         WHERE p_direction IN ('in', 'both')
           AND c.object_id = p_subject
+          AND NOT EXISTS(SELECT FROM public.entity WHERE id=encode(p_subject,'hex')::public.blake3)
           -- SELF-EDGE, ONCE PER SCAN. An edge whose object IS its subject satisfies BOTH
           -- arms, so 'both' emitted it twice — identical in every column but `direction`.
           -- That is one row mirrored, not two observations, and it costs a slot in the

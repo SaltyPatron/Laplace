@@ -134,6 +134,14 @@ export interface MatchupSide {
   source_rating_peak?: number | null;
   source_rating_observations?: number;
   chess?: ChessMatchupSide | null;
+  readings?: {
+    entity_id: string;
+    definition_id: string;
+    definition: string;
+    eff_mu: number;
+    witnesses: number;
+    paths: { claim_id: string; relation: string; entity_id: string; label: string }[][];
+  }[] | null;
 }
 
 export interface Matchup {

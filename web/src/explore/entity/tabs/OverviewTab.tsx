@@ -43,7 +43,7 @@ export function OverviewTab({ entity }: { entity: ExploreEntityResponse }) {
             <Table>
               <tbody>
                 {entity.senses.map((s) => (
-                  <tr key={s.sense_id_hex}>
+                  <tr key={`${s.sense_id_hex}:${s.synset_id_hex}:${s.synset_label}`}>
                     <Td>
                       <EntityLink idHex={s.synset_id_hex} label={s.synset_label} />
                     </Td>

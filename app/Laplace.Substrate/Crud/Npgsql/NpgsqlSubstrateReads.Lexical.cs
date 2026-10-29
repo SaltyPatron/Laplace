@@ -122,13 +122,34 @@ public static partial class NpgsqlSubstrateReads
         string SenseIdHex, string SynsetIdHex, string SynsetLabel, decimal EffMu, long Witnesses);
 
     /// <summary><c>lexical.senses(id)</c>.</summary>
-    public static Task<IReadOnlyList<MatchupSenseRow>> SensesAsync(
+    public static async Task<IReadOnlyList<MatchupSenseRow>> SensesAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("lexical.senses_rendered"),
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var program = await Laplace.Decomposers.Abstractions.NativeRecipeExecution.QueryProgramAsync(ct).ConfigureAwait(false);
+        var bindings = await DeclaredPathsAsync(conn, [id], new([program.Up], program.Up), ct).ConfigureAwait(false);
+        if (bindings.Count > 0)
+        {
+            var paths = await DeclaredPathsAsync(conn, [id], program, ct).ConfigureAwait(false);
+            return bindings.GroupBy(b => Convert.ToHexString(b.Steps[^1].EntityId)).SelectMany(g =>
+            {
+                var binding = g.First().Steps[^1];
+                var found = paths.Where(p => p.Steps.Count >= 2 && p.Steps.Any(s => s.EntityId.AsSpan().SequenceEqual(binding.EntityId)))
+                    .DistinctBy(p => (Convert.ToHexString(p.Steps[^2].EntityId), Convert.ToHexString(p.Steps[^1].EntityId)))
+                    .ToArray();
+                string sense = Convert.ToHexString(binding.EntityId).ToLowerInvariant();
+                return found.Length == 0
+                    ? [new MatchupSenseRow(sense, sense, binding.Label, binding.EffMu, binding.Witnesses)]
+                    : found.Select(p => new MatchupSenseRow(sense,
+                        Convert.ToHexString(p.Steps[^2].EntityId).ToLowerInvariant(), p.Steps[^1].Label,
+                        binding.EffMu, binding.Witnesses)).ToArray();
+            }).ToArray();
+        }
+        return await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("lexical.senses_rendered"),
             static r => new MatchupSenseRow(r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "senses", onError: onError);
+            ct: ct, label: "senses", onError: onError).ConfigureAwait(false);
+    }
 
     public readonly record struct TranslationRow(
         string Translation, string Language, decimal EffMu, long Witnesses);

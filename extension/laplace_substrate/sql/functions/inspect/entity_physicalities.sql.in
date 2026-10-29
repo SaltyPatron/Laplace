@@ -15,11 +15,22 @@ CREATE OR REPLACE FUNCTION ops.entity_physicalities(p_id bytea)
                   hilbert_index bytea)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
+    WITH native AS MATERIALIZED (
+        SELECT 1::smallint AS type, ST_X(e.coord) AS x, ST_Y(e.coord) AS y,
+               ST_Z(e.coord) AS z, ST_M(e.coord) AS m,
+               public.laplace_radius_origin(e.coord) AS radius,
+               public.laplace_path_length(p.path)::integer AS n_constituents,
+               int8send(e.hilbert # '-9223372036854775808'::bigint) AS hilbert_index
+        FROM public.entity e JOIN public.physicality p ON p.entity=e.id
+        WHERE e.id=encode(p_id,'hex')::public.blake3
+    )
+    SELECT * FROM native
+    UNION ALL
     SELECT p.type, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
            p.radius_origin, p.n_constituents, p.hilbert_index
     FROM laplace.physicalities p
-    WHERE p.entity_id = p_id
-    ORDER BY p.type, p.id;
+    WHERE p.entity_id = p_id AND (p.type<>1 OR NOT EXISTS(SELECT FROM native))
+    ORDER BY 1;
 END;
 
 

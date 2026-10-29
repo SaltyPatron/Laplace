@@ -22,12 +22,20 @@ BEGIN ATOMIC
     -- already has the exact content/governed id; sense/synset navigation is exposed
     -- separately through lexical.senses. Flattening those subjects here erased the
     -- subject identity and manufactured duplicate-looking consensus rows.
-    WITH ranked AS (
+    WITH native AS MATERIALIZED (
+        SELECT f.claim,decode(f.predicate::text,'hex') AS type_id,
+               decode(f.object::text,'hex') AS object_id,f.type,f.fact,f.eff_mu
+        FROM ops.claim_facts(p_id,p_limit) f
+    ), native_provenance AS MATERIALIZED (
+        SELECT a.claim,count(*) AS witnesses
+        FROM public.laplace_attribution(ARRAY(SELECT claim FROM native)) a GROUP BY a.claim
+    ), ranked AS (
         SELECT c.type_id, c.object_id, c.eff_mu, c.witness_count,
                consensus.edge_rank(c.type_id, c.eff_mu_raw) AS rnk
         FROM laplace.v_consensus_resolved c
         WHERE c.subject_id = p_id
           AND c.object_id IS NOT NULL
+          AND NOT EXISTS(SELECT FROM public.entity e WHERE e.id=encode(p_id,'hex')::public.blake3)
         ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC, c.type_id, c.object_id
         LIMIT GREATEST(p_limit, 0)
     )
@@ -43,6 +51,9 @@ BEGIN ATOMIC
         SELECT d.id, d.label
         FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d
     )
+    SELECT n.type_id,n.object_id,n.type,n.fact,n.eff_mu,coalesce(p.witnesses,0)::bigint
+    FROM native n LEFT JOIN native_provenance p USING(claim)
+    UNION ALL
     SELECT o.type_id, o.object_id,
            t.label, v.label,
            o.eff_mu,
@@ -50,5 +61,5 @@ BEGIN ATOMIC
     FROM ordered o
     JOIN labels t ON t.id = o.type_id
     JOIN labels v ON v.id = o.object_id
-    ORDER BY o.ord;
+    ORDER BY 5 DESC,1,2;
 END;
