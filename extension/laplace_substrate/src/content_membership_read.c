@@ -31,6 +31,52 @@
 #include "utils/snapmgr.h"
 #include "content_membership_read.h"
 #include "spi_common.h"
+#include "spi_nested.h"
+#include "laplace/core/sql_catalog.h"
+
+/* Native paths use their own indexed codec. Never decode them through the
+ * historical trajectory expression index. Keep the frontier walk in C and
+ * delegate the set probe to the canonical Native/PostgreSQL operation. */
+static bool
+native_membership(ArrayType *members, bool require_all, ArrayType *required,
+                  uint64 maximum, LaplaceContentMembershipConsumer consume,
+                  void *context, uint64 *matched)
+{
+    static SPIPlanPtr plans[2];
+    MemoryContext caller = CurrentMemoryContext;
+    bool finish;
+    if (maximum > PG_INT64_MAX - 1) elog(ERROR, "membership boundary exceeds SQL capacity");
+    if (laplace_spi_connect(&finish) != SPI_OK_CONNECT) elog(ERROR, "Native membership SPI connect failed");
+    int which = require_all ? 1 : 0;
+    if (plans[which] == NULL)
+    {
+        Oid types[] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8OID};
+        plans[which] = SPI_prepare(laplace_sql_query_text(require_all ?
+            "native.membership_all" : "native.membership_any"), 3, types);
+        if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
+            elog(ERROR, "cannot prepare Native membership");
+    }
+    Datum args[] = {PointerGetDatum(members), PointerGetDatum(required), Int64GetDatum((int64)maximum)};
+    char nulls[] = {' ', required ? ' ' : 'n', ' '};
+    if (SPI_execute_plan(plans[which], args, nulls, true, 0) != SPI_OK_SELECT)
+        elog(ERROR, "Native membership failed");
+    SPITupleTable *table = SPI_tuptable;
+    uint64 rows = SPI_processed;
+    bool complete = maximum == 0 || rows <= maximum;
+    *matched = complete ? rows : maximum;
+    for (uint64 i = 0; i < *matched; ++i)
+    {
+        bool absent;
+        Datum id = SPI_getbinval(table->vals[i], table->tupdesc, 1, &absent);
+        Datum path = SPI_getbinval(table->vals[i], table->tupdesc, 2, &absent);
+        MemoryContext spi = MemoryContextSwitchTo(caller);
+        consume(id, id, path, context);
+        MemoryContextSwitchTo(spi);
+    }
+    SPI_freetuptable(table);
+    laplace_spi_finish(finish);
+    return complete;
+}
 
 static bool
 is_column(Node *node, AttrNumber column)
@@ -229,6 +275,9 @@ laplace_typed_membership_read_with_required(ArrayType *members, bool require_all
         if (has_null) return true;
         if (count == 0) required_members = NULL;
     }
+    uint64 native_rows = 0;
+    if (physicality_type == 1 && !native_membership(members, require_all, required_members,
+            max_rows, consume, context, &native_rows)) return false;
     Relation relation = table_open(root, AccessShareLock);
     if (relation->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
         elog(ERROR, "content membership requires partitioned physicalities");
@@ -273,7 +322,7 @@ laplace_typed_membership_read_with_required(ArrayType *members, bool require_all
      * read; index_get_partition() would scan every index of every leaf. */
     List *indexes = find_inheritance_children(parent_oid, AccessShareLock);
     ListCell *cell;
-    uint64 matched_rows = 0;
+    uint64 matched_rows = native_rows;
     bool complete = true;
     foreach(cell, indexes)
     {

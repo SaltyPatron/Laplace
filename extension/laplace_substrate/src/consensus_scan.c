@@ -28,6 +28,54 @@
 #include "utils/snapmgr.h"
 
 #include "consensus_scan.h"
+#include "spi_common.h"
+#include "spi_nested.h"
+#include "laplace/core/sql_catalog.h"
+
+/* The legacy cell layout is only a transport projection for typed Native
+ * claims. Source value claims remain available through the claim readers;
+ * they do not acquire an invented predicate in the binary relation graph. */
+static void
+scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types,
+            LaplaceConsensusConsumer consume, void *context,
+            LaplaceConsensusScanStats *stats)
+{
+    static SPIPlanPtr plan;
+    MemoryContext caller = CurrentMemoryContext;
+    bool finish;
+    if (laplace_spi_connect(&finish) != SPI_OK_CONNECT) elog(ERROR, "Native consensus SPI connect failed");
+    if (plan == NULL)
+    {
+        Oid args[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID};
+        plan = SPI_prepare(laplace_sql_query_text("native.consensus_cells"), 3, args);
+        if (plan == NULL || SPI_keepplan(plan) != 0) elog(ERROR, "cannot prepare Native consensus cells");
+    }
+    Datum args[] = {PointerGetDatum(subjects), PointerGetDatum(objects), PointerGetDatum(types)};
+    char nulls[] = {subjects ? ' ' : 'n', objects ? ' ' : 'n', types ? ' ' : 'n'};
+    if (SPI_execute_plan(plan, args, nulls, true, 0) != SPI_OK_SELECT)
+        elog(ERROR, "Native consensus cells failed");
+    SPITupleTable *table = SPI_tuptable;
+    uint64 rows = SPI_processed;
+    for (uint64 i = 0; i < rows; ++i)
+    {
+        HeapTuple tuple = table->vals[i]; TupleDesc desc = table->tupdesc;
+        bool absent;
+        LaplaceConsensusRow row = {0};
+        row.subject = datum_to_hash128(SPI_getbinval(tuple, desc, 1, &absent));
+        row.type = datum_to_hash128(SPI_getbinval(tuple, desc, 2, &absent));
+        row.object = datum_to_hash128(SPI_getbinval(tuple, desc, 3, &absent));
+        row.rating = DatumGetInt64(SPI_getbinval(tuple, desc, 4, &absent));
+        row.rd = DatumGetInt64(SPI_getbinval(tuple, desc, 5, &absent));
+        row.volatility = DatumGetInt64(SPI_getbinval(tuple, desc, 6, &absent));
+        row.witnesses = DatumGetInt64(SPI_getbinval(tuple, desc, 7, &absent));
+        ++stats->rows_read; ++stats->rows_matched;
+        MemoryContext spi = MemoryContextSwitchTo(caller);
+        consume(&row, context);
+        MemoryContextSwitchTo(spi);
+    }
+    SPI_freetuptable(table);
+    laplace_spi_finish(finish);
+}
 
 typedef struct ScanId { char bytes[16]; } ScanId;
 typedef struct ScanSet
@@ -426,6 +474,8 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
     if ((subjects.array != NULL && subjects.count == 0) ||
         (objects.array != NULL && objects.count == 0) ||
         (types.array != NULL && types.count == 0)) goto done;
+
+    scan_native(subjects.array, objects.array, types.array, consume, context, stats);
 
     root = get_relname_relid("consensus", get_namespace_oid("laplace", false));
     if (!OidIsValid(root))

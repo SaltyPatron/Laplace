@@ -21,7 +21,7 @@ typedef struct {
     hash128_t id, type;
     int hop;
     int16 tier;
-    bool exists;
+    bool exists, type_is_null;
 } ContainerHit;
 static SPIPlanPtr facets_plan;
 
@@ -137,14 +137,17 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
             if (entry && entry->ordinal >= 0) {
                 ContainerHit *hit = &hits[entry->ordinal];
                 hit->tier = DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
-                hit->type = datum_to_hash128(SPI_getbinval(t,d,3,&isnull)); hit->exists = true;
+                Datum type = SPI_getbinval(t,d,3,&isnull);
+                hit->type_is_null = isnull;
+                if (!isnull) hit->type = datum_to_hash128(type);
+                hit->exists = true;
             }
         }
         SPI_freetuptable(SPI_tuptable);
         for (Size i = 0; i < count; ++i) if (hits[i].exists) {
             Datum values[] = {hash128_to_datum(&hits[i].id),Int16GetDatum(hits[i].tier),
-                hash128_to_datum(&hits[i].type),Int32GetDatum(hits[i].hop)};
-            bool nulls[] = {false,false,false,false};
+                hits[i].type_is_null ? (Datum)0 : hash128_to_datum(&hits[i].type),Int32GetDatum(hits[i].hop)};
+            bool nulls[] = {false,false,hits[i].type_is_null,false};
             tuplestore_putvalues(result->setResult,result->setDesc,values,nulls);
         }
     }

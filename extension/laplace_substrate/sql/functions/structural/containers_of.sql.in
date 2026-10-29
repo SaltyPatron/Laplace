@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
     p_max_hops int   DEFAULT 1,
     p_limit    int   DEFAULT 1000)
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea, hops int)
-    AS 'MODULE_PATHNAME', 'pg_laplace_containers_of'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_containers_of'
     LANGUAGE C STABLE;
 
 CREATE OR REPLACE FUNCTION structural.text_containers(p_forms text[])

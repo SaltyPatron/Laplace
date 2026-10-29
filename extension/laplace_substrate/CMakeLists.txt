@@ -32,6 +32,7 @@ set(EXT_EXECUTION_SOURCES
     src/content_carrier_vertices.c
     src/identity_scan.c
     src/content_membership_read.c
+    src/containers_of.c
     src/content_text_read.c
     src/display_native.c
     src/attestation_response.c
@@ -193,7 +194,6 @@ set(EXT_C_SOURCES
     src/fold_route.c
     src/consensus_bulk_write.c
     src/hash_leaves.c
-    src/containers_of.c
     src/browse_native.c
     src/band_leaders.c
     src/consensus_scan.c

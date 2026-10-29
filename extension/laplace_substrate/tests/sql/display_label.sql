@@ -25,7 +25,8 @@ BEGIN
 END $$;
 DO $test$
 DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.laplace_id('λ');
- row_id public.blake3; nested public.blake3; opaque public.blake3; absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
+ row_id public.blake3; nested public.blake3; opaque public.blake3; shared public.blake3; root_a public.blake3; root_b public.blake3; claim_id public.blake3;
+ absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
  row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
  nested=pg_temp.display_tuple(ARRAY[row_id,dog,dog],'tuple');
@@ -63,6 +64,22 @@ BEGIN
  END IF;
  IF (SELECT count(*) FROM consensus.relation_metadata(ARRAY[decode(public.laplace_id('~')::text,'hex')]) WHERE canonical='IS_A' AND inverse AND qualifier_bit=-1)<>1 THEN
   RAISE EXCEPTION 'Native original-ID alias metadata lost inversion';
+ END IF;
+ -- Two distinct roots refer to one shared composition. Upward navigation must
+ -- recover both through the Native codec without inventing an exclusive type.
+ shared=pg_temp.display_tuple(ARRAY[dog,scalar],'tuple');
+ root_a=pg_temp.display_tuple(ARRAY[scalar,shared],'file');
+ root_b=pg_temp.display_tuple(ARRAY[public.laplace_id('中'),shared],'file');
+ IF (SELECT count(*) FROM structural.containers_of(decode(shared::text,'hex'),1,100)
+     WHERE entity_id IN (decode(root_a::text,'hex'),decode(root_b::text,'hex')) AND type_id IS NULL)<>2 THEN
+  RAISE EXCEPTION 'Native containment lost shared content roots or fabricated a type';
+ END IF;
+ claim_id=pg_temp.display_tuple(ARRAY[shared,scalar,dog],'claim');
+ INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
+ VALUES(claim_id,1500,350,0.06,0) ON CONFLICT DO NOTHING;
+ IF NOT EXISTS(SELECT FROM consensus.explore_web_neighbors(ARRAY[decode(shared::text,'hex')],NULL,100,false)
+     WHERE nbr=decode(dog::text,'hex') AND type_id=decode(scalar::text,'hex') AND outbound) THEN
+  RAISE EXCEPTION 'Native typed claims disappeared from graph navigation';
  END IF;
 END $test$;
 ROLLBACK;
