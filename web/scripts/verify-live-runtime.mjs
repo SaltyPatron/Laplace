@@ -6,11 +6,11 @@ import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({ options: {
-  base: { type: 'string' }, output: { type: 'string' }, channel: { type: 'string' },
+  base: { type: 'string' }, output: { type: 'string' }, channel: { type: 'string' }, revision: { type: 'string' },
 } });
 const base = new URL(values.base);
 if (base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
-    (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname))) {
+    (base.protocol !== 'https:' && !(base.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(base.hostname)))) {
   throw new Error('Declare an HTTPS application origin, or a loopback development origin.');
 }
 if (!values.output || !isAbsolute(values.output)) throw new Error('Declare an absolute result directory.');
@@ -18,7 +18,7 @@ const key = process.env.LAPLACE_API_KEY;
 if (!key?.startsWith('sk-laplace-')) throw new Error('An enrolled verification API key is required.');
 const scrub = (message) => String(message).replaceAll(key, '[credential]');
 const report = { origin: base.origin, started: new Date().toISOString(), passed: false,
-  browser: null, pages: [], errors: [] };
+  deployed_revision: values.revision ?? null, browser: null, pages: [], errors: [] };
 await mkdir(values.output, { recursive: true });
 let browser;
 try {

@@ -1,6 +1,6 @@
 #Requires -Version 7
 [CmdletBinding()]
-param([string]$Installation,[string]$ReceiptDirectory)
+param([string]$Installation,[string]$ReceiptDirectory,[switch]$Browser,[string]$BrowserChannel='msedge')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 . "$PSScriptRoot/iis-runtime.ps1"
@@ -29,6 +29,12 @@ try{
     $result.hosting='installed IIS / ANCM in-process'
     if(-not $ReceiptDirectory){$ReceiptDirectory=Join-Path $env:LAPLACE_WORK 'operations'}
     [void][IO.Directory]::CreateDirectory($ReceiptDirectory)
+    if($Browser){
+        if(-not $env:LAPLACE_API_KEY){throw 'Browser verification requires the caller to provide a temporary workload key.'}
+        & node (Join-Path $PSScriptRoot '../../web/scripts/verify-live-runtime.mjs') --base $c.origin --output $ReceiptDirectory --channel $BrowserChannel --revision $active.revision
+        if($LASTEXITCODE -ne 0){throw 'Installed browser verification failed; see browser.json in the receipt directory.'}
+        $result.browser_receipt=Join-Path $ReceiptDirectory 'browser.json'
+    }
     $receipt=Join-Path $ReceiptDirectory ('iis-verification-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')+'.json')
     Write-IisAtomic $receipt (Iis-Json $result)
     $result.receipt=$receipt
