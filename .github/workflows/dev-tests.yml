@@ -75,6 +75,9 @@ jobs:
           # Match tests/ingest-completion.sh: this cluster keeps the monorepo's
           # extension controls and modules in its installation prefix.
           export PGOPTIONS='-c dynamic_library_path=/opt/laplace/lib/postgresql/18:$libdir -c extension_control_path=/opt/laplace/share/postgresql/18:$system -c session_preload_libraries=laplace_substrate'
+          # Private fixture databases must use the selected installed caches,
+          # rather than the extension compiler's disposable build defaults.
+          export PGOPTIONS="$PGOPTIONS -c laplace.tier0=$LAPLACE_TIER0 -c laplace.flags=$LAPLACE_FLAGS -c laplace.highway=$LAPLACE_HIGHWAY"
           export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
           source deploy/linux/host-lock.sh
           host_lock_hold shared 8 "${LAPLACE_HOST_LOCK:-/run/lock/laplace/host-resource.lock}" 600
