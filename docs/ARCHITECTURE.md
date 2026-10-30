@@ -407,3 +407,13 @@ error. The managed UI reader maps these rows, and recall uses the same operation
 firmware and producer recipes during the normal build. It has no second relation
 vocabulary or request-time compiler. Callers may pass another compiled program
 explicitly to the same Native executor.
+
+`public.laplace_testimony(claims, sources)` reads source-attested records from
+canonical Native containment. `laplace_observation_read` projects typed triples
+through one reader for query evidence, prompt structure, task shapes and response
+support. It retains the actual claim, corpus witness, record context and slot,
+occurrences, score and dependence class. A continuous score has no invented
+confirm/draw/refute outcome. Response support counts distinct sources from those
+records; source/context filters narrow that support while preserving the pooled
+standing. Two-constituent source values stay predicate-free and use the declared
+Native classification banks.

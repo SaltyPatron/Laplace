@@ -39,6 +39,17 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
         Assert.Equal(presence.entities, inventory.HasEntities);
         Assert.Equal(presence.consensus, inventory.HasConsensus);
+        Assert.Empty(inventory.MissingNativeApi);
+        await using (var remove = new NpgsqlCommand("""
+            ALTER EXTENSION laplace DROP FUNCTION public.laplace_testimony(public.blake3[],public.blake3[]);
+            DROP FUNCTION public.laplace_testimony(public.blake3[],public.blake3[]);
+            """, connection, transaction)) await remove.ExecuteNonQueryAsync();
+        inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
+        Assert.Equal(new[] { "laplace_testimony" }, inventory.MissingNativeApi);
+        await using (var repair = new NpgsqlCommand("SELECT public.laplace_restore_function_bindings()", connection, transaction))
+            await repair.ExecuteNonQueryAsync();
+        inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
+        Assert.Empty(inventory.MissingNativeApi);
         await transaction.RollbackAsync();
     }
 
@@ -69,8 +80,19 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             SELECT decode(public.laplace_compose(ARRAY[encode(subject,'hex')::public.blake3,
                 encode(relation,'hex')::public.blake3,encode(object,'hex')::public.blake3])::text,'hex'),
               subject,relation,object,1700000000000,50000000000,60000000,7000,now() FROM executor_case;
+            INSERT INTO laplace.attestations
+              (id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,
+               observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+            SELECT public.blake3_send(public.laplace_id('executor-unary/'||encode(a.id,'hex'))),
+              a.subject_id,a.type_id,NULL,a.source_id,a.context_id,a.outcome,a.last_observed_at,
+              a.observation_count,a.sum_score_fp1e9,a.opponent_rd_fp1e9
+            FROM laplace.attestations a JOIN executor_case t ON t.subject=a.subject_id;
+            INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+            SELECT laplace.consensus_id(subject,relation,NULL),subject,relation,NULL,
+              1700000000000,50000000000,60000000,7000,now() FROM executor_case;
             """, connection, transaction)) await seed.ExecuteNonQueryAsync();
 
+        foreach (var unary in new[] { "false", "true" })
         foreach (var (scope, context, count) in new[]
         {
             ("NULL::bytea[]", "NULL::bytea", 5000),
@@ -80,7 +102,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         {
             await using var read = new NpgsqlCommand($"""
                 SELECT r.* FROM executor_case t CROSS JOIN LATERAL ops.attestation_response_batch(
-                  ARRAY[t.subject,t.subject],t.relation,{scope},{context},NULL,false) r
+                  ARRAY[t.subject,t.subject],t.relation,{scope},{context},NULL,{unary}) r
                 """, connection, transaction);
             await using var rows = await read.ExecuteReaderAsync();
             Assert.True(await rows.ReadAsync());
@@ -340,6 +362,44 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             }
             Assert.Equal(12, seen.Count);
             Assert.Equal(4, references.Count);
+        }
+        // Response support uses these same record witnesses, independently of
+        // pooled standing. Source/context filters narrow support, not rating.
+        await using (var standing = new NpgsqlCommand("""
+            INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
+            SELECT $1,1700,50,0.06,5
+            """, connection, transaction))
+        {
+            standing.Parameters.AddWithValue(claim.Id);
+            await standing.ExecuteNonQueryAsync();
+        }
+        foreach (var (sources, context, expectedCount) in new[]
+        {
+            ((byte[][]?)null, (byte[]?)null, 1L),
+            (new[] { witness.Id.ToBytes() }, positive.Id.ToBytes(), 1L),
+            (new[] { witness.Id.ToBytes() }, scored.Id.ToBytes(), 1L),
+            (Array.Empty<byte[]>(), (byte[]?)null, 0L),
+            (new[] { target.Id.ToBytes() }, (byte[]?)null, 0L),
+            ((byte[][]?)null, target.Id.ToBytes(), 0L),
+        })
+        {
+            await using var response = new NpgsqlCommand("""
+                SELECT count(*),min(source_count),min(rating_fp1e9),min(rd_fp1e9)
+                FROM ops.attestation_response_batch($1,$2,$3,$4,NULL,false)
+                """, connection, transaction);
+            response.Parameters.AddWithValue(new[] { subject.Id.ToBytes(), subject.Id.ToBytes() });
+            response.Parameters.AddWithValue(predicate.Id.ToBytes());
+            response.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea, (object?)sources ?? DBNull.Value);
+            response.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, (object?)context ?? DBNull.Value);
+            await using var rows = await response.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(expectedCount, rows.GetInt64(0));
+            if (expectedCount != 0)
+            {
+                Assert.Equal(1, rows.GetInt32(1));
+                Assert.Equal(1700000000000L, rows.GetInt64(2));
+                Assert.Equal(50000000000L, rows.GetInt64(3));
+            }
         }
         await transaction.RollbackAsync();
     }

@@ -17,7 +17,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
 #include "spi_nested.h"
-#include "spi_stream.h"
+#include "observation_read.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_response_batch);
 
@@ -30,23 +30,26 @@ typedef struct ResponseCell
 } ResponseCell;
 typedef struct ResponseState { HTAB *cells; bool unary; } ResponseState;
 
-static SPIPlanPtr support_plan;
+typedef struct {
+    HTAB *cells, *sources;
+    bool unary, context_filtered;
+    hash128_t context;
+} ResponseSupport;
 
-typedef struct { HTAB *cells, *sources; bool unary; } ResponseSupport;
 static void
-response_support(TupleTableSlot *row, void *context)
+response_support(int ordinal, int16 role, const LaplaceObservation *row, void *context)
 {
     ResponseSupport *support = context;
-    char key[48];
+    char key[48] = {0};
     bool found;
-    for (int col = 1; col <= 3; ++col) {
-        bool isnull;
-        Datum value = slot_getattr(row, col, &isnull);
-        if (isnull && col == 2 && support->unary) { memset(key + 16, 0, 16); continue; }
-        if (isnull || VARSIZE_ANY_EXHDR(DatumGetByteaPP(value)) != 16)
-            elog(ERROR, "attestation response: malformed stored evidence identity");
-        memcpy(key + (col - 1) * 16, VARDATA_ANY(DatumGetByteaPP(value)), 16);
-    }
+    (void) ordinal;
+    if (role != 1 || row->object_null != support->unary) return;
+    if (support->context_filtered && (row->context_null ||
+        memcmp(&row->context, &support->context, sizeof(hash128_t)) != 0)) return;
+    if (row->source_null) elog(ERROR, "attestation response: missing supporting source");
+    memcpy(key, &row->subject, 16);
+    if (!row->object_null) memcpy(key + 16, &row->object, 16);
+    memcpy(key + 32, &row->source, 16);
     hash_search(support->sources, key, HASH_ENTER, &found);
     if (found) return;
     ResponseCell *cell = hash_search(support->cells, key, HASH_ENTER, &found);
@@ -132,28 +135,18 @@ pg_laplace_attestation_response_batch(PG_FUNCTION_ARGS)
     bool spi_top = false;
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "attestation response: SPI_connect failed");
-    if (!support_plan)
-    {
-        Oid types[5] = {BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID, BYTEAOID, BOOLOID};
-        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("evidence.response_support"),
-                                             5, types, CURSOR_OPT_PARALLEL_OK);
-        if (!plan || SPI_keepplan(plan) != 0)
-            elog(ERROR, "attestation response: preparing support query failed");
-        support_plan = plan;
-    }
-    Datum args[5] = {PointerGetDatum(subjects), PointerGetDatum(relation),
-                    PG_ARGISNULL(2) ? (Datum) 0 : PG_GETARG_DATUM(2),
-                    PG_ARGISNULL(3) ? (Datum) 0 : PG_GETARG_DATUM(3), BoolGetDatum(unary)};
-    char nulls[5] = {' ', ' ', PG_ARGISNULL(2) ? 'n' : ' ', PG_ARGISNULL(3) ? 'n' : ' ', ' '};
-    Oid support_types[5] = {BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID, BYTEAOID, BOOLOID};
-    ResponseSupport support = {cells, sources, unary};
-    laplace_spi_stream(support_plan, 5, support_types, args, nulls, response_support, &support);
-    MemoryContextSwitchTo(work);
     Datum type_datum = PointerGetDatum(relation);
     ArrayType *types = construct_array(&type_datum, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+    ResponseSupport support = {.cells=cells, .sources=sources, .unary=unary,
+        .context_filtered=!PG_ARGISNULL(3)};
+    if (support.context_filtered)
+        support.context=datum_to_hash128(PG_GETARG_DATUM(3));
+    laplace_observation_read(subjects, PG_ARGISNULL(2) ? NULL : PG_GETARG_ARRAYTYPE_P(2),
+        types, 1, response_support, &support);
+    MemoryContextSwitchTo(work);
     ResponseState state = {cells, unary};
     if (hash_get_num_entries(cells) > 0)
-        laplace_consensus_scan(subjects, NULL, types, response_standing, &state, NULL);
+        laplace_consensus_candidates(subjects, NULL, types, response_standing, &state, NULL);
     long capacity = hash_get_num_entries(cells);
     if ((uint64) capacity > MaxAllocSize / sizeof(ResponseCell))
         elog(ERROR, "attestation response exceeds allocation capacity");
