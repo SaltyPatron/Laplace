@@ -1,4 +1,6 @@
 using System.Globalization;
+using Laplace.Ingestion;
+using Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -12,47 +14,40 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
 {
     [Fact]
-    public async Task ShapeNeighborsUseWordRoleAndReturnCanonicalHeight()
+    public async Task ShapeNeighborsUseCanonicalContentAndReturnCanonicalHeight()
     {
-        CodepointPerfcache.LoadDefault();
-        string unit = $"explore-word-role/{Guid.NewGuid():N}";
-        Hash128 source = Hash128.Text(unit);
-        using var builder = new SubstrateChangeBuilder(source, unit)
-            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
-        Assert.NotNull(ContentEmitter.Emit(builder, unit, source));
-
-        using var wordTree = TextDecomposer.Run("mississippi");
-        var word = StageRoot(builder, wordTree, EntityTypeRegistry.Word, source);
-        Assert.Equal(1, word.Tier);
-        using var digitsTree = TextDecomposer.Run("255");
-        StageRoot(builder, digitsTree, EntityTypeRegistry.Id("Number"), source);
-        using var numberTree = TextDecomposer.Run("-255");
-        var number = StageRoot(builder, numberTree, EntityTypeRegistry.Id("Number"), source);
-        Assert.Equal(2, number.Tier);
-
-        await using (var writer = new ConsensusAccumulatingWriter(
-            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
-            await writer.ApplyWorkingSetAsync(builder.Build());
-
-        // Transport the actual Native child coordinates, never packed ID carriers.
-        string trajectory = "LINESTRING ZM (" + string.Join(",", Components(wordTree).Select(c =>
-            string.Join(" ", new[] { c.CoordX, c.CoordY, c.CoordZ, c.CoordM }
-                .Select(v => v.ToString("R", CultureInfo.InvariantCulture))))) + ")";
         await using var connection = await pg.DataSource.OpenConnectionAsync();
-        var reader = new NpgsqlSubstrateReader(pg.DataSource);
-        Assert.Equal(1, await reader.CountEntitiesByTypeAsync(EntityTypeRegistry.Word));
-        var placement = await NpgsqlSubstrateReads.EntityPrimaryFormAsync(
-            connection, word.Id.ToBytes(), CancellationToken.None);
-        Assert.NotNull(placement);
-        Assert.Equal(11, placement.Value.Constituents);
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var migrate = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate"))
+            await migrate.ExecuteNonQueryAsync();
+        using var window = new StagedSourceWriter(1024, 4096, 1 << 20);
+        var word = window.Text("mississippi"u8);
+        var number = window.Text("3"u8);
+        var writer = new NpgsqlSubstrateWriter(pg.DataSource);
+        await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [word.Id]);
+        await using var anchor = new NpgsqlCommand("""
+            SELECT public.ST_X(e.coord),public.ST_Y(e.coord),public.ST_Z(e.coord),public.ST_M(e.coord),
+                public.ST_AsText(structural.entity_curve($1),53),public.ST_NPoints(structural.entity_curve($1))
+            FROM public.laplace_entities(ARRAY[encode($1,'hex')::public.blake3]) e
+            """, connection, transaction);
+        anchor.Parameters.AddWithValue(word.Id.ToBytes());
+        double[] coordinates; string trajectory;
+        await using (var row = await anchor.ExecuteReaderAsync())
+        {
+            Assert.True(await row.ReadAsync());
+            coordinates = Enumerable.Range(0,4).Select(row.GetDouble).ToArray();
+            trajectory = row.GetString(4);
+            Assert.Equal(11, row.GetInt32(5));
+        }
         var neighbors = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
-            connection, word.CoordX, word.CoordY, word.CoordZ, word.CoordM,
+            connection, coordinates[0], coordinates[1], coordinates[2], coordinates[3],
             trajectory, 0, 100, 4, 60, CancellationToken.None);
         var shape = neighbors.Where(n => n.Axis == "shape").ToArray();
         var selected = Assert.Single(shape, n => n.IdHex == word.Id.ToHex());
         Assert.Equal((short)word.Tier, selected.Tier);
         Assert.Equal(0d, selected.Frechet);
         Assert.DoesNotContain(shape, n => n.IdHex == number.Id.ToHex());
+        await transaction.RollbackAsync();
     }
 
     [Fact]

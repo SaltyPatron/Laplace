@@ -16,7 +16,8 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static NpgsqlDataSource? _sharedDataSource;
     private static bool _nativeFoundationReady;
 
-    public const string DatabaseName = "laplace_substratecrud_test";
+    // Share within this test host, never drop another test process's database.
+    public static readonly string DatabaseName = $"laplace_substratecrud_test_{Environment.ProcessId}";
 
     private static readonly NpgsqlConnectionStringBuilder Conn =
         new(LaplaceInstall.PostgresConnectionString(DatabaseName));
@@ -62,6 +63,9 @@ public sealed class LocalPgFixture : IAsyncLifetime
             SET search_path TO laplace, public;
         ";
                     await cmd.ExecuteNonQueryAsync();
+                    // This connection loaded types before CREATE EXTENSION.
+                    // Publish its newly installed Native scalar/array OIDs once.
+                    await conn.ReloadTypesAsync();
                     _sharedDataSource = candidate;
                 }
                 catch
