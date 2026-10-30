@@ -11,24 +11,18 @@ runs:
   using: composite
   steps:
     - name: Check out the qualified Operations controller once per job
-      if: env.LAPLACE_STORAGE_READY != 'e08c9e9878f9ebf93e08bc6910f066ee79da24db'
+      if: env.LAPLACE_STORAGE_READY != '816b3c3dd1f935e2635144938db92d3e1910807a'
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         repository: SaltyPatron/Laplace-Operations
-        ref: e08c9e9878f9ebf93e08bc6910f066ee79da24db
+        ref: 816b3c3dd1f935e2635144938db92d3e1910807a
         path: .ci-dependencies/Laplace-Operations
         token: ${{ inputs.checkout-token }}
         persist-credentials: false
     - shell: bash
-      run: echo 'LAPLACE_STORAGE_READY=e08c9e9878f9ebf93e08bc6910f066ee79da24db' >> "$GITHUB_ENV"
+      run: echo 'LAPLACE_STORAGE_READY=816b3c3dd1f935e2635144938db92d3e1910807a' >> "$GITHUB_ENV"
     - name: Run the common storage owner
-      shell: bash
-      env:
-        STORAGE_OPERATION: ${{ inputs.operation }}
-        STORAGE_RECEIPT: ${{ inputs.receipt }}
-        GH_TOKEN: ${{ github.token }}
-        LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ env.LAPLACE_HOST_LOCK_WAIT_SECONDS || '120' }}
-      run: |
-        arguments=("$STORAGE_OPERATION" --finish-job)
-        if [[ -n "$STORAGE_RECEIPT" ]]; then arguments+=(--receipt "$STORAGE_RECEIPT"); fi
-        bash .ci-dependencies/Laplace-Operations/storage.sh "${arguments[@]}"
+      uses: ./.ci-dependencies/Laplace-Operations/storage
+      with:
+        operation: ${{ inputs.operation }}
+        receipt: ${{ inputs.receipt }}
