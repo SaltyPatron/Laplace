@@ -96,6 +96,42 @@ scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types, bool witn
     laplace_spi_finish(finish);
 }
 
+typedef struct {
+    MemoryContext caller;LaplaceClassificationConsumer consume;void *context;
+} ClassificationRead;
+static bool classification_row(TupleTableSlot *slot,void *context)
+{
+    ClassificationRead *read=context;Datum values[7];
+    for(int i=0;i<7;i++){
+        bool missing;values[i]=slot_getattr(slot,i+1,&missing);
+        if(missing)elog(ERROR,"Native classification has a null field");
+    }
+    LaplaceClassificationRow row={.subject=datum_to_hash128(values[0]),.value=datum_to_hash128(values[1]),
+        .rating=DatumGetInt64(values[2]),.rd=DatumGetInt64(values[3]),.volatility=DatumGetInt64(values[4]),
+        .games=DatumGetInt64(values[5]),.claim=datum_to_hash128(values[6])};
+    MemoryContext previous=MemoryContextSwitchTo(read->caller);
+    read->consume(&row,read->context);MemoryContextSwitchTo(previous);return true;
+}
+void laplace_classification_scan(ArrayType *subjects,const char *bank,
+    LaplaceClassificationConsumer consume,void *context)
+{
+    if(!subjects || !ArrayGetNItems(ARR_NDIM(subjects),ARR_DIMS(subjects)))return;
+    if(!bank || !*bank || !consume)elog(ERROR,"Native classification requires its bank and consumer");
+    static SPIPlanPtr plan;MemoryContext caller=CurrentMemoryContext;bool finish;
+    if(laplace_spi_connect(&finish)!=SPI_OK_CONNECT)elog(ERROR,"Native classification SPI connect failed");
+    if(!plan){
+        Oid types[]={BYTEAARRAYOID,TEXTOID};
+        plan=SPI_prepare_cursor(laplace_sql_query_text("native.classification_values"),2,types,CURSOR_OPT_PARALLEL_OK);
+        if(!plan || SPI_keepplan(plan)!=0)elog(ERROR,"Cannot prepare Native classifications");
+    }
+    text *name=cstring_to_text(bank);ParamListInfo parameters=makeParamList(2);
+    parameters->params[0]=(ParamExternData){.value=PointerGetDatum(subjects),.isnull=false,.pflags=PARAM_FLAG_CONST,.ptype=BYTEAARRAYOID};
+    parameters->params[1]=(ParamExternData){.value=PointerGetDatum(name),.isnull=false,.pflags=PARAM_FLAG_CONST,.ptype=TEXTOID};
+    ClassificationRead read={caller,consume,context};
+    lp_pg_execute_stream_until(plan,parameters,true,classification_row,&read);
+    pfree(parameters);pfree(name);laplace_spi_finish(finish);
+}
+
 typedef struct ScanId { char bytes[16]; } ScanId;
 typedef struct ScanSet
 {

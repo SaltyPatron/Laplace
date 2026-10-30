@@ -674,10 +674,10 @@ program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_cou
 
 /*
  * Without a supported parse, each occurrence's own consensus decides: one
- * HAS_POS scan over the occurrence forms keeps, per form, the object with the
+ * Native UPOS value scan over the occurrence forms keeps, per form, the value with the
  * highest conservative rating (rating - 2 rd). An occurrence whose text is all
  * White_Space, or whose best UPOS is not a content tag, is not an obligation.
- * An occurrence with no HAS_POS standing stays required: absence is not false.
+ * An occurrence without a recorded UPOS standing stays required: absence is not false.
  */
 typedef struct ObservedUpos
 {
@@ -687,21 +687,21 @@ typedef struct ObservedUpos
 } ObservedUpos;
 
 static void
-receive_observed_upos(const LaplaceConsensusRow *row, void *context)
+receive_observed_upos(const LaplaceClassificationRow *row, void *context)
 {
     HTAB *best = context;
     ObservedUpos *entry;
     bool found;
     __int128 conservative;
-    if (row->object_is_null || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+    if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
     conservative = (__int128) row->rating - 2 * (__int128) row->rd;
     entry = hash_search(best, &row->subject, HASH_ENTER, &found);
     if (!found || conservative > entry->conservative ||
         (conservative == entry->conservative &&
-         memcmp(&row->object, &entry->upos, sizeof(hash128_t)) < 0))
+         memcmp(&row->value, &entry->upos, sizeof(hash128_t)) < 0))
     {
-        entry->upos = row->object;
+        entry->upos = row->value;
         entry->conservative = conservative;
     }
 }
@@ -717,7 +717,6 @@ program_observed_content_origins(const LaplacePromptInput *input,
     const uint32 *text_len = tier_tree_text_len_array(input->tree);
     size_t text_bytes = 0;
     const uint8 *text = tier_tree_text(input->tree, &text_bytes);
-    hash128_t has_pos;
     hash128_t *forms;
     int form_count = 0;
     Bitmapset *required = NULL;
@@ -725,8 +724,6 @@ program_observed_content_origins(const LaplacePromptInput *input,
     HTAB *best;
     int member = -1;
 
-    if (laplace_relation_type_id("HAS_POS", &has_pos) != 0)
-        return NULL;
     forms = palloc(sizeof(hash128_t) * Max(prompt_origin_count, 1));
     while ((member = bms_next_member(eligible, member)) >= 0)
         forms[form_count++] = datum_to_hash128(context_values[member]);
@@ -738,10 +735,8 @@ program_observed_content_origins(const LaplacePromptInput *input,
     if (form_count > 0)
     {
         ArrayType *subjects = hash128_array_from_ids(forms, form_count);
-        ArrayType *types = hash128_array_from_ids(&has_pos, 1);
-        laplace_consensus_scan(subjects, NULL, types, receive_observed_upos, best, NULL);
+        laplace_classification_scan(subjects,"upos",receive_observed_upos,best);
         pfree(subjects);
-        pfree(types);
     }
 
     member = -1;
@@ -821,7 +816,7 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     }
 
     /* With no declared operation, obligations narrow to content occurrences:
-     * from a supported parse, else from per-occurrence HAS_POS consensus. */
+     * from a supported parse, else from recorded Native UPOS value claims. */
     if (operation_count == 0)
         content_required = program_content_origins(intent, prompt_origin_count);
     if (operation_count == 0 && !content_required && eligible)

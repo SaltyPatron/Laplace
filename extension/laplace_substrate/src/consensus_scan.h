@@ -27,6 +27,16 @@ typedef struct LaplaceConsensusScanStats
 } LaplaceConsensusScanStats;
 
 typedef void (*LaplaceConsensusConsumer)(const LaplaceConsensusRow *, void *);
+/* A source value claim has two constituents and no predicate. Classification
+ * membership comes from the canonical value's Native bank, never its spelling. */
+typedef struct LaplaceClassificationRow
+{
+    hash128_t subject,value,claim;
+    int64 rating,rd,volatility,games;
+} LaplaceClassificationRow;
+typedef void (*LaplaceClassificationConsumer)(const LaplaceClassificationRow *,void *);
+extern void laplace_classification_scan(ArrayType *subjects,const char *bank,
+    LaplaceClassificationConsumer consume,void *context);
 /* Called inside the ordered range promised by the selected scan operation.
  * Return true only when this row and every lower score in that same range
  * cannot change the result. Endpoint-wide and exact-type ranges differ. */

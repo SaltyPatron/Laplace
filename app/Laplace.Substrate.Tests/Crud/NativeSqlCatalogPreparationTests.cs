@@ -257,6 +257,84 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NativeClassificationsUseCanonicalBanksWithoutInventingPredicatesOrNormalizingRawValues()
+    {
+        await using var native = LaplaceDataSource.Create(SubstrateAccess.Ingest, _source.ConnectionString);
+        await using var connection = await native.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        using var window = new StagedSourceWriter(10000, 100000, 1 << 24);
+        var word = window.Text(Encoding.UTF8.GetBytes("classification" + Guid.NewGuid().ToString("N")));
+        var noun = window.Text("NOUN"u8);
+        var raw = window.Text("n"u8);
+        var dependency = window.Text("nsubj"u8);
+        var oldPredicate = window.Text("HAS_POS"u8);
+        StagedReference Compose(StagedReference[] children, ulong mask = 0) =>
+            window.Compose(children, checked((byte)(children.Max(c => c.Tier) + 1)), mask, mask);
+        var typed = Compose([word, noun], 1);
+        var untyped = Compose([word, raw], 1);
+        var otherBank = Compose([word, dependency], 1);
+        var obsoleteShape = Compose([word, oldPredicate, noun], 1);
+        typed.Said = untyped.Said = otherBank.Said = obsoleteShape.Said = 1;
+        var witness = Compose([typed, untyped, otherBank, obsoleteShape]);
+        await new NpgsqlSubstrateWriter(native).ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
+        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
+        {
+            register.Parameters.AddWithValue(witness.Id);
+            await register.ExecuteNonQueryAsync();
+        }
+        await using (var attest = new NpgsqlCommand("""
+            WITH observations AS MATERIALIZED (
+              SELECT claim,array_agg(trunk ORDER BY trunk) witnesses,
+                array_agg(games::bigint ORDER BY trunk) games,
+                array_agg(score/games ORDER BY trunk) scores,
+                array_agg(trust ORDER BY trunk) trusts
+              FROM public.laplace_attested(ARRAY[$1,$2,$3,$4]::public.blake3[],false)
+              WHERE witness GROUP BY claim
+            )
+            INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
+            SELECT o.claim,s.rating,s.deviation,s.volatility,s.matches
+            FROM observations o CROSS JOIN LATERAL public.laplace_series(o.witnesses,o.games,o.scores,o.trusts) s
+            """, connection, transaction))
+        {
+            foreach (var claim in new[] { typed, untyped, otherBank, obsoleteShape }) attest.Parameters.AddWithValue(claim.Id);
+            await attest.ExecuteNonQueryAsync();
+        }
+
+        foreach (var (bank, value, claim) in new[] { ("upos", noun, typed), ("deprel", dependency, otherBank) })
+        {
+            await using var read = NpgsqlCatalog.Command(connection, transaction, "native.classification_values",
+                new[] { word.Id.ToBytes(), word.Id.ToBytes() }, bank);
+            await using var rows = await read.ExecuteReaderAsync();
+            if (!await rows.ReadAsync())
+            {
+                await rows.DisposeAsync();
+                await using var diagnostic = new NpgsqlCommand("""
+                    SELECT jsonb_build_object('value',encode($2::bytea,'hex'),
+                      'bank',to_jsonb(public.laplace_bank_of(encode($2::bytea,'hex')::public.blake3)),
+                      'claims',(SELECT jsonb_agg(to_jsonb(c)) FROM public.laplace_claims_each(
+                        ARRAY[encode($1::bytea,'hex')::public.blake3],NULL,ARRAY[public.laplace_bank_bit('kind','claim')],
+                        '{}',1::smallint,NULL,2) c))::text
+                    """, connection, transaction);
+                diagnostic.Parameters.AddWithValue(word.Id.ToBytes());
+                diagnostic.Parameters.AddWithValue(value.Id.ToBytes());
+                Assert.Fail($"Missing {bank} classification: {await diagnostic.ExecuteScalarAsync()}");
+            }
+            Assert.Equal(word.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+            Assert.Equal(value.Id.ToBytes(), rows.GetFieldValue<byte[]>(1));
+            Assert.True(rows.GetInt64(2) > 0); Assert.True(rows.GetInt64(3) > 0);
+            Assert.Equal(1L, rows.GetInt64(5)); Assert.Equal(claim.Id.ToBytes(), rows.GetFieldValue<byte[]>(6));
+            Assert.False(await rows.ReadAsync());
+        }
+        foreach (var (ids, bank) in new[] { (Array.Empty<byte[]>(), "upos"), (new[] { word.Id.ToBytes() }, "unknown-bank") })
+        {
+            await using var read = NpgsqlCatalog.Command(connection, transaction, "native.classification_values", ids, bank);
+            await using var rows = await read.ExecuteReaderAsync();
+            Assert.False(await rows.ReadAsync());
+        }
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task PurposeReadAdaptersRemainBoundAndVisibleToThePlanner()
     {
         await using var connection = await _source.OpenConnectionAsync();
