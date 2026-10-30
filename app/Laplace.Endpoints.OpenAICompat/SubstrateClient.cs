@@ -487,6 +487,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             bool postgresPerfcacheReady;
             string? detail = inventory.MissingNativeApi.Length == 0 ? null
                 : "Native API is missing declared functions: " + string.Join(", ", inventory.MissingNativeApi);
+            if (inventory.MissingNativeIndexes.Length != 0)
+            {
+                var indexes = "Native indexes are missing or invalid: " + string.Join(", ", inventory.MissingNativeIndexes);
+                detail = string.IsNullOrEmpty(detail) ? indexes : detail + "; " + indexes;
+            }
             try
             {
                 await NpgsqlSubstrateReads.PerfCacheProbeAsync(conn, ct);
@@ -523,7 +528,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
             bool perfcacheReady = postgresPerfcacheReady && processPerfcacheReady;
             var ready = inventory.HasEntities && inventory.HasConsensus && perfcacheReady
-                && inventory.MissingNativeApi.Length == 0;
+                && inventory.MissingNativeApi.Length == 0 && inventory.MissingNativeIndexes.Length == 0;
             if (ready)
                 return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache,
                     HasEntities: inventory.HasEntities, HasConsensus: inventory.HasConsensus);

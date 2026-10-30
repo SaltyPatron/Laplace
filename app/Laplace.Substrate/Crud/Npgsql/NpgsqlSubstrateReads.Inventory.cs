@@ -344,13 +344,13 @@ public static partial class NpgsqlSubstrateReads
 
     public readonly record struct ReadinessInventory(
         long EstimatedEntities, long EstimatedConsensus, bool HasEntities, bool HasConsensus,
-        string[] MissingNativeApi);
+        string[] MissingNativeApi, string[] MissingNativeIndexes);
 
     /// <summary>One inventory query: estimates describe size; EXISTS determines presence.</summary>
     public static async Task<ReadinessInventory> ReadinessInventoryAsync(
         NpgsqlConnection conn, CancellationToken ct)
     {
-        var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("readiness.inventory"), static r => new ReadinessInventory(r.GetInt64(0), r.GetInt64(1), r.GetBoolean(2), r.GetBoolean(3), r.GetFieldValue<string[]>(4)),
+        var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("readiness.inventory"), static r => new ReadinessInventory(r.GetInt64(0), r.GetInt64(1), r.GetBoolean(2), r.GetBoolean(3), r.GetFieldValue<string[]>(4), r.GetFieldValue<string[]>(5)),
             timeoutSeconds: 30, ct: ct, label: "readiness_inventory").ConfigureAwait(false);
         return rows[0];
     }

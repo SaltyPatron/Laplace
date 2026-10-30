@@ -40,6 +40,15 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.Equal(presence.entities, inventory.HasEntities);
         Assert.Equal(presence.consensus, inventory.HasConsensus);
         Assert.Empty(inventory.MissingNativeApi);
+        Assert.Empty(inventory.MissingNativeIndexes);
+        await using (var removeIndex = new NpgsqlCommand("DROP INDEX public.physicality_assertions", connection, transaction))
+            await removeIndex.ExecuteNonQueryAsync();
+        inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
+        Assert.Equal(new[] { "physicality_assertions" }, inventory.MissingNativeIndexes);
+        await using (var repairIndex = new NpgsqlCommand("SELECT public.laplace_schema_indexes()", connection, transaction))
+            await repairIndex.ExecuteNonQueryAsync();
+        inventory = await NpgsqlSubstrateReads.ReadinessInventoryAsync(connection, default);
+        Assert.Empty(inventory.MissingNativeIndexes);
         await using (var remove = new NpgsqlCommand("""
             ALTER EXTENSION laplace DROP FUNCTION public.laplace_testimony(public.blake3[],public.blake3[]);
             DROP FUNCTION public.laplace_testimony(public.blake3[],public.blake3[]);
