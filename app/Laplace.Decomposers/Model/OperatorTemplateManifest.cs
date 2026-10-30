@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Laplace.Decomposers.Model;
 
@@ -12,6 +13,7 @@ public enum SymbolBinding
     Config = 3,
     Instance = 4,
     ConfigOrFrequency = 5,
+    ConfigOrShape = 6,
 }
 
 public sealed record OperatorSymbol(
@@ -35,12 +37,71 @@ public sealed record OperatorTemplate(
     public bool AtOwner { get; init; }
     public bool Coexists { get; init; }
     public bool RequireBound { get; init; }
+    public bool RequireHints { get; init; }
 }
 
 public sealed record OperatorContext(
     IReadOnlyList<string> Paths, string Symbol, IReadOnlyList<string> ConfigKeys, string? Default)
 {
     public ShapeExpression? DefaultExpression { get; } = Default is { } text ? ShapeExpression.Parse(text) : null;
+    private readonly SourcePathPattern[] _patterns = Paths.Select(SourcePathPattern.Parse).ToArray();
+
+    public IReadOnlyDictionary<string, string>? Match(string sourcePath)
+    {
+        foreach (SourcePathPattern pattern in _patterns)
+            if (pattern.Match(sourcePath) is { } captures) return captures;
+        return null;
+    }
+}
+
+/// <summary>Recipe path globs with named numeric constituents, used to address
+/// the corresponding element of a source config array.</summary>
+internal sealed class SourcePathPattern
+{
+    private readonly Regex _pattern;
+    private readonly string[] _captures;
+
+    private SourcePathPattern(Regex pattern, string[] captures) { _pattern = pattern; _captures = captures; }
+
+    public static SourcePathPattern Parse(string text)
+    {
+        var pattern = new StringBuilder("\\A");
+        var captures = new List<string>();
+        for (int at = 0; at < text.Length; at++)
+        {
+            char c = text[at];
+            if (c == '{')
+            {
+                int end = text.IndexOf('}', at + 1);
+                if (end < 0) throw new InvalidDataException($"context path has an unclosed capture: '{text}'");
+                string name = text[(at + 1)..end];
+                if (name.Length == 0 || !(char.IsAsciiLetter(name[0]) || name[0] == '_')
+                    || name.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch == '_')) || captures.Contains(name))
+                    throw new InvalidDataException($"context path has an invalid or repeated capture: '{text}'");
+                captures.Add(name); pattern.Append("(?<").Append(name).Append(">[0-9]+)"); at = end;
+            }
+            else if (c == '}') throw new InvalidDataException($"context path has an unmatched closing brace: '{text}'");
+            else if (c == '*') pattern.Append(".*");
+            else if (c == '?') pattern.Append('.');
+            else pattern.Append(Regex.Escape(c.ToString()));
+        }
+        pattern.Append("\\z");
+        return new SourcePathPattern(new Regex(pattern.ToString(), RegexOptions.CultureInvariant | RegexOptions.Singleline | RegexOptions.NonBacktracking), captures.ToArray());
+    }
+
+    public IReadOnlyDictionary<string, string>? Match(string text)
+    {
+        Match match = _pattern.Match(text);
+        return match.Success ? _captures.ToDictionary(name => name, name => match.Groups[name].Value, StringComparer.Ordinal) : null;
+    }
+
+    public static string Expand(string pointer, IReadOnlyDictionary<string, string> captures)
+    {
+        foreach (var capture in captures) pointer = pointer.Replace("{" + capture.Key + "}", capture.Value, StringComparison.Ordinal);
+        if (pointer.Contains('{') || pointer.Contains('}'))
+            throw new InvalidDataException($"config pointer uses a capture absent from its source path: '{pointer}'");
+        return pointer;
+    }
 }
 
 public sealed record OperatorScope(string Name, IReadOnlyList<string> After);
@@ -75,7 +136,7 @@ public sealed class OperatorTemplateManifest
     {
         var tables = TomlTables.Parse(toml);
         var symbols = new List<OperatorSymbol>();
-        var operators = new List<(string Name, string Family, List<string> Scopes, bool Repeat, bool AtOwner, bool Coexists, bool RequireBound)>();
+        var operators = new List<(string Name, string Family, List<string> Scopes, bool Repeat, bool AtOwner, bool Coexists, bool RequireBound, bool RequireHints)>();
         var slots = new List<OperatorSlot>();
         var contexts = new List<OperatorContext>();
         var scopes = new List<OperatorScope>();
@@ -96,7 +157,8 @@ public sealed class OperatorTemplateManifest
                     operators.Add((Str(t, "name"), Str(t, "family"), OptList(t, "scopes").ToList(),
                         t.TryGetValue("repeat", out object? rp) && rp is bool r && r, locality == "owner",
                         t.TryGetValue("coexists", out object? co) && co is true,
-                        t.TryGetValue("require_bound", out object? rb) && rb is true));
+                        t.TryGetValue("require_bound", out object? rb) && rb is true,
+                        t.TryGetValue("require_hints", out object? rh) && rh is true));
                     break;
                 case "context":
                     contexts.Add(new OperatorContext(OptList(t, "paths"), Str(t, "symbol"),
@@ -133,7 +195,7 @@ public sealed class OperatorTemplateManifest
                             throw new InvalidDataException(
                                 $"operator manifest: slot {op.Name}.{slot.Role} uses undeclared symbol '{symbol}'");
             templates.Add(new OperatorTemplate(op.Name, op.Family, op.Scopes, own, op.Repeat)
-                { AtOwner = op.AtOwner, Coexists = op.Coexists, RequireBound = op.RequireBound });
+                { AtOwner = op.AtOwner, Coexists = op.Coexists, RequireBound = op.RequireBound, RequireHints = op.RequireHints });
         }
         foreach (OperatorSlot slot in slots)
             if (!operators.Any(o => o.Name == slot.Operator))
@@ -156,6 +218,7 @@ public sealed class OperatorTemplateManifest
     {
         "frequency" => SymbolBinding.Frequency,
         "config-or-frequency" => SymbolBinding.ConfigOrFrequency,
+        "config-or-shape" => SymbolBinding.ConfigOrShape,
         "tokenizer" => SymbolBinding.Tokenizer,
         "blocks" => SymbolBinding.Blocks,
         "config" => SymbolBinding.Config,
@@ -212,6 +275,16 @@ public sealed class ShapeExpression
     /// the arithmetic is not an exact positive integer.</summary>
     public long? Evaluate(IReadOnlyDictionary<string, long> bound) =>
         IsWildcard ? null : _root.Evaluate(bound) is { } v && v > 0 ? v : null;
+
+    internal KeyValuePair<string, long>? Infer(long size, IReadOnlyDictionary<string, long> bound)
+    {
+        string[] missing = Symbols.Where(symbol => !bound.ContainsKey(symbol)).ToArray();
+        if (IsWildcard || missing.Length != 1 || size <= 0) return null;
+        string symbol = missing[0];
+        if (_root.Solve(symbol, size, bound) is not { } value || value <= 0) return null;
+        var check = new Dictionary<string, long>(bound, StringComparer.Ordinal) { [symbol] = value };
+        return Evaluate(check) == size ? new KeyValuePair<string, long>(symbol, value) : null;
+    }
 
     public override string ToString() => Text;
 
@@ -283,6 +356,7 @@ public sealed class ShapeExpression
     private abstract class Node
     {
         public abstract long? Evaluate(IReadOnlyDictionary<string, long> bound);
+        public virtual long? Solve(string symbol, long value, IReadOnlyDictionary<string, long> bound) => null;
         public virtual void Collect(ISet<string> names) { }
     }
 
@@ -296,10 +370,36 @@ public sealed class ShapeExpression
         public override long? Evaluate(IReadOnlyDictionary<string, long> bound) =>
             bound.TryGetValue(name, out long v) ? v : null;
         public override void Collect(ISet<string> names) => names.Add(name);
+        public override long? Solve(string symbol, long value, IReadOnlyDictionary<string, long> bound) =>
+            symbol == name ? value : null;
     }
 
     private sealed class Binary(char op, Node left, Node right) : Node
     {
+        public override long? Solve(string symbol, long value, IReadOnlyDictionary<string, long> bound)
+        {
+            long? a = left.Evaluate(bound), b = right.Evaluate(bound);
+            static long? Divide(long numerator, long denominator) =>
+                denominator != 0 && numerator % denominator == 0 ? numerator / denominator : null;
+            try
+            {
+                if (a is null && b is { } knownRight)
+                {
+                    long? target = op switch { '+' => checked(value - knownRight), '-' => checked(value + knownRight),
+                        '*' => Divide(value, knownRight), '/' => knownRight != 0 ? checked(value * knownRight) : null, _ => null };
+                    return target is { } t ? left.Solve(symbol, t, bound) : null;
+                }
+                if (b is null && a is { } knownLeft)
+                {
+                    long? target = op switch { '+' => checked(value - knownLeft), '-' => checked(knownLeft - value),
+                        '*' => Divide(value, knownLeft), '/' => Divide(knownLeft, value), _ => null };
+                    return target is { } t ? right.Solve(symbol, t, bound) : null;
+                }
+            }
+            catch (OverflowException) { }
+            return null;
+        }
+
         public override long? Evaluate(IReadOnlyDictionary<string, long> bound)
         {
             if (left.Evaluate(bound) is not { } a || right.Evaluate(bound) is not { } b) return null;

@@ -33,6 +33,7 @@ public enum TensorRoleKind
 
     LowRankDown,
     LowRankUp,
+    AttnKv,
 }
 
 public enum Modality
@@ -263,6 +264,7 @@ public sealed class ModelManifest
             ("attention", "v") => TensorRoleKind.AttnV,
             ("attention", "o") => TensorRoleKind.AttnO,
             ("attention", "qkv") => TensorRoleKind.AttnQkv,
+            ("attention", "kv") => TensorRoleKind.AttnKv,
             ("attention", "q-norm") or ("attention", "k-norm") or ("attention", "kv-norm") => TensorRoleKind.Norm,
             ("mlp", "gate") or ("experts", "gate") => expert ? TensorRoleKind.MoeExpertGate : TensorRoleKind.MlpGate,
             ("mlp", "up") or ("experts", "up") => expert ? TensorRoleKind.MoeExpertUp : TensorRoleKind.MlpUp,

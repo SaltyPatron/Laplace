@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.IO.Enumeration;
 using System.Text;
 
 namespace Laplace.Decomposers.Model;
@@ -210,7 +209,7 @@ public static class ModelOperatorRecognizer
         }
 
         // Config: the first declared key, else the declared default expression.
-        foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Config))
+        foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind is SymbolBinding.Config or SymbolBinding.ConfigOrShape))
         {
             if (Declared(s) is { } v) { Bind(s, v, "config"); continue; }
             if (s.DefaultExpression?.Evaluate(Values()) is { } dv)
@@ -239,14 +238,15 @@ public static class ModelOperatorRecognizer
         {
             var values = new Dictionary<string, long>(bound, StringComparer.Ordinal);
             var supplied = new HashSet<string>(StringComparer.Ordinal);
-            foreach (OperatorContext context in manifest.Contexts.Where(c =>
-                         c.Paths.Any(pattern => FileSystemName.MatchesSimpleExpression(pattern, path, ignoreCase: false))))
+            foreach (OperatorContext context in manifest.Contexts)
             {
-                long? value = context.ConfigKeys.Select(Configured).FirstOrDefault(n => n is not null);
+                if (context.Match(path) is not { } captures) continue;
+                long? value = context.ConfigKeys.Select(key => Configured(SourcePathPattern.Expand(key, captures)))
+                    .FirstOrDefault(n => n is not null);
                 value ??= context.DefaultExpression?.Evaluate(values);
                 if (value is { } n) { values[context.Symbol] = n; supplied.Add(context.Symbol); }
             }
-            foreach (OperatorSymbol symbol in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Config
+            foreach (OperatorSymbol symbol in manifest.Symbols.Where(s => (s.Bind is SymbolBinding.Config or SymbolBinding.ConfigOrShape)
                          && s.Default is not null && !supplied.Contains(s.Name) && Declared(s) is null))
             {
                 if (symbol.DefaultExpression?.Evaluate(values) is { } n) values[symbol.Name] = n;
@@ -285,8 +285,10 @@ public static class ModelOperatorRecognizer
                                 if (slot.Tensor is { } t) claimed.Add(t);
                                 foreach (string c in slot.Candidates) claimed.Add(c);
                             }
+                            var instanceContext = new Dictionary<string, long>(context, StringComparer.Ordinal);
+                            foreach (var value in fit.Instance) instanceContext[value.Key] = value.Value;
                             instances.Add(new OperatorInstance(op.Name, op.Family, scope, block, expert,
-                                fit.Instance, fit.Slots) { SourcePath = owner.Path, ContextSymbols = context });
+                                fit.Instance, fit.Slots) { SourcePath = owner.Path, ContextSymbols = instanceContext });
                             if (!op.Repeat) break;
                         }
                         if (fitted && !op.Coexists) break;
@@ -380,6 +382,71 @@ public static class ModelOperatorRecognizer
         OperatorTemplate op, List<Located> pool,
         IReadOnlyDictionary<string, long> bound, OperatorTemplateManifest manifest)
     {
+        var inferred = InferShapeSymbols(op, pool, bound, manifest);
+        if (inferred.Count > 0)
+        {
+            var resolved = new Dictionary<string, long>(bound, StringComparer.Ordinal);
+            foreach (var value in inferred) resolved[value.Key] = value.Value;
+            Fit? fit = TryFitBound(op, pool, resolved, manifest);
+            if (fit is null) return null;
+            foreach (var value in fit.Instance) inferred[value.Key] = value.Value;
+            return fit with { Instance = inferred };
+        }
+        return TryFitBound(op, pool, bound, manifest);
+    }
+
+    private static Dictionary<string, long> InferShapeSymbols(OperatorTemplate op, List<Located> pool,
+        IReadOnlyDictionary<string, long> bound, OperatorTemplateManifest manifest)
+    {
+        var permitted = manifest.Symbols.Where(s => s.Bind == SymbolBinding.ConfigOrShape && !bound.ContainsKey(s.Name))
+            .Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        var inferred = new Dictionary<string, long>(StringComparer.Ordinal);
+        if (permitted.Count == 0) return inferred;
+        var values = new Dictionary<string, long>(bound, StringComparer.Ordinal);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (OperatorSlot slot in op.Slots)
+            {
+                var candidates = new List<(int Hint, Dictionary<string, long> Values)>();
+                foreach (Located tensor in pool.Where(t => t.Shape.Length == slot.Shape.Count))
+                    foreach (bool reversed in slot.EitherOrientation && slot.Shape.Count == 2 ? new[] { false, true } : new[] { false })
+                    {
+                        var local = new Dictionary<string, long>(values, StringComparer.Ordinal);
+                        bool matches = true;
+                        for (int axis = 0; axis < slot.Shape.Count && matches; axis++)
+                        {
+                            int size = tensor.Shape[reversed ? 1 - axis : axis];
+                            ShapeExpression expression = slot.Shape[axis];
+                            if (expression.IsWildcard) continue;
+                            if (expression.Evaluate(local) is { } expected) matches = expected == size;
+                            else if (expression.Symbols.All(local.ContainsKey)) matches = false;
+                            else if (expression.Infer(size, local) is { } proposal && permitted.Contains(proposal.Key))
+                                local[proposal.Key] = proposal.Value;
+                        }
+                        if (matches && slot.Where?.Holds(local) != false)
+                            candidates.Add((HintLength(slot, tensor.Name), local));
+                    }
+                if (candidates.Count == 0) continue;
+                int hint = candidates.Max(candidate => candidate.Hint);
+                if (!slot.Required && hint == 0) continue;
+                var supported = candidates.Where(candidate => candidate.Hint == hint).ToArray();
+                foreach (string symbol in permitted.Where(symbol => !values.ContainsKey(symbol)))
+                {
+                    if (supported.Any(candidate => !candidate.Values.ContainsKey(symbol))) continue;
+                    long[] proposals = supported.Select(candidate => candidate.Values[symbol]).Distinct().ToArray();
+                    if (proposals.Length != 1) continue;
+                    values[symbol] = inferred[symbol] = proposals[0]; changed = true;
+                }
+            }
+        } while (changed);
+        return inferred;
+    }
+
+    private static Fit? TryFitBound(OperatorTemplate op, List<Located> pool,
+        IReadOnlyDictionary<string, long> bound, OperatorTemplateManifest manifest)
+    {
         Func<string, bool> isInstance = IsInstanceSymbol(manifest);
         var instanceSymbols = op.Slots.SelectMany(s => s.Shape).SelectMany(a => a.Symbols)
             .Where(isInstance).Distinct().ToArray();
@@ -443,6 +510,7 @@ public static class ModelOperatorRecognizer
             foreach (Located t in pool)
             {
                 if (t.Shape.Length != axes.Length) continue;
+                if (op.RequireHints && slot.Required && HintLength(slot, t.Name) == 0) continue;
                 bool direct = Matches(t.Shape, axes, reversed: false);
                 bool transposed = slot.EitherOrientation && axes.Length == 2 && Matches(t.Shape, axes, reversed: true);
                 if (!direct && !transposed) continue;

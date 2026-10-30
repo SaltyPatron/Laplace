@@ -203,6 +203,110 @@ public sealed class ModelOperatorRecognizerTests
     }
 
     [Fact]
+    public void ConfigArrayContexts_UseTheCapturedSourceStage()
+    {
+        var config = ModelConfigReader.Read(System.Text.Encoding.UTF8.GetBytes("""
+            {"text_config":{"hidden_size":32,"num_attention_heads":4,"num_key_value_heads":2,"head_dim":8},
+             "vision_config":{"dim_embed":[8,16,24],"num_heads":[2,4,6]}}
+            """));
+        var tensors = new List<HeaderTensor>();
+        foreach (var stage in new[] { (Index: 0, Width: 8), (Index: 2, Width: 24) })
+        {
+            string path = $"vision_tower.blocks.{stage.Index}.7.ffn";
+            tensors.Add(T(path + ".fc1.weight", stage.Width * 4, stage.Width));
+            tensors.Add(T(path + ".fc2.weight", stage.Width, stage.Width * 4));
+        }
+        var anatomy = ModelOperatorRecognizer.Recognize(tensors, config.IntegerFields, null,
+            OperatorTemplateManifest.Governed, config.JsonIntegerFields);
+        var mlps = anatomy.Operators.Where(op => op.Family == "mlp").ToArray();
+        Assert.Equal(2, mlps.Length);
+        Assert.Empty(anatomy.Unrecognized);
+        foreach (var op in mlps)
+        {
+            bool first = op.SourcePath.StartsWith("vision_tower.blocks.0.", StringComparison.Ordinal);
+            Assert.Equal(first ? 8 : 24, op.ContextSymbols["d"]);
+            Assert.Equal(first ? 2 : 6, op.ContextSymbols["h"]);
+            Assert.Equal(op.ContextSymbols["h"], op.ContextSymbols["h_kv"]);
+            Assert.Equal(4, op.ContextSymbols["d_h"]);
+        }
+    }
+
+    [Fact]
+    public void ProjectorContext_DoesNotBorrowTheTextOrAudioHeadLayout()
+    {
+        var config = ModelConfigReader.Read(System.Text.Encoding.UTF8.GetBytes("""
+            {"text_config":{"hidden_size":64,"num_attention_heads":8,"num_key_value_heads":2,"head_dim":8},
+             "encoder_config":{"hidden_dim":32,"num_heads":4,"dim_head":8},
+             "projector_config":{"hidden_size":16,"num_attention_heads":4}}
+            """));
+        var tensors = new[] { "query", "key", "value" }
+            .Select(name => T("projector.qformer.encoder.layer.3.attention.attention." + name + ".weight", 16, 16)).ToList();
+        tensors.Add(T("projector.qformer.encoder.layer.3.attention.output.dense.weight", 16, 16));
+        var anatomy = ModelOperatorRecognizer.Recognize(tensors, config.IntegerFields, null,
+            OperatorTemplateManifest.Governed, config.JsonIntegerFields);
+        var attention = Assert.Single(anatomy.Operators, op => op.Family == "attention");
+        Assert.Equal(16, attention.ContextSymbols["d"]);
+        Assert.Equal(4, attention.ContextSymbols["h"]);
+        Assert.Equal(4, attention.ContextSymbols["h_kv"]);
+        Assert.Equal(4, attention.ContextSymbols["d_h"]);
+        Assert.DoesNotContain(attention.Slots, slot => slot.IsAmbiguous);
+    }
+
+    [Theory]
+    [InlineData("stage.{ordinal")]
+    [InlineData("stage.{ordinal}.{ordinal}")]
+    [InlineData("stage.{0bad}")]
+    public void InvalidSourceCaptures_AreRejectedAtRecipeLoad(string pattern)
+    {
+        Assert.Throws<InvalidDataException>(() => new OperatorContext([pattern], "d", ["/width/{ordinal}"], null));
+    }
+
+    [Fact]
+    public void MissingHeadConfig_IsResolvedFromConnectedProjectionAndNormShapes()
+    {
+        const string path = "package.layers.7.attention.";
+        var tensors = new[] {
+            T(path + "q_proj.base_layer.weight", 32, 32),
+            T(path + "q_proj.lora_A.weight", 4, 32), T(path + "q_proj.lora_B.weight", 32, 4),
+            T(path + "k_proj.weight", 16, 32), T(path + "v_proj.weight", 16, 32),
+            T(path + "o_proj.weight", 32, 32), T(path + "q_norm.weight", 4), T(path + "k_norm.weight", 4),
+        };
+        var anatomy = ModelOperatorRecognizer.Recognize(tensors, new Dictionary<string, long> { ["hidden_size"] = 32 }, null);
+        var attention = Assert.Single(anatomy.Operators, op => op.Family == "attention");
+        Assert.Equal(8, attention.ContextSymbols["h"]);
+        Assert.Equal(4, attention.ContextSymbols["h_kv"]);
+        Assert.Equal(4, attention.ContextSymbols["d_h"]);
+        Assert.Equal(path + "q_proj.base_layer.weight", attention.Slot("q")!.Tensor);
+        Assert.DoesNotContain(attention.Slots, slot => slot.IsAmbiguous);
+        Assert.Single(anatomy.Operators, op => op.Family == "low-rank");
+        Assert.DoesNotContain(anatomy.Operators, op => op.Family == "mlp");
+        var withoutNorms = ModelOperatorRecognizer.Recognize(tensors.Where(t => t.Shape.Length == 2).ToArray(),
+            new Dictionary<string, long> { ["hidden_size"] = 32 }, null);
+        Assert.DoesNotContain(withoutNorms.Operators, op => op.Family == "attention");
+        var unrelatedNorm = tensors.Where(t => t.Shape.Length == 2 && !t.Name.Contains("lora", StringComparison.Ordinal))
+            .Select(t => t with { Shape = [32, 32] }).Append(T("package.layers.7.input_layernorm.weight", 32)).ToArray();
+        Assert.DoesNotContain(ModelOperatorRecognizer.Recognize(unrelatedNorm,
+            new Dictionary<string, long> { ["hidden_size"] = 32 }, null).Operators, op => op.Family == "attention");
+    }
+
+    [Theory]
+    [InlineData("2*h*d_h", 256, 8L)]
+    [InlineData("(h+1)*d_h", 144, 8L)]
+    [InlineData("h+4", 12, 8L)]
+    [InlineData("4-h", 1, 3L)]
+    [InlineData("d_h/h", 2, 8L)]
+    [InlineData("h*d_h", 127, null)]
+    [InlineData("h/h", 1, null)]
+    [InlineData("h*k", 128, null)]
+    [InlineData("h*0", 3, null)]
+    public void ShapeInference_RequiresOneExactPositiveSolution(string expression, long size, long? expected)
+    {
+        var result = ShapeExpression.Parse(expression).Infer(size, new Dictionary<string, long> { ["d_h"] = 16 });
+        Assert.Equal(expected, result?.Value);
+        if (expected is not null) Assert.Equal("h", result!.Value.Key);
+    }
+
+    [Fact]
     public void ConditionalAttentionRecipes_KeepContentPositionAndOptionalOperandsDistinct()
     {
         var tensors = new List<HeaderTensor>();

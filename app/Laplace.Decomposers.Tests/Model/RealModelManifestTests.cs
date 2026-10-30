@@ -70,7 +70,7 @@ public class RealModelManifestTests
         Assert.Equal(32000, a.Symbol("V"));
         Assert.Equal(22, a.Symbol("L"));
         Assert.Equal(64, a.Symbol("d_h"));
-        Assert.Equal("frequency", a.Symbols["d"].Basis);
+        Assert.Equal("config", a.Symbols["d"].Basis);
         Assert.Equal("tokenizer", a.Symbols["V"].Basis);
         Assert.Equal(22, a.Operators.Count(o => o.Operator == "self-attention"));
         Assert.Equal(22, a.Operators.Count(o => o.Operator == "gated-mlp"));

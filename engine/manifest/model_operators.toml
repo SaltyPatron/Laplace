@@ -19,6 +19,8 @@
 # Symbol binding:
 #   frequency  - the most frequent axis over every tensor shape
 #   config-or-frequency - declared config first; axis frequency only when absent
+#   config-or-shape - declared config/default first; otherwise infer a unique
+#                     positive integer from the connected operator's shape constraints
 #   tokenizer  - the tokenizer's id space (the smallest vocabulary axis that covers it)
 #   blocks     - the repeated block index read from the tensor paths (a hint)
 #   config     - the first declared config key, else the default expression
@@ -29,6 +31,8 @@
 # Config entries beginning with '/' address the complete config by JSON Pointer;
 # ordinary keys address its top level. Contexts do not turn a numeric ordinal
 # into identity: the full source path remains on every resulting operator.
+# A numeric constituent named {stage} in a context path can address the same
+# constituent of a config array, e.g. /vision_config/dim_embed/{stage}.
 
 # These are source path fields, not "first number is layer, second is expert".
 # Additional vendor spellings are recipe data; their complete ancestor path is
@@ -44,29 +48,129 @@ after = ["experts", "expert", "local_experts"]
 [[context]]
 paths = ["encoder.*", "*.encoder.*", "decoder.*", "*.decoder.*"]
 symbol = "d"
-config = ["d_model", "/text_config/d_model"]
+config = ["d_model", "/text_config/d_model", "/encoder_config/hidden_dim", "/perception/encoder/d_model"]
 
 [[context]]
 paths = ["encoder.*", "*.encoder.*"]
 symbol = "h"
-config = ["encoder_attention_heads", "/text_config/encoder_attention_heads"]
+config = ["encoder_attention_heads", "/text_config/encoder_attention_heads", "/encoder_config/num_heads", "/perception/encoder/n_heads"]
 
 [[context]]
 paths = ["decoder.*", "*.decoder.*"]
 symbol = "h"
 config = ["decoder_attention_heads", "/text_config/decoder_attention_heads"]
 
+# Independently configured language, audio, projector and visual branches.
+# These pointers are the fields written by the held packages' config.json.
+[[context]]
+paths = ["language_model.*", "*.language_model.*"]
+symbol = "d"
+config = ["/text_config/hidden_size", "/text_config/d_model"]
+
+[[context]]
+paths = ["language_model.*", "*.language_model.*"]
+symbol = "h"
+config = ["/text_config/num_attention_heads"]
+
+[[context]]
+paths = ["language_model.*", "*.language_model.*"]
+symbol = "h_kv"
+config = ["/text_config/num_key_value_heads"]
+default = "h"
+
+[[context]]
+paths = ["language_model.*", "*.language_model.*"]
+symbol = "d_h"
+config = ["/text_config/head_dim"]
+default = "d/h"
+
+[[context]]
+paths = ["llm.*"]
+symbol = "d"
+config = ["/perception/output_dim"]
+
+[[context]]
+paths = ["encoder.*", "*.encoder.*", "decoder.*", "*.decoder.*"]
+symbol = "h_kv"
+default = "h"
+
+[[context]]
+paths = ["encoder.*", "*.encoder.*", "decoder.*", "*.decoder.*"]
+symbol = "d_h"
+config = ["/encoder_config/dim_head"]
+default = "d/h"
+
+[[context]]
+paths = ["projector.*", "*.projector.*"]
+symbol = "d"
+config = ["/projector_config/hidden_size"]
+
+[[context]]
+paths = ["projector.*", "*.projector.*"]
+symbol = "h"
+config = ["/projector_config/num_attention_heads"]
+
+[[context]]
+paths = ["projector.*", "*.projector.*"]
+symbol = "h_kv"
+default = "h"
+
+[[context]]
+paths = ["projector.*", "*.projector.*"]
+symbol = "d_h"
+default = "d/h"
+
+[[context]]
+paths = ["visual.*", "*.visual.*"]
+symbol = "d"
+config = ["/vision_config/hidden_size"]
+
+[[context]]
+paths = ["visual.*", "*.visual.*"]
+symbol = "h"
+config = ["/vision_config/num_heads"]
+
+[[context]]
+paths = ["visual.*", "*.visual.*"]
+symbol = "h_kv"
+default = "h"
+
+[[context]]
+paths = ["visual.*", "*.visual.*"]
+symbol = "d_h"
+default = "d/h"
+
+[[context]]
+paths = ["vision_tower.blocks.{stage}", "*.vision_tower.blocks.{stage}"]
+symbol = "d"
+config = ["/vision_config/dim_embed/{stage}"]
+
+[[context]]
+paths = ["vision_tower.blocks.{stage}", "*.vision_tower.blocks.{stage}"]
+symbol = "h"
+config = ["/vision_config/num_heads/{stage}"]
+
+[[context]]
+paths = ["vision_tower.blocks.{stage}", "*.vision_tower.blocks.{stage}"]
+symbol = "h_kv"
+default = "h"
+
+[[context]]
+paths = ["vision_tower.blocks.{stage}", "*.vision_tower.blocks.{stage}"]
+symbol = "d_h"
+default = "d/h"
+
 [[symbol]]
 name = "d"
 meaning = "residual width"
 bind = "config-or-frequency"
-config = ["hidden_size", "n_embd", "d_model", "model_dim"]
+config = ["hidden_size", "n_embd", "d_model", "model_dim", "/text_config/hidden_size", "/text_config/d_model", "/perception/output_dim"]
 
 [[symbol]]
 name = "V"
 meaning = "vocabulary rows"
 bind = "tokenizer"
-config = ["vocab_size", "padded_vocab_size"]
+config = ["vocab_size", "padded_vocab_size", "/text_config/vocab_size"]
 
 [[symbol]]
 name = "L"
@@ -77,28 +181,28 @@ config = ["num_hidden_layers", "n_layer", "num_layers", "n_layers"]
 [[symbol]]
 name = "h"
 meaning = "query heads"
-bind = "config"
-config = ["num_attention_heads", "n_head", "num_heads"]
+bind = "config-or-shape"
+config = ["num_attention_heads", "n_head", "num_heads", "/text_config/num_attention_heads"]
 
 [[symbol]]
 name = "h_kv"
 meaning = "key/value heads"
-bind = "config"
-config = ["num_key_value_heads", "num_kv_heads", "n_kv_heads", "multi_query_group_num"]
+bind = "config-or-shape"
+config = ["num_key_value_heads", "num_kv_heads", "n_kv_heads", "multi_query_group_num", "/text_config/num_key_value_heads"]
 default = "h"
 
 [[symbol]]
 name = "d_h"
 meaning = "head width"
-bind = "config"
-config = ["head_dim", "attention_head_dim", "kv_channels"]
+bind = "config-or-shape"
+config = ["head_dim", "attention_head_dim", "kv_channels", "/text_config/head_dim"]
 default = "d/h"
 
 [[symbol]]
 name = "f"
 meaning = "feed-forward width"
 bind = "config"
-config = ["intermediate_size", "ffn_dim", "n_inner", "encoder_ffn_dim", "ffn_hidden_size"]
+config = ["intermediate_size", "ffn_dim", "n_inner", "encoder_ffn_dim", "ffn_hidden_size", "/text_config/intermediate_size", "/text_config/encoder_ffn_dim"]
 default = "4*d"
 
 [[symbol]]
@@ -340,6 +444,34 @@ required = true
 hints = ["encoder_attn.out_proj"]
 
 [[operator]]
+name = "query-fused-key-value"
+family = "attention"
+scopes = ["block"]
+locality = "owner"
+require_bound = true
+
+[[slot]]
+operator = "query-fused-key-value"
+role = "q"
+shape = ["h*d_h", "d"]
+required = true
+hints = ["to_q", "q_proj", "query"]
+
+[[slot]]
+operator = "query-fused-key-value"
+role = "kv"
+shape = ["2*h_kv*d_h", "d"]
+required = true
+hints = ["to_kv", "kv_proj", "key_value"]
+
+[[slot]]
+operator = "query-fused-key-value"
+role = "o"
+shape = ["d", "h*d_h"]
+required = true
+hints = ["to_out", "out_proj", "o_proj"]
+
+[[operator]]
 name = "self-attention"
 family = "attention"
 scopes = ["block"]
@@ -349,29 +481,30 @@ locality = "owner"
 operator = "self-attention"
 role = "q"
 shape = ["h*d_h", "d"]
+where = "h >= h_kv"
 required = true
-hints = ["q_proj", "query", "wq", "q_lin", "to_q"]
+hints = ["q_proj", "query", "wq", "q_lin", "to_q", "linear_q"]
 
 [[slot]]
 operator = "self-attention"
 role = "k"
 shape = ["h_kv*d_h", "d"]
 required = true
-hints = ["k_proj", "key", "wk", "k_lin", "to_k"]
+hints = ["k_proj", "key", "wk", "k_lin", "to_k", "linear_k"]
 
 [[slot]]
 operator = "self-attention"
 role = "v"
 shape = ["h_kv*d_h", "d"]
 required = true
-hints = ["v_proj", "value", "wv", "v_lin", "to_v"]
+hints = ["v_proj", "value", "wv", "v_lin", "to_v", "linear_v"]
 
 [[slot]]
 operator = "self-attention"
 role = "o"
 shape = ["d", "h*d_h"]
 required = true
-hints = ["o_proj", "out_proj", "wo", "attention.output.dense", "self_attn.dense", "out_lin", "to_out", "attn.c_proj"]
+hints = ["o_proj", "out_proj", "wo", "attention.output.dense", "crossattention.output.dense", "self_attn.dense", "out_lin", "to_out", "attn.c_proj", "linear_out"]
 
 [[slot]]
 operator = "self-attention"
@@ -407,7 +540,7 @@ role = "o"
 shape = ["d", "h*d_h"]
 orientation = "either"
 required = true
-hints = ["o_proj", "out_proj", "wo", "dense", "c_proj"]
+hints = ["o_proj", "out_proj", "wo", "dense", "c_proj", "attn.fn.proj", "attn.proj"]
 
 # Multi-head latent attention: keys and values pass through a shared low-rank
 # latent; the query may too.
@@ -473,6 +606,32 @@ shape = ["d", "h*d_v"]
 required = true
 hints = ["o_proj", "out_proj", "wo"]
 
+# Explicit factor pairs precede the general two-matrix FFN shape. Both operands
+# must carry a declared factor notation as well as matching their joint shapes.
+[[operator]]
+name = "low-rank-factor"
+family = "low-rank"
+scopes = ["block", "model"]
+repeat = true
+locality = "owner"
+require_bound = true
+require_hints = true
+
+[[slot]]
+operator = "low-rank-factor"
+role = "down"
+shape = ["r", "d"]
+required = true
+where = "r < d"
+hints = ["_a_proj", "lora_a", "down"]
+
+[[slot]]
+operator = "low-rank-factor"
+role = "up"
+shape = ["_", "r"]
+required = true
+hints = ["_b_proj", "lora_b", "up"]
+
 [[operator]]
 name = "gated-mlp"
 family = "mlp"
@@ -532,7 +691,7 @@ role = "up"
 shape = ["w", "d"]
 orientation = "either"
 required = true
-hints = ["up_proj", "fc1", "c_fc", "intermediate.dense", "dense_h_to_4h", "fc_in", "lin1"]
+hints = ["up_proj", "fc1", "c_fc", "intermediate.dense", "intermediate_query.dense", "dense_h_to_4h", "fc_in", "lin1", "linear1"]
 
 [[slot]]
 operator = "plain-mlp"
@@ -540,7 +699,7 @@ role = "down"
 shape = ["d", "w"]
 orientation = "either"
 required = true
-hints = ["down_proj", "fc2", "mlp.c_proj", "output.dense", "dense_4h_to_h", "fc_out", "lin2"]
+hints = ["down_proj", "fc2", "mlp.c_proj", "output.dense", "output_query.dense", "dense_4h_to_h", "fc_out", "lin2", "linear2"]
 
 [[operator]]
 name = "moe-router"
@@ -605,24 +764,3 @@ role = "post-mlp"
 shape = ["d"]
 required = false
 hints = ["post_feedforward_layernorm", "post_mlp_layernorm"]
-
-[[operator]]
-name = "low-rank-factor"
-family = "low-rank"
-scopes = ["block", "model"]
-repeat = true
-
-[[slot]]
-operator = "low-rank-factor"
-role = "down"
-shape = ["r", "d"]
-required = true
-where = "r < d"
-hints = ["_a_proj", "lora_a", "down"]
-
-[[slot]]
-operator = "low-rank-factor"
-role = "up"
-shape = ["_", "r"]
-required = true
-hints = ["_b_proj", "lora_b", "up"]

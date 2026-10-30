@@ -9,6 +9,65 @@ namespace Laplace.Decomposers.Model.Tests;
 
 public sealed class ModelOperatorPackageTests(ITestOutputHelper output)
 {
+    private sealed record FarmPackage(string Name, string Directory, int Mlps, int Attention);
+
+    [SkippableFact]
+    [Trait("Category", "RequiresQualification")]
+    public void SourcePackageBindings_MatchTheModelFarm()
+    {
+        string? roster = Environment.GetEnvironmentVariable("LAPLACE_MODEL_FARM_ROSTER");
+        string? root = Environment.GetEnvironmentVariable("LAPLACE_MODEL_ROOT");
+        Skip.If(string.IsNullOrWhiteSpace(roster) || string.IsNullOrWhiteSpace(root),
+            "LAPLACE_MODEL_FARM_ROSTER and LAPLACE_MODEL_ROOT select the held source packages");
+        var packages = JsonSerializer.Deserialize<FarmPackage[]>(File.ReadAllText(roster!),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        Assert.NotEmpty(packages);
+        var reports = new List<object>();
+        var errors = new List<string>();
+        var total = Stopwatch.StartNew();
+        foreach (FarmPackage package in packages)
+        {
+            var clock = Stopwatch.StartNew();
+            try
+            {
+                string directory = Path.Combine(root!, package.Directory);
+                var config = ModelConfigReader.Read(Path.Combine(directory, "config.json"));
+                var tensors = SafetensorsContainerParser.ParseModel(directory);
+                var manifest = ModelManifest.Recognize(tensors, config, null, package.Name);
+                var mlps = manifest.Anatomy.Operators.Where(op => op.Family == "mlp").ToArray();
+                var attention = manifest.Anatomy.Operators.Where(op => op.Family == "attention").ToArray();
+                var ambiguous = mlps.Concat(attention).Where(op => op.Slots.Any(slot => slot.IsAmbiguous)).ToArray();
+                var outside = manifest.Anatomy.Operators.Where(op => op.Scope != "model")
+                    .SelectMany(op => op.Slots.Where(slot => slot.IsBound)
+                        .Where(slot => !slot.Tensor!.StartsWith(op.SourcePath + ".", StringComparison.Ordinal)))
+                    .ToArray();
+                if (mlps.Length != package.Mlps) errors.Add($"{package.Name}: expected {package.Mlps} MLP operators, got {mlps.Length}");
+                if (attention.Length != package.Attention) errors.Add($"{package.Name}: expected {package.Attention} attention operators, got {attention.Length}");
+                if (ambiguous.Length != 0) errors.Add($"{package.Name}: {ambiguous.Length} ambiguous MLP/attention operators");
+                if (outside.Length != 0) errors.Add($"{package.Name}: {outside.Length} operands outside their source container");
+                reports.Add(new { package.Name, directory, observedAt = DateTimeOffset.UtcNow,
+                    elapsedMs = clock.Elapsed.TotalMilliseconds, headers = tensors.Count,
+                    mlps = mlps.Length, attention = attention.Length, ambiguous = ambiguous.Length,
+                    scopes = manifest.Anatomy.Operators, unrecognized = manifest.Anatomy.Unrecognized,
+                    conflicts = manifest.Anatomy.Conflicts });
+                output.WriteLine($"{package.Name}: mlp={mlps.Length}/{package.Mlps}, attention={attention.Length}/{package.Attention}, "
+                    + $"ambiguous={ambiguous.Length}, outside={outside.Length}, elapsed={clock.Elapsed}");
+            }
+            catch (Exception error)
+            {
+                errors.Add($"{package.Name}: {error}");
+                reports.Add(new { package.Name, error = error.ToString() });
+            }
+        }
+        if (Environment.GetEnvironmentVariable("LAPLACE_MODEL_FARM_REPORT") is { Length: > 0 } path)
+        {
+            Assert.True(Path.IsPathFullyQualified(path));
+            File.WriteAllText(path, JsonSerializer.Serialize(new { observedAt = DateTimeOffset.UtcNow,
+                elapsedMs = total.Elapsed.TotalMilliseconds, packages = reports, errors }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
+    }
+
     [SkippableFact]
     [Trait("Category", "RequiresQualification")]
     public void PackageOperators_ExecuteOverTheCompleteCanonicalVocabulary()
