@@ -151,7 +151,6 @@ if(NOT EXISTS "${LAPLACE_POSTGRES_SOURCE}/CMakeLists.txt")
 endif()
 set(LAPLACE_PG_INSTALL_LIBDIR "${LAPLACE_EXT_LIBDIR}")
 set(LAPLACE_PG_INSTALL_SHAREDIR "${LAPLACE_EXT_SHAREDIR}")
-set(LAPLACE_PG_MODULE_PATHNAME "laplace")
 add_subdirectory("${LAPLACE_POSTGRES_SOURCE}" postgres)
 
 add_subdirectory(extension)
