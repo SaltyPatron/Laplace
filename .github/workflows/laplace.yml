@@ -125,14 +125,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: b4e0584145c4c6d52962e3647696c6152592240a
+          ref: d11a6ea16ace5e5819f08ea27fb7c466a4bd3bbd
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: e7df4ef96fabd6dc52e1899226c64cc892f93773
+          ref: 098dca0188465bae4ad4ef9ea267f72998b537ee
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -332,14 +332,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: b4e0584145c4c6d52962e3647696c6152592240a
+          ref: d11a6ea16ace5e5819f08ea27fb7c466a4bd3bbd
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: e7df4ef96fabd6dc52e1899226c64cc892f93773
+          ref: 098dca0188465bae4ad4ef9ea267f72998b537ee
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
