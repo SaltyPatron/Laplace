@@ -116,3 +116,13 @@ grep -Fxq "LAPLACE_OPS_LOG_DIR=$LAPLACE_MCP_LOG_DIR" "$work/runtime/laplace-mcp.
 grep -Fxq "LAPLACE_AGENTS_CONFIG=$LAPLACE_MCP_STATE_DIR/agents.json" "$work/runtime/laplace-mcp.env"
 grep -Fxq "LAPLACE_OUT=$LAPLACE_MCP_STATE_DIR/out" "$work/runtime/laplace-mcp.env"
 echo 'PASS API/MCP substrate identities and MCP writable state remain separate from deployment'
+
+# The seed child receives corpus input without rewriting the persistent state root.
+sed -n '/^phase_seed() {/,/^}/p' "$root/deploy/linux/site.sh" >> "$work/functions.sh"
+mkdir -p "$work/source/scripts" "$LAPLACE_INSTALL_PREFIX/lib" "$SITE_WORK/cli"
+printf fixture > "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_fixture.so"
+printf 'printf "%%s\\n" "$INGEST" "$LAPLACE_DATA_ROOT" > "$SITE_WORK/seed-roots"\n' > "$work/source/scripts/ensure-foundation.sh"
+ROOT="$work/source" LAPLACE_DBNAME=fixture LAPLACE_SEED_ARGS= bash -c 'set -euo pipefail; say(){ :; }; dotnet_app(){ :; }; source "$SITE_WORK/functions.sh"; phase_seed'
+printf '%s\n' "$LAPLACE_DATA" "$LAPLACE_DATA_ROOT" > "$work/expected-seed-roots"
+cmp "$SITE_WORK/seed-roots" "$work/expected-seed-roots"
+echo 'PASS seed corpus input and persistent state roots stay distinct'

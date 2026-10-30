@@ -41,7 +41,9 @@ LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-${LAPLACE_PG_DIR:-/usr/local/pgsql}}"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_APP_DIR="${LAPLACE_APP_DIR:-$LAPLACE_INSTALL_PREFIX/app}"
 LAPLACE_DEPSRC="${LAPLACE_DEPSRC:-/repos/src}"
-LAPLACE_DATA_ROOT="${LAPLACE_DATA_ROOT:-${LAPLACE_DATA:-/vault/Data}}"
+# LAPLACE_DATA_ROOT is persistent installation state (also on Windows), not
+# the corpus estate. Keep source material on its independently declared root.
+export LAPLACE_DATA="${LAPLACE_DATA:-/vault/Data}"
 SITE_WORK="${LAPLACE_SITE_WORK:-${LAPLACE_WORK:-/repos/work}/mono-site}"
 SITE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:-/repos/build}/Laplace/release}"
 # the PostGIS the cluster runs was built by setup.sh deps out of tree: its liblwgeom is the one laplace_geom links
@@ -140,7 +142,7 @@ fathom                $LAPLACE_DEPSRC/Fathom
 spectra               $LAPLACE_DEPSRC/spectra
 postgis               $LAPLACE_DEPSRC/postgis
 eigen                 ${LAPLACE_EIGEN:-/usr/include/eigen3}
-tree-sitter-grammars  $LAPLACE_DATA_ROOT/TreeSitter
+tree-sitter-grammars  $LAPLACE_DATA/TreeSitter
 EOF
   ln -sfn "$LAPLACE_GEOS_PROJ_PREFIX" "$d/geos"; ln -sfn "$LAPLACE_GEOS_PROJ_PREFIX" "$d/proj"
   [[ -f "$LAPLACE_POSTGIS_BUILD/liblwgeom/.libs/liblwgeom.a" ]] || fail "no liblwgeom.a under $LAPLACE_POSTGIS_BUILD (Operations setup.sh deps builds PostGIS there)"
@@ -164,8 +166,8 @@ phase_build() {
   need_pg
   say "build: engine, perf-caches, extensions"
   oneapi
-  local ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA_ROOT/UCD/Public/UCD/latest}"
-  local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings}"
+  local ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA/UCD/Public/UCD/latest}"
+  local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA/Games/Chess/lichess-openings}"
   local recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
   local operations_source="${LAPLACE_OPERATIONS:-$LAPLACE_DEPSRC/Laplace-Operations}"
@@ -251,7 +253,7 @@ phase_install() {
   missing="$(find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec env LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" ldd {} + 2>/dev/null | grep 'not found' | sort -u || true)"
   [[ -z "$missing" ]] || fail "unresolved libraries under $LAPLACE_INSTALL_PREFIX/lib: $missing"
   local openings_src
-  for openings_src in "${LAPLACE_CHESS_OPENINGS:-}" "$LAPLACE_DATA_ROOT/Games/Chess/lichess-openings" "$LAPLACE_DATA_ROOT/Games/Chess/openings"; do
+  for openings_src in "${LAPLACE_CHESS_OPENINGS:-}" "$LAPLACE_DATA/Games/Chess/lichess-openings" "$LAPLACE_DATA/Games/Chess/openings"; do
     if [[ -n "$openings_src" && -f "$openings_src/a.tsv" ]]; then
       mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings"
       cp -f "$openings_src"/{a,b,c,d,e}.tsv "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings/" 2>/dev/null || true
@@ -433,7 +435,7 @@ LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
 ASPNETCORE_URLS=$LAPLACE_API_URL
 LAPLACE_OPS_LOG_DIR=${LAPLACE_API_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
-LAPLACE_DATA=${LAPLACE_DATA:-$LAPLACE_DATA_ROOT}
+LAPLACE_DATA=$LAPLACE_DATA
 LAPLACE_INSTALL_PREFIX=$LAPLACE_INSTALL_PREFIX
 LAPLACE_CLI_EXE=$LAPLACE_APP_DIR/cli/Laplace.Cli
 LAPLACE_UCI=$LAPLACE_APP_DIR/uci/laplace-uci
@@ -466,7 +468,7 @@ LAPLACE_OPS_LOG_DIR=${LAPLACE_MCP_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 ${LAPLACE_MCP_STATE_DIR:+LAPLACE_AGENTS_CONFIG=$LAPLACE_MCP_STATE_DIR/agents.json}
 ${LAPLACE_MCP_STATE_DIR:+LAPLACE_OUT=$LAPLACE_MCP_STATE_DIR/out}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
-LAPLACE_DATA=${LAPLACE_DATA:-$LAPLACE_DATA_ROOT}
+LAPLACE_DATA=$LAPLACE_DATA
 LAPLACE_INSTALL_PREFIX=$LAPLACE_INSTALL_PREFIX
 EOF
   chmod 0664 "$env_file.new"; mv -f "$env_file.new" "$env_file"
@@ -764,7 +766,7 @@ phase_seed() {
   cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$cli/"
   mkdir -p "$SITE_WORK/scratch" "$SITE_WORK/ingest-logs/ops"
   # shellcheck disable=SC2086
-  INGEST="$LAPLACE_DATA_ROOT" LAPLACE_DATA_ROOT="$LAPLACE_DATA_ROOT" \
+  INGEST="$LAPLACE_DATA" \
     LAPLACE_INGEST_RUNTIME="$cli" LAPLACE_SCRATCH_ROOT="$SITE_WORK/scratch" INGEST_LOGDIR="$SITE_WORK/ingest-logs" \
     LAPLACE_OPS_LOG_DIR="$SITE_WORK/ingest-logs/ops" \
     bash "$ROOT/scripts/ensure-foundation.sh" ${LAPLACE_SEED_ARGS:-}

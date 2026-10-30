@@ -11,7 +11,7 @@
 
 static std::string VaultOrSkip(const char* rel)
 {
-    const char* root = std::getenv("LAPLACE_DATA_ROOT");
+    const char* root = std::getenv("LAPLACE_DATA");
     if (!root || !*root) root = "/vault/Data";
     return std::string(root) + "/" + rel;
 }
