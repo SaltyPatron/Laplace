@@ -87,7 +87,9 @@ env:
 concurrency:
   group: laplace-promotion
   cancel-in-progress: false
-  queue: max
+  # Finish the active promotion; only the newest pending revision still needs
+  # delivery. Per-host maintenance jobs retain their own explicit queues.
+  queue: single
 
 # Host groups also coordinate jobs with other workflows. Status and verification
 # remain independently callable; the promotion queue is not a machine lock.

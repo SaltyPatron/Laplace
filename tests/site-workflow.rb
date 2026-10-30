@@ -49,6 +49,8 @@ class SiteWorkflow < Minitest::Test
     paths = triggers.fetch('push').fetch('paths')
     assert_includes paths, '!tests/**'
     assert_includes paths, '!web/scripts/verify-*.mjs'
+    assert_equal false, @workflow.fetch('concurrency').fetch('cancel-in-progress')
+    assert_equal 'single', @workflow.fetch('concurrency').fetch('queue')
     refute @jobs.key?('mainline-qualification')
     groups = %w[deliver production-build production].map do |name|
       concurrency = @jobs.fetch(name).fetch('concurrency')
