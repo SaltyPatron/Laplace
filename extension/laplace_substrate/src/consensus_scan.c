@@ -26,6 +26,7 @@
 #include "utils/rel.h"
 #include "utils/rls.h"
 #include "utils/snapmgr.h"
+#include "portability/instr_time.h"
 
 #include "consensus_scan.h"
 #include "spi_common.h"
@@ -81,7 +82,16 @@ scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types, bool witn
     parameters->params[3]=(ParamExternData){.value=BoolGetDatum(witnesses),.isnull=false,
         .pflags=PARAM_FLAG_CONST,.ptype=BOOLOID};
     NativeConsensusRead read={caller,consume,context,stats};
+    instr_time started,elapsed;INSTR_TIME_SET_CURRENT(started);
+    uint64 before=stats->rows_read;
+    elog(DEBUG1,"Native consensus cells: subjects %d; objects %d; types %d; witnesses %s",
+        subjects?ArrayGetNItems(ARR_NDIM(subjects),ARR_DIMS(subjects)):-1,
+        objects?ArrayGetNItems(ARR_NDIM(objects),ARR_DIMS(objects)):-1,
+        types?ArrayGetNItems(ARR_NDIM(types),ARR_DIMS(types)):-1,witnesses?"yes":"no");
     lp_pg_execute_stream_until(plan,parameters,true,native_consensus_row,&read);
+    INSTR_TIME_SET_CURRENT(elapsed);INSTR_TIME_SUBTRACT(elapsed,started);
+    elog(DEBUG1,"Native consensus cells: " UINT64_FORMAT " rows; %.3f ms",
+        stats->rows_read-before,INSTR_TIME_GET_MILLISEC(elapsed));
     pfree(parameters);
     laplace_spi_finish(finish);
 }
@@ -604,7 +614,12 @@ void laplace_consensus_witness_counts(const hash128_t *claims,int count,int64 *c
     ParamListInfo parameters=makeParamList(1);
     parameters->params[0]=(ParamExternData){.value=PointerGetDatum(ids),.isnull=false,.pflags=PARAM_FLAG_CONST,.ptype=BYTEAARRAYOID};
     NativeWitnessCounts read={count,0,counts};
+    instr_time started,elapsed;INSTR_TIME_SET_CURRENT(started);
+    elog(DEBUG1,"Native witness counts: %d claims",count);
     lp_pg_execute_stream_until(plan,parameters,true,native_witness_count,&read);
+    INSTR_TIME_SET_CURRENT(elapsed);INSTR_TIME_SUBTRACT(elapsed,started);
+    elog(DEBUG1,"Native witness counts: %d results; %.3f ms",read.received,
+        INSTR_TIME_GET_MILLISEC(elapsed));
     if(read.received!=count)elog(ERROR,"Native witness count lost input ordinals");
     pfree(parameters);pfree(ids);laplace_spi_finish(finish);
 }
