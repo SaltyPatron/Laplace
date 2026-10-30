@@ -1037,7 +1037,14 @@ SQL_QUERY("readiness.inventory", "",
     "SELECT FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid=p.prolang "
     "JOIN pg_catalog.pg_depend d ON d.objid=p.oid AND d.classid='pg_catalog.pg_proc'::pg_catalog.regclass "
     "JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid AND d.refclassid='pg_catalog.pg_extension'::pg_catalog.regclass "
-    "WHERE e.extname='laplace' AND d.deptype='e' AND l.lanname='c' AND p.prosrc=b.symbol) ORDER BY b.symbol) "
+    "WHERE e.extname='laplace' AND d.deptype='e' AND l.lanname='c' AND p.prosrc=b.symbol) ORDER BY b.symbol), "
+    "ARRAY(SELECT required.name FROM (VALUES('physicality_paths'),('physicality_assertions')) required(name) WHERE NOT EXISTS("
+    "SELECT FROM pg_catalog.pg_class c JOIN pg_catalog.pg_index i ON i.indexrelid=c.oid "
+    "WHERE c.relnamespace='public'::pg_catalog.regnamespace AND c.relname=required.name "
+    "AND i.indrelid='public.physicality'::pg_catalog.regclass AND i.indisvalid AND i.indisready AND NOT EXISTS("
+    "SELECT FROM pg_catalog.pg_partition_tree('public.physicality'::pg_catalog.regclass) leaf WHERE leaf.isleaf AND NOT EXISTS("
+    "SELECT FROM pg_catalog.pg_index child JOIN pg_catalog.pg_inherits h ON h.inhrelid=child.indexrelid "
+    "WHERE h.inhparent=i.indexrelid AND child.indrelid=leaf.relid AND child.indisvalid AND child.indisready))) ORDER BY required.name) "
     "FROM ops.substrate_counts()")
 
 SQL_QUERY("laplace.substrate_health_metrics", "",
