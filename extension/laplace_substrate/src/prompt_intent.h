@@ -10,6 +10,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/sql_catalog.h"
 #include "laplace/core/relation_law.h"
 #include "prompt_input.h"
 #include "prompt_structure.h"
@@ -355,7 +356,7 @@ laplace_prompt_geometry_append(LaplacePromptIntent *intent,
 
 /* Geometry response of one anchor: an indexed S3 angular KNN over same-tier
  * points, then at most fanout equal, predecessor and successor Hilbert keys
- * each from the btree, ranked in C by exact unsigned 128-bit delta. Two SPI
+ * each from the btree, ranked in C by exact unsigned Native-key delta. Two SPI
  * reads per anchor, whatever the candidate count. */
 static inline void
 laplace_prompt_geometry_scan_anchor(
@@ -364,7 +365,6 @@ laplace_prompt_geometry_scan_anchor(
     hash128_t *root_angular, int *root_angular_count)
 {
     const double *coords = tier_tree_coord_array(intent->input->tree);
-    const hilbert128_t *hilberts = tier_tree_hilbert_array(intent->input->tree);
     const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
     Datum source_datum = hash128_to_datum(source);
     Datum angular_args[7] = {
@@ -399,14 +399,9 @@ laplace_prompt_geometry_scan_anchor(
     }
     SPI_freetuptable(SPI_tuptable);
 
-    bytea *hilbert = palloc(VARHDRSZ + 16);
-    SET_VARSIZE(hilbert, VARHDRSZ + 16);
-    memcpy(VARDATA(hilbert), hilberts[node].bytes, 16);
-    Datum hilbert_args[4] = {
-        PointerGetDatum(hilbert), source_datum, Int32GetDatum(fanout),
-        Int16GetDatum((int16) tiers[node])
-    };
-    rc = SPI_execute_plan(hilbert_plan, hilbert_args, NULL, true, 0);
+    /* The stored Native key has 64 bits. Project the anchor with that same
+     * owner instead of comparing it to the retired 128-bit key encoding. */
+    rc = SPI_execute_plan(hilbert_plan, angular_args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "prompt geometry: Hilbert locality read failed: %s",
              SPI_result_code_string(rc));
@@ -425,13 +420,17 @@ laplace_prompt_geometry_scan_anchor(
             SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &key_null);
         if (id_null || key_null)
             elog(ERROR, "prompt geometry: indexed Hilbert row contains NULL");
+        bool anchor_null;
+        Datum anchor_value = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 3, &anchor_null);
         bytea *key = DatumGetByteaPP(key_value);
-        if (VARSIZE_ANY_EXHDR(key) != 16)
-            elog(ERROR, "prompt geometry: stored Hilbert key is not 128 bits");
+        bytea *anchor = anchor_null ? NULL : DatumGetByteaPP(anchor_value);
+        if (VARSIZE_ANY_EXHDR(key) != 8 || !anchor || VARSIZE_ANY_EXHDR(anchor) != 8)
+            elog(ERROR, "prompt geometry: Native Hilbert key is not 64 bits");
+        uint8 left[16] = {0}, right[16] = {0};
+        memcpy(left + 8, VARDATA_ANY(anchor), 8);
+        memcpy(right + 8, VARDATA_ANY(key), 8);
         ordered[row].id = datum_to_hash128(id_value);
-        laplace_prompt_hilbert_delta(
-            hilberts[node].bytes, (const uint8 *) VARDATA_ANY(key),
-            ordered[row].delta);
+        laplace_prompt_hilbert_delta(left, right, ordered[row].delta);
     }
     if (hilbert_count > 1)
         qsort(ordered, hilbert_count, sizeof(*ordered), laplace_prompt_hilbert_compare);
@@ -441,7 +440,6 @@ laplace_prompt_geometry_scan_anchor(
             (uint32) row + 1u, ordered[row].delta, 0.0);
     SPI_freetuptable(SPI_tuptable);
     if (ordered) pfree(ordered);
-    pfree(hilbert);
     pfree(DatumGetPointer(source_datum));
 }
 
@@ -539,57 +537,11 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
         return;
     }
 
-    const char *angular_sql =
-        "WITH nearest AS MATERIALIZED ("
-        " SELECT w.id,w.coord,public.laplace_direction_4d(w.coord) <<->> "
-        " public.laplace_direction_4d(public.ST_SetSRID("
-        " public.ST_MakePoint($1,$2,$3,$4),0)) chord"
-        " FROM laplace.v_word_points w"
-        " WHERE w.id<>$5 AND w.tier=$7"
-        " AND public.laplace_direction_4d(w.coord) IS NOT NULL"
-        " AND public.laplace_direction_4d(public.ST_SetSRID("
-        " public.ST_MakePoint($1,$2,$3,$4),0)) IS NOT NULL"
-        " ORDER BY public.laplace_direction_4d(w.coord) <<->> "
-        " public.laplace_direction_4d(public.ST_SetSRID("
-        " public.ST_MakePoint($1,$2,$3,$4),0)) LIMIT $6"
-        ") SELECT id,public.laplace_angular_distance_4d("
-        " coord,public.ST_SetSRID(public.ST_MakePoint($1,$2,$3,$4),0))"
-        " FROM nearest ORDER BY chord,id";
-    const char *hilbert_sql =
-        "WITH same AS MATERIALIZED ("
-        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " JOIN laplace.entities e ON e.id=p.entity_id"
-        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index=$1 AND p.entity_id<>$2"
-        " ORDER BY p.entity_id LIMIT $3"
-        "),before AS MATERIALIZED ("
-        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " JOIN laplace.entities e ON e.id=p.entity_id"
-        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index<$1 AND p.entity_id<>$2"
-        " ORDER BY p.hilbert_index DESC,p.entity_id DESC LIMIT $3"
-        "),after AS MATERIALIZED ("
-        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " JOIN laplace.entities e ON e.id=p.entity_id"
-        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index>$1 AND p.entity_id<>$2"
-        " ORDER BY p.hilbert_index ASC,p.entity_id ASC LIMIT $3"
-        ") SELECT * FROM same UNION ALL SELECT * FROM before UNION ALL SELECT * FROM after";
-    const char *frechet_sql =
-        "WITH anchor_points AS MATERIALIZED ("
-        " SELECT public.ST_MakePoint(p.x,p.y,p.z,p.m) coord,p.ord"
-        " FROM unnest($1::float8[],$2::float8[],$3::float8[],$4::float8[])"
-        " WITH ORDINALITY AS p(x,y,z,m,ord)"
-        "),anchor AS MATERIALIZED ("
-        " SELECT public.ST_MakeLine(coord ORDER BY ord) curve FROM anchor_points"
-        "),candidates AS MATERIALIZED ("
-        " SELECT u.id,u.ord,structural.entity_curve(u.id) curve"
-        " FROM unnest($5::bytea[]) WITH ORDINALITY AS u(id,ord)"
-        "),scored AS ("
-        " SELECT c.id,public.laplace_frechet_4d(c.curve,a.curve) d"
-        " FROM candidates c CROSS JOIN anchor a"
-        " WHERE c.curve IS NOT NULL AND a.curve IS NOT NULL"
-        ") SELECT id,d FROM scored WHERE d IS NOT NULL ORDER BY d,id LIMIT $6";
+    const char *angular_sql = laplace_sql_query_text("geometry.prompt.angular");
+    const char *hilbert_sql = laplace_sql_query_text("geometry.prompt.hilbert");
+    const char *frechet_sql = laplace_sql_query_text("geometry.prompt.frechet");
     Oid angular_types[7] = {
         FLOAT8OID,FLOAT8OID,FLOAT8OID,FLOAT8OID,BYTEAOID,INT4OID,INT2OID};
-    Oid hilbert_types[4] = {BYTEAOID,BYTEAOID,INT4OID,INT2OID};
     Oid frechet_types[6] = {
         FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,
         BYTEAARRAYOID,INT4OID};
@@ -605,7 +557,7 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
             angular_sql, 7, angular_types,
             CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr hilbert = SPI_prepare_cursor(
-            hilbert_sql, 4, hilbert_types,
+            hilbert_sql, 7, angular_types,
             CURSOR_OPT_PARALLEL_OK);
         SPIPlanPtr frechet = SPI_prepare_cursor(
             frechet_sql, 6, frechet_types,

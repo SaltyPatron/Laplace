@@ -1,0 +1,17 @@
+-- Shared canonical angular KNN for prompt compilation, CLI and web exploration.
+CREATE OR REPLACE FUNCTION structural.angular_nearest(p_anchor geometry,p_k integer,
+    p_tier smallint DEFAULT NULL,p_except bytea DEFAULT NULL)
+RETURNS TABLE(entity_id bytea,tier smallint,coord geometry,distance double precision)
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH nearest AS MATERIALIZED (
+        SELECT e.id,e.tier,e.coord,e.coord OPERATOR(public.<=>) p_anchor AS distance
+        FROM public.entity e
+        WHERE (p_tier IS NULL OR e.tier=p_tier)
+          AND e.id IS DISTINCT FROM encode(p_except,'hex')::public.blake3
+        ORDER BY e.coord OPERATOR(public.<=>) p_anchor
+        FETCH FIRST (greatest(p_k,0)) ROWS WITH TIES
+    )
+    SELECT public.blake3_send(n.id),n.tier,n.coord,n.distance FROM nearest n
+    WHERE n.distance IS NOT NULL ORDER BY n.distance,n.id LIMIT greatest(p_k,0);
+END;

@@ -6,48 +6,6 @@ CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH anchor AS MATERIALIZED (
-        SELECT p.entity_id AS v_id, p.coord AS v_coord, structural.entity_curve(p.entity_id) AS v_curve
-        FROM converse.prompt_state(p_word) s
-        JOIN laplace.physicalities p ON p.entity_id = s.id AND p.type = 1
-        WHERE p.coord IS NOT NULL
-          AND public.laplace_direction_4d(p.coord) IS NOT NULL
-        ORDER BY s.ord, p.id
-        LIMIT 1
-    ),
-    nearest AS MATERIALIZED (
-        SELECT p.entity_id, p.coord,
-               public.laplace_angular_distance_4d(p.coord, a.v_coord) AS geo
-        FROM anchor a
-        JOIN laplace.physicalities p
-          ON p.type = 1
-         AND p.entity_id <> a.v_id
-        WHERE public.laplace_direction_4d(p.coord) IS NOT NULL
-        ORDER BY public.laplace_direction_4d(p.coord)
-                 <<->> public.laplace_direction_4d(a.v_coord)
-        LIMIT p_k
-    ),
-    ordered AS MATERIALIZED (
-        SELECT t.entity_id, t.geo, row_number() OVER (ORDER BY t.geo) AS ord
-        FROM nearest t
-    ),
-    curves AS MATERIALIZED (
-        SELECT o.entity_id, o.geo, o.ord, structural.entity_curve(o.entity_id) AS curve
-        FROM ordered o
-    ),
-    labels AS MATERIALIZED (
-        SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
-        FROM curves c
-    )
-    SELECT r.lbl, r.geo, r.frechet
-    FROM (
-        SELECT labels.l[c.ord] AS lbl, c.geo, c.ord,
-               CASE WHEN c.curve IS NOT NULL AND a.v_curve IS NOT NULL
-                    THEN public.laplace_frechet_4d(c.curve, a.v_curve) END AS frechet
-        FROM curves c
-        CROSS JOIN labels
-        CROSS JOIN anchor a
-    ) r
-    WHERE r.lbl IS NOT NULL AND r.lbl <> ''
-    ORDER BY r.ord;
+    SELECT n.neighbor,n.geodesic,n.frechet
+    FROM structural.neighbors_of(converse.resolve_ref(p_word),p_k) n;
 END;

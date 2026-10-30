@@ -21,46 +21,18 @@ CREATE OR REPLACE FUNCTION structural.neighbors_of(
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH anchor AS MATERIALIZED (
-        SELECT a.coord AS v_coord, structural.entity_curve(p_id) AS v_curve
-        FROM structural.word_anchor(p_id) a
-        WHERE a.coord IS NOT NULL
-          AND public.laplace_direction_4d(a.coord) IS NOT NULL
-    ),
-    nearest AS MATERIALIZED (
-        SELECT p.entity_id, p.coord, p.radius_origin,
-               public.laplace_angular_distance_4d(p.coord, a.v_coord) AS geo
-        FROM anchor a
-        JOIN laplace.physicalities p
-          ON p.type = 1
-         AND p.entity_id <> p_id
-        WHERE public.laplace_direction_4d(p.coord) IS NOT NULL
-        ORDER BY public.laplace_direction_4d(p.coord)
-                 <<->> public.laplace_direction_4d(a.v_coord)
-        LIMIT p_k
-    ),
-    ordered AS MATERIALIZED (
-        SELECT n.entity_id, n.coord, n.radius_origin, n.geo,
-               row_number() OVER (ORDER BY n.geo) AS ord
-        FROM nearest n
-    ),
-    curves AS MATERIALIZED (
-        SELECT o.entity_id, o.coord, o.radius_origin, o.geo, o.ord,
-               structural.entity_curve(o.entity_id) AS curve
-        FROM ordered o
-    ),
-    labels AS MATERIALIZED (
-        SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
-        FROM curves c
+        SELECT e.coord,structural.entity_curve(p_id) AS curve
+        FROM public.laplace_entities(ARRAY[encode(p_id,'hex')::public.blake3]) e
+    ), nearest AS MATERIALIZED (
+        SELECT n.* FROM anchor a CROSS JOIN LATERAL
+            structural.angular_nearest(a.coord,p_k,NULL,p_id) n
+    ), labels AS MATERIALIZED (
+        SELECT * FROM public.laplace_labels(ARRAY(SELECT encode(entity_id,'hex')::public.blake3 FROM nearest ORDER BY entity_id))
     )
-    SELECT c.entity_id,
-           COALESCE(NULLIF(labels.l[c.ord], ''), 'Unrealized entity'),
-           public.ST_X(c.coord), public.ST_Y(c.coord), public.ST_Z(c.coord), public.ST_M(c.coord),
-           c.radius_origin,
-           c.geo,
-           CASE WHEN c.curve IS NOT NULL AND a.v_curve IS NOT NULL
-                THEN public.laplace_frechet_4d(c.curve, a.v_curve) END
-    FROM curves c
-    CROSS JOIN labels
-    CROSS JOIN anchor a
-    ORDER BY c.ord;
+    SELECT n.entity_id,coalesce(l.content,'Unrealized entity'),
+           public.ST_X(n.coord),public.ST_Y(n.coord),public.ST_Z(n.coord),public.ST_M(n.coord),
+           public.laplace_radius_origin(n.coord),n.distance,
+           public.laplace_frechet_4d(structural.entity_curve(n.entity_id),a.curve)
+    FROM nearest n CROSS JOIN anchor a LEFT JOIN labels l ON l.entity=encode(n.entity_id,'hex')::public.blake3
+    ORDER BY n.distance,n.entity_id;
 END;

@@ -3,8 +3,5 @@ CREATE OR REPLACE FUNCTION structural.entity_physicality_coord(p_entity bytea)
     RETURNS geometry
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT p.coord
-    FROM laplace.physicalities p
-    WHERE p.entity_id = p_entity AND p.type = 1 AND p.coord IS NOT NULL
-    LIMIT 1;
+    SELECT e.coord FROM public.laplace_entities(ARRAY[encode(p_entity,'hex')::public.blake3]) e;
 END;

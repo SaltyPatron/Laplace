@@ -423,10 +423,30 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims]);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
+        await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(structural.entity_curve($1))", connection, transaction))
+        {
+            curve.Parameters.AddWithValue(witness.Id.ToBytes());
+            // The repeated xc run must remain three ordered points. The curve
+            // comes entirely from Native carriers while compatibility rows are absent.
+            Assert.Equal(8, await curve.ExecuteScalarAsync());
+        }
         await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
         {
             absent.Parameters.AddWithValue(new[] { x.Id.ToBytes(), y.Id.ToBytes() });
             Assert.Equal(0L, await absent.ExecuteScalarAsync());
+        }
+        await using (var neighbors = NpgsqlCatalog.Command(connection, transaction, "structural.neighbors_of", x.Id.ToBytes(), 3))
+        await using (var rows = await neighbors.ExecuteReaderAsync())
+        {
+            int count = 0;
+            while (await rows.ReadAsync())
+            {
+                Assert.Equal(32, rows.GetString(0).Length);
+                Assert.False(string.IsNullOrWhiteSpace(rows.GetString(1)));
+                Assert.True(double.IsFinite(rows.GetDouble(2)));
+                count++;
+            }
+            Assert.Equal(3, count);
         }
         await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
         {
@@ -608,6 +628,83 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.Equal(definedName + ": native witnessed definition", rows.GetString(0));
             Assert.Equal(1L, rows.GetInt64(1));
             Assert.False(await rows.ReadAsync());
+        }
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task NativeGeometrySelectorsMatchExhaustiveCanonicalMetrics()
+    {
+        await using var connection = await _source.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var seed = new NpgsqlCommand("""
+            INSERT INTO public.entity(id,tier,coord,hilbert)
+            SELECT public.laplace_id(s),public.laplace_tier(s),public.laplace_coord(s),public.laplace_hilbert(s)
+            FROM (SELECT 'nativegeometry'||i::text AS s FROM generate_series(1,160) i
+                  UNION ALL SELECT chr(i) FROM generate_series(256,415) i
+                  UNION ALL SELECT chr(i) FROM generate_series(900000,900160) i) words
+            ON CONFLICT(id) DO NOTHING
+            """, connection, transaction))
+            await seed.ExecuteNonQueryAsync();
+        var fixtures = new List<(byte[] Id, short Tier, double[] Coord)>();
+        await using (var anchors = new NpgsqlCommand("""
+            SELECT DISTINCT ON(hilbert<0) public.blake3_send(id),tier,
+                public.ST_X(coord),public.ST_Y(coord),public.ST_Z(coord),public.ST_M(coord)
+            FROM public.entity ORDER BY hilbert<0,id
+            """, connection, transaction))
+        await using (var rows = await anchors.ExecuteReaderAsync())
+            while (await rows.ReadAsync()) fixtures.Add((rows.GetFieldValue<byte[]>(0), rows.GetInt16(1),
+                Enumerable.Range(2,4).Select(rows.GetDouble).ToArray()));
+        Assert.Equal(2, fixtures.Count);
+        foreach (var anchor in fixtures)
+        {
+            const int fan = 7;
+            object[] arguments = [.. anchor.Coord.Cast<object>(), anchor.Id, fan, anchor.Tier];
+            var angular = new List<byte[]>();
+            await using (var query = NpgsqlCatalog.Command(connection, transaction, "geometry.prompt.angular", arguments))
+            await using (var rows = await query.ExecuteReaderAsync())
+                while (await rows.ReadAsync()) angular.Add(rows.GetFieldValue<byte[]>(0));
+            var expectedAngular = new List<byte[]>();
+            await using (var query = new NpgsqlCommand("""
+                SELECT public.blake3_send(id) FROM public.entity
+                WHERE tier=$1 AND public.blake3_send(id)<>$2
+                ORDER BY public.laplace_angular4d(coord,public.ST_MakePoint($3,$4,$5,$6)),id LIMIT $7
+                """, connection, transaction))
+            {
+                query.Parameters.AddWithValue(anchor.Tier); query.Parameters.AddWithValue(anchor.Id);
+                foreach (double coordinate in anchor.Coord) query.Parameters.AddWithValue(coordinate);
+                query.Parameters.AddWithValue(fan);
+                await using var rows = await query.ExecuteReaderAsync();
+                while (await rows.ReadAsync()) expectedAngular.Add(rows.GetFieldValue<byte[]>(0));
+            }
+            Assert.Equal(expectedAngular.Select(Convert.ToHexString), angular.Select(Convert.ToHexString));
+            var hilbert = new List<(byte[] Id, ulong Delta)>();
+            await using (var query = NpgsqlCatalog.Command(connection, transaction, "geometry.prompt.hilbert", arguments))
+            await using (var rows = await query.ExecuteReaderAsync())
+                while (await rows.ReadAsync())
+                {
+                    ulong key = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(rows.GetFieldValue<byte[]>(1));
+                    ulong origin = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(rows.GetFieldValue<byte[]>(2));
+                    hilbert.Add((rows.GetFieldValue<byte[]>(0), key > origin ? key - origin : origin - key));
+                }
+            var expectedHilbert = new List<string>();
+            await using (var query = new NpgsqlCommand("""
+                WITH origin AS (SELECT public.laplace_hilbert4(public.ST_MakePoint($3,$4,$5,$6)) h)
+                SELECT encode(public.blake3_send(e.id),'hex') FROM public.entity e CROSS JOIN origin o
+                WHERE e.tier=$1 AND public.blake3_send(e.id)<>$2
+                ORDER BY abs((e.hilbert::numeric+CASE WHEN e.hilbert<0 THEN 18446744073709551616::numeric ELSE 0 END)
+                    -(o.h::numeric+CASE WHEN o.h<0 THEN 18446744073709551616::numeric ELSE 0 END)),e.id LIMIT $7
+                """, connection, transaction))
+            {
+                query.Parameters.AddWithValue(anchor.Tier); query.Parameters.AddWithValue(anchor.Id);
+                foreach (double coordinate in anchor.Coord) query.Parameters.AddWithValue(coordinate);
+                query.Parameters.AddWithValue(fan);
+                await using var rows = await query.ExecuteReaderAsync();
+                while (await rows.ReadAsync()) expectedHilbert.Add(rows.GetString(0));
+            }
+            Assert.Equal(expectedHilbert, hilbert.OrderBy(item => item.Delta)
+                .ThenBy(item => Convert.ToHexString(item.Id), StringComparer.Ordinal).Take(fan)
+                .Select(item => Convert.ToHexStringLower(item.Id)));
         }
         await transaction.RollbackAsync();
     }
