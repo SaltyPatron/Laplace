@@ -54,6 +54,9 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/tests/classify-ingest-exit.test.sh",
             "scripts/test-application-publish.py",
             "scripts/test-managed-db-scheduling.py",
+            "tests/site-workflow.rb",
+            "tests/bootstrap-stockfish.sh",
+            "web/scripts/verify-live-runtime.mjs",
         ):
             with self.subTest(path=path):
                 self.assertTrue(MODULE.ignored(path))

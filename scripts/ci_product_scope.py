@@ -18,6 +18,7 @@ PRODUCT_IGNORED_PREFIXES = (
     "deploy/windows/",
     "scripts/win/",
     "scripts/test-suites/",
+    "tests/",
 )
 
 PRODUCT_IGNORED_SUFFIXES = (
