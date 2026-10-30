@@ -197,6 +197,7 @@ public static class NpgsqlCatalog
                 "int4" => NpgsqlDbType.Integer,
                 "int8" => NpgsqlDbType.Bigint,
                 "text" => NpgsqlDbType.Text,
+                "jsonb" => NpgsqlDbType.Jsonb,
                 "bool" => NpgsqlDbType.Boolean,
                 "float8" => NpgsqlDbType.Double,
                 "timestamptz" => NpgsqlDbType.TimestampTz,

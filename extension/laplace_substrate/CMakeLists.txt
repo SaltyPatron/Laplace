@@ -26,6 +26,8 @@ set(EXT_EXECUTION_SOURCES
     src/hash_leaves.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.c
     src/content_resolve.c
+    src/declared_paths.c
+    src/constituents_closure.c
     src/text_root_placements.c
     src/content_trajectory_read.c
     src/physicality_descriptor_readback.c
@@ -94,6 +96,16 @@ if(WIN32)
     list(APPEND _execution_inputs "${_core_archive}" "${_dynamics_archive}"
         ${LAPLACE_CORE_STATIC_DEPENDENCIES})
 endif()
+
+get_filename_component(_query_engine_source "${LAPLACE_POSTGRES_SOURCE}/../Laplace-Engine" ABSOLUTE)
+if(LAPLACE_RECIPE_ENGINE_SOURCE)
+    set(_query_engine_source "${LAPLACE_RECIPE_ENGINE_SOURCE}")
+endif()
+file(GLOB_RECURSE _query_producer_inputs CONFIGURE_DEPENDS
+    "${_query_engine_source}/recipes/*.recipe" "${_query_engine_source}/recipes/*.format")
+list(APPEND _execution_inputs ${_query_producer_inputs}
+    "${_query_engine_source}/firmware/program.firmware"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/query-program-embed.py")
 list(SORT _execution_inputs)
 set(_execution_hashes "testing=${BUILD_TESTING};${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
 foreach(_input IN LISTS _execution_inputs)
@@ -110,6 +122,12 @@ endforeach()
 string(SHA256 _execution_hash "${_execution_hashes}")
 string(SUBSTRING "${_execution_hash}" 0 16 _execution_version)
 set(EXT_EXECUTION_MODULE "laplace_execution_${_execution_version}")
+if(WIN32)
+    set(_query_program_include "${LAPLACE_ENGINE_BUILD}/core")
+else()
+    get_target_property(_query_program_include laplace_core_static BINARY_DIR)
+endif()
+
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/laplace_execution_module.txt"
     CONTENT "${EXT_EXECUTION_MODULE}\n")
 
@@ -200,7 +218,6 @@ set(EXT_C_SOURCES
     src/chess_roster.c
     src/chess_rating_repair.c
     src/display_native.c
-    src/constituents_closure.c
     src/geometry_successors.c
     src/highway_mask.c
     src/vocabulary.c
@@ -362,6 +379,13 @@ set(EXT_SQL_MODULES
     ${_install_deps}
     ${_upgrade_deps}
 )
+
+target_include_directories(laplace_execution PRIVATE "${_query_program_include}")
+if(TARGET laplace_query_program)
+    add_dependencies(laplace_execution laplace_query_program)
+elseif(NOT EXISTS "${_query_program_include}/query_program.h")
+    message(FATAL_ERROR "Build the shared laplace_query_program target before the standalone extensions")
+endif()
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)
 set(EXT_TMP_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.tmp)

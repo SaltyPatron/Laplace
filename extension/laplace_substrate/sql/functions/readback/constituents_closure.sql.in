@@ -14,5 +14,5 @@ RETURNS TABLE(
     run_length integer,
     flags bigint
 )
-AS 'MODULE_PATHNAME', 'pg_laplace_constituents_closure'
+AS 'EXECUTION_LIBRARY', 'pg_laplace_constituents_closure'
 LANGUAGE C STABLE PARALLEL RESTRICTED;

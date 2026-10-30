@@ -392,3 +392,18 @@ The PostgreSQL extension links engine code into the server-side extension build,
 Protocol/product surfaces include the CLI, OpenAI-compatible endpoint, MCP endpoint, chess/UCI surfaces and the web product. These are adapters over the same substrate/operation laws, not separate intelligence implementations.
 
 ---
+
+The Native claim reader owns directed endpoint and positive mask nomination in
+the existing multicolumn GIN index, with exact lossy bitmap rechecks. Stored-only
+identity resolution uses the same canonical Native primary-key reader as the
+other exact-ID consumers; it does not infer absence from the older adapter tables.
+
+`ops.declared_paths(roots, program, capacity)` owns complete producer-declared
+query paths in Native C. It retains a frontier across one set read per depth and
+returns complete paths with actual claim IDs, labels, standings and witness
+counts. Duplicate root/program occurrences are preserved; overflow raises an
+error. The managed UI reader maps these rows, and recall uses the same operation.
+`converse.query_program()` embeds the Engine compiler's output from the selected
+firmware and producer recipes during the normal build. It has no second relation
+vocabulary or request-time compiler. Callers may pass another compiled program
+explicitly to the same Native executor.

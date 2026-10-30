@@ -385,6 +385,23 @@ add_custom_command(OUTPUT "${LAPLACE_HIGHWAY_BIN}"
     VERBATIM)
 add_custom_target(laplace_highway_perfcache DEPENDS "${LAPLACE_HIGHWAY_BIN}")
 
+# The same producer compiler supplies the database and managed query consumers.
+# It runs once during the normal build, never while answering a request.
+set(LAPLACE_QUERY_PROGRAM_HEADER "${CMAKE_CURRENT_BINARY_DIR}/query_program.h")
+add_custom_command(OUTPUT "${LAPLACE_QUERY_PROGRAM_HEADER}"
+    COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/query-program-embed.py"
+        --engine $<TARGET_FILE:laplace_engine>
+        --recipes "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes"
+        --tier0 "${LAPLACE_PERFCACHE_BIN}"
+        --firmware "${LAPLACE_RECIPE_ENGINE_SOURCE}/firmware/program.firmware"
+        --output "${LAPLACE_QUERY_PROGRAM_HEADER}"
+    DEPENDS laplace_engine "${LAPLACE_PERFCACHE_BIN}" ${_recipe_runtime_sources}
+        "${LAPLACE_RECIPE_ENGINE_SOURCE}/firmware/program.firmware"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/query-program-embed.py"
+    COMMENT "Compile shared Native query declarations" VERBATIM)
+add_custom_target(laplace_query_program DEPENDS "${LAPLACE_QUERY_PROGRAM_HEADER}")
+
+
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
 # before identity/geometry. It is never admitted as a sentence or chess content.

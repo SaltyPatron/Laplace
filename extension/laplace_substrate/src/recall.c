@@ -1,4 +1,5 @@
 #include "postgres.h"
+#include "common/int.h"
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
@@ -17,6 +18,8 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "recall_route.h"
+#include "consensus_scan.h"
+#include "laplace/core/sql_catalog.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_recall_intent);
 PG_FUNCTION_INFO_V1(pg_laplace_recall);
@@ -565,247 +568,58 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
 }
 
 
-typedef struct DefineCandidate
+typedef struct { hash128_t id;Datum label;int64 score,witnesses; } DefineCandidate;
+typedef struct { hash128_t id;int ordinal; } DefineIndex;
+typedef struct { DefineCandidate *rows;HTAB *index; } DefineContext;
+static void define_context_cell(const LaplaceConsensusRow *row,void *context)
 {
-    Datum   definition_id;
-    int64   score_fp;
-    int64   witness_count;
-} DefineCandidate;
-
-typedef struct DefineCandBuf
-{
-    DefineCandidate *rows;
-    int              n;
-    int              cap;
-} DefineCandBuf;
-
-static void
-define_cand_add(DefineCandBuf *buf, Datum definition_id, int64 score_fp, int64 witness_count)
-{
-    if (buf->n >= buf->cap)
-    {
-        buf->cap = buf->cap < 16 ? 16 : buf->cap * 2;
-        buf->rows = buf->rows
-            ? repalloc(buf->rows, buf->cap * sizeof(DefineCandidate))
-            : palloc(buf->cap * sizeof(DefineCandidate));
-    }
-    buf->rows[buf->n].definition_id = copy_bytea_datum(definition_id);
-    buf->rows[buf->n].score_fp = score_fp;
-    buf->rows[buf->n].witness_count = witness_count;
-    buf->n++;
+    DefineContext *read=context;if(row->object_is_null)return;
+    DefineIndex *entry=hash_search(read->index,&row->object,HASH_FIND,NULL);
+    if(entry && pg_add_s64_overflow(read->rows[entry->ordinal].score,
+        laplace_effective_mu_fp(row->rating,row->rd),&read->rows[entry->ordinal].score))
+        ereport(ERROR,(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),errmsg("Definition context exceeds integer capacity")));
 }
-
-static int
-define_cand_cmp(const void *a, const void *b)
+static int define_order(const void *a,const void *b)
 {
-    int64 sa = ((const DefineCandidate *) a)->score_fp;
-    int64 sb = ((const DefineCandidate *) b)->score_fp;
-    return (sb > sa) - (sb < sa);
+    const DefineCandidate *left=a,*right=b;
+    if(left->score!=right->score)return left->score>right->score?-1:1;
+    return memcmp(&left->id,&right->id,sizeof(left->id));
 }
-
-/*
- * Glosses for an entity, ranked by consensus standing. Reads the entity's
- * lexical peers once, then the unrefuted HAS_SENSE -> HAS_DEFINITION cells
- * and direct HAS_DEFINITION cells over the whole peer set, adds the standing of
- * any cells from the context ids to each gloss, ranks in C, and realizes text
- * only for the top p_limit.
- */
-static void
-define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *buf)
+/* The producer-declared program is shared with the UI; no retired relation
+ * vocabulary or a parallel legacy entity/consensus stack decides a gloss. */
+static void define_fast_impl(Datum word,ArrayType *context,int limit,ReplyBuf *buf)
 {
-    hash128_t   has_sense    = rel_type_id("HAS_SENSE");
-    hash128_t   is_sense_of  = rel_type_id("IS_SENSE_OF");
-    hash128_t   has_def      = rel_type_id("HAS_DEFINITION");
-    Datum       peers_arr;
-    bool        peers_null;
-    int         rc;
-    DefineCandBuf cands = {0};
-    bool        has_context = p_context_arr != NULL && ArrayGetNItems(
-                                   ARR_NDIM(p_context_arr), ARR_DIMS(p_context_arr)) > 0;
-
-
-    {
-        Oid   types[1] = { BYTEAOID };
-        Datum args[1] = { p_word };
-
-        rc = SPI_execute_with_args(
-            "SELECT lexical.lexical_peers($1)", 1, types, args, NULL, true, 1);
-        if (rc != SPI_OK_SELECT || SPI_processed == 0)
-            return;
-        peers_arr = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &peers_null);
-        if (peers_null)
-            return;
-        peers_arr = copy_bytea_datum(peers_arr);
-    }
-
-
-    {
-        /* word --HAS_SENSE--> sense [--IS_SENSE_OF--> synset] --HAS_DEFINITION--> gloss */
-        Oid   types[4] = { BYTEAARRAYOID, BYTEAOID, BYTEAOID, BYTEAOID };
-        Datum args[4] = { peers_arr, hash128_to_datum(&has_sense), hash128_to_datum(&has_def), hash128_to_datum(&is_sense_of) };
-
-        rc = SPI_execute_with_args(
-            "SELECT g.object_id, g.rating, g.rd, g.witness_count, "
-            "       s.rating, s.rd, ss.rating, ss.rd "
-            "FROM laplace.v_consensus_unrefuted s "
-            "LEFT JOIN laplace.v_consensus_unrefuted ss ON ss.subject_id = s.object_id AND ss.type_id = $4 "
-            "JOIN laplace.v_consensus_unrefuted g ON g.subject_id = COALESCE(ss.object_id, s.object_id) AND g.type_id = $3 "
-            "WHERE s.subject_id = ANY($1) AND s.type_id = $2",
-            4, types, args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "define_fast: sense query failed: %s", SPI_result_code_string(rc));
-        for (uint64 r = 0; r < SPI_processed; r++)
-        {
-            HeapTuple tup = SPI_tuptable->vals[r];
-            TupleDesc td  = SPI_tuptable->tupdesc;
-            bool n0, n1, n2, n3, ns1, ns2, ns3, ns4;
-            Datum obj   = SPI_getbinval(tup, td, 1, &n0);
-            Datum rat   = SPI_getbinval(tup, td, 2, &n1);
-            Datum rd    = SPI_getbinval(tup, td, 3, &n2);
-            Datum wc    = SPI_getbinval(tup, td, 4, &n3);
-            Datum srat  = SPI_getbinval(tup, td, 5, &ns1);
-            Datum srd   = SPI_getbinval(tup, td, 6, &ns2);
-            Datum ssrat = SPI_getbinval(tup, td, 7, &ns3);
-            Datum ssrd  = SPI_getbinval(tup, td, 8, &ns4);
-            int64 score = laplace_effective_mu_fp(DatumGetInt64(rat), DatumGetInt64(rd));
-
-            if (!ns1 && !ns2) score += laplace_effective_mu_fp(DatumGetInt64(srat), DatumGetInt64(srd));
-            if (!ns3 && !ns4) score += laplace_effective_mu_fp(DatumGetInt64(ssrat), DatumGetInt64(ssrd));
-            define_cand_add(&cands, obj, score, n3 ? 0 : DatumGetInt64(wc));
+    if(limit<0)ereport(ERROR,(errcode(ERRCODE_INVALID_PARAMETER_VALUE),errmsg("Definition limit must not be negative")));
+    if(!limit)return;
+    static SPIPlanPtr plan;Oid types[]={BYTEAOID};Datum args[]={word};
+    spi_common_ensure_plan(&plan,laplace_sql_query_text("recall.declared_definitions"),1,types);
+    int rc=SPI_execute_plan(plan,args,NULL,true,0);
+    if(rc!=SPI_OK_SELECT)elog(ERROR,"Declared definition read failed");
+    uint64 n=SPI_processed;
+    if(n>MaxAllocSize/sizeof(DefineCandidate))elog(ERROR,"Declared definitions exceed memory capacity");
+    DefineCandidate *rows=palloc(Max(n,1)*sizeof(*rows));Datum *ids=palloc(Max(n,1)*sizeof(Datum));
+    HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(DefineIndex);
+    HTAB *index=hash_create("Declared definition context",Max(n,16),&ctl,HASH_ELEM|HASH_BLOBS);
+    for(uint64 i=0;i<n;i++){
+        bool missing;Datum values[4];
+        for(int j=0;j<4;j++){
+            values[j]=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,j+1,&missing);
+            if(missing)elog(ERROR,"Declared definition has a null field");
         }
+        rows[i]=(DefineCandidate){datum_to_hash128(values[0]),datumCopy(values[1],false,-1),DatumGetInt64(values[2]),DatumGetInt64(values[3])};
+        ids[i]=hash128_to_datum(&rows[i].id);
+        DefineIndex *entry=hash_search(index,&rows[i].id,HASH_ENTER,NULL);entry->ordinal=(int)i;
     }
-
-
-    {
-        Oid   types[2] = { BYTEAARRAYOID, BYTEAOID };
-        Datum args[2] = { peers_arr, hash128_to_datum(&has_def) };
-
-        rc = SPI_execute_with_args(
-            "SELECT g.object_id, g.rating, g.rd, g.witness_count "
-            "FROM laplace.v_consensus_unrefuted g "
-            "WHERE g.subject_id = ANY($1) AND g.type_id = $2",
-            2, types, args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "define_fast: peer-definition query failed: %s", SPI_result_code_string(rc));
-        for (uint64 r = 0; r < SPI_processed; r++)
-        {
-            HeapTuple tup = SPI_tuptable->vals[r];
-            TupleDesc td  = SPI_tuptable->tupdesc;
-            bool n0, n1, n2, n3;
-            Datum obj = SPI_getbinval(tup, td, 1, &n0);
-            Datum rat = SPI_getbinval(tup, td, 2, &n1);
-            Datum rd  = SPI_getbinval(tup, td, 3, &n2);
-            Datum wc  = SPI_getbinval(tup, td, 4, &n3);
-            int64 score = laplace_effective_mu_fp(DatumGetInt64(rat), DatumGetInt64(rd));
-
-            define_cand_add(&cands, obj, score, n3 ? 0 : DatumGetInt64(wc));
-        }
+    if(n && context && ArrayGetNItems(ARR_NDIM(context),ARR_DIMS(context))){
+        ArrayType *candidates=construct_array(ids,(int)n,BYTEAOID,-1,false,TYPALIGN_INT);
+        DefineContext read={rows,index};
+        laplace_consensus_scan(context,candidates,NULL,define_context_cell,&read,NULL);
+        pfree(candidates);
     }
-
-    if (cands.n == 0)
-        return;
-
-
-    if (has_context)
-    {
-        Datum *ids = (Datum *) palloc(sizeof(Datum) * cands.n);
-        int   *chain_next;
-        HTAB  *cand_idx;
-        HASHCTL ctl;
-        ArrayType *cand_arr;
-        Oid   types[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-        Datum args[2];
-
-        for (int i = 0; i < cands.n; i++) ids[i] = cands.rows[i].definition_id;
-        cand_arr = construct_array(ids, cands.n, BYTEAOID, -1, false, 'i');
-        args[0] = PointerGetDatum(cand_arr);
-        args[1] = PointerGetDatum(p_context_arr);
-
-        /* Candidates indexed by definition id. One gloss can be reached by
-         * several routes, so duplicates are chained (built back to front, so
-         * chains run in ascending index) and every route gets the context
-         * credit. */
-        {
-            typedef struct DefineCandIdxEntry
-            {
-                hash128_t key;
-                int       head;
-            } DefineCandIdxEntry;
-
-            memset(&ctl, 0, sizeof(ctl));
-            ctl.keysize   = sizeof(hash128_t);
-            ctl.entrysize = sizeof(DefineCandIdxEntry);
-            cand_idx = hash_create("define_fast cand idx", cands.n > 16 ? cands.n : 16,
-                                   &ctl, HASH_ELEM | HASH_BLOBS);
-            chain_next = (int *) palloc(sizeof(int) * cands.n);
-            for (int i = cands.n - 1; i >= 0; i--)
-            {
-                hash128_t key = datum_to_hash128(cands.rows[i].definition_id);
-                bool      found;
-                DefineCandIdxEntry *e = (DefineCandIdxEntry *)
-                    hash_search(cand_idx, &key, HASH_ENTER, &found);
-
-                chain_next[i] = found ? e->head : -1;
-                e->head = i;
-            }
-
-            rc = SPI_execute_with_args(
-                "SELECT c.object_id, sum(consensus.eff_mu(c.rating, c.rd)) "
-                "FROM laplace.v_consensus_unrefuted c "
-                "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) "
-                "GROUP BY c.object_id",
-                2, types, args, NULL, true, 0);
-            if (rc == SPI_OK_SELECT)
-            {
-                for (uint64 r = 0; r < SPI_processed; r++)
-                {
-                    HeapTuple tup = SPI_tuptable->vals[r];
-                    TupleDesc td  = SPI_tuptable->tupdesc;
-                    bool n0, n1;
-                    Datum obj = SPI_getbinval(tup, td, 1, &n0);
-                    Datum sum = SPI_getbinval(tup, td, 2, &n1);
-                    hash128_t key;
-                    bool      found;
-                    DefineCandIdxEntry *e;
-
-                    if (n1) continue;
-                    key = datum_to_hash128(obj);
-                    e = (DefineCandIdxEntry *)
-                        hash_search(cand_idx, &key, HASH_FIND, &found);
-                    if (!found) continue;
-                    for (int i = e->head; i >= 0; i = chain_next[i])
-                        cands.rows[i].score_fp += DatumGetInt64(sum);
-                }
-            }
-            hash_destroy(cand_idx);
-            pfree(chain_next);
-        }
-        pfree(ids);
-    }
-
-    qsort(cands.rows, cands.n, sizeof(DefineCandidate), define_cand_cmp);
-
-    {
-        int n_out = cands.n < p_limit ? cands.n : p_limit;
-
-        for (int i = 0; i < n_out; i++)
-        {
-            Datum text_datum = spi_render_text(cands.rows[i].definition_id);
-            Datum eff_mu_num;
-            bool  mu_null = false;
-
-            if (text_datum == (Datum) 0)
-                continue;
-            eff_mu_num = DirectFunctionCall2(numeric_round,
-                DirectFunctionCall2(numeric_div,
-                    DirectFunctionCall1(int8_numeric, Int64GetDatum(cands.rows[i].score_fp)),
-                    DirectFunctionCall1(int8_numeric, Int64GetDatum(INT64CONST(1000000000)))),
-                Int32GetDatum(3));
-            reply_buf_add(buf, text_datum, eff_mu_num,
-                         Int64GetDatum(cands.rows[i].witness_count),
-                         false, mu_null, false);
-        }
-    }
+    qsort(rows,(size_t)n,sizeof(*rows),define_order);
+    for(uint64 i=0;i<n && i<(uint64)limit;i++)
+        reply_buf_add(buf,rows[i].label,fp_display_numeric(rows[i].score),Int64GetDatum(rows[i].witnesses),false,false,false);
+    hash_destroy(index);pfree(ids);pfree(rows);
 }
 
 Datum

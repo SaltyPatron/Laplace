@@ -4,9 +4,10 @@ CREATE OR REPLACE FUNCTION converse.resolve_last_word(p_phrase text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT pw.id FROM converse.prompt_words(p_phrase) pw
-    JOIN laplace.entities e ON e.id=pw.id
-    WHERE pw.id IS NOT NULL
-    ORDER BY pw.ord DESC
-    LIMIT 1;
+    WITH words AS MATERIALIZED (SELECT p.*,row_number() OVER(ORDER BY ord) AS input_ordinal FROM converse.prompt_words(p_phrase) p),
+    recorded AS MATERIALIZED (
+      SELECT ordinal FROM @extschema:laplace@.laplace_present_ids(
+        ARRAY(SELECT encode(id,'hex')::@extschema:laplace@.blake3 FROM words ORDER BY ord)))
+    SELECT w.id FROM words w JOIN recorded r ON r.ordinal=w.input_ordinal
+    ORDER BY w.ord DESC LIMIT 1;
 END;

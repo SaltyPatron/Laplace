@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Text;
 using Laplace.Ingestion;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Laplace.SubstrateCRUD;
@@ -405,7 +406,21 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var ysense = Compose([y, language, context], 4);
         var link = Compose([xsense, predicate, ysense], 1);
         link.Said = 1;
-        var witness = Compose([xc, xc, xc, yc, link]);
+        string definedName = "defined" + Guid.NewGuid().ToString("N");
+        var defined = window.Text(Encoding.UTF8.GetBytes(definedName));
+        var definition = window.Text("native witnessed definition"u8);
+        var declared = await NativeRecipeExecution.QueryProgramAsync();
+        var senseRelation = window.Text("lexical sense"u8);
+        var referenceRelation = window.Text("reference"u8);
+        var definitionRelation = window.Text("definition of the synset"u8);
+        Assert.Equal(senseRelation.Id.ToBytes(), declared.Paths[0][0].Entity);
+        Assert.Equal(referenceRelation.Id.ToBytes(), declared.Paths[0][1].Entity);
+        Assert.Equal(definitionRelation.Id.ToBytes(), declared.Paths[0][2].Entity);
+        var definedSense = Compose([defined, language, context], 4);
+        var declaredClaims = new[] { Compose([defined, senseRelation, definedSense], 1),
+            Compose([definedSense, referenceRelation, context], 1), Compose([context, definitionRelation, definition], 1) };
+        for (int index = 0; index < declaredClaims.Length; index++) declaredClaims[index].Said = 1;
+        var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims]);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
         await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
@@ -418,7 +433,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             register.Parameters.AddWithValue(witness.Id);
             await register.ExecuteNonQueryAsync();
         }
-        foreach (var claim in new[] { xc, yc, link })
+        foreach (var claim in new[] { xc, yc, link }.Concat(declaredClaims))
         {
             await using var standing = new NpgsqlCommand("""
                 INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
@@ -552,6 +567,47 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.Equal("IS_ANTONYM_OF", read.GetString(1));
             Assert.Equal("shared", read.GetString(2));
             Assert.False(await read.ReadAsync());
+        }
+        // Identity resolution, UI path reads and recall share canonical stored
+        // content and the same producer-compiled program, with no legacy rows.
+        await using (var resolve = new NpgsqlCommand("SELECT converse.resolve_phrase($1),converse.resolve_last_word($1)", connection, transaction))
+        {
+            resolve.Parameters.AddWithValue(definedName);
+            await using var rows = await resolve.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(defined.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+            Assert.Equal(defined.Id.ToBytes(), rows.GetFieldValue<byte[]>(1));
+        }
+        await using (var compiled = new NpgsqlCommand("SELECT converse.query_program()::text", connection, transaction))
+        {
+            var installed = NativeQueryProgram.Parse(Encoding.UTF8.GetBytes((string)(await compiled.ExecuteScalarAsync())!));
+            Assert.Equal(declared.Paths.SelectMany(path => path.Select(r => (r.Declaration, Convert.ToHexString(r.Entity)))),
+                installed.Paths.SelectMany(path => path.Select(r => (r.Declaration, Convert.ToHexString(r.Entity)))));
+        }
+        var meanings = await NpgsqlSubstrateReads.DeclaredPathsAsync(connection, [defined.Id.ToBytes()], declared);
+        var meaning = Assert.Single(meanings);
+        Assert.Equal(3, meaning.Steps.Count);
+        Assert.Equal(definition.Id.ToBytes(), meaning.Steps[^1].EntityId);
+        Assert.Equal("native witnessed definition", meaning.Steps[^1].Label);
+        Assert.Equal(1, meaning.Steps[^1].Witnesses);
+        var part = new NativeQueryRelation("@fixture/relation", predicate.Id.ToBytes());
+        var duplicateProgram = new NativeQueryProgram([[part], [part], [part, part]], [part]);
+        var repeated = await NpgsqlSubstrateReads.DeclaredPathsAsync(connection,
+            [x.Id.ToBytes(), y.Id.ToBytes(), x.Id.ToBytes(), absentId.ToBytes()], duplicateProgram);
+        Assert.Equal(6, repeated.Count);
+        Assert.All(repeated, path =>
+        {
+            Assert.InRange(path.RootIndex, 0, 2); Assert.InRange(path.ProgramIndex, 0, 1);
+            Assert.Equal(value.Id.ToBytes(), Assert.Single(path.Steps).EntityId);
+        });
+        await using (var recall = new NpgsqlCommand("SELECT reply,witnesses FROM converse.recall($1)", connection, transaction))
+        {
+            recall.Parameters.AddWithValue(definedName);
+            await using var rows = await recall.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(definedName + ": native witnessed definition", rows.GetString(0));
+            Assert.Equal(1L, rows.GetInt64(1));
+            Assert.False(await rows.ReadAsync());
         }
         await transaction.RollbackAsync();
     }

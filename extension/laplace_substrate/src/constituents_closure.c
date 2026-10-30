@@ -18,6 +18,8 @@
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
 #include "perfcache_native.h"
+#include "laplace/core/sql_catalog.h"
+#include "spi_stream.h"
 
 /*
  * realize.constituents_closure(roots, max_depth)
@@ -37,6 +39,7 @@ static const char *CLOSURE_LEVEL_QUERY =
 /* Prepared once per backend; PostgreSQL chooses custom/generic plans for the
  * actual frontier and honors the operator's plan_cache_mode. */
 static SPIPlanPtr closure_level_plan = NULL;
+static SPIPlanPtr native_closure_plan = NULL;
 static Oid closure_st_asbinary_oid = InvalidOid;
 
 static Oid
@@ -210,6 +213,21 @@ typedef struct ClosureReadCtx
     MemoryContext owner;
 } ClosureReadCtx;
 
+static void native_closure_edge(TupleTableSlot *slot,void *context)
+{
+    ClosureReadCtx *read=context;Datum values[5];bool missing;
+    for(int i=0;i<5;i++){
+        values[i]=slot_getattr(slot,i+1,&missing);
+        if(missing)elog(ERROR,"Native constituent frontier contains a null field");
+    }
+    ClosureEdge edge={datum_to_hash128(values[0]),datum_to_hash128(values[2]),
+        DatumGetInt32(values[1]),DatumGetInt32(values[3]),DatumGetInt64(values[4])};
+    if(edge.ordinal<1 || edge.run_length<1)elog(ERROR,"Native constituent frontier contains an invalid span");
+    (void)hash_search(read->resolved,&edge.parent,HASH_ENTER,NULL);
+    edgevec_push(read->edges,&edge,read->owner);
+    frontier_add_if_new(read->visited,read->next,&edge.child,read->owner);
+}
+
 static void
 closure_consume_trajectory(Datum physicality, Datum entity, Datum geometry, void *opaque)
 {
@@ -300,7 +318,26 @@ pg_laplace_constituents_closure(PG_FUNCTION_ARGS)
                                      (int) Min(frontier.count, 1024), &rctl,
                                      HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
         ClosureReadCtx read_ctx = {as_binary, resolved, &edges, &next, visited, owner};
-        laplace_content_trajectory_read(arg_array, closure_consume_trajectory, &read_ctx);
+        if(!spi_connected){
+            if(laplace_spi_connect(&spi_top)!=SPI_OK_CONNECT)elog(ERROR,"constituents_closure: SPI_connect failed");
+            Oid types[]={BYTEAARRAYOID};
+            spi_common_ensure_plan(&native_closure_plan,laplace_sql_query_text("native.constituent_frontier"),1,types);
+            spi_connected=true;
+        }
+        {
+            Oid types[]={BYTEAARRAYOID};Datum args[]={PointerGetDatum(arg_array)};
+            laplace_spi_stream(native_closure_plan,1,types,args,NULL,native_closure_edge,&read_ctx);
+        }
+        /* Older typed physicalities remain a predecessor input. A canonical
+         * carrier always wins; only unresolved IDs probe that representation. */
+        if((size_t)hash_get_num_entries(resolved)<frontier.count){
+            int remaining=0;Datum *pending=palloc(frontier.count*sizeof(Datum));
+            for(size_t i=0;i<frontier.count;i++)
+                if(!hash_search(resolved,&frontier.ids[i],HASH_FIND,NULL))pending[remaining++]=ids[i];
+            ArrayType *legacy=construct_array(pending,remaining,BYTEAOID,-1,false,TYPALIGN_INT);
+            laplace_content_trajectory_read(legacy,closure_consume_trajectory,&read_ctx);
+            pfree(legacy);pfree(pending);
+        }
 
         if ((size_t) hash_get_num_entries(resolved) < frontier.count) {
             int rem_n = 0;
@@ -313,9 +350,9 @@ pg_laplace_constituents_closure(PG_FUNCTION_ARGS)
                 if (!spi_connected) {
                     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
                         elog(ERROR, "constituents_closure: SPI_connect failed");
-                    ensure_closure_level_plan();
                     spi_connected = true;
                 }
+                ensure_closure_level_plan();
                 ArrayType *rem_array = construct_array(rem_ids, rem_n,
                                                        BYTEAOID, -1, false, TYPALIGN_INT);
                 Datum args[1] = {PointerGetDatum(rem_array)};

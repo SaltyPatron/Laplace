@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 call "%~dp0env.cmd" || exit /b 1
 rem The extension imports these archives from the engine build. Refresh them
 rem before linking; an existing archive can belong to an older source revision.
-call "%~dp0build-engine.cmd" laplace_core_static laplace_dynamics_pg_static || exit /b 1
+call "%~dp0build-engine.cmd" laplace_core_static laplace_dynamics_pg_static laplace_query_program || exit /b 1
 pwsh -NoProfile -File "%~dp0assert-build-source.ps1" -SourceDirectory "%LAPLACE_ROOT%\extension" -BuildDirectory "%LAPLACE_EXT_BUILD%" || exit /b 1
 set "LAPLACE_RESOURCE_FLAGS="
 if defined LAPLACE_RC set LAPLACE_RESOURCE_FLAGS="-DCMAKE_RC_COMPILER=%LAPLACE_RC%"

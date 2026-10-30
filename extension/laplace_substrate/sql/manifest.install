@@ -491,3 +491,5 @@ functions/lexical/sense_audit.sql.in
 functions/converse/election_token_profile.sql.in
 functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in
+
+functions/query/declared_paths.sql.in

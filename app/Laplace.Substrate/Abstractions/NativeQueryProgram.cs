@@ -8,6 +8,14 @@ public sealed record NativeQueryRelation(string Declaration, byte[] Entity);
 public sealed record NativeQueryProgram(IReadOnlyList<IReadOnlyList<NativeQueryRelation>> Paths,
     IReadOnlyList<NativeQueryRelation> Up)
 {
+    public string ToJson() => JsonSerializer.Serialize(new
+    {
+        chains = Paths.Select(path => path.Select(binding => new
+            { name = binding.Declaration, entity = Convert.ToHexStringLower(binding.Entity) })),
+        up = Up.Select(binding => new
+            { name = binding.Declaration, entity = Convert.ToHexStringLower(binding.Entity) })
+    });
+
     public static NativeQueryProgram Parse(ReadOnlyMemory<byte> json)
     {
         using var document = JsonDocument.Parse(json);

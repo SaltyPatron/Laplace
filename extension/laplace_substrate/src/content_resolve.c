@@ -6,6 +6,7 @@
 
 
 #include "postgres.h"
+#include "common/int.h"
 
 #include "fmgr.h"
 #include "miscadmin.h"
@@ -24,6 +25,8 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "prompt_input.h"
+#include "consensus_scan.h"
+#include "laplace/core/sql_catalog.h"
 
 typedef struct
 {
@@ -58,82 +61,28 @@ typedef struct
 /* Containers read per candidate. */
 #define RESOLVE_CONTAINER_PROBE_LIMIT 64
 
-/*
- * Containers of one candidate: word trajectories whose constituent ids include
- * it, via a single-key GIN probe. The plan is kept per backend; LIMIT is a
- * bound parameter because it is the only bound: physicalities is HASH(id)
- * partitioned and this reads by trajectory content, so no partition prunes,
- * and the LIMIT lets the Append stop early on a hit.
- */
-static const char *RESOLVE_CONTAINER_QUERY =
-    "SELECT p.entity_id FROM laplace.physicalities p "
-    "WHERE p.type = 1 AND p.trajectory IS NOT NULL "
-    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) "
-    "      @> ARRAY[$1]::bytea[] "
-    "LIMIT $2";
-
-static SPIPlanPtr resolve_container_plan = NULL;
-
-static void
-ensure_resolve_container_plan(void)
+/* One coarse holder read for the complete candidate set. Native owns GIN,
+ * exact membership and hub classification; no per-candidate SQL executor. */
+static SPIPlanPtr resolve_container_plan;
+static void ensure_resolve_container_plan(void)
 {
-    if (resolve_container_plan == NULL)
-    {
-        Oid argtypes[2] = { BYTEAOID, INT4OID };
-        /* PARALLEL_OK: a kept read-only plan prepared without it stays serial
-         * for the life of the backend. */
-        SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_CONTAINER_QUERY, 2, argtypes,
-                                             CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL)
-            elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "resolve_phrase: SPI_keepplan failed");
-        resolve_container_plan = plan;
-    }
+    Oid types[]={BYTEAARRAYOID,INT4OID};
+    spi_common_ensure_plan(&resolve_container_plan,laplace_sql_query_text("native.resolve_containers"),2,types);
 }
-
-/*
- * Joint consensus among candidate spans: every cell with both endpoints in the
- * candidate set, credited to each endpoint, in one set read. Per-candidate
- * truncated reads cannot express this intersection; a candidate with a huge
- * posting list and one with a small list would never meet. Credit is the
- * rating tuple, not a scalar.
- */
-static const char *RESOLVE_JOINT_EDGE_QUERY =
-    "WITH cand AS MATERIALIZED ("
-    "  SELECT DISTINCT id FROM unnest($1::bytea[]) AS u(id) WHERE id IS NOT NULL"
-    "), "
-    "edges AS MATERIALIZED ("
-    "  SELECT c.subject_id, c.object_id, c.witness_count, c.rating, c.rd "
-    "    FROM cand s "
-    "    JOIN laplace.consensus c ON c.subject_id = s.id "
-    "   WHERE c.object_id = ANY($1::bytea[])"
-    ") "
-    "SELECT ep.id, sum(edges.witness_count)::bigint, sum(edges.rating)::bigint, "
-    "       min(edges.rd)::bigint "
-    "  FROM edges "
-    "  CROSS JOIN LATERAL (VALUES (edges.subject_id), (edges.object_id)) AS ep(id) "
-    " GROUP BY ep.id";
-
-static SPIPlanPtr resolve_joint_edge_plan = NULL;
-
-static void
-ensure_resolve_joint_edge_plan(void)
+typedef struct { HTAB *degree;bool any; } JointRead;
+static void resolve_joint_cell(const LaplaceConsensusRow *row,void *context)
 {
-    if (resolve_joint_edge_plan == NULL)
-    {
-        Oid argtypes[1] = { BYTEAARRAYOID };
-        /* PARALLEL_OK for the same reason as the container plan. */
-        SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_JOINT_EDGE_QUERY, 1, argtypes,
-                                             CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL)
-            elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "resolve_phrase: SPI_keepplan failed");
-        resolve_joint_edge_plan = plan;
+    JointRead *read=context;if(row->object_is_null)return;
+    const hash128_t *ends[]={&row->subject,&row->object};
+    for(int i=0;i<2;i++){
+        bool found;joint_degree_entry *entry=hash_search(read->degree,ends[i],HASH_ENTER,&found);
+        if(!found)*entry=(joint_degree_entry){.key=*ends[i],.rd=PG_INT64_MAX};
+        if(pg_add_s64_overflow(entry->witnesses,row->witnesses,&entry->witnesses)
+           || pg_add_s64_overflow(entry->rating,row->rating,&entry->rating))
+            ereport(ERROR,(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),errmsg("Joint evidence exceeds integer capacity")));
+        entry->rd=Min(entry->rd,row->rd);
     }
+    read->any=true;
 }
 
 static void
@@ -520,7 +469,7 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
     /*
      * Every contiguous span of words is a candidate; root ids are computed
-     * natively and presence is one set read against laplace.entities.
+     * natively and presence is one set read through the canonical Native identity reader.
      * Candidates enumerate by length descending, then position ascending.
      *
      * Presence reads stored entities, not entity_exists(): that helper is true
@@ -577,7 +526,7 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
             arr = construct_array(elems, n_elems, BYTEAOID, -1, false, TYPALIGN_INT);
             args[0] = PointerGetDatum(arr);
             qrc = SPI_execute_with_args(
-                "SELECT e.id FROM laplace.entities e WHERE e.id = ANY($1::bytea[])",
+                laplace_sql_query_text("native.stored_ids"),
                 1, argtypes, args, NULL, true, 0);
             if (qrc != SPI_OK_SELECT)
                 elog(ERROR, "resolve_phrase: entity membership query failed: %s",
@@ -640,48 +589,9 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
                 {
                     ArrayType *cand_arr = construct_array(
                         pres_elems, n_pres, BYTEAOID, -1, false, TYPALIGN_INT);
-                    Datum      jarg[1];
-                    bool       joint_from_consensus = false;
-                    int        jrc;
-
-                    ensure_resolve_joint_edge_plan();
-                    jarg[0] = PointerGetDatum(cand_arr);
-                    jrc = SPI_execute_plan(resolve_joint_edge_plan, jarg, NULL,
-                                           true, 0);
-                    if (jrc != SPI_OK_SELECT)
-                        elog(ERROR, "resolve_phrase: joint edge query failed: %s",
-                             SPI_result_code_string(jrc));
-
-                    for (uint64 r = 0; r < SPI_processed; r++)
-                    {
-                        bool       isnull, dfound;
-                        HeapTuple  tup = SPI_tuptable->vals[r];
-                        TupleDesc  td  = SPI_tuptable->tupdesc;
-                        hash128_t  eid;
-                        joint_degree_entry *ent;
-                        int64      rdv;
-
-                        eid = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
-                        if (isnull)
-                            continue;
-                        ent = (joint_degree_entry *)
-                            hash_search(degree, &eid, HASH_ENTER, &dfound);
-                        if (!dfound)
-                        {
-                            ent->witnesses = 0;
-                            ent->rating    = 0;
-                            ent->rd        = PG_INT64_MAX;
-                            ent->degree    = 0;
-                        }
-                        ent->witnesses += DatumGetInt64(
-                            SPI_getbinval(tup, td, 2, &isnull));
-                        ent->rating += DatumGetInt64(
-                            SPI_getbinval(tup, td, 3, &isnull));
-                        rdv = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-                        if (!isnull && rdv < ent->rd)
-                            ent->rd = rdv;
-                        joint_from_consensus = true;
-                    }
+                    JointRead joint={degree,false};
+                    laplace_consensus_scan(cand_arr,cand_arr,NULL,resolve_joint_cell,&joint,NULL);
+                    bool joint_from_consensus=joint.any;
 
                     /* With no consensus among the candidates, joint evidence
                      * is trajectory co-occurrence. */
@@ -710,43 +620,24 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
                     ensure_resolve_container_plan();
 
-                    /* Containers are retained so scoring reads memory. */
-                    for (int c = 0; c < n_pres; c++)
-                    {
-                        int qrc2;
-
-                        cargs[0] = pres_elems[c];
-                        cargs[1] = Int32GetDatum(RESOLVE_CONTAINER_PROBE_LIMIT);
-                        qrc2 = SPI_execute_plan(resolve_container_plan,
-                                                cargs, NULL, true, 0);
-                        if (qrc2 != SPI_OK_SELECT)
-                            elog(ERROR, "resolve_phrase: container probe failed: %s",
-                                 SPI_result_code_string(qrc2));
-
-                        for (uint64 r = 0; r < SPI_processed; r++)
-                        {
-                            bool      isnull, ofound;
-                            hash128_t cid = datum_to_hash128(
-                                SPI_getbinval(SPI_tuptable->vals[r],
-                                              SPI_tuptable->tupdesc, 1, &isnull));
-                            container_owner_entry *oe;
-
-                            if (isnull)
-                                continue;
-                            cont[c * RESOLVE_CONTAINER_PROBE_LIMIT + cont_n[c]++] = cid;
-                            oe = (container_owner_entry *)
-                                hash_search(owners, &cid, HASH_ENTER, &ofound);
-                            if (!ofound)
-                            {
-                                oe->first_candidate = c;
-                                oe->n_candidates    = 1;
-                            }
-                            else if (oe->first_candidate != c)
-                            {
-                                oe->n_candidates++;
-                                oe->first_candidate = c;
-                            }
-                        }
+                    /* Complete non-hub holders for every candidate, in one
+                     * read. A hub contributes no arbitrary heap-order subset. */
+                    cargs[0]=PointerGetDatum(cand_arr);
+                    cargs[1]=Int32GetDatum(RESOLVE_CONTAINER_PROBE_LIMIT);
+                    int qrc2=SPI_execute_plan(resolve_container_plan,cargs,NULL,true,0);
+                    if(qrc2!=SPI_OK_SELECT)elog(ERROR,"resolve_phrase: container set failed: %s",SPI_result_code_string(qrc2));
+                    for(uint64 r=0;r<SPI_processed;r++){
+                        bool missing,found;
+                        int64 ordinal=DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[r],SPI_tuptable->tupdesc,1,&missing));
+                        if(missing || ordinal<1 || ordinal>n_pres)elog(ERROR,"resolve_phrase: invalid holder ordinal");
+                        int c=(int)ordinal-1;
+                        Datum value=SPI_getbinval(SPI_tuptable->vals[r],SPI_tuptable->tupdesc,2,&missing);
+                        if(missing || cont_n[c]>=RESOLVE_CONTAINER_PROBE_LIMIT)elog(ERROR,"resolve_phrase: invalid holder set");
+                        hash128_t cid=datum_to_hash128(value);
+                        cont[c*RESOLVE_CONTAINER_PROBE_LIMIT+cont_n[c]++]=cid;
+                        container_owner_entry *owner=hash_search(owners,&cid,HASH_ENTER,&found);
+                        if(!found)*owner=(container_owner_entry){cid,c,1};
+                        else if(owner->first_candidate!=c){owner->n_candidates++;owner->first_candidate=c;}
                     }
 
                     /* A container holding two or more candidates is joint
@@ -1028,7 +919,7 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
         arr = construct_array(elems, n_elems, BYTEAOID, -1, false, TYPALIGN_INT);
         args[0] = PointerGetDatum(arr);
         qrc = SPI_execute_with_args(
-            "SELECT e.id FROM laplace.entities e WHERE e.id = ANY($1::bytea[])",
+            laplace_sql_query_text("native.stored_ids"),
             1, argtypes, args, NULL, true, 0);
         if (qrc != SPI_OK_SELECT)
             elog(ERROR, "word_segment_resolved: entity membership query failed: %s",
