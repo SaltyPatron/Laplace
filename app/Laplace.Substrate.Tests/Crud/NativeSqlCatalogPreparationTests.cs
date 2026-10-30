@@ -667,6 +667,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             INSERT INTO public.entity(id,tier,coord,hilbert)
             SELECT public.laplace_id(s),public.laplace_tier(s),public.laplace_coord(s),public.laplace_hilbert(s)
             FROM (SELECT 'nativegeometry'||i::text AS s FROM generate_series(1,160) i
+                  UNION ALL SELECT repeat('n',16384)||i::text FROM generate_series(1,160) i
                   UNION ALL SELECT chr(i) FROM generate_series(256,415) i
                   UNION ALL SELECT chr(i) FROM generate_series(900000,900160) i) words
             ON CONFLICT(id) DO NOTHING
@@ -682,9 +683,24 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             while (await rows.ReadAsync()) fixtures.Add((rows.GetFieldValue<byte[]>(0), rows.GetInt16(1),
                 Enumerable.Range(2,4).Select(rows.GetDouble).ToArray()));
         Assert.Equal(2, fixtures.Count);
-        foreach (var anchor in fixtures)
+        await using (var tied = new NpgsqlCommand("""
+            SELECT public.blake3_send(e.id),e.tier,public.ST_X(e.coord),public.ST_Y(e.coord),
+                public.ST_Z(e.coord),public.ST_M(e.coord)
+            FROM public.entity e JOIN (
+                SELECT tier,hilbert FROM public.entity GROUP BY tier,hilbert
+                HAVING count(*)>8 ORDER BY count(*) DESC,tier,hilbert LIMIT 1
+            ) b USING(tier,hilbert) ORDER BY e.id LIMIT 1
+            """, connection, transaction))
+        await using (var rows = await tied.ExecuteReaderAsync())
         {
-            const int fan = 7;
+            Assert.True(await rows.ReadAsync(), "Canonical content must exercise a boundary with more ties than the fanout.");
+            fixtures.Add((rows.GetFieldValue<byte[]>(0), rows.GetInt16(1),
+                Enumerable.Range(2,4).Select(rows.GetDouble).ToArray()));
+        }
+        for (int fixture = 0; fixture < fixtures.Count; fixture++)
+        {
+            var anchor = fixtures[fixture];
+            int fan = fixture < 2 ? 7 : 40;
             object[] arguments = [.. anchor.Coord.Cast<object>(), anchor.Id, fan, anchor.Tier];
             var angular = new List<byte[]>();
             await using (var query = NpgsqlCatalog.Command(connection, transaction, "geometry.prompt.angular", arguments))
@@ -715,15 +731,13 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 }
             var expectedHilbert = new List<string>();
             await using (var query = new NpgsqlCommand("""
-                WITH origin AS (SELECT public.laplace_hilbert4(public.ST_MakePoint($3,$4,$5,$6)) h)
+                WITH origin AS (SELECT hilbert h FROM public.entity WHERE public.blake3_send(id)=$2)
                 SELECT encode(public.blake3_send(e.id),'hex') FROM public.entity e CROSS JOIN origin o
                 WHERE e.tier=$1 AND public.blake3_send(e.id)<>$2
-                ORDER BY abs((e.hilbert::numeric+CASE WHEN e.hilbert<0 THEN 18446744073709551616::numeric ELSE 0 END)
-                    -(o.h::numeric+CASE WHEN o.h<0 THEN 18446744073709551616::numeric ELSE 0 END)),e.id LIMIT $7
+                ORDER BY abs(e.hilbert::numeric-o.h::numeric),e.id LIMIT $3
                 """, connection, transaction))
             {
                 query.Parameters.AddWithValue(anchor.Tier); query.Parameters.AddWithValue(anchor.Id);
-                foreach (double coordinate in anchor.Coord) query.Parameters.AddWithValue(coordinate);
                 query.Parameters.AddWithValue(fan);
                 await using var rows = await query.ExecuteReaderAsync();
                 while (await rows.ReadAsync()) expectedHilbert.Add(rows.GetString(0));
