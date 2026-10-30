@@ -267,6 +267,11 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var noun = window.Text("NOUN"u8);
         var raw = window.Text("n"u8);
         var dependency = window.Text("nsubj"u8);
+        var auxiliaryWord = window.Text(Encoding.UTF8.GetBytes("auxiliary" + Guid.NewGuid().ToString("N")));
+        var auxiliary = window.Text("AUX"u8);
+        var binding = window.Text("lexical sense"u8);
+        var program = await NativeRecipeExecution.QueryProgramAsync();
+        Assert.Equal(binding.Id.ToBytes(), program.Paths[0][0].Entity);
         var oldPredicate = window.Text("HAS_POS"u8);
         StagedReference Compose(StagedReference[] children, ulong mask = 0) =>
             window.Compose(children, checked((byte)(children.Max(c => c.Tier) + 1)), mask, mask);
@@ -274,8 +279,12 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var untyped = Compose([word, raw], 1);
         var otherBank = Compose([word, dependency], 1);
         var obsoleteShape = Compose([word, oldPredicate, noun], 1);
-        typed.Said = untyped.Said = otherBank.Said = obsoleteShape.Said = 1;
-        var witness = Compose([typed, untyped, otherBank, obsoleteShape]);
+        var auxiliaryType = Compose([auxiliaryWord, auxiliary], 1);
+        var nounBinding = Compose([word, binding, Compose([word, raw], 4)], 1);
+        var auxiliaryBinding = Compose([auxiliaryWord, binding, Compose([auxiliaryWord, raw], 4)], 1);
+        var claims = new[] { typed, untyped, otherBank, obsoleteShape, auxiliaryType, nounBinding, auxiliaryBinding };
+        for (int index = 0; index < claims.Length; index++) claims[index].Said = 1;
+        var witness = Compose(claims);
         await new NpgsqlSubstrateWriter(native).ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
         await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
         {
@@ -288,7 +297,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 array_agg(games::bigint ORDER BY trunk) games,
                 array_agg(score/games ORDER BY trunk) scores,
                 array_agg(trust ORDER BY trunk) trusts
-              FROM public.laplace_attested(ARRAY[$1,$2,$3,$4]::public.blake3[],false)
+              FROM public.laplace_attested($1::public.blake3[],false)
               WHERE witness GROUP BY claim
             )
             INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
@@ -296,7 +305,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             FROM observations o CROSS JOIN LATERAL public.laplace_series(o.witnesses,o.games,o.scores,o.trusts) s
             """, connection, transaction))
         {
-            foreach (var claim in new[] { typed, untyped, otherBank, obsoleteShape }) attest.Parameters.AddWithValue(claim.Id);
+            attest.Parameters.AddWithValue(claims.Select(c => c.Id.ToBytes()).ToArray());
             await attest.ExecuteNonQueryAsync();
         }
 
@@ -330,6 +339,13 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             await using var read = NpgsqlCatalog.Command(connection, transaction, "native.classification_values", ids, bank);
             await using var rows = await read.ExecuteReaderAsync();
             Assert.False(await rows.ReadAsync());
+        }
+        await using (var content = new NpgsqlCommand("SELECT converse.content_terms($1)", connection, transaction))
+        {
+            content.Parameters.AddWithValue(new[] { word.Id.ToBytes(), auxiliaryWord.Id.ToBytes(), word.Id.ToBytes() });
+            var result = Assert.IsType<byte[][]>(await content.ExecuteScalarAsync());
+            Assert.Single(result);
+            Assert.Equal(word.Id.ToBytes(), result[0]);
         }
         await transaction.RollbackAsync();
     }

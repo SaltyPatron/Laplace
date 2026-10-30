@@ -14,6 +14,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "query_program.h"
+#include "declared_paths.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_query_program);
 Datum pg_laplace_query_program(PG_FUNCTION_ARGS)
@@ -110,6 +111,21 @@ static DeclaredChain *read_chains(Jsonb *program,int *count)
         }
     }
     return result;
+}
+
+ArrayType *laplace_declared_binding_types(void)
+{
+    Jsonb *program=DatumGetJsonbP(DirectFunctionCall1(jsonb_in,
+        CStringGetDatum(laplace_compiled_query_program)));
+    int count;
+    DeclaredChain *chains=read_chains(program,&count);
+    ArrayBuildState *out=NULL;
+    for(int i=0;i<count;i++){
+        out=accumArrayResult(out,hash128_to_datum(chains[i].relations),false,BYTEAOID,CurrentMemoryContext);
+        pfree(chains[i].relations);
+    }
+    pfree(chains);pfree(program);
+    return DatumGetArrayTypeP(makeArrayResult(out,CurrentMemoryContext));
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_declared_paths);

@@ -34,6 +34,7 @@
 #include "laplace/core/firmware_law.h"
 #include "cognition_program.h"
 #include "consensus_scan.h"
+#include "declared_paths.h"
 #include "walk_score.h"
 #include "spi_nested.h"
 
@@ -567,13 +568,13 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
 
 /*
  * converse.content_terms(ids): the ids, deduplicated in order, that have a
- * positively standing HAS_SENSE and whose highest-standing HAS_POS, if any, is a
- * content tag. One consensus scan over all ids; no word list.
+ * positively standing producer-declared binding and whose highest-standing
+ * canonical UPOS value, if any, is a content tag. Both reads acquire sets.
  */
 typedef struct
 {
     hash128_t id;
-    bool has_sense;
+    bool has_meaning;
     bool has_upos;
     hash128_t upos;
     __int128 upos_standing;
@@ -582,7 +583,6 @@ typedef struct
 typedef struct
 {
     HTAB *evidence;
-    hash128_t has_sense, has_pos;
 } TermRead;
 
 static void
@@ -592,15 +592,23 @@ receive_term_evidence(const LaplaceConsensusRow *row, void *context)
     TermEvidence *entry = hash_search(read->evidence, &row->subject, HASH_FIND, NULL);
     if (!entry || row->object_is_null || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
-    if (hash128_eq(&row->type, &read->has_sense))
-        entry->has_sense = true;
-    else if (hash128_eq(&row->type, &read->has_pos))
+    entry->has_meaning = true;
+}
+
+static void
+receive_term_upos(const LaplaceClassificationRow *row, void *context)
+{
+    TermRead *read = context;
+    TermEvidence *entry = hash_search(read->evidence, &row->subject, HASH_FIND, NULL);
+    if (!entry || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
     {
         __int128 standing = (__int128) row->rating - 2 * (__int128) row->rd;
-        if (!entry->has_upos || standing > entry->upos_standing)
+        if (!entry->has_upos || standing > entry->upos_standing ||
+            (standing == entry->upos_standing && memcmp(&row->value, &entry->upos, sizeof(hash128_t)) < 0))
         {
             entry->has_upos = true;
-            entry->upos = row->object;
+            entry->upos = row->value;
             entry->upos_standing = standing;
         }
     }
@@ -614,7 +622,6 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
     int n;
     HASHCTL ctl = {0};
     TermRead read;
-    hash128_t types[2];
     hash128_t *ids;
     int n_ids = 0;
     ArrayBuildState *out = NULL;
@@ -623,9 +630,6 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     deconstruct_array(PG_GETARG_ARRAYTYPE_P(0), BYTEAOID, -1, false, TYPALIGN_INT,
                       &values, &nulls, &n);
-    if (laplace_relation_type_id("HAS_SENSE", &read.has_sense) != 0 ||
-        laplace_relation_type_id("HAS_POS", &read.has_pos) != 0)
-        elog(ERROR, "content_terms: HAS_SENSE / HAS_POS are not governed");
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(TermEvidence);
     ctl.hcxt = CurrentMemoryContext;
@@ -640,25 +644,24 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
         id = datum_to_hash128(values[i]);
         TermEvidence *entry = hash_search(read.evidence, &id, HASH_ENTER, &found);
         if (found) continue;
-        entry->has_sense = entry->has_upos = false;
+        entry->has_meaning = entry->has_upos = false;
         ids[n_ids++] = id;
     }
     if (n_ids > 0)
     {
         bool spi_top = false;
         ArrayType *subjects = hash128_array_from_ids(ids, n_ids);
-        types[0] = read.has_sense;
-        types[1] = read.has_pos;
-        ArrayType *type_ids = hash128_array_from_ids(types, 2);
+        ArrayType *type_ids = laplace_declared_binding_types();
         if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
             elog(ERROR, "content_terms: SPI connect failed");
-        laplace_consensus_scan(subjects, NULL, type_ids, receive_term_evidence, &read, NULL);
+        laplace_consensus_candidates(subjects, NULL, type_ids, receive_term_evidence, &read, NULL);
+        laplace_classification_scan(subjects, "upos", receive_term_upos, &read);
         laplace_spi_finish(spi_top);
     }
     for (int i = 0; i < n_ids; ++i)
     {
         TermEvidence *entry = hash_search(read.evidence, &ids[i], HASH_FIND, NULL);
-        if (!entry->has_sense) continue;
+        if (!entry->has_meaning) continue;
         if (entry->has_upos && !laplace_upos_is_content(&entry->upos)) continue;
         Datum id = hash128_to_datum(&ids[i]);
         out = accumArrayResult(out, id, false, BYTEAOID, CurrentMemoryContext);
