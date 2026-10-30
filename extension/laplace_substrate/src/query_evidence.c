@@ -359,6 +359,8 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.rd = row->rd;
         channel.volatility = row->volatility;
         channel.witnesses = row->witnesses;
+        channel.claim = row->claim;
+        channel.native_claim = row->native_claim;
         query_channel_insert(state, channel.ordinal, &channel);
     }
 }
@@ -947,12 +949,12 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
 
     unique_operands = hash128_array_from_ids(unique, unique_count);
     scan.reverse = false;
-    laplace_consensus_scan_ranked_planes(unique_operands, NULL, types, false,
+    laplace_consensus_ranked_candidates(unique_operands, NULL, types, false, true,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->forward : NULL);
 
     scan.reverse = true;
-    laplace_consensus_scan_ranked_planes(NULL, unique_operands, types, false,
+    laplace_consensus_ranked_candidates(NULL, unique_operands, types, false, true,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->reverse : NULL);
 
@@ -997,6 +999,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         }
     }
 
+    LAPLACE_CONSENSUS_ENRICH(result,result_count,LaplaceQueryChannel);
     bind_channel_observations(operands, result, result_count, stats, work);
 
     MemoryContextSwitchTo(owner);
@@ -1066,6 +1069,8 @@ query_exact_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.rd = row->rd;
         channel.volatility = row->volatility;
         channel.witnesses = row->witnesses;
+        channel.claim = row->claim;
+        channel.native_claim = row->native_claim;
         key = channel_key(&channel);
         entry = (QueryChannelIndex *)
             hash_search(state->channel_index, &key, HASH_ENTER, &found);

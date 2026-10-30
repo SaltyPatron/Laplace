@@ -45,6 +45,8 @@ typedef struct LaplaceQueryChannel
     int64 rd;
     int64 volatility;
     int64 witnesses;
+    hash128_t claim;
+    bool native_claim;
 
     /* Attestation topology of the cell, kept apart from standing. The
      * provenance root is a Merkle digest over the bound attestation rows

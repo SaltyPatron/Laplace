@@ -131,10 +131,10 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
     /* Omitting a type restriction selects all types; it does not make
      * directed claims symmetric. Only symmetric relation types are read in
      * the candidate -> frontier orientation. */
-    laplace_consensus_scan(frontier, candidates, types, steer_cell, &state, stats);
+    laplace_consensus_candidates(frontier, candidates, types, steer_cell, &state, stats);
     state.reverse = true;
     ArrayType *reverse_types = laplace_symmetric_relation_types_in(types);
-    laplace_consensus_scan(candidates, frontier, reverse_types, steer_cell, &state, stats);
+    laplace_consensus_candidates(candidates, frontier, reverse_types, steer_cell, &state, stats);
     if (types != NULL) pfree(reverse_types);
     hash_seq_init(&seq, state.pairs);
     while ((pair = hash_seq_search(&seq)) != NULL)

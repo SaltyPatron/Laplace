@@ -500,7 +500,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
                     entry->count = 0;
                     ids[g] = ranked[g].node->id;
                 }
-                laplace_consensus_scan_ranked(NULL, id_array(ids, group), NULL, false,
+                laplace_consensus_ranked_candidates(NULL, id_array(ids, group), NULL, false, false,
                                               receive_sharing, sharing_cutoff, sharing, NULL);
                 for (int g = 0; g < group; ++g)
                 {

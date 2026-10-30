@@ -13,6 +13,8 @@ typedef struct LaplaceNeighbor
     int64 volatility;
     int64 witnesses;
     bool outbound;
+    hash128_t claim;
+    bool native_claim;
 } LaplaceNeighbor;
 
 /* One star-expansion step over the consensus face: for each frontier id, the

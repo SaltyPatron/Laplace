@@ -125,6 +125,8 @@ neighbor_cell(const LaplaceConsensusRow *row, void *opaque)
     edge.rd = row->rd;
     edge.volatility = row->volatility;
     edge.witnesses = row->witnesses;
+    edge.claim = row->claim;
+    edge.native_claim = row->native_claim;
     edge.outbound = !state->reverse;
     bucket = hash_search(state->frontiers, &edge.frontier, HASH_ENTER, &found);
     if (!found)
@@ -212,19 +214,19 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
     ctl.entrysize = sizeof(NeighborBucket);
     state.frontiers = hash_create("consensus neighbor frontiers", 64, &ctl,
                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    laplace_consensus_scan_ranked(frontier, NULL, types, false,
+    laplace_consensus_ranked_candidates(frontier, NULL, types, false, false,
         neighbor_cell, neighbor_cutoff, &state, stats);
     if (types != NULL && include_default)
-        laplace_consensus_scan_ranked(frontier, NULL, NULL, true,
+        laplace_consensus_ranked_candidates(frontier, NULL, NULL, true, false,
             neighbor_cell, neighbor_cutoff, &state, stats);
     state.reverse = true;
     ArrayType *reverse_types = respect_direction
         ? laplace_symmetric_relation_types_in(types) : types;
-    laplace_consensus_scan_ranked(NULL, frontier, reverse_types, false,
+    laplace_consensus_ranked_candidates(NULL, frontier, reverse_types, false, false,
         neighbor_cell, neighbor_cutoff, &state, stats);
     if (respect_direction && types != NULL) pfree(reverse_types);
     if (types != NULL && include_default)
-        laplace_consensus_scan_ranked(NULL, frontier, NULL, true,
+        laplace_consensus_ranked_candidates(NULL, frontier, NULL, true, false,
             neighbor_cell, neighbor_cutoff, &state, stats);
     entries = hash_get_num_entries(state.pairs);
     if (entries > INT_MAX || (Size) entries > MaxAllocSize / sizeof(*rows))
@@ -237,6 +239,7 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
         n += bucket->count;
         pfree(bucket->heap);
     }
+    LAPLACE_CONSENSUS_ENRICH(rows,n,LaplaceNeighbor);
     qsort(rows, n, sizeof(*rows), neighbor_order);
     *count = n;
     hash_destroy(state.pairs);

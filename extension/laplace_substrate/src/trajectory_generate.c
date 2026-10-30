@@ -1059,7 +1059,7 @@ order_leading_by_sharing(Candidate *candidates, int count)
     {
         ArrayType *object_ids = hash128_array_from_ids(objects, object_count);
         ArrayType *type_ids = hash128_array_from_ids(types, type_count);
-        laplace_consensus_scan_ranked(NULL, object_ids, type_ids, false,
+        laplace_consensus_ranked_candidates(NULL, object_ids, type_ids, false, false,
                                       receive_sharing, sharing_cutoff, sharing, NULL);
         pfree(object_ids);
         pfree(type_ids);

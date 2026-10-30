@@ -40,15 +40,16 @@ typedef struct {
 
 static bool native_consensus_row(TupleTableSlot *slot,void *context)
 {
-    NativeConsensusRead *read=context;Datum values[7];bool missing;
-    for(int i=0;i<7;i++){
+    NativeConsensusRead *read=context;Datum values[8];bool missing;
+    for(int i=0;i<8;i++){
         values[i]=slot_getattr(slot,i+1,&missing);
         if(missing)elog(ERROR,"Native consensus projection has a null field");
     }
     LaplaceConsensusRow row={
         .subject=datum_to_hash128(values[0]),.type=datum_to_hash128(values[1]),.object=datum_to_hash128(values[2]),
         .rating=DatumGetInt64(values[3]),.rd=DatumGetInt64(values[4]),
-        .volatility=DatumGetInt64(values[5]),.witnesses=DatumGetInt64(values[6])};
+        .volatility=DatumGetInt64(values[5]),.witnesses=DatumGetInt64(values[6]),
+        .claim=datum_to_hash128(values[7]),.native_claim=true};
     read->stats->rows_read++;read->stats->rows_matched++;
     MemoryContext previous=MemoryContextSwitchTo(read->caller);
     read->consume(&row,read->context);MemoryContextSwitchTo(previous);
@@ -59,7 +60,7 @@ static bool native_consensus_row(TupleTableSlot *slot,void *context)
  * claims. Source value claims remain available through the claim readers;
  * they do not acquire an invented predicate in the binary relation graph. */
 static void
-scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types,
+scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types, bool witnesses,
             LaplaceConsensusConsumer consume, void *context,
             LaplaceConsensusScanStats *stats)
 {
@@ -69,14 +70,16 @@ scan_native(ArrayType *subjects, ArrayType *objects, ArrayType *types,
     if (laplace_spi_connect(&finish) != SPI_OK_CONNECT) elog(ERROR, "Native consensus SPI connect failed");
     if (plan == NULL)
     {
-        Oid args[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID};
-        plan = SPI_prepare_cursor(laplace_sql_query_text("native.consensus_cells"), 3, args,
+        Oid args[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, BOOLOID};
+        plan = SPI_prepare_cursor(laplace_sql_query_text("native.consensus_cells"), 4, args,
                                   CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0) elog(ERROR, "cannot prepare Native consensus cells");
     }
-    ArrayType *inputs[]={subjects,objects,types};ParamListInfo parameters=makeParamList(3);
+    ArrayType *inputs[]={subjects,objects,types};ParamListInfo parameters=makeParamList(4);
     for(int i=0;i<3;i++)parameters->params[i]=(ParamExternData){
         .value=PointerGetDatum(inputs[i]),.isnull=inputs[i]==NULL,.pflags=PARAM_FLAG_CONST,.ptype=BYTEAARRAYOID};
+    parameters->params[3]=(ParamExternData){.value=BoolGetDatum(witnesses),.isnull=false,
+        .pflags=PARAM_FLAG_CONST,.ptype=BOOLOID};
     NativeConsensusRead read={caller,consume,context,stats};
     lp_pg_execute_stream_until(plan,parameters,true,native_consensus_row,&read);
     pfree(parameters);
@@ -418,7 +421,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
             Datum s = slot_getattr(slot, subject, &snull);
             Datum o = slot_getattr(slot, object, &onull);
             Datum t = slot_getattr(slot, type, &tnull);
-            LaplaceConsensusRow row;
+            LaplaceConsensusRow row={0};
             stats->rows_read++;
             if ((stats->rows_read & 4095) == 0) CHECK_FOR_INTERRUPTS();
             if (snull || tnull || !scan_set_contains(subjects, s, snull) ||
@@ -463,7 +466,7 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
                     ArrayType *type_ids, bool default_only,
                     LaplaceConsensusConsumer consume,
                     void *context, LaplaceConsensusScanStats *stats,
-                    LaplaceConsensusCutoff cutoff, bool plane_local)
+                    LaplaceConsensusCutoff cutoff, bool plane_local, bool witnesses)
 {
     ScanSet subjects, objects, types;
     LaplaceConsensusScanStats local_stats = {0};
@@ -481,7 +484,7 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
         (objects.array != NULL && objects.count == 0) ||
         (types.array != NULL && types.count == 0)) goto done;
 
-    scan_native(subjects.array, objects.array, types.array, consume, context, stats);
+    scan_native(subjects.array, objects.array, types.array, witnesses, consume, context, stats);
 
     root = get_relname_relid("consensus", get_namespace_oid("laplace", false));
     if (!OidIsValid(root))
@@ -536,7 +539,7 @@ laplace_consensus_scan(ArrayType *subjects, ArrayType *objects, ArrayType *types
                        LaplaceConsensusConsumer consume, void *context,
                        LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, types, false, consume, context, stats, NULL, false);
+    consensus_scan_impl(subjects, objects, types, false, consume, context, stats, NULL, false, true);
 }
 
 void
@@ -544,7 +547,7 @@ laplace_consensus_scan_default(ArrayType *subjects, ArrayType *objects,
                                LaplaceConsensusConsumer consume, void *context,
                                LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats, NULL, false);
+    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats, NULL, false, true);
 }
 
 void
@@ -553,7 +556,7 @@ laplace_consensus_scan_ranked(ArrayType *subjects, ArrayType *objects, ArrayType
     void *context, LaplaceConsensusScanStats *stats)
 {
     consensus_scan_impl(subjects, objects, types, default_only, consume, context,
-                        stats, cutoff, false);
+                        stats, cutoff, false, true);
 }
 
 void
@@ -562,5 +565,69 @@ laplace_consensus_scan_ranked_planes(ArrayType *subjects, ArrayType *objects, Ar
     void *context, LaplaceConsensusScanStats *stats)
 {
     consensus_scan_impl(subjects, objects, types, default_only, consume, context,
-                        stats, cutoff, true);
+                        stats, cutoff, true, true);
+}
+
+void laplace_consensus_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    LaplaceConsensusConsumer consume,void *context,LaplaceConsensusScanStats *stats)
+{
+    consensus_scan_impl(subjects,objects,types,false,consume,context,stats,NULL,false,false);
+}
+void laplace_consensus_ranked_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    bool default_only,bool planes,LaplaceConsensusConsumer consume,LaplaceConsensusCutoff cutoff,
+    void *context,LaplaceConsensusScanStats *stats)
+{
+    consensus_scan_impl(subjects,objects,types,default_only,consume,context,stats,cutoff,planes,false);
+}
+typedef struct { int count,received;int64 *values; } NativeWitnessCounts;
+static bool native_witness_count(TupleTableSlot *slot,void *context)
+{
+    NativeWitnessCounts *read=context;bool missing;
+    Datum ordinal=slot_getattr(slot,1,&missing);
+    if(missing || DatumGetInt64(ordinal)!=(int64)read->received+1 || read->received>=read->count)
+        elog(ERROR,"Native witness count has an invalid input ordinal");
+    Datum count=slot_getattr(slot,2,&missing);
+    if(missing || DatumGetInt64(count)<0)elog(ERROR,"Native witness count is invalid");
+    read->values[read->received++]=DatumGetInt64(count);return true;
+}
+void laplace_consensus_witness_counts(const hash128_t *claims,int count,int64 *counts)
+{
+    if(count<=0)return;
+    bool finish;static SPIPlanPtr plan;
+    if(laplace_spi_connect(&finish)!=SPI_OK_CONNECT)elog(ERROR,"Native witness count SPI connect failed");
+    if(!plan){
+        Oid type=BYTEAARRAYOID;
+        plan=SPI_prepare_cursor(laplace_sql_query_text("native.claim_witness_counts"),1,&type,CURSOR_OPT_PARALLEL_OK);
+        if(!plan || SPI_keepplan(plan)!=0)elog(ERROR,"Cannot prepare Native witness counts");
+    }
+    ArrayType *ids=hash128_array_from_ids(claims,count);
+    ParamListInfo parameters=makeParamList(1);
+    parameters->params[0]=(ParamExternData){.value=PointerGetDatum(ids),.isnull=false,.pflags=PARAM_FLAG_CONST,.ptype=BYTEAARRAYOID};
+    NativeWitnessCounts read={count,0,counts};
+    lp_pg_execute_stream_until(plan,parameters,true,native_witness_count,&read);
+    if(read.received!=count)elog(ERROR,"Native witness count lost input ordinals");
+    pfree(parameters);pfree(ids);laplace_spi_finish(finish);
+}
+void laplace_consensus_enrich(void *rows,int count,Size stride,
+    Size claim_offset,Size native_offset,Size witnesses_offset)
+{
+    if(count<=0)return;
+    if(!rows || claim_offset>stride || stride-claim_offset<sizeof(hash128_t)
+       || native_offset>=stride || witnesses_offset>stride || stride-witnesses_offset<sizeof(int64)
+       || (Size)count>MaxAllocSize/sizeof(hash128_t) || (Size)count>MaxAllocSize/stride)
+        elog(ERROR,"Native consensus enrichment has an invalid record layout");
+    hash128_t *claims=palloc(sizeof(*claims)*(Size)count);
+    int *ordinals=palloc(sizeof(*ordinals)*(Size)count),selected=0;
+    for(int i=0;i<count;i++){
+        char *row=(char *)rows+(Size)i*stride;
+        if(!*(bool *)(row+native_offset))continue;
+        memcpy(claims+selected,row+claim_offset,sizeof(hash128_t));ordinals[selected++]=i;
+    }
+    if(selected){
+        int64 *counts=palloc(sizeof(*counts)*(Size)selected);
+        laplace_consensus_witness_counts(claims,selected,counts);
+        for(int i=0;i<selected;i++)memcpy((char *)rows+(Size)ordinals[i]*stride+witnesses_offset,counts+i,sizeof(int64));
+        pfree(counts);
+    }
+    pfree(claims);pfree(ordinals);
 }

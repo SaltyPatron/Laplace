@@ -15,6 +15,8 @@ typedef struct LaplaceConsensusRow
     int64 volatility;
     int64 witnesses;
     bool object_is_null;
+    hash128_t claim;
+    bool native_claim;
 } LaplaceConsensusRow;
 
 typedef struct LaplaceConsensusScanStats
@@ -64,5 +66,20 @@ extern void laplace_consensus_scan_ranked_planes(
     ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
     LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,
     LaplaceConsensusScanStats *stats);
+
+/* Standing-only acquisition for consumers whose election does not use source
+ * counts. Native claim IDs stay attached. Hydrate retained claims in one batch
+ * before exposing them as source-counted results; zero here is not testimony. */
+extern void laplace_consensus_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    LaplaceConsensusConsumer consume,void *context,LaplaceConsensusScanStats *stats);
+extern void laplace_consensus_ranked_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    bool default_only,bool planes,LaplaceConsensusConsumer consume,LaplaceConsensusCutoff cutoff,
+    void *context,LaplaceConsensusScanStats *stats);
+extern void laplace_consensus_witness_counts(const hash128_t *claims,int count,int64 *counts);
+extern void laplace_consensus_enrich(void *rows,int count,Size stride,
+    Size claim_offset,Size native_offset,Size witnesses_offset);
+#define LAPLACE_CONSENSUS_ENRICH(rows,count,type) \
+    laplace_consensus_enrich((rows),(count),sizeof(type),offsetof(type,claim), \
+        offsetof(type,native_claim),offsetof(type,witnesses))
 
 #endif

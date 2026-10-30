@@ -521,6 +521,32 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.False(await rows.ReadAsync());
         }
         // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
+        await using (var selected = new NpgsqlCommand("""
+            SELECT nbr,witness_count FROM consensus.explore_web_neighbors(
+                ARRAY[$1,$1]::bytea[],ARRAY[$2]::bytea[],1,false) WHERE outbound
+            """, connection, transaction))
+        {
+            selected.Parameters.AddWithValue(x.Id.ToBytes()); selected.Parameters.AddWithValue(predicate.Id.ToBytes());
+            await using var rows = await selected.ExecuteReaderAsync();
+            for (int i = 0; i < 2; i++)
+            {
+                Assert.True(await rows.ReadAsync());
+                Assert.Equal(value.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+                Assert.Equal(1L, rows.GetInt64(1));
+            }
+            Assert.False(await rows.ReadAsync());
+        }
+        await using (var counts = NpgsqlCatalog.Command(connection, transaction, "native.claim_witness_counts",
+            (object)new[] { xc.Id.ToBytes(), xc.Id.ToBytes(), new byte[16] }))
+        await using (var rows = await counts.ExecuteReaderAsync())
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                Assert.True(await rows.ReadAsync()); Assert.Equal(i + 1L, rows.GetInt64(0));
+                Assert.Equal(i == 2 ? 0L : 1L, rows.GetInt64(1));
+            }
+            Assert.False(await rows.ReadAsync());
+        }
         await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.entity_evidence_count", x.Id.ToBytes()))
             Assert.Equal(1L, await evidence.ExecuteScalarAsync());
         await using (var evidence = NpgsqlCatalog.Command(connection, transaction, "ops.evidence_counts_batch", new[] { x.Id.ToBytes(), y.Id.ToBytes() }))
