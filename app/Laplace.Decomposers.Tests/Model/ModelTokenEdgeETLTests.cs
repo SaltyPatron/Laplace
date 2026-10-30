@@ -71,6 +71,96 @@ public sealed class ModelTokenEdgeETLTests
         Assert.NotEqual(receipt, nextReceipt);
     }
 
+    [Fact]
+    public async Task DeclaredSourceOperators_ExecuteAndRecordBranchesAndExpertsSeparately()
+    {
+        var fixture = WriteScopedCircuitFixture();
+        try
+        {
+            var tokens = FixtureTokens();
+            var canonical = tokens.Select((token, index) => (token.EntityId, index))
+                .ToDictionary(pair => pair.EntityId, pair => pair.index);
+            using var snapshot = SourceEntityIdConventions.OpenModelContentSnapshot(fixture.Directory)!;
+            var estate = new ModelCircuitEstate(new(fixture.Directory, fixture.Manifest,
+                tokens, snapshot.SourceId, snapshot), canonical);
+            var attention = estate.Enumerate(ModelDecomposer.AttendsTypeId).Select(c =>
+                (c.SourcePath, c.Head, c.ContextId, Score: c.Contraction.Score([0], [1]).Scores[0])).ToArray();
+            Assert.Equal(5, attention.Length);
+            Assert.Single(attention, c => c.SourcePath == "encoder.layers.5.self_attn");
+            Assert.Equal(2, attention.Count(c => c.SourcePath == "decoder.layers.5.self_attn"));
+            Assert.Equal(2, attention.Count(c => c.SourcePath == "decoder.layers.5.cross_attn"));
+            Assert.Equal(5, attention.Select(c => c.ContextId).Distinct().Count());
+            Assert.True(attention.Single(c => c.SourcePath == "decoder.layers.5.self_attn" && c.Head == 0).Score
+                > attention.Single(c => c.SourcePath == "decoder.layers.5.cross_attn" && c.Head == 0).Score);
+            Assert.Equal(5, estate.Enumerate(ModelDecomposer.OvRelatesTypeId).Count());
+            var ffns = estate.Enumerate(ModelDecomposer.CompletesToTypeId).Select(c =>
+                (c.SourcePath, c.Operator, c.Layer, c.Head, Score: c.Contraction.Score([0], [1]).Scores[0])).ToArray();
+            Assert.Equal(4, ffns.Length);
+            Assert.Equal(4, ffns.Select(c => c.SourcePath).Distinct().Count());
+            Assert.True(ffns.Single(c => c.SourcePath == "decoder.layers.17.mlp.experts.4").Score
+                > ffns.Single(c => c.SourcePath == "decoder.layers.17.mlp.experts.9").Score);
+            Assert.Empty(estate.Skipped);
+
+            var etl = new ModelTokenEdgeETL(fixture.Directory, fixture.Manifest, tokens, snapshot.SourceId, "scoped-fixture");
+            using var changes = await Collect(etl.EmitAsync(1, null, DecomposerOptions.Default));
+            var projections = changes.SelectMany(c => c.Physicalities)
+                .Where(p => p.Type == PhysicalityType.Projection).ToArray();
+            Assert.Equal(15, projections.Length); // embedding + 5 QK + 5 VO + 4 FFN
+            Assert.Equal(15, projections.Select(p => p.EntityId).Distinct().Count());
+            foreach (var ffn in ffns)
+            {
+                Hash128 id = ModelCoordinates.CircuitId(snapshot.SourceId, "scoped-fixture", "ffn",
+                    ffn.Layer, ffn.Head, ffn.SourcePath, ffn.Operator);
+                Assert.Single(projections, p => p.EntityId == id);
+            }
+        }
+        finally { Directory.Delete(fixture.Directory, recursive: true); }
+    }
+
+    [Fact]
+    public void SourceOperatorAddress_DistinguishesBranchExpertAndOperator()
+    {
+        Hash128 source = Hash128.Text("scoped-source");
+        Hash128 Id(string path, string op = "gated-mlp") =>
+            ModelCoordinates.CircuitId(source, "scoped-source", "ffn", 5, -1, path, op);
+        var ids = new[] { Id("encoder.layers.5.mlp"), Id("decoder.layers.5.mlp"),
+            Id("decoder.layers.5.mlp.experts.4"), Id("decoder.layers.5.mlp.experts.9"),
+            Id("decoder.layers.5.mlp", "plain-mlp") };
+        Assert.Equal(ids.Length, ids.Distinct().Count());
+        Hash128 Context(string path) => ModelTokenEdgeETL.CircuitContextForVersion(
+            ModelTokenEdgeETL.AnalyzerVersion, source, "ffn", 5, -1, ["same.weight"], path, "gated-mlp");
+        Assert.NotEqual(Context("encoder.layers.5.mlp"), Context("decoder.layers.5.mlp"));
+    }
+
+    [Fact]
+    public void TransposedSourceProjections_ExecuteTheSameDeclaredFunctions()
+    {
+        var original = WriteScopedCircuitFixture();
+        var transposed = WriteScopedCircuitFixture(transposed: true);
+        try
+        {
+            var tokens = FixtureTokens();
+            var canonical = tokens.Select((token, index) => (token.EntityId, index))
+                .ToDictionary(pair => pair.EntityId, pair => pair.index);
+            using var a = SourceEntityIdConventions.OpenModelContentSnapshot(original.Directory)!;
+            using var b = SourceEntityIdConventions.OpenModelContentSnapshot(transposed.Directory)!;
+            var left = new ModelCircuitEstate(new(original.Directory, original.Manifest, tokens, a.SourceId, a), canonical);
+            var right = new ModelCircuitEstate(new(transposed.Directory, transposed.Manifest, tokens, b.SourceId, b), canonical);
+            var expected = left.Enumerate(ModelDecomposer.CompletesToTypeId).ToDictionary(c => c.SourcePath,
+                c => c.Contraction.Score([0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]).Scores);
+            var actual = right.Enumerate(ModelDecomposer.CompletesToTypeId).ToDictionary(c => c.SourcePath,
+                c => c.Contraction.Score([0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]).Scores);
+            Assert.Equal(4, actual.Count);
+            foreach (var pair in expected) Assert.Equal(pair.Value, actual[pair.Key]);
+            Assert.Empty(right.Skipped);
+        }
+        finally
+        {
+            Directory.Delete(original.Directory, recursive: true);
+            Directory.Delete(transposed.Directory, recursive: true);
+        }
+    }
+
 
     [Fact]
     public async Task CircuitPhysicalityIsRecordedWithoutAnyPreexistingGraphClaim()
@@ -642,6 +732,57 @@ public sealed class ModelTokenEdgeETLTests
             ("encoder.layer.0.output.dense.weight", [2, 3],
                 [scale, 0, scale, 0, scale, scale], TensorRoleKind.MlpDown),
         };
+        WriteTensors(dir, tensors.Select(t => (t.Name, t.Shape, t.Values)).ToArray());
+
+        ModelManifest manifest = ModelManifest.Recognize(
+            tensors.Select(t => new HeaderTensor(t.Name, "F32", t.Shape)).ToArray(),
+            ConfigResult(BertConfig(rows, 2, 1, 2, 1, 3), new()
+            {
+                ["hidden_size"] = 2, ["num_attention_heads"] = 2, ["head_dim"] = 1,
+                ["num_hidden_layers"] = 1, ["intermediate_size"] = 3,
+            }),
+            rows, "circuit-fixture");
+        foreach (var tensor in tensors)
+            Assert.Equal(tensor.Kind, Assert.Single(manifest.Roles, r => r.Name == tensor.Name).Kind);
+        return (dir, manifest);
+    }
+
+    private static (string Directory, ModelManifest Manifest) WriteScopedCircuitFixture(bool transposed = false)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-source-operators-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var tensors = new List<(string Name, int[] Shape, float[] Values)>
+        {
+            ("embed_tokens.weight", [3, 2], [1, 2, 2, 1, -1, -3]),
+        };
+        foreach (string path in new[] { "encoder.layers.5.self_attn", "decoder.layers.5.self_attn", "decoder.layers.5.cross_attn" })
+        {
+            float sign = path.EndsWith("cross_attn", StringComparison.Ordinal) ? -1 : 1;
+            tensors.Add(($"{path}.q_proj.weight", [2, 2], [1, 0, 0, 1]));
+            tensors.Add(($"{path}.k_proj.weight", [2, 2], [sign, 0, 0, sign]));
+            tensors.Add(($"{path}.v_proj.weight", [2, 2], [1, 0, 0, 1]));
+            tensors.Add(($"{path}.o_proj.weight", [2, 2], [1, 0, 0, 1]));
+        }
+        foreach (string path in new[] { "encoder.layers.5.mlp", "decoder.layers.5.mlp", "decoder.layers.17.mlp.experts.4", "decoder.layers.17.mlp.experts.9" })
+        {
+            float sign = path.EndsWith(".9", StringComparison.Ordinal) ? -1 : 1;
+            tensors.Add(($"{path}.up_proj.weight", transposed ? [2, 3] : [3, 2],
+                transposed ? [1, 0, 1, 0, 1, 1] : [1, 0, 0, 1, 1, 1]));
+            tensors.Add(($"{path}.down_proj.weight", transposed ? [3, 2] : [2, 3],
+                transposed ? [sign, 0, 0, sign, sign, sign] : [sign, 0, sign, 0, sign, sign]));
+        }
+        WriteTensors(dir, tensors.ToArray());
+        var config = ModelConfigReader.Read(Encoding.UTF8.GetBytes("""
+            {"model_type":"bert","vocab_size":3,"hidden_size":2,"num_hidden_layers":2,
+             "num_attention_heads":2,"encoder_attention_heads":1,"decoder_attention_heads":2,
+             "intermediate_size":3,"hidden_act":"relu"}
+            """));
+        return (dir, ModelManifest.Recognize(tensors.Select(t => new HeaderTensor(t.Name, "F32", t.Shape)).ToArray(),
+            config, 3, "scoped-fixture"));
+    }
+
+    private static void WriteTensors(string dir, (string Name, int[] Shape, float[] Values)[] tensors)
+    {
         var json = new StringBuilder("{");
         int dataBytes = 0;
         for (int i = 0; i < tensors.Length; i++)
@@ -667,18 +808,6 @@ public sealed class ModelTokenEdgeETLTests
             at += tensor.Values.Length * sizeof(float);
         }
         File.WriteAllBytes(Path.Combine(dir, "model.safetensors"), bytes);
-
-        ModelManifest manifest = ModelManifest.Recognize(
-            tensors.Select(t => new HeaderTensor(t.Name, "F32", t.Shape)).ToArray(),
-            ConfigResult(BertConfig(rows, 2, 1, 2, 1, 3), new()
-            {
-                ["hidden_size"] = 2, ["num_attention_heads"] = 2, ["head_dim"] = 1,
-                ["num_hidden_layers"] = 1, ["intermediate_size"] = 3,
-            }),
-            rows, "circuit-fixture");
-        foreach (var tensor in tensors)
-            Assert.Equal(tensor.Kind, Assert.Single(manifest.Roles, r => r.Name == tensor.Name).Kind);
-        return (dir, manifest);
     }
 
     private static ModelConfig BertConfig(int vocab, int hidden, int layers, int heads, int headDim, int interm) => new()

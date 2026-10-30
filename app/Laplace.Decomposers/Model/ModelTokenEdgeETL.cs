@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class ModelTokenEdgeETL
 {
-    internal const int AnalyzerVersion = 11;
+    internal const int AnalyzerVersion = 12;
     private const string DerivationFamily = "model-circuit-decomposition";
     private const int PlacementWitnesses = 64;
 
@@ -215,7 +215,7 @@ public sealed class ModelTokenEdgeETL
 
         using var builder = new SubstrateChangeBuilder(
                 _source,
-                $"model/circuit/{descriptor.Plane}/L{descriptor.Layer}/H{descriptor.Head}",
+                $"model/circuit/{descriptor.Plane}/{descriptor.SourcePath}/{descriptor.Operator}/H{descriptor.Head}",
                 entityCapacity: 0, physicalityCapacity: 1,
                 attestationCapacity: 0)
             .DeclareSourcePrior(sourceTrust)
@@ -223,7 +223,9 @@ public sealed class ModelTokenEdgeETL
 
         OrderedCompositionResult circuit = ModelCoordinates.StageCircuit(
             builder, _source, _sourceName,
-            descriptor.Plane, descriptor.Layer, descriptor.Head, observedAt);
+            descriptor.Plane, descriptor.Layer, descriptor.Head, observedAt,
+            descriptor.SourcePath.Length == 0 ? null : descriptor.SourcePath,
+            descriptor.Operator.Length == 0 ? null : descriptor.Operator);
 
         builder.AddPhysicality(new PhysicalityRow(
             Id: PhysicalityId.Compute(
@@ -278,7 +280,7 @@ public sealed class ModelTokenEdgeETL
             {
                 using var builder = new SubstrateChangeBuilder(
                         _source,
-                        $"model/claim/{descriptor.Plane}/L{descriptor.Layer}/H{descriptor.Head}/{row}",
+                        $"model/claim/{descriptor.Plane}/{descriptor.SourcePath}/{descriptor.Operator}/H{descriptor.Head}/{row}",
                         entityCapacity: 0, physicalityCapacity: 0,
                         attestationCapacity: page.Rows.Length)
                     .DeclareSourcePrior(sourceTrust)
@@ -310,9 +312,11 @@ public sealed class ModelTokenEdgeETL
     internal static Hash128 CircuitContextForVersion(
         int analyzerVersion, Hash128 source,
         string plane, int layer, int head,
-        IReadOnlyList<string> tensorNames) =>
+        IReadOnlyList<string> tensorNames, string? sourcePath = null, string? operatorName = null) =>
         Hash128.Text(
-            $"{DerivationFamily}/v{analyzerVersion}/context/source={source}/plane={plane}/layer={layer}/head={head}/tensors={string.Join('|', tensorNames)}");
+            $"{DerivationFamily}/v{analyzerVersion}/context/source={source}/plane={plane}/layer={layer}/head={head}/tensors={string.Join('|', tensorNames)}"
+            + (sourcePath is null && operatorName is null ? ""
+                : $"/source-path:{sourcePath?.Length ?? 0}={sourcePath}/operator:{operatorName?.Length ?? 0}={operatorName}"));
 
     private Hash128 CalculationReceipt(
         Hash128 context, Hash128 typeId,

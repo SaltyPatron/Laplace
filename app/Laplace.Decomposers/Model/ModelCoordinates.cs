@@ -49,10 +49,11 @@ public static class ModelCoordinates
         return plane.Trim().ToLowerInvariant();
     }
 
-    private static string[] CircuitPath(string plane, int layer, int head)
+    private static string[] CircuitPath(string plane, int layer, int head,
+        string? sourcePath = null, string? operatorName = null)
     {
         plane = NormalizePlane(plane);
-        if (head >= 0 && layer < 0)
+        if (head >= 0 && layer < 0 && sourcePath is null)
             throw new ArgumentException("a model head cannot exist without a layer");
         var parts = new List<string>(6) { "model-circuit", plane };
         if (layer >= 0)
@@ -64,6 +65,13 @@ public static class ModelCoordinates
         {
             parts.Add("head");
             parts.Add(head.ToString(CultureInfo.InvariantCulture));
+        }
+        if (sourcePath is not null || operatorName is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(operatorName);
+            parts.Add(sourcePath);
+            parts.Add(operatorName);
         }
         return parts.ToArray();
     }
@@ -83,9 +91,10 @@ public static class ModelCoordinates
     }
 
     public static Hash128 CircuitId(
-        Hash128 witness, string witnessName, string plane, int layer, int head)
+        Hash128 witness, string witnessName, string plane, int layer, int head,
+        string? sourcePath = null, string? operatorName = null)
     {
-        string[] path = CircuitPath(plane, layer, head);
+        string[] path = CircuitPath(plane, layer, head, sourcePath, operatorName);
         var components = new OrderedCompositionComponent[path.Length + 1];
         components[0] = WitnessComponent(witness, witnessName);
         for (int i = 0; i < path.Length; i++) components[i + 1] = TextComponent(path[i]);
@@ -96,10 +105,11 @@ public static class ModelCoordinates
 
     public static OrderedCompositionResult StageCircuit(
         SubstrateChangeBuilder builder, Hash128 witness, string witnessName,
-        string plane, int layer, int head, long observedAtUnixUs = 0)
+        string plane, int layer, int head, long observedAtUnixUs = 0,
+        string? sourcePath = null, string? operatorName = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        string[] path = CircuitPath(plane, layer, head);
+        string[] path = CircuitPath(plane, layer, head, sourcePath, operatorName);
         var components = new OrderedCompositionComponent[path.Length + 1];
         components[0] = WitnessComponent(witness, witnessName);
         for (int i = 0; i < path.Length; i++)

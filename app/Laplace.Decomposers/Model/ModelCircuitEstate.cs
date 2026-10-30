@@ -14,7 +14,11 @@ internal readonly record struct ModelCircuitDescriptor(
     int Layer,
     int Head,
     IReadOnlyList<string> TensorNames,
-    NativeBilinearContraction Contraction);
+    NativeBilinearContraction Contraction)
+{
+    public string SourcePath { get; init; } = "";
+    public string Operator { get; init; } = "";
+}
 
 /// <summary>
 /// Transient numeric view of one held model artifact over a caller-selected
@@ -25,6 +29,7 @@ internal sealed class ModelCircuitEstate
 {
     private readonly SelectedModelAnalysisInput _model;
     private readonly Dictionary<string, SafetensorsContainerParser.TensorReference> _refs;
+    private readonly Dictionary<string, TensorRole> _roles;
     private readonly float[] _embedding;
     private float[]? _output;
 
@@ -60,6 +65,7 @@ internal sealed class ModelCircuitEstate
         TensorRole embeddingRole = model.Manifest.Embedding
             ?? throw new InvalidDataException("selected model has no classified embedding tensor");
         _cfg = model.Manifest.Config;
+        _roles = model.Manifest.Roles.ToDictionary(role => role.Name, StringComparer.Ordinal);
         if (_cfg.VocabSize <= 0 || _cfg.HiddenSize <= 0)
             throw new InvalidDataException("selected model has no runnable text dimensions");
 
@@ -135,34 +141,29 @@ internal sealed class ModelCircuitEstate
             }
         }
 
-        for (int layer = 0; layer < _model.Manifest.LayerCount; layer++)
+        foreach (OperatorInstance op in _model.Manifest.Anatomy.Operators.Where(o => o.Family is "mlp" or "experts"))
         {
-            TensorRole? upRole = _model.Manifest.Single(layer, TensorRoleKind.MlpUp);
-            TensorRole? downRole = _model.Manifest.Single(layer, TensorRoleKind.MlpDown);
-            TensorRole? gateRole = _model.Manifest.Single(layer, TensorRoleKind.MlpGate);
-            int intermediate = upRole is { Shape.Length: 2 } ? upRole.Shape[0] : 0;
+            TensorRole? upRole = Operand(op, "up");
+            TensorRole? downRole = Operand(op, "down");
+            TensorRole? gateRole = Operand(op, "gate");
+            int intermediate = upRole is { Shape.Length: 2 }
+                ? upRole.Shape[upRole.Orientation == "in,out" ? 1 : 0] : 0;
             if (upRole is null || downRole is null || intermediate <= 0)
             {
-                _skipped.Add($"ffn layer {layer}: no recognized split up/down projections");
-                continue;
-            }
-            if (!upRole.IsRowMajorProjection || !downRole.IsRowMajorProjection
-                || gateRole is { IsRowMajorProjection: false })
-            {
-                _skipped.Add($"ffn layer {layer}: projections are stored transposed ({upRole.Orientation})");
+                _skipped.Add($"ffn {op.SourcePath} ({op.Operator}): no recognized split up/down projections");
                 continue;
             }
             if (_model.Manifest.FfnActivation(gateRole is not null) is not { } activation)
             {
-                _skipped.Add($"ffn layer {layer}: declared activation '{_cfg.HiddenAct}' has no native operator");
+                _skipped.Add($"ffn {op.SourcePath} ({op.Operator}): declared activation '{_cfg.HiddenAct}' has no native operator");
                 continue;
             }
-            float[] up = Load(upRole.Name, (long)intermediate * d);
-            float[] down = Load(downRole.Name, (long)d * intermediate);
-            float[]? gate = gateRole is not null ? Load(gateRole.Name, (long)intermediate * d) : null;
+            float[] up = LoadProjection(upRole, intermediate, d);
+            float[] down = LoadProjection(downRole, d, intermediate);
+            float[]? gate = gateRole is not null ? LoadProjection(gateRole, intermediate, d) : null;
             if (up.Length == 0 || down.Length == 0 || gate is { Length: 0 })
             {
-                _skipped.Add($"ffn layer {layer}: projections have no numeric interpretation");
+                _skipped.Add($"ffn {op.SourcePath} ({op.Operator}): projections have no numeric interpretation");
                 continue;
             }
             float[]? upBias = LoadOptionalBias(upRole.Bias, intermediate);
@@ -179,33 +180,29 @@ internal sealed class ModelCircuitEstate
             if (gateBias is not null) tensors.Add(gateRole!.Bias!);
             if (downBias is not null) tensors.Add(downRole.Bias!);
             yield return Describe(
-                "ffn", layer, -1, tensors, circuit);
+                "ffn", op.Block, -1, tensors, circuit, op);
         }
     }
 
     private IEnumerable<ModelCircuitDescriptor> AttentionCircuits()
     {
         int d = _cfg.HiddenSize;
-        if (_cfg.NumHeads <= 0 || _cfg.HeadDim <= 0) yield break;
-        int heads = _cfg.NumHeads;
-        int kvHeads = Math.Max(1, _cfg.NumKvHeads);
-        int headDim = _cfg.HeadDim;
-        int attnDim = checked(heads * headDim);
-        int kvDim = checked(kvHeads * headDim);
-        for (int layer = 0; layer < _model.Manifest.LayerCount; layer++)
+        foreach (OperatorInstance op in _model.Manifest.Anatomy.Operators.Where(o => o.Family == "attention"))
         {
-            TensorRole? qRole = _model.Manifest.Single(layer, TensorRoleKind.AttnQ);
-            TensorRole? kRole = _model.Manifest.Single(layer, TensorRoleKind.AttnK);
+            TensorRole? qRole = Operand(op, "q");
+            TensorRole? kRole = Operand(op, "k");
             if (qRole is null || kRole is null)
             {
-                _skipped.Add($"attention layer {layer}: no recognized split query/key projections");
+                _skipped.Add($"attention {op.SourcePath} ({op.Operator}): no recognized split query/key projections");
                 continue;
             }
-            float[] q = Load(qRole.Name, (long)attnDim * d);
-            float[] k = Load(kRole.Name, (long)kvDim * d);
+            if (!AttentionDimensions(op, out int heads, out int kvHeads, out int headDim)) continue;
+            int attnDim = checked(heads * headDim), kvDim = checked(kvHeads * headDim);
+            float[] q = LoadProjection(qRole, attnDim, d);
+            float[] k = LoadProjection(kRole, kvDim, d);
             if (q.Length == 0 || k.Length == 0)
             {
-                _skipped.Add($"attention layer {layer}: projections have no numeric interpretation");
+                _skipped.Add($"attention {op.SourcePath} ({op.Operator}): projections have no numeric interpretation");
                 continue;
             }
             float[]? qBias = LoadOptionalBias(qRole.Bias, attnDim);
@@ -220,7 +217,7 @@ internal sealed class ModelCircuitEstate
                     kBias is null ? null : SliceVector(kBias, kvHead * headDim, headDim),
                     headDim);
                 yield return Describe(
-                    "attention", layer, head, [qRole.Name, kRole.Name], circuit);
+                    "attention", op.Block, head, [qRole.Name, kRole.Name], circuit, op);
             }
         }
     }
@@ -228,26 +225,22 @@ internal sealed class ModelCircuitEstate
     private IEnumerable<ModelCircuitDescriptor> ValueOutputCircuits()
     {
         int d = _cfg.HiddenSize;
-        if (_cfg.NumHeads <= 0 || _cfg.HeadDim <= 0) yield break;
-        int heads = _cfg.NumHeads;
-        int kvHeads = Math.Max(1, _cfg.NumKvHeads);
-        int headDim = _cfg.HeadDim;
-        int attnDim = checked(heads * headDim);
-        int kvDim = checked(kvHeads * headDim);
-        for (int layer = 0; layer < _model.Manifest.LayerCount; layer++)
+        foreach (OperatorInstance op in _model.Manifest.Anatomy.Operators.Where(o => o.Family == "attention"))
         {
-            TensorRole? vRole = _model.Manifest.Single(layer, TensorRoleKind.AttnV);
-            TensorRole? oRole = _model.Manifest.Single(layer, TensorRoleKind.AttnO);
+            TensorRole? vRole = Operand(op, "v");
+            TensorRole? oRole = Operand(op, "o");
             if (vRole is null || oRole is null)
             {
-                _skipped.Add($"value-output layer {layer}: no recognized split value/output projections");
+                _skipped.Add($"value-output {op.SourcePath} ({op.Operator}): no recognized split value/output projections");
                 continue;
             }
-            float[] v = Load(vRole.Name, (long)kvDim * d);
-            float[] output = Load(oRole.Name, (long)d * attnDim);
+            if (!AttentionDimensions(op, out int heads, out int kvHeads, out int headDim)) continue;
+            int attnDim = checked(heads * headDim), kvDim = checked(kvHeads * headDim);
+            float[] v = LoadProjection(vRole, kvDim, d);
+            float[] output = LoadProjection(oRole, d, attnDim);
             if (v.Length == 0 || output.Length == 0)
             {
-                _skipped.Add($"value-output layer {layer}: projections have no numeric interpretation");
+                _skipped.Add($"value-output {op.SourcePath} ({op.Operator}): projections have no numeric interpretation");
                 continue;
             }
             float[]? vBias = LoadOptionalBias(vRole.Bias, kvDim);
@@ -271,7 +264,7 @@ internal sealed class ModelCircuitEstate
                     vBias is null ? null : SliceVector(vBias, kvHead * headDim, headDim),
                     rightWeight, null, headDim, OutputRows);
                 yield return Describe(
-                    "value-output", layer, head, [_model.Manifest.Embedding!.Name, vRole.Name, oRole.Name, OutputRole.Name], circuit);
+                    "value-output", op.Block, head, [_model.Manifest.Embedding!.Name, vRole.Name, oRole.Name, OutputRole.Name], circuit, op);
             }
         }
     }
@@ -299,12 +292,59 @@ internal sealed class ModelCircuitEstate
 
     private ModelCircuitDescriptor Describe(
         string plane, int layer, int head, IReadOnlyList<string> tensorNames,
-        NativeBilinearContraction circuit) =>
+        NativeBilinearContraction circuit, OperatorInstance? op = null) =>
         new(
             ModelTokenEdgeETL.CircuitContextForVersion(
                 ModelTokenEdgeETL.AnalyzerVersion, _model.SourceId,
-                plane, layer, head, tensorNames),
-            plane, layer, head, tensorNames, circuit);
+                plane, layer, head, tensorNames, op?.SourcePath, op?.Operator),
+            plane, layer, head, tensorNames, circuit)
+        { SourcePath = op?.SourcePath ?? "", Operator = op?.Operator ?? "" };
+
+    private TensorRole? Operand(OperatorInstance op, string slot)
+    {
+        SlotBinding? binding = op.Slot(slot);
+        if (binding is { IsAmbiguous: true })
+            throw new InvalidDataException($"{op.SourcePath} ({op.Operator}): ambiguous '{slot}' operand");
+        if (binding?.Tensor is not { } name) return null;
+        if (!_roles.TryGetValue(name, out TensorRole? role) || role.SourcePath != op.SourcePath
+            || role.Operator != op.Operator || role.Slot != slot)
+            throw new InvalidDataException($"{op.SourcePath} ({op.Operator}): '{slot}' lost its source binding");
+        return role;
+    }
+
+    private bool AttentionDimensions(OperatorInstance op, out int heads, out int kvHeads, out int headDim)
+    {
+        int Dimension(string symbol, int fallback) => op.ContextSymbols.TryGetValue(symbol, out long value)
+            ? checked((int)value) : fallback;
+        heads = Dimension("h", _cfg.NumHeads);
+        kvHeads = Dimension("h_kv", _cfg.NumKvHeads);
+        headDim = Dimension("d_h", _cfg.HeadDim);
+        if (heads > 0 && kvHeads > 0 && headDim > 0 && heads % kvHeads == 0) return true;
+        _skipped.Add($"attention {op.SourcePath} ({op.Operator}): invalid scoped head dimensions h={heads}, h_kv={kvHeads}, d_h={headDim}");
+        return false;
+    }
+
+    private float[] LoadProjection(TensorRole role, int rows, int cols)
+    {
+        bool transposed = role.Orientation == "in,out";
+        if (role.Orientation is not ("out,in" or "in,out" or "-"))
+            throw new InvalidDataException($"projection '{role.Name}' has undecided orientation '{role.Orientation}'");
+        if (role.Shape.Length != 2 || role.Shape[0] != (transposed ? cols : rows)
+            || role.Shape[1] != (transposed ? rows : cols))
+            throw new InvalidDataException($"projection '{role.Name}' source shape disagrees with its scoped {rows}x{cols} operands");
+        float[] values = Load(role.Name, (long)rows * cols);
+        if (!transposed || values.Length == 0) return values;
+        var result = new float[values.Length];
+        int rc;
+        unsafe
+        {
+            fixed (float* input = values)
+            fixed (float* output = result)
+                rc = DynInterop.TransposeColumnBlockF(input, (nuint)cols, (nuint)rows, 0, (nuint)rows, output);
+        }
+        if (rc != 0) throw new InvalidOperationException($"native projection transpose failed: {rc}");
+        return result;
+    }
 
     private float[] Load(string tensorName, long elements) =>
         _refs.ContainsKey(tensorName)
