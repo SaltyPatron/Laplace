@@ -8,7 +8,7 @@ namespace Laplace.Decomposers.Model;
 
 public sealed class ModelTokenEdgeETL
 {
-    internal const int AnalyzerVersion = 10;
+    internal const int AnalyzerVersion = 11;
     private const string DerivationFamily = "model-circuit-decomposition";
     private const int PlacementWitnesses = 64;
 

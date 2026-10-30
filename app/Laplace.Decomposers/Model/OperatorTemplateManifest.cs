@@ -6,16 +6,20 @@ namespace Laplace.Decomposers.Model;
 /// <summary>How a template symbol receives its value.</summary>
 public enum SymbolBinding
 {
-    Frequency,
-    Tokenizer,
-    Blocks,
-    Config,
-    Instance,
+    Frequency = 0,
+    Tokenizer = 1,
+    Blocks = 2,
+    Config = 3,
+    Instance = 4,
+    ConfigOrFrequency = 5,
 }
 
 public sealed record OperatorSymbol(
     string Name, string Meaning, SymbolBinding Bind,
-    IReadOnlyList<string> ConfigKeys, string? Default);
+    IReadOnlyList<string> ConfigKeys, string? Default)
+{
+    public ShapeExpression? DefaultExpression { get; } = Default is { } text ? ShapeExpression.Parse(text) : null;
+}
 
 public sealed record OperatorSlot(
     string Operator, string Role, IReadOnlyList<ShapeExpression> Shape,
@@ -28,7 +32,18 @@ public sealed record OperatorTemplate(
     IReadOnlyList<OperatorSlot> Slots, bool Repeat = false)
 {
     public bool HasScope(string scope) => Scopes.Contains(scope, StringComparer.Ordinal);
+    public bool AtOwner { get; init; }
+    public bool Coexists { get; init; }
+    public bool RequireBound { get; init; }
 }
+
+public sealed record OperatorContext(
+    IReadOnlyList<string> Paths, string Symbol, IReadOnlyList<string> ConfigKeys, string? Default)
+{
+    public ShapeExpression? DefaultExpression { get; } = Default is { } text ? ShapeExpression.Parse(text) : null;
+}
+
+public sealed record OperatorScope(string Name, IReadOnlyList<string> After);
 
 /// <summary>
 /// The governed operator-template manifest (engine/manifest/model_operators.toml).
@@ -43,6 +58,8 @@ public sealed class OperatorTemplateManifest
 
     public required IReadOnlyList<OperatorSymbol> Symbols { get; init; }
     public required IReadOnlyList<OperatorTemplate> Operators { get; init; }
+    public IReadOnlyList<OperatorContext> Contexts { get; init; } = [];
+    public IReadOnlyList<OperatorScope> SourceScopes { get; init; } = [];
 
     public static OperatorTemplateManifest Governed => Embedded.Value;
 
@@ -58,8 +75,10 @@ public sealed class OperatorTemplateManifest
     {
         var tables = TomlTables.Parse(toml);
         var symbols = new List<OperatorSymbol>();
-        var operators = new List<(string Name, string Family, List<string> Scopes, bool Repeat)>();
+        var operators = new List<(string Name, string Family, List<string> Scopes, bool Repeat, bool AtOwner, bool Coexists, bool RequireBound)>();
         var slots = new List<OperatorSlot>();
+        var contexts = new List<OperatorContext>();
+        var scopes = new List<OperatorScope>();
         foreach ((string kind, Dictionary<string, object> t) in tables)
         {
             switch (kind)
@@ -71,8 +90,20 @@ public sealed class OperatorTemplateManifest
                         OptList(t, "config"), OptStr(t, "default")));
                     break;
                 case "operator":
+                    string locality = OptStr(t, "locality") ?? "scope";
+                    if (locality is not ("scope" or "owner"))
+                        throw new InvalidDataException($"operator manifest: unknown locality '{locality}'");
                     operators.Add((Str(t, "name"), Str(t, "family"), OptList(t, "scopes").ToList(),
-                        t.TryGetValue("repeat", out object? rp) && rp is bool r && r));
+                        t.TryGetValue("repeat", out object? rp) && rp is bool r && r, locality == "owner",
+                        t.TryGetValue("coexists", out object? co) && co is true,
+                        t.TryGetValue("require_bound", out object? rb) && rb is true));
+                    break;
+                case "context":
+                    contexts.Add(new OperatorContext(OptList(t, "paths"), Str(t, "symbol"),
+                        OptList(t, "config"), OptStr(t, "default")));
+                    break;
+                case "scope":
+                    scopes.Add(new OperatorScope(Str(t, "name"), OptList(t, "after")));
                     break;
                 case "slot":
                     slots.Add(new OperatorSlot(
@@ -101,17 +132,30 @@ public sealed class OperatorTemplateManifest
                         if (!symbolNames.Contains(symbol))
                             throw new InvalidDataException(
                                 $"operator manifest: slot {op.Name}.{slot.Role} uses undeclared symbol '{symbol}'");
-            templates.Add(new OperatorTemplate(op.Name, op.Family, op.Scopes, own, op.Repeat));
+            templates.Add(new OperatorTemplate(op.Name, op.Family, op.Scopes, own, op.Repeat)
+                { AtOwner = op.AtOwner, Coexists = op.Coexists, RequireBound = op.RequireBound });
         }
         foreach (OperatorSlot slot in slots)
             if (!operators.Any(o => o.Name == slot.Operator))
                 throw new InvalidDataException($"operator manifest: slot for undeclared operator '{slot.Operator}'");
-        return new OperatorTemplateManifest { Symbols = symbols, Operators = templates };
+        foreach (OperatorContext context in contexts)
+            if (!symbolNames.Contains(context.Symbol) || context.Paths.Count == 0
+                || (context.ConfigKeys.Count == 0 && context.Default is null))
+                throw new InvalidDataException($"operator manifest: incomplete context for '{context.Symbol}'");
+        var markers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (OperatorScope scope in scopes)
+        {
+            if (scope.After.Count == 0) throw new InvalidDataException($"operator manifest: scope '{scope.Name}' has no path markers");
+            foreach (string marker in scope.After)
+                if (!markers.Add(marker)) throw new InvalidDataException($"operator manifest: repeated scope marker '{marker}'");
+        }
+        return new OperatorTemplateManifest { Symbols = symbols, Operators = templates, Contexts = contexts, SourceScopes = scopes };
     }
 
     private static SymbolBinding ParseBinding(string value) => value switch
     {
         "frequency" => SymbolBinding.Frequency,
+        "config-or-frequency" => SymbolBinding.ConfigOrFrequency,
         "tokenizer" => SymbolBinding.Tokenizer,
         "blocks" => SymbolBinding.Blocks,
         "config" => SymbolBinding.Config,

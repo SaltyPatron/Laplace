@@ -70,6 +70,8 @@ public sealed record TensorRole(
     string? Bias = null)
 {
     public bool IsLayerScoped => LayerIndex >= 0;
+    public string SourcePath { get; init; } = "";
+    public IReadOnlyDictionary<string, long> ContextSymbols { get; init; } = new Dictionary<string, long>();
 
     /// <summary>A row-major [out, in] projection that numeric circuits may consume as stored.</summary>
     public bool IsRowMajorProjection => Orientation is "out,in" or "-";
@@ -156,10 +158,26 @@ public sealed class ModelManifest
     public IEnumerable<TensorRole> ForLayer(int layer) => Roles.Where(r => r.LayerIndex == layer);
 
     public TensorRole? Single(int layer, TensorRoleKind kind) =>
-        Roles.FirstOrDefault(r => r.LayerIndex == layer && r.ExpertIndex < 0 && r.Kind == kind);
+        UniqueRole(Roles.Where(r => r.LayerIndex == layer && r.ExpertIndex < 0 && r.Kind == kind));
+
+    public TensorRole? Single(string sourcePath, TensorRoleKind kind) =>
+        UniqueRole(Roles.Where(r => r.SourcePath == sourcePath && r.ExpertIndex < 0 && r.Kind == kind));
 
     public TensorRole? Norm(int layer, string slot) =>
-        Roles.FirstOrDefault(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm && r.Slot == slot);
+        UniqueRole(Roles.Where(r => r.LayerIndex == layer && r.Kind == TensorRoleKind.Norm && r.Slot == slot));
+
+    private static TensorRole? UniqueRole(IEnumerable<TensorRole> candidates)
+    {
+        TensorRole? result = null;
+        foreach (TensorRole candidate in candidates)
+        {
+            if (result is not null)
+                throw new InvalidDataException(
+                    $"multiple source operands match {candidate.Kind}: '{result.Name}' and '{candidate.Name}'; select their source path explicitly");
+            result = candidate;
+        }
+        return result;
+    }
 
     public static ModelManifest Recognize(
         IReadOnlyList<SafetensorsContainerParser.TensorReference> headers,
@@ -181,7 +199,8 @@ public sealed class ModelManifest
     {
         ArgumentNullException.ThrowIfNull(tensors);
         ArgumentNullException.ThrowIfNull(config);
-        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors, config.IntegerFields, tokenizerSize);
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors, config.IntegerFields, tokenizerSize,
+            manifest: null, jsonConfig: config.JsonIntegerFields);
         var byName = tensors.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         var roles = new List<TensorRole>();
@@ -193,7 +212,8 @@ public sealed class ModelManifest
                 HeaderTensor t = byName[name];
                 roles.Add(new TensorRole(
                     name, t.Shape, t.Dtype, KindOf(op, slot.Role), op.Block, op.Expert,
-                    op.Operator, slot.Role, slot.Orientation, slot.Bias));
+                    op.Operator, slot.Role, slot.Orientation, slot.Bias)
+                { SourcePath = op.SourcePath, ContextSymbols = op.ContextSymbols });
             }
         }
 

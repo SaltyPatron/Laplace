@@ -10,6 +10,229 @@ public sealed class ModelOperatorRecognizerTests
 {
     private static HeaderTensor T(string name, params int[] shape) => new(name, "BF16", shape);
 
+    [Fact]
+    public void NumericAncestors_AreNotAssumedToBeLayerOrExpertOrdinals()
+    {
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(
+            [T("package.revision.99.blocks.3.fc1.weight", 48, 16), T("package.revision.99.blocks.3.fc2.weight", 16, 48)],
+            new Dictionary<string, long> { ["hidden_size"] = 16 }, null);
+        OperatorInstance op = Assert.Single(anatomy.Operators, o => o.Family == "mlp");
+        Assert.Equal("block", op.Scope);
+        Assert.Equal(3, op.Block);
+        Assert.Equal(-1, op.Expert);
+        Assert.Equal("package.revision.99.blocks.3", op.SourcePath);
+    }
+
+    [Fact]
+    public void RecipeDeclaredSourceScope_DoesNotRequireARecognizerCodeChange()
+    {
+        OperatorTemplateManifest recipe = OperatorTemplateManifest.Parse("""
+            [[scope]]
+            name = "operator-body"
+            after = ["segments"]
+            [[symbol]]
+            name = "d"
+            bind = "config"
+            config = ["hidden_size"]
+            [[symbol]]
+            name = "w"
+            bind = "instance"
+            [[operator]]
+            name = "affine-pair"
+            family = "mlp"
+            scopes = ["operator-body"]
+            locality = "owner"
+            [[slot]]
+            operator = "affine-pair"
+            role = "up"
+            shape = ["w", "d"]
+            required = true
+            [[slot]]
+            operator = "affine-pair"
+            role = "down"
+            shape = ["d", "w"]
+            required = true
+            """);
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(
+            [T("package.outer.99.segments.7.up.weight", 48, 16), T("package.outer.99.segments.7.down.weight", 16, 48)],
+            new Dictionary<string, long> { ["hidden_size"] = 16 }, null, recipe);
+        OperatorInstance op = Assert.Single(anatomy.Operators);
+        Assert.Equal("operator-body", op.Scope);
+        Assert.Equal("package.outer.99.segments.7", op.SourcePath);
+        Assert.Empty(anatomy.Unrecognized);
+    }
+
+    [Fact]
+    public void RepeatedOrdinalsUnderDifferentSourcePaths_DoNotShareOperands()
+    {
+        var tensors = new[]
+        {
+            T("package.left.blocks.0.fc1.weight", 48, 16),
+            T("package.left.blocks.0.fc2.weight", 16, 48),
+            T("package.right.blocks.0.fc1.weight", 64, 16),
+            T("package.right.blocks.0.fc2.weight", 16, 64),
+        };
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors,
+            new Dictionary<string, long> { ["d_model"] = 16 }, null);
+
+        OperatorInstance[] operators = anatomy.Operators.Where(o => o.Family == "mlp").ToArray();
+        Assert.Equal(2, operators.Length);
+        Assert.Empty(anatomy.Unrecognized);
+        Assert.All(operators, op =>
+        {
+            Assert.Equal("plain-mlp", op.Operator);
+            Assert.All(op.Slots.Where(s => s.IsBound), slot =>
+                Assert.StartsWith(op.SourcePath + ".", slot.Tensor!));
+        });
+        Assert.Equal(["package.left.blocks.0", "package.right.blocks.0"],
+            operators.Select(o => o.SourcePath).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public void ConfiguredWidth_IsNotReplacedByAnUnrelatedBackboneAxis()
+    {
+        var tensors = new List<HeaderTensor>
+        {
+            T("model.encoder.layers.0.fc1.weight", 2048, 256),
+            T("model.encoder.layers.0.fc2.weight", 256, 2048),
+        };
+        for (int i = 0; i < 20; i++)
+            tensors.Add(T($"backbone.stages.{i}.convolution.weight", 64, 64, 3, 3));
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors,
+            new Dictionary<string, long> { ["d_model"] = 256 }, null);
+
+        Assert.Equal(256, anatomy.Symbol("d"));
+        Assert.Equal("config", anatomy.Symbols["d"].Basis);
+        OperatorInstance mlp = Assert.Single(anatomy.Operators, o => o.Family == "mlp");
+        Assert.Equal("plain-mlp", mlp.Operator);
+        Assert.Equal("model.encoder.layers.0.fc1.weight", mlp.Slot("up")!.Tensor);
+        Assert.Equal("model.encoder.layers.0.fc2.weight", mlp.Slot("down")!.Tensor);
+    }
+
+    [Fact]
+    public void GatedOperator_RequiresDistinctTensorsForItsRequiredOperands()
+    {
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(
+            [T("layers.0.fc1.weight", 48, 16), T("layers.0.fc2.weight", 16, 48)],
+            new Dictionary<string, long> { ["hidden_size"] = 16 }, null);
+
+        OperatorInstance mlp = Assert.Single(anatomy.Operators, o => o.Family == "mlp");
+        Assert.Equal("plain-mlp", mlp.Operator);
+        Assert.All(mlp.Slots, slot => Assert.False(slot.IsAmbiguous));
+    }
+
+    [Fact]
+    public void SourcePaths_SurviveManifestConversion_AndUnqualifiedLookupCannotMixThem()
+    {
+        var headers = new[]
+        {
+            T("left.blocks.0.fc1.weight", 48, 16), T("left.blocks.0.fc2.weight", 16, 48),
+            T("right.blocks.0.fc1.weight", 64, 16), T("right.blocks.0.fc2.weight", 16, 64),
+        }.Select(t => new SafetensorsContainerParser.TensorReference
+        {
+            Name = t.Name, Dtype = t.Dtype, Shape = t.Shape,
+            DataStart = 0, DataEnd = 0, HeaderBytes = 0,
+        }).ToArray();
+        ModelConfigReader.Result config = ModelConfigReader.Read(
+            System.Text.Encoding.UTF8.GetBytes("""{"model_type":"bert","d_model":16}"""));
+        ModelManifest manifest = ModelManifest.Recognize(headers, config, null, "two branches");
+
+        Assert.Throws<InvalidDataException>(() => manifest.Single(0, TensorRoleKind.MlpUp));
+        Assert.Equal("left.blocks.0.fc1.weight", manifest.Single("left.blocks.0", TensorRoleKind.MlpUp)!.Name);
+        Assert.Equal("right.blocks.0.fc1.weight", manifest.Single("right.blocks.0", TensorRoleKind.MlpUp)!.Name);
+    }
+
+    [Fact]
+    public void RecipeContexts_KeepEncoderDecoderAndCrossAttentionOperandsSeparate()
+    {
+        var tensors = new List<HeaderTensor>();
+        foreach (string owner in new[]
+                 { "package.encoder.layers.0.self_attn", "package.decoder.layers.0.self_attn", "package.decoder.layers.0.encoder_attn" })
+            foreach (string projection in new[] { "q_proj", "k_proj", "v_proj", "out_proj" })
+                tensors.Add(T($"{owner}.{projection}.weight", 16, 16));
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors,
+            new Dictionary<string, long>
+            {
+                ["d_model"] = 16, ["encoder_attention_heads"] = 4, ["decoder_attention_heads"] = 8,
+            }, null);
+
+        OperatorInstance[] attention = anatomy.Operators.Where(o => o.Family == "attention").ToArray();
+        Assert.Equal(3, attention.Length);
+        Assert.Empty(anatomy.Unrecognized);
+        foreach (OperatorInstance op in attention)
+        {
+            long heads = op.SourcePath.StartsWith("package.encoder.", StringComparison.Ordinal) ? 4 : 8;
+            Assert.Equal(heads, op.ContextSymbols["h"]);
+            Assert.Equal(heads, op.ContextSymbols["h_kv"]);
+            Assert.Equal(16 / heads, op.ContextSymbols["d_h"]);
+            Assert.Equal(4, op.Slots.Count(s => s.IsBound));
+            Assert.All(op.Slots.Where(s => s.IsBound), slot =>
+            {
+                Assert.StartsWith(op.SourcePath + ".", slot.Tensor!);
+            });
+        }
+    }
+
+    [Fact]
+    public void NestedConfigDeclarations_KeepTheirPathsAndBindTheirOwnContexts()
+    {
+        var config = ModelConfigReader.Read(System.Text.Encoding.UTF8.GetBytes("""
+            {"text_config":{"d_model":16,"encoder_attention_heads":4,"decoder_attention_heads":8},
+             "vision_config":{"hidden_size":64},"escaped~/":{"values":[7,9]}}
+            """));
+        Assert.DoesNotContain("hidden_size", config.IntegerFields.Keys);
+        Assert.Equal(64, config.JsonIntegerFields["/vision_config/hidden_size"]);
+        Assert.Equal(7, config.JsonIntegerFields["/escaped~0~1/values/0"]);
+        var headers = new List<SafetensorsContainerParser.TensorReference>();
+        foreach (string owner in new[] { "package.encoder.layers.0.attention", "package.decoder.layers.0.attention" })
+            foreach (string projection in new[] { "q_proj", "k_proj", "v_proj", "out_proj" })
+                headers.Add(new SafetensorsContainerParser.TensorReference
+                {
+                    Name = $"{owner}.{projection}.weight", Shape = [16, 16], Dtype = "F32",
+                    DataStart = 0, DataEnd = 0, HeaderBytes = 0,
+                });
+        ModelManifest manifest = ModelManifest.Recognize(headers, config, null, "nested config");
+        var encoder = manifest.Single("package.encoder.layers.0.attention", TensorRoleKind.AttnQ);
+        var decoder = manifest.Single("package.decoder.layers.0.attention", TensorRoleKind.AttnQ);
+        Assert.NotNull(encoder);
+        Assert.NotNull(decoder);
+        Assert.Equal(4, encoder.ContextSymbols["h"]);
+        Assert.Equal(8, decoder.ContextSymbols["h"]);
+        Assert.Equal(4, encoder.ContextSymbols["d_h"]);
+        Assert.Equal(2, decoder.ContextSymbols["d_h"]);
+    }
+
+    [Fact]
+    public void ConditionalAttentionRecipes_KeepContentPositionAndOptionalOperandsDistinct()
+    {
+        var tensors = new List<HeaderTensor>();
+        foreach (int block in new[] { 3, 7 })
+        {
+            string prefix = $"model.decoder.layers.{block}.";
+            foreach (string part in new[] { "qcontent", "qpos", "kcontent", "kpos", "v" })
+                tensors.Add(T(prefix + "sa_" + part + "_proj.weight", 16, 16));
+            foreach (string part in new[] { "qcontent", "qpos_sine", "kcontent", "kpos", "v" })
+                tensors.Add(T(prefix + "ca_" + part + "_proj.weight", 16, 16));
+            tensors.Add(T(prefix + "self_attn.out_proj.weight", 16, 16));
+            tensors.Add(T(prefix + "encoder_attn.out_proj.weight", 16, 16));
+            if (block == 7) tensors.Add(T(prefix + "ca_qpos_proj.weight", 16, 16));
+        }
+        ModelAnatomy anatomy = ModelOperatorRecognizer.Recognize(tensors,
+            new Dictionary<string, long> { ["d_model"] = 16, ["decoder_attention_heads"] = 4 }, null);
+
+        Assert.Empty(anatomy.Unrecognized);
+        OperatorInstance[] attention = anatomy.Operators.Where(o => o.Family == "attention").ToArray();
+        Assert.Equal(4, attention.Length);
+        Assert.All(attention, op => Assert.DoesNotContain(op.Slots, slot => slot.IsAmbiguous));
+        Assert.All(attention, op => Assert.All(op.Slots.Where(s => s.IsBound), slot =>
+            Assert.StartsWith(op.SourcePath + ".", slot.Tensor!)));
+        var first = Assert.Single(attention, o => o.Operator == "conditional-cross-attention" && o.Block == 3);
+        var second = Assert.Single(attention, o => o.Operator == "conditional-cross-attention" && o.Block == 7);
+        Assert.False(first.Slot("q-position")!.IsBound);
+        Assert.True(second.Slot("q-position")!.IsBound);
+        Assert.True(first.Slot("q-position-sine")!.IsBound);
+    }
+
     private static IEnumerable<HeaderTensor> LlamaBlock(int b, int d, int q, int kv, int f)
     {
         string p = $"model.layers.{b}.";

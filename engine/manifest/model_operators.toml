@@ -18,15 +18,48 @@
 #
 # Symbol binding:
 #   frequency  - the most frequent axis over every tensor shape
+#   config-or-frequency - declared config first; axis frequency only when absent
 #   tokenizer  - the tokenizer's id space (the smallest vocabulary axis that covers it)
 #   blocks     - the repeated block index read from the tensor paths (a hint)
 #   config     - the first declared config key, else the default expression
 #   instance   - solved per operator instance from the matched shapes
+# Contexts map source path scopes to their own config declarations. Their derived
+# defaults are evaluated in that scope. Owner locality fits the smallest source
+# container holding a complete operand set before considering its ancestors.
+# Config entries beginning with '/' address the complete config by JSON Pointer;
+# ordinary keys address its top level. Contexts do not turn a numeric ordinal
+# into identity: the full source path remains on every resulting operator.
+
+# These are source path fields, not "first number is layer, second is expert".
+# Additional vendor spellings are recipe data; their complete ancestor path is
+# retained, including numeric ancestors outside the declared scope.
+[[scope]]
+name = "block"
+after = ["layers", "layer", "blocks", "block", "h"]
+
+[[scope]]
+name = "expert"
+after = ["experts", "expert", "local_experts"]
+
+[[context]]
+paths = ["encoder.*", "*.encoder.*", "decoder.*", "*.decoder.*"]
+symbol = "d"
+config = ["d_model", "/text_config/d_model"]
+
+[[context]]
+paths = ["encoder.*", "*.encoder.*"]
+symbol = "h"
+config = ["encoder_attention_heads", "/text_config/encoder_attention_heads"]
+
+[[context]]
+paths = ["decoder.*", "*.decoder.*"]
+symbol = "h"
+config = ["decoder_attention_heads", "/text_config/decoder_attention_heads"]
 
 [[symbol]]
 name = "d"
 meaning = "residual width"
-bind = "frequency"
+bind = "config-or-frequency"
 config = ["hidden_size", "n_embd", "d_model", "model_dim"]
 
 [[symbol]]
@@ -195,10 +228,122 @@ hints = ["embeddings.layernorm", "embed_norm", "embedding_norm", "emb_ln", "ln_e
 
 # ---------------------------------------------------------------- block scope
 
+# Conditional DETR publishes separate content and position projections at the
+# decoder-layer scope. They are two distinct operators, not one ambiguous Q/K
+# selection. Each needs its complete named operand set; neither is inferred from
+# an arbitrary collection of square matrices.
+# Source: huggingface/transformers v4.53.0, ConditionalDetrDecoderLayer:
+# https://github.com/huggingface/transformers/blob/v4.53.0/src/transformers/models/conditional_detr/modeling_conditional_detr.py
+[[operator]]
+name = "conditional-self-attention"
+family = "attention"
+scopes = ["block"]
+coexists = true
+require_bound = true
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "q-content"
+shape = ["d", "d"]
+required = true
+hints = ["sa_qcontent_proj"]
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "q-position"
+shape = ["d", "d"]
+required = true
+hints = ["sa_qpos_proj"]
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "k-content"
+shape = ["d", "d"]
+required = true
+hints = ["sa_kcontent_proj"]
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "k-position"
+shape = ["d", "d"]
+required = true
+hints = ["sa_kpos_proj"]
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "v"
+shape = ["d", "d"]
+required = true
+hints = ["sa_v_proj"]
+
+[[slot]]
+operator = "conditional-self-attention"
+role = "o"
+shape = ["d", "d"]
+required = true
+hints = ["self_attn.out_proj"]
+
+[[operator]]
+name = "conditional-cross-attention"
+family = "attention"
+scopes = ["block"]
+coexists = true
+require_bound = true
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "q-content"
+shape = ["d", "d"]
+required = true
+hints = ["ca_qcontent_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "q-position"
+shape = ["d", "d"]
+required = false
+hints = ["ca_qpos_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "q-position-sine"
+shape = ["d", "d"]
+required = true
+hints = ["ca_qpos_sine_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "k-content"
+shape = ["d", "d"]
+required = true
+hints = ["ca_kcontent_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "k-position"
+shape = ["d", "d"]
+required = true
+hints = ["ca_kpos_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "v"
+shape = ["d", "d"]
+required = true
+hints = ["ca_v_proj"]
+
+[[slot]]
+operator = "conditional-cross-attention"
+role = "o"
+shape = ["d", "d"]
+required = true
+hints = ["encoder_attn.out_proj"]
+
 [[operator]]
 name = "self-attention"
 family = "attention"
 scopes = ["block"]
+locality = "owner"
 
 [[slot]]
 operator = "self-attention"
@@ -246,6 +391,7 @@ hints = ["k_norm", "k_layernorm"]
 name = "self-attention-fused"
 family = "attention"
 scopes = ["block"]
+locality = "owner"
 
 [[slot]]
 operator = "self-attention-fused"
@@ -269,6 +415,7 @@ hints = ["o_proj", "out_proj", "wo", "dense", "c_proj"]
 name = "latent-attention"
 family = "attention"
 scopes = ["block"]
+locality = "owner"
 
 [[slot]]
 operator = "latent-attention"
@@ -330,6 +477,7 @@ hints = ["o_proj", "out_proj", "wo"]
 name = "gated-mlp"
 family = "mlp"
 scopes = ["block", "expert"]
+locality = "owner"
 
 [[slot]]
 operator = "gated-mlp"
@@ -356,6 +504,7 @@ hints = ["down_proj", "w2", "wo", "down"]
 name = "gated-mlp-fused"
 family = "mlp"
 scopes = ["block", "expert"]
+locality = "owner"
 
 [[slot]]
 operator = "gated-mlp-fused"
@@ -375,6 +524,7 @@ hints = ["down_proj", "w2", "fc2"]
 name = "plain-mlp"
 family = "mlp"
 scopes = ["block", "expert"]
+locality = "owner"
 
 [[slot]]
 operator = "plain-mlp"

@@ -14,7 +14,12 @@ public static class ModelConfigReader
     /// the operator recognizer takes its open symbols from these.</param>
     public sealed record Result(
         ModelConfig Config, Modality Modality, Coverage Coverage,
-        IReadOnlyDictionary<string, long> IntegerFields);
+        IReadOnlyDictionary<string, long> IntegerFields)
+    {
+        /// <summary>All declared integer fields, including nested objects and
+        /// arrays, addressed by JSON Pointer without losing their source scope.</summary>
+        public IReadOnlyDictionary<string, long> JsonIntegerFields { get; init; } = new Dictionary<string, long>();
+    }
 
 
     private static readonly HashSet<string> VisionTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -100,6 +105,22 @@ public static class ModelConfigReader
             foreach (var p in root.EnumerateObject())
                 if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt64(out long v))
                     integers[p.Name] = v;
+            var jsonIntegers = new Dictionary<string, long>(StringComparer.Ordinal);
+            void CollectIntegers(JsonElement value, string pointer)
+            {
+                if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number))
+                    jsonIntegers.Add(pointer, number);
+                else if (value.ValueKind == JsonValueKind.Object)
+                    foreach (JsonProperty property in value.EnumerateObject())
+                        CollectIntegers(property.Value, pointer + "/" + property.Name.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal));
+                else if (value.ValueKind == JsonValueKind.Array)
+                {
+                    int index = 0;
+                    foreach (JsonElement item in value.EnumerateArray())
+                        CollectIntegers(item, pointer + "/" + (index++).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            CollectIntegers(root, "");
 
             var cfg = new ModelConfig
             {
@@ -126,7 +147,7 @@ public static class ModelConfigReader
             };
 
             Coverage coverage = VerdictFor(cfg, modality);
-            return new Result(cfg, modality, coverage, integers);
+            return new Result(cfg, modality, coverage, integers) { JsonIntegerFields = jsonIntegers };
         }
     }
 

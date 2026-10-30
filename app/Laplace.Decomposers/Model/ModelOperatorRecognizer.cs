@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Enumeration;
 using System.Text;
 
 namespace Laplace.Decomposers.Model;
@@ -30,6 +31,10 @@ public sealed record OperatorInstance(
     IReadOnlyList<SlotBinding> Slots)
 {
     public SlotBinding? Slot(string role) => Slots.FirstOrDefault(s => s.Role == role);
+    /// <summary>The full source container holding this operator's operands.</summary>
+    public string SourcePath { get; init; } = "";
+    /// <summary>Recipe symbols evaluated in this source scope, including its own config bindings.</summary>
+    public IReadOnlyDictionary<string, long> ContextSymbols { get; init; } = new Dictionary<string, long>();
 }
 
 /// <summary>
@@ -61,8 +66,8 @@ public sealed record ModelAnatomy(
             OperatorInstance first = byFamily.First();
             int count = byFamily.Count();
             string where = first.Scope == "model" ? "model"
-                : count > 1 ? $"{first.Scope} x{count} (e.g. block {first.Block}{(first.Expert >= 0 ? $" expert {first.Expert}" : "")})"
-                : $"{first.Scope} {first.Block}{(first.Expert >= 0 ? $" expert {first.Expert}" : "")}";
+                : count > 1 ? $"{first.Scope} x{count} (e.g. {first.SourcePath})"
+                : first.SourcePath;
             sb.AppendLine(CultureInfo.InvariantCulture, $"operator {first.Operator} [{first.Family}] @ {where}");
             if (first.InstanceSymbols.Count > 0)
                 sb.AppendLine("    instance: " + string.Join(", ",
@@ -89,15 +94,16 @@ public sealed record ModelAnatomy(
 
 /// <summary>
 /// Recognizes a checkpoint's operators by shape against the governed template
-/// manifest. The residual width comes from the axis frequency, the vocabulary from
-/// the tokenizer, block repetition from the paths' numeric segments (a hint), and the
+/// manifest. The manifest declares config/frequency precedence, the vocabulary comes from
+/// the tokenizer, source scopes from recipe-declared path markers, and the
 /// remaining symbols from the config. Names only break symmetries between slots of
 /// equal shape; an undecided slot is ambiguous, and an unclaimed tensor is
 /// unrecognized. Recognition never throws for an unfamiliar architecture.
 /// </summary>
 public static class ModelOperatorRecognizer
 {
-    private sealed record Located(HeaderTensor Tensor, int Block, int Expert, bool IsBias)
+    private sealed record Located(HeaderTensor Tensor, int Block, int Expert, bool IsBias,
+        string Scope, string Path)
     {
         public string Name => Tensor.Name;
         public int[] Shape => Tensor.Shape;
@@ -107,21 +113,32 @@ public static class ModelOperatorRecognizer
         IReadOnlyList<HeaderTensor> tensors,
         IReadOnlyDictionary<string, long> config,
         int? tokenizerSize,
-        OperatorTemplateManifest? manifest = null)
+        OperatorTemplateManifest? manifest = null) => Recognize(tensors, config, tokenizerSize, manifest, null);
+
+    public static ModelAnatomy Recognize(
+        IReadOnlyList<HeaderTensor> tensors,
+        IReadOnlyDictionary<string, long> config,
+        int? tokenizerSize,
+        OperatorTemplateManifest? manifest,
+        IReadOnlyDictionary<string, long>? jsonConfig)
     {
         ArgumentNullException.ThrowIfNull(tensors);
         ArgumentNullException.ThrowIfNull(config);
         manifest ??= OperatorTemplateManifest.Governed;
         var conflicts = new List<string>();
         var symbols = new Dictionary<string, BoundSymbol>(StringComparer.Ordinal);
-        var located = tensors.Select(Locate).ToList();
+        var located = tensors.Select(t => Locate(t, manifest.SourceScopes)).ToList();
 
         long? Declared(OperatorSymbol s)
         {
             foreach (string key in s.ConfigKeys)
-                if (config.TryGetValue(key, out long v) && v > 0) return v;
+                if (Configured(key) is { } v) return v;
             return null;
         }
+        long? Configured(string key) =>
+            key.StartsWith('/') && jsonConfig is not null
+                ? jsonConfig.TryGetValue(key, out long nested) && nested > 0 ? nested : null
+                : config.TryGetValue(key, out long value) && value > 0 ? value : null;
         IReadOnlyDictionary<string, long> Values() =>
             symbols.ToDictionary(kv => kv.Key, kv => kv.Value.Value, StringComparer.Ordinal);
 
@@ -133,13 +150,21 @@ public static class ModelOperatorRecognizer
                 conflicts.Add($"{s.Name}: {basis} gives {value}, config declares {d}");
         }
 
-        // Frequency: the residual width is the axis most tensors share.
+        // Binding precedence is part of the recipe. A multimodal package's most
+        // frequent axis need not be the width its config declares.
         var frequency = new Dictionary<long, int>();
         foreach (HeaderTensor t in tensors)
             foreach (int axis in t.Shape)
                 frequency[axis] = frequency.GetValueOrDefault(axis) + 1;
-        foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Frequency))
+        foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind is SymbolBinding.Frequency or SymbolBinding.ConfigOrFrequency))
         {
+            if (s.Bind == SymbolBinding.ConfigOrFrequency && Declared(s) is { } declared)
+            {
+                Bind(s, declared, "config");
+                if (!frequency.ContainsKey(declared))
+                    conflicts.Add($"{s.Name}: config declares {declared}, which no tensor axis carries");
+                continue;
+            }
             if (frequency.Count == 0) break;
             int top = frequency.Values.Max();
             long[] modes = frequency.Where(kv => kv.Value == top).Select(kv => kv.Key).OrderBy(v => v).ToArray();
@@ -148,7 +173,7 @@ public static class ModelOperatorRecognizer
             else conflicts.Add($"{s.Name}: axis frequency ties between {string.Join(", ", modes)}");
         }
 
-        // Blocks: the first numeric path segment repeats a structure (a hint).
+        // Block ordinals come from the source path fields the recipe names.
         foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Blocks))
         {
             var blocks = located.Where(t => t.Block >= 0).Select(t => t.Block).Distinct().OrderBy(b => b).ToArray();
@@ -188,8 +213,8 @@ public static class ModelOperatorRecognizer
         foreach (OperatorSymbol s in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Config))
         {
             if (Declared(s) is { } v) { Bind(s, v, "config"); continue; }
-            if (s.Default is { } expr && ShapeExpression.Parse(expr).Evaluate(Values()) is { } dv)
-                Bind(s, dv, $"default {expr}");
+            if (s.DefaultExpression?.Evaluate(Values()) is { } dv)
+                Bind(s, dv, $"default {s.Default}");
         }
 
         // A width that no tensor carries is re-solved from block shapes: the
@@ -210,40 +235,62 @@ public static class ModelOperatorRecognizer
         }
 
         IReadOnlyDictionary<string, long> bound = Values();
+        IReadOnlyDictionary<string, long> ContextValues(string path)
+        {
+            var values = new Dictionary<string, long>(bound, StringComparer.Ordinal);
+            var supplied = new HashSet<string>(StringComparer.Ordinal);
+            foreach (OperatorContext context in manifest.Contexts.Where(c =>
+                         c.Paths.Any(pattern => FileSystemName.MatchesSimpleExpression(pattern, path, ignoreCase: false))))
+            {
+                long? value = context.ConfigKeys.Select(Configured).FirstOrDefault(n => n is not null);
+                value ??= context.DefaultExpression?.Evaluate(values);
+                if (value is { } n) { values[context.Symbol] = n; supplied.Add(context.Symbol); }
+            }
+            foreach (OperatorSymbol symbol in manifest.Symbols.Where(s => s.Bind == SymbolBinding.Config
+                         && s.Default is not null && !supplied.Contains(s.Name) && Declared(s) is null))
+            {
+                if (symbol.DefaultExpression?.Evaluate(values) is { } n) values[symbol.Name] = n;
+                else values.Remove(symbol.Name);
+            }
+            return values;
+        }
         var claimed = new HashSet<string>(StringComparer.Ordinal);
         var instances = new List<OperatorInstance>();
-        var scopes = new List<(string Scope, int Block, int Expert)> { ("model", -1, -1) };
-        foreach (int b in located.Where(t => t.Block >= 0).Select(t => t.Block).Distinct().OrderBy(b => b))
-        {
-            scopes.Add(("block", b, -1));
-            foreach (int e in located.Where(t => t.Block == b && t.Expert >= 0).Select(t => t.Expert).Distinct().OrderBy(e => e))
-                scopes.Add(("expert", b, e));
-        }
+        var sourcePools = located.Where(t => !t.IsBias)
+            .GroupBy(t => (t.Scope, t.Path))
+            .ToDictionary(g => g.Key, g => g.OrderBy(t => t.Name, StringComparer.Ordinal).ToArray());
         string[] families = manifest.Operators.Select(o => o.Family).Distinct().ToArray();
 
-        foreach ((string scope, int block, int expert) in scopes)
+        foreach (var entry in sourcePools.OrderBy(p => p.Key.Scope == "model" ? 0 : 1)
+                     .ThenBy(p => p.Key.Path, StringComparer.Ordinal))
         {
-            List<Located> Pool() => located
-                .Where(t => !t.IsBias && t.Block == block && t.Expert == expert && !claimed.Contains(t.Name))
-                .OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
+            (string scope, string path) = entry.Key;
+            Located[] sourcePool = entry.Value;
+            int block = sourcePool[0].Block, expert = sourcePool[0].Expert;
+            IReadOnlyDictionary<string, long> context = ContextValues(path);
+            var owners = OwnerPools(path, sourcePool);
             foreach (string family in families)
             {
-                foreach (OperatorTemplate op in manifest.Operators.Where(o => o.Family == family && o.HasScope(scope)))
+                OperatorTemplate[] templates = manifest.Operators.Where(o => o.Family == family && o.HasScope(scope)).ToArray();
+                foreach (var owner in templates.Any(o => o.AtOwner) ? owners : [(Path: path, Pool: sourcePool)])
                 {
-                    bool fitted = false;
-                    while (TryFit(op, Pool(), bound, manifest) is { } fit)
+                    foreach (OperatorTemplate op in templates.Where(o => o.AtOwner || owner.Path == path))
                     {
-                        fitted = true;
-                        foreach (SlotBinding slot in fit.Slots)
+                        bool fitted = false;
+                        while (TryFit(op, owner.Pool.Where(t => !claimed.Contains(t.Name)).ToList(), context, manifest) is { } fit)
                         {
-                            if (slot.Tensor is { } t) claimed.Add(t);
-                            foreach (string c in slot.Candidates) claimed.Add(c);
+                            fitted = true;
+                            foreach (SlotBinding slot in fit.Slots)
+                            {
+                                if (slot.Tensor is { } t) claimed.Add(t);
+                                foreach (string c in slot.Candidates) claimed.Add(c);
+                            }
+                            instances.Add(new OperatorInstance(op.Name, op.Family, scope, block, expert,
+                                fit.Instance, fit.Slots) { SourcePath = owner.Path, ContextSymbols = context });
+                            if (!op.Repeat) break;
                         }
-                        instances.Add(new OperatorInstance(op.Name, op.Family, scope, block, expert,
-                            fit.Instance, fit.Slots));
-                        if (!op.Repeat) break;
+                        if (fitted && !op.Coexists) break;
                     }
-                    if (fitted) break;
                 }
             }
         }
@@ -284,19 +331,47 @@ public static class ModelOperatorRecognizer
         return set.Contains;
     }
 
-    private static Located Locate(HeaderTensor t)
+    private static (string Path, Located[] Pool)[] OwnerPools(string scope, Located[] tensors)
+    {
+        var owners = new Dictionary<string, List<Located>>(StringComparer.Ordinal);
+        foreach (Located tensor in tensors)
+        {
+            string path = tensor.Name;
+            while (path.LastIndexOf('.') is int dot && dot >= scope.Length)
+            {
+                path = path[..dot];
+                if (!owners.TryGetValue(path, out List<Located>? pool)) owners[path] = pool = [];
+                pool.Add(tensor);
+                if (path == scope) break;
+            }
+        }
+        if (!owners.ContainsKey(scope)) owners[scope] = tensors.ToList();
+        return owners.OrderByDescending(p => p.Key.Length).ThenBy(p => p.Key, StringComparer.Ordinal)
+            .Select(p => (p.Key, p.Value.ToArray())).ToArray();
+    }
+
+    private static Located Locate(HeaderTensor t, IReadOnlyList<OperatorScope> scopes)
     {
         int block = -1, expert = -1;
+        string sourceScope = "model", sourcePath = "";
+        int end = 0;
+        string? previous = null;
         foreach (string segment in t.Name.Split('.'))
         {
-            if (segment.Length == 0 || !segment.All(char.IsAsciiDigit)) continue;
-            if (!int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out int v)) continue;
-            if (block < 0) block = v;
-            else if (expert < 0) { expert = v; break; }
+            int segmentEnd = end + segment.Length; end = segmentEnd + 1;
+            OperatorScope? declaration = previous is null ? null : scopes.FirstOrDefault(s => s.After.Contains(previous, StringComparer.Ordinal));
+            if (declaration is not null && segment.Length > 0 && segment.All(char.IsAsciiDigit)
+                && int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out int v))
+            {
+                sourceScope = declaration.Name; sourcePath = t.Name[..segmentEnd];
+                if (sourceScope == "block") block = v;
+                if (sourceScope == "expert") expert = v;
+            }
+            previous = segment;
         }
         string leaf = t.Name[(t.Name.LastIndexOf('.') + 1)..];
         bool isBias = t.Shape.Length == 1 && leaf.Equals("bias", StringComparison.OrdinalIgnoreCase);
-        return new Located(t, block, expert, isBias);
+        return new Located(t, block, expert, isBias, sourceScope, sourcePath);
     }
 
     private sealed record Fit(IReadOnlyList<SlotBinding> Slots, IReadOnlyDictionary<string, long> Instance);
@@ -379,6 +454,25 @@ public static class ModelOperatorRecognizer
             candidates[slot] = list;
         }
 
+        // A required operand needs its own tensor. A gated operator cannot claim
+        // a plain two-matrix MLP merely because gate and up both match one row.
+        var owners = new Dictionary<string, OperatorSlot>(StringComparer.Ordinal);
+        bool AssignRequired(OperatorSlot slot, HashSet<string> visited)
+        {
+            foreach (var candidate in candidates[slot])
+            {
+                if (!visited.Add(candidate.Tensor.Name)) continue;
+                if (!owners.TryGetValue(candidate.Tensor.Name, out OperatorSlot? owner)
+                    || AssignRequired(owner, visited))
+                {
+                    owners[candidate.Tensor.Name] = slot; return true;
+                }
+            }
+            return false;
+        }
+        foreach (OperatorSlot required in op.Slots.Where(s => s.Required))
+            if (!AssignRequired(required, new HashSet<string>(StringComparer.Ordinal))) return null;
+
         // Slots that share candidates are symmetric: resolve each connected group
         // by shape, then name hints, then elimination; otherwise leave it ambiguous.
         var result = new Dictionary<OperatorSlot, SlotBinding>();
@@ -413,6 +507,7 @@ public static class ModelOperatorRecognizer
                 result[slot] = new SlotBinding(slot.Role, null, [], "-", "unbound");
             }
         }
+        if (op.RequireBound && op.Slots.Any(slot => slot.Required && !result[slot].IsBound)) return null;
         // An operator is present when a slot is decided, or when a required slot has
         // candidates it cannot choose between; ambiguity over optional slots alone
         // is no evidence of the operator.
