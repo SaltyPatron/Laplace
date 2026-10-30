@@ -257,6 +257,94 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NativeRecordTestimonyFeedsTheSharedReaderWithoutLegacyRowsOrFabricatedOutcomes()
+    {
+        await using var native = LaplaceDataSource.Create(SubstrateAccess.Ingest, _source.ConnectionString);
+        await using var connection = await native.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        using var window = new StagedSourceWriter(10000, 100000, 1 << 24);
+        string suffix = Guid.NewGuid().ToString("N");
+        StagedReference Text(string value) => window.Text(Encoding.UTF8.GetBytes(value));
+        StagedReference Compose(StagedReference[] children, ulong mask = 0) =>
+            window.Compose(children, checked((byte)(children.Max(c => c.Tier) + 1)), mask, mask);
+        var subject = Text("testimony" + suffix); var predicate = Text("relation" + suffix); var target = Text("target" + suffix);
+        var claim = Compose([subject, predicate, target], 1);
+        var saying = claim; saying.Said = 1;
+        var positive = Compose([Text("positive" + suffix), saying, saying]);
+        saying.Outcome = 1;
+        var draw = Compose([Text("draw" + suffix), saying]);
+        saying.Outcome = 2;
+        var negative = Compose([Text("negative" + suffix), saying]);
+        saying.Outcome = 3; saying.Spare = 1u | (1u << 26); saying.Position = 17; // Native LP_SPARE_SCORE, exact 0.25.
+        var dependence = Text("DerivedCalculation"); dependence.Said = 7;
+        var scored = Compose([Text("scored" + suffix), dependence, saying]);
+        var witness = Compose([positive, positive, draw, negative, scored]);
+        await new NpgsqlSubstrateWriter(native).ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
+        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,0.85)", connection, transaction))
+        {
+            register.Parameters.AddWithValue(witness.Id);
+            await register.ExecuteNonQueryAsync();
+        }
+        await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.attestations WHERE subject_id=$1", connection, transaction))
+        {
+            absent.Parameters.AddWithValue(subject.Id.ToBytes());
+            Assert.Equal(0L, await absent.ExecuteScalarAsync());
+        }
+        var expected = new Dictionary<string, (short? Outcome, long Count, long Tokens, double Score, bool Calculation)>
+        {
+            [Convert.ToHexString(positive.Id.ToBytes())] = (2, 2, 4, 1, false),
+            [Convert.ToHexString(draw.Id.ToBytes())] = (1, 1, 1, 0.5, false),
+            [Convert.ToHexString(negative.Id.ToBytes())] = (0, 1, 1, 0, false),
+            [Convert.ToHexString(scored.Id.ToBytes())] = (null, 1, 1, 0.25, true)
+        };
+        await using (var exact = NpgsqlCatalog.Command(connection, transaction, "native.observation_cells",
+            new[] { subject.Id.ToBytes() }, new[] { predicate.Id.ToBytes() }, new[] { target.Id.ToBytes() }, new[] { witness.Id.ToBytes() }))
+        await using (var rows = await exact.ExecuteReaderAsync())
+        {
+            int count = 0;
+            while (await rows.ReadAsync())
+            {
+                var record = expected[Convert.ToHexString(rows.GetFieldValue<byte[]>(5))];
+                Assert.Equal(claim.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
+                Assert.Equal(witness.Id.ToBytes(), rows.GetFieldValue<byte[]>(4));
+                Assert.Equal(record.Outcome, rows.IsDBNull(6) ? null : rows.GetInt16(6));
+                Assert.Equal(record.Count, rows.GetInt64(7)); Assert.Equal(record.Tokens, rows.GetInt64(10));
+                Assert.Equal(record.Score, rows.GetDouble(9)); Assert.Equal(record.Calculation, rows.GetBoolean(14));
+                Assert.Equal(record.Calculation ? 17 : 0, rows.GetInt32(15));
+                if (record.Calculation) Assert.Equal(dependence.Id.ToBytes(), rows.GetFieldValue<byte[]>(13));
+                else Assert.True(rows.IsDBNull(13));
+                count++;
+            }
+            Assert.Equal(4, count);
+        }
+        // This is the same C reader used by query evidence, prompt structure and task shapes.
+        await using (var shared = new NpgsqlCommand("SELECT * FROM generation.observation_bindings($1,$2,$3,3)", connection, transaction))
+        {
+            shared.Parameters.AddWithValue(new[] { subject.Id.ToBytes(), subject.Id.ToBytes(), target.Id.ToBytes() });
+            shared.Parameters.AddWithValue(new[] { witness.Id.ToBytes() });
+            shared.Parameters.AddWithValue(new[] { predicate.Id.ToBytes() });
+            await using var rows = await shared.ExecuteReaderAsync();
+            var seen = new HashSet<(int, string)>();
+            var references = new HashSet<string>();
+            while (await rows.ReadAsync())
+            {
+                int ordinal = rows.GetInt32(0);
+                Assert.NotEqual(claim.Id.ToBytes(), rows.GetFieldValue<byte[]>(2));
+                references.Add(Convert.ToHexString(rows.GetFieldValue<byte[]>(2)));
+                Assert.Equal((short)(ordinal == 3 ? 2 : 1), rows.GetInt16(1));
+                string context = Convert.ToHexString(rows.GetFieldValue<byte[]>(7));
+                var record = expected[context];
+                Assert.Equal(record.Outcome, rows.IsDBNull(8) ? null : rows.GetInt16(8));
+                Assert.Equal(record.Count, rows.GetInt64(9));
+                Assert.True(seen.Add((ordinal, context)));
+            }
+            Assert.Equal(12, seen.Count);
+            Assert.Equal(4, references.Count);
+        }
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task NativeClassificationsUseCanonicalBanksWithoutInventingPredicatesOrNormalizingRawValues()
     {
         await using var native = LaplaceDataSource.Create(SubstrateAccess.Ingest, _source.ConnectionString);
@@ -297,7 +385,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
                 array_agg(games::bigint ORDER BY trunk) games,
                 array_agg(score/games ORDER BY trunk) scores,
                 array_agg(trust ORDER BY trunk) trusts
-              FROM public.laplace_attested($1::public.blake3[],false)
+              FROM public.laplace_attested(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)),false)
               WHERE witness GROUP BY claim
             )
             INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)

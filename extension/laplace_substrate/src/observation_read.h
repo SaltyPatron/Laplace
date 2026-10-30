@@ -16,7 +16,20 @@ typedef struct LaplaceObservation
     /* The claim's governed qualifier bits (qualifier_law); zero when the
      * witness states none. */
     uint8 qualifiers[32];
+    /* Native assertion face. A continuous score has outcome=-1; it is never
+     * classified from its value. ordinal addresses the stored record slot. */
+    bool native,dependence_null;
+    hash128_t claim,dependence;
+    int64 ordinal,tokens;
+    int32 position;
+    double score,trust;
 } LaplaceObservation;
+
+#define LAPLACE_OBSERVATION_SCORED (-1)
+
+/* A reference to the exact testimony payload, distinct from its content claim.
+ * Native references include the source, record slot, score and dependence. */
+hash128_t laplace_observation_provenance(const LaplaceObservation *row);
 
 /* Whether the witness's qualifiers carry family/value ("derivation/calculation"). */
 bool laplace_observation_qualified(const LaplaceObservation *row, const char *family, const char *value);

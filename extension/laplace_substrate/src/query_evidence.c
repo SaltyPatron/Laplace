@@ -98,6 +98,7 @@ typedef struct QueryEvidenceState
     LaplaceQueryChannel *channels;
     HTAB *channel_index;
     HTAB *sources;
+    HTAB *native_sources;
     HTAB *contexts;
     HTAB *provenance;
     HTAB *witnesses;
@@ -411,52 +412,6 @@ add_occurrences(int64 *target, int64 value)
     return true;
 }
 
-/* Digest of one attestation row: row id plus source, context, outcome and
- * occurrence count encoded explicitly, so two rows sharing an id but differing
- * in testimony remain distinct provenance members of the channel's Merkle
- * root. */
-static hash128_t
-query_provenance_witness(const LaplaceObservation *row)
-{
-    unsigned char bytes[16 * 4 + 12];
-    hash128_t domain;
-    hash128_t zero;
-    hash128_t result;
-    const hash128_t *source;
-    const hash128_t *context;
-    Size at = 0;
-    uint16 outcome = (uint16) row->outcome;
-    uint64 occurrences = (uint64) row->occurrences;
-
-    hash128_blake3_str("laplace:query-provenance-witness:v1", &domain);
-    hash128_zero(&zero);
-    source = row->source_null ? &zero : &row->source;
-    context = row->context_null ? &zero : &row->context;
-
-#define PROVENANCE_APPEND(value) \
-    do { memcpy(bytes + at, &(value), sizeof(value)); at += sizeof(value); } while (0)
-    PROVENANCE_APPEND(domain);
-    PROVENANCE_APPEND(row->id);
-    PROVENANCE_APPEND(*source);
-    PROVENANCE_APPEND(*context);
-#undef PROVENANCE_APPEND
-    bytes[at++] = row->source_null ? 0 : 1;
-    bytes[at++] = row->context_null ? 0 : 1;
-    bytes[at++] = (unsigned char) (outcome >> 8);
-    bytes[at++] = (unsigned char) outcome;
-    bytes[at++] = (unsigned char) (occurrences >> 56);
-    bytes[at++] = (unsigned char) (occurrences >> 48);
-    bytes[at++] = (unsigned char) (occurrences >> 40);
-    bytes[at++] = (unsigned char) (occurrences >> 32);
-    bytes[at++] = (unsigned char) (occurrences >> 24);
-    bytes[at++] = (unsigned char) (occurrences >> 16);
-    bytes[at++] = (unsigned char) (occurrences >> 8);
-    bytes[at++] = (unsigned char) occurrences;
-
-    hash128_blake3(bytes, at, &result);
-    return result;
-}
-
 static int
 query_evidence_key_order(const void *left, const void *right)
 {
@@ -602,6 +557,8 @@ bind_channel_calculations(QueryEvidenceState *state, int channel_count)
 
         switch (witness->outcome)
         {
+            case LAPLACE_OBSERVATION_SCORED:
+                break;
             case LAPLACE_ATTESTATION_OUTCOME_CONFIRM:
                 if (!add_occurrences(&channel->calculation_confirm_occurrences,
                                      witness->occurrences))
@@ -695,6 +652,8 @@ query_observation(int ordinal, int16 role,
 
     switch (row->outcome)
     {
+        case LAPLACE_OBSERVATION_SCORED:
+            break;
         case LAPLACE_ATTESTATION_OUTCOME_CONFIRM:
             if (!add_occurrences(&channel->confirm_occurrences, row->occurrences))
                 ereport(ERROR, (errmsg("query evidence: confirmation count overflow")));
@@ -718,7 +677,7 @@ query_observation(int ordinal, int16 role,
         bool found;
         MemSet(&provenance, 0, sizeof(provenance));
         provenance.channel_index = index->heap_index;
-        provenance.id = query_provenance_witness(row);
+        provenance.id = laplace_observation_provenance(row);
         (void) hash_search(state->provenance, &provenance, HASH_ENTER, NULL);
 
         witness = (QueryEvidenceWitness *)
@@ -750,6 +709,13 @@ query_observation(int ordinal, int16 role,
         MemSet(&source, 0, sizeof(source));
         source.channel_index = index->heap_index;
         source.id = row->source;
+        if(row->native && channel->native_claim){
+            (void)hash_search(state->native_sources,&source,HASH_ENTER,&found);
+            if(!found){
+                if(channel->witnesses==PG_INT64_MAX)elog(ERROR,"Native witness count overflow");
+                channel->witnesses++;
+            }
+        }
         (void) hash_search(state->sources, &source, HASH_ENTER, &found);
         if (!found)
         {
@@ -816,6 +782,8 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
     ctl.entrysize = sizeof(QueryEvidenceKey);
     ctl.hcxt = work;
     evidence.sources = hash_create("query evidence sources",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.native_sources = hash_create("query Native witness sources",
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     evidence.contexts = hash_create("query evidence contexts",
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
@@ -999,7 +967,6 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         }
     }
 
-    LAPLACE_CONSENSUS_ENRICH(result,result_count,LaplaceQueryChannel);
     bind_channel_observations(operands, result, result_count, stats, work);
 
     MemoryContextSwitchTo(owner);
@@ -1394,12 +1361,12 @@ laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
     operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
     candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
     exact.reverse = false;
-    laplace_consensus_scan(operand_ids, candidate_ids, state->types,
+    laplace_consensus_candidates(operand_ids, candidate_ids, state->types,
                            query_exact_cell, &exact,
                            stats ? &stats->forward : NULL);
 
     exact.reverse = true;
-    laplace_consensus_scan(candidate_ids, operand_ids, state->types,
+    laplace_consensus_candidates(candidate_ids, operand_ids, state->types,
                            query_exact_cell, &exact,
                            stats ? &stats->reverse : NULL);
 

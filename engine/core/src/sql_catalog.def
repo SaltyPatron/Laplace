@@ -413,6 +413,14 @@ SQL_QUERY("evidence.observation_cells", "bytea[],bytea[],bytea[],bytea[]",
     "JOIN laplace.attestations a ON a.subject_id=c.subject_id "
     "AND a.type_id=c.type_id AND a.object_id=c.object_id "
     "WHERE ($4 IS NULL OR a.source_id=ANY($4))")
+SQL_QUERY("native.observation_cells", "bytea[],bytea[],bytea[],bytea[]",
+    "WITH cells AS MATERIALIZED (SELECT DISTINCT s,r,o,public.laplace_compose(ARRAY[encode(s,'hex')::public.blake3,encode(r,'hex')::public.blake3,encode(o,'hex')::public.blake3]) claim FROM unnest($1::bytea[],$2::bytea[],$3::bytea[]) c(s,r,o)) "
+    "SELECT public.blake3_send(a.claim),c.s,c.r,c.o,public.blake3_send(a.source),public.blake3_send(a.context),a.outcome,a.occurrences,NULL::bytea,a.score,a.tokens,a.ordinal,a.trust,public.blake3_send(a.dependence_root),a.calculation,a.position "
+    "FROM public.laplace_testimony(ARRAY(SELECT DISTINCT claim FROM cells),CASE WHEN $4 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($4::bytea[]) u(id)) END) a JOIN cells c USING(claim)")
+SQL_QUERY("native.observation_bindings", "bytea[],bytea[],bytea[],int4",
+    "WITH held AS MATERIALIZED (SELECT h.entity,public.laplace_parts(h.path) ids FROM public.laplace_holders(ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)),'{}',false,-1::smallint,-1::bigint,1::smallint) h WHERE public.laplace_path_length(h.path)=3), cells AS MATERIALIZED (SELECT * FROM held WHERE (($4&1)<>0 AND public.blake3_send(ids[1])=ANY($1) OR ($4&2)<>0 AND public.blake3_send(ids[3])=ANY($1)) AND ($3 IS NULL OR public.blake3_send(ids[2])=ANY($3))) "
+    "SELECT public.blake3_send(a.claim),public.blake3_send(c.ids[1]),public.blake3_send(c.ids[2]),public.blake3_send(c.ids[3]),public.blake3_send(a.source),public.blake3_send(a.context),a.outcome,a.occurrences,NULL::bytea,a.score,a.tokens,a.ordinal,a.trust,public.blake3_send(a.dependence_root),a.calculation,a.position "
+    "FROM public.laplace_testimony(ARRAY(SELECT DISTINCT entity FROM cells),CASE WHEN $2 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($2::bytea[]) u(id)) END) a JOIN cells c ON c.entity=a.claim")
 SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
     "SELECT encode(object_id,'hex'),combined_eff_mu,source_count "
     "FROM ops.attestation_response_type($1,$2,NULL,NULL,$3)")

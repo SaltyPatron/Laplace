@@ -30,10 +30,13 @@ typedef struct ObservationReceiver
     int roles;
     LaplaceObservationVisitor visit;
     void *context;
+    bool native;
 } ObservationReceiver;
 
 static SPIPlanPtr observation_plan;
 static SPIPlanPtr observation_cell_plan;
+static SPIPlanPtr native_observation_plan;
+static SPIPlanPtr native_observation_cell_plan;
 
 static void
 read_id(Datum value, hash128_t *id)
@@ -42,6 +45,62 @@ read_id(Datum value, hash128_t *id)
     if (VARSIZE_ANY_EXHDR(bytes) != sizeof(*id))
         ereport(ERROR, (errmsg("observation bindings: ids must be 16 bytes")));
     memcpy(id, VARDATA_ANY(bytes), sizeof(*id));
+}
+
+/* Digest of one attestation row: row id plus source, context, outcome and
+ * occurrence count encoded explicitly, so two rows sharing an id but differing
+ * in testimony remain distinct provenance members of the channel's Merkle
+ * root. */
+hash128_t
+laplace_observation_provenance(const LaplaceObservation *row)
+{
+    unsigned char bytes[16 * 5 + 12 + 1 + 40 + 32];
+    hash128_t domain;
+    hash128_t zero;
+    hash128_t result;
+    const hash128_t *source;
+    const hash128_t *context;
+    Size at = 0;
+    uint16 outcome = (uint16) row->outcome;
+    uint64 occurrences = (uint64) row->occurrences;
+
+    hash128_blake3_str(row->native?"laplace:native-testimony-witness:v1":"laplace:query-provenance-witness:v1", &domain);
+    hash128_zero(&zero);
+    source = row->source_null ? &zero : &row->source;
+    context = row->context_null ? &zero : &row->context;
+
+#define PROVENANCE_APPEND(value) \
+    do { memcpy(bytes + at, &(value), sizeof(value)); at += sizeof(value); } while (0)
+    PROVENANCE_APPEND(domain);
+    if(row->native){ PROVENANCE_APPEND(row->claim); } else { PROVENANCE_APPEND(row->id); }
+    PROVENANCE_APPEND(*source);
+    PROVENANCE_APPEND(*context);
+#undef PROVENANCE_APPEND
+    bytes[at++] = row->source_null ? 0 : 1;
+    bytes[at++] = row->context_null ? 0 : 1;
+    bytes[at++] = (unsigned char) (outcome >> 8);
+    bytes[at++] = (unsigned char) outcome;
+    bytes[at++] = (unsigned char) (occurrences >> 56);
+    bytes[at++] = (unsigned char) (occurrences >> 48);
+    bytes[at++] = (unsigned char) (occurrences >> 40);
+    bytes[at++] = (unsigned char) (occurrences >> 32);
+    bytes[at++] = (unsigned char) (occurrences >> 24);
+    bytes[at++] = (unsigned char) (occurrences >> 16);
+    bytes[at++] = (unsigned char) (occurrences >> 8);
+    bytes[at++] = (unsigned char) occurrences;
+
+    if(row->native){
+        bytes[at++]=row->dependence_null?0:1;
+        memcpy(bytes+at,row->dependence_null?&zero:&row->dependence,sizeof(hash128_t));at+=sizeof(hash128_t);
+        uint64 score,trust;memcpy(&score,&row->score,sizeof(score));memcpy(&trust,&row->trust,sizeof(trust));
+        uint64 fields[]={(uint64)row->ordinal,(uint64)row->tokens,score,trust,(uint64)row->position};
+        for(int i=0;i<lengthof(fields);i++)for(int shift=56;shift>=0;shift-=8)
+            bytes[at++]=(unsigned char)(fields[i]>>shift);
+        memcpy(bytes+at,row->qualifiers,sizeof(row->qualifiers));at+=sizeof(row->qualifiers);
+    }
+
+    hash128_blake3(bytes, at, &result);
+    return result;
 }
 
 static void
@@ -69,20 +128,35 @@ receive_observation(TupleTableSlot *slot, DestReceiver *destination)
     LaplaceObservation row = {0};
     hash128_t *ids[] = {&row.id, &row.subject, &row.type,
                        &row.object, &row.source, &row.context};
-    bool nulls[9];
-    Datum values[9];
+    bool nulls[16];
+    Datum values[16];
     OperandEntry *operand;
-    for (int i = 0; i < 9; ++i)
+    for (int i = 0; i < (receiver->native?16:9); ++i)
         values[i] = slot_getattr(slot, i + 1, &nulls[i]);
-    if (nulls[0] || nulls[1] || nulls[2] || nulls[6] || nulls[7])
+    if (nulls[0] || nulls[1] || nulls[2] || (!receiver->native && nulls[6]) || nulls[7])
         elog(ERROR, "observation bindings: missing witness identity or outcome");
     for (int i = 0; i < 6; ++i)
         if (!nulls[i]) read_id(values[i], ids[i]);
     row.object_null = nulls[3];
     row.source_null = nulls[4];
     row.context_null = nulls[5];
-    row.outcome = DatumGetInt16(values[6]);
+    row.outcome = nulls[6]?LAPLACE_OBSERVATION_SCORED:DatumGetInt16(values[6]);
     row.occurrences = DatumGetInt64(values[7]);
+    row.native=receiver->native;row.dependence_null=true;
+    row.score=(double)row.outcome/2.0;row.tokens=row.occurrences;
+    if(receiver->native){
+        for(int i=9;i<16;i++)if(i!=13 && nulls[i])
+            elog(ERROR,"Native observation has a missing series field");
+        row.score=DatumGetFloat8(values[9]);row.tokens=DatumGetInt64(values[10]);
+        row.ordinal=DatumGetInt64(values[11]);row.trust=DatumGetFloat8(values[12]);
+        row.position=DatumGetInt32(values[15]);
+        row.dependence_null=nulls[13];if(!nulls[13])read_id(values[13],&row.dependence);
+        if(DatumGetBool(values[14])){
+            int bit=laplace_qualifier_bit("derivation","calculation");
+            if(bit<0 || bit>=256)elog(ERROR,"Native calculation qualifier is undeclared");
+            row.qualifiers[bit/8]|=1u<<(bit%8);
+        }
+    }
     if (!nulls[8])
     {
         bytea *mask = DatumGetByteaPP(values[8]);
@@ -90,6 +164,7 @@ receive_observation(TupleTableSlot *slot, DestReceiver *destination)
             elog(ERROR, "observation bindings: qualifier masks must be 32 bytes");
         memcpy(row.qualifiers, VARDATA_ANY(mask), sizeof(row.qualifiers));
     }
+    if(row.native){row.claim=row.id;row.id=laplace_observation_provenance(&row);}
     operand = (receiver->roles & 1)
         ? hash_search(receiver->operands, &row.subject, HASH_FIND, NULL) : NULL;
     if (operand)
@@ -114,11 +189,13 @@ static void
 observation_startup(DestReceiver *destination, int operation, TupleDesc descriptor)
 {
     const Oid types[] = {BYTEAOID, BYTEAOID, BYTEAOID, BYTEAOID,
-                         BYTEAOID, BYTEAOID, INT2OID, INT8OID, BYTEAOID};
-    (void) destination;
-    if (operation != CMD_SELECT || descriptor->natts != lengthof(types))
+                         BYTEAOID, BYTEAOID, INT2OID, INT8OID, BYTEAOID,
+                         FLOAT8OID,INT8OID,INT8OID,FLOAT8OID,BYTEAOID,BOOLOID,INT4OID};
+    ObservationReceiver *receiver=(ObservationReceiver *)destination;
+    int columns=receiver->native?16:9;
+    if (operation != CMD_SELECT || descriptor->natts != columns)
         elog(ERROR, "observation bindings: invalid result shape");
-    for (int i = 0; i < lengthof(types); ++i)
+    for (int i = 0; i < columns; ++i)
         if (TupleDescAttr(descriptor, i)->atttypid != types[i])
             elog(ERROR, "observation bindings: invalid result column type");
 }
@@ -195,20 +272,6 @@ observation_read(ArrayType *operands, ArrayType *sources,
         SPIExecuteOptions options = {.params = params, .read_only = true,
             .must_return_tuples = true, .dest = &receiver.receiver};
         int result;
-        SPIPlanPtr *plan = cells ? &observation_cell_plan : &observation_plan;
-        if (!*plan)
-        {
-            Oid parameter_types[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
-            if (cells) parameter_types[3] = BYTEAARRAYOID;
-            const char *query = laplace_sql_query_text(cells
-                ? "evidence.observation_cells" : "evidence.observation_bindings");
-            if (!query)
-                elog(ERROR, "observation bindings: required static query is unavailable");
-            *plan = SPI_prepare_cursor(query,
-                4, parameter_types, CURSOR_OPT_PARALLEL_OK);
-            if (!*plan || SPI_keepplan(*plan) != 0)
-                elog(ERROR, "observation bindings: preparing static read failed");
-        }
         params->params[0].value = PointerGetDatum(hash128_array_from_ids(unique, unique_count));
         params->params[1].value = sources ? PointerGetDatum(sources) : (Datum) 0;
         params->params[2].value = types ? PointerGetDatum(types) : (Datum) 0;
@@ -249,10 +312,24 @@ observation_read(ArrayType *operands, ArrayType *sources,
             params->params[3].isnull = sources == NULL;
             params->params[3].ptype = BYTEAARRAYOID;
         }
-        result = SPI_execute_plan_extended(*plan, &options);
-        /* SELECT to DestNone reports SPI_OK_UTILITY; startup checks its shape. */
-        if (result != SPI_OK_SELECT && result != SPI_OK_UTILITY)
-            elog(ERROR, "observation bindings: read failed: %s", SPI_result_code_string(result));
+        SPIPlanPtr *plans[]={cells?&observation_cell_plan:&observation_plan,
+            cells?&native_observation_cell_plan:&native_observation_plan};
+        const char *names[]={cells?"evidence.observation_cells":"evidence.observation_bindings",
+            cells?"native.observation_cells":"native.observation_bindings"};
+        for(int face=0;face<2;face++){
+            SPIPlanPtr *plan=plans[face];receiver.native=face==1;
+            if(!*plan){
+                Oid parameter_types[]={BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,cells?BYTEAARRAYOID:INT4OID};
+                const char *query=laplace_sql_query_text(names[face]);
+                if(!query)elog(ERROR,"observation bindings: required static query is unavailable");
+                *plan=SPI_prepare_cursor(query,4,parameter_types,CURSOR_OPT_PARALLEL_OK);
+                if(!*plan || SPI_keepplan(*plan)!=0)elog(ERROR,"observation bindings: preparing static read failed");
+            }
+            result=SPI_execute_plan_extended(*plan,&options);
+            /* SELECT to DestNone reports SPI_OK_UTILITY; startup checks shape. */
+            if(result!=SPI_OK_SELECT && result!=SPI_OK_UTILITY)
+                elog(ERROR,"observation bindings: read failed: %s",SPI_result_code_string(result));
+        }
     }
     MemoryContextSwitchTo(previous);
     MemoryContextDelete(work);
@@ -287,7 +364,7 @@ emit_observation(int ordinal, int16 role, const LaplaceObservation *row, void *c
         hash128_to_datum(&row->context), Int16GetDatum(row->outcome),
         Int64GetDatum(row->occurrences)};
     bool nulls[] = {false, false, false, false, false, row->object_null,
-        row->source_null, row->context_null, false, false};
+        row->source_null, row->context_null, row->outcome==LAPLACE_OBSERVATION_SCORED, false};
     tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     for (int i = 2; i <= 7; ++i) pfree(DatumGetPointer(values[i]));
 }
