@@ -190,8 +190,7 @@ public static partial class NpgsqlSubstrateReads
 
     /// <summary>
     /// <c>consensus.relation_summary(x, y)</c> — relation, plane, standing, geodesic and
-    /// verdict between two entities. Path search makes this slow, so it runs with a
-    /// 120-second timeout instead of the default serving budget.
+    /// verdict between two entities, through the shared Native endpoint reader.
     /// </summary>
     public static async Task<RelationSummaryRow?> RelationSummaryAsync(
         NpgsqlDataSource dataSource, byte[] x, byte[] y, CancellationToken ct,
@@ -209,7 +208,7 @@ public static partial class NpgsqlSubstrateReads
             {
                 p.Add("x", NpgsqlDbType.Bytea).Value = x;
                 p.Add("y", NpgsqlDbType.Bytea).Value = y;
-            }, timeoutSeconds: 120, ct: ct, label: "relation_summary", onError: onError).ConfigureAwait(false);
+            }, ct: ct, label: "relation_summary", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
     }
 

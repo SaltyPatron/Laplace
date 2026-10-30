@@ -614,6 +614,25 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.Equal("shared", read.GetString(2));
             Assert.False(await read.ReadAsync());
         }
+        foreach (bool reverse in new[] { false, true })
+        {
+            await using var summary = NpgsqlCatalog.Command(connection, transaction, "consensus.relation_summary",
+                (reverse ? value : x).Id.ToBytes(), (reverse ? x : value).Id.ToBytes());
+            await using var rows = await summary.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal("IS_ANTONYM_OF", rows.GetString(0));
+            Assert.Equal("direct witnessed claims", rows.GetString(1));
+            Assert.True(rows.GetDecimal(2) > 0); Assert.Equal(3L, rows.GetInt64(3));
+            Assert.False(await rows.ReadAsync());
+        }
+        await using (var predicateOnly = NpgsqlCatalog.Command(connection, transaction, "consensus.relation_summary",
+            x.Id.ToBytes(), predicate.Id.ToBytes()))
+        await using (var rows = await predicateOnly.ExecuteReaderAsync())
+        {
+            Assert.True(await rows.ReadAsync());
+            Assert.True(rows.IsDBNull(0)); Assert.True(rows.IsDBNull(2)); Assert.True(rows.IsDBNull(3));
+            Assert.False(await rows.ReadAsync());
+        }
         // Identity resolution, UI path reads and recall share canonical stored
         // content and the same producer-compiled program, with no legacy rows.
         await using (var resolve = new NpgsqlCommand("SELECT converse.resolve_phrase($1),converse.resolve_last_word($1)", connection, transaction))

@@ -1,45 +1,44 @@
--- consensus.relation_summary(x, y): how two terms relate, from their strongest coupling
--- evidence (converse.couple), realized in the terms' language.
---   relation  the realized evidence: "<x key> · <relation or ancestor> · <y key>"
---   plane     the coupling channel: usage / fact / ancestor
---   mu        the evidence's specificity, 1 / ln(2 + how many cells share it) (this
---             summary's declared measure over couple's typed sharing count)
---   usage     how many structures contain both terms
+-- A direct claim names these entities as endpoints. Predicate membership and
+-- shared packaging are not a direct relation. Both orientations share the
+-- Native endpoint/mask/standing reader; value claims keep their absent predicate.
 DROP FUNCTION IF EXISTS laplace.relation_summary(bytea, bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_summary(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH lang AS (
-        SELECT converse.terms_language(ARRAY[p_x, p_y]) AS l
-    ), ev AS MATERIALIZED (
-        SELECT c.* FROM lang, converse.couple(p_x, p_y, lang.l, 256) c
-    ), best AS (
-        SELECT e.* FROM ev e WHERE e.channel <> 'usage' ORDER BY e.sharing, e.depth LIMIT 1
-    ), shared AS (
-        SELECT count(*)::bigint AS n FROM ev WHERE channel = 'usage'
-    ), labels AS (
-        SELECT realize.batch(ARRAY[b.x_key, b.via, b.y_key], (SELECT l FROM lang)) AS l,
-               (lexical.type_label_batch(ARRAY[b.relation]))[1] AS rel
-        FROM best b
+    WITH ids AS MATERIALIZED (
+        SELECT encode(p_x,'hex')::public.blake3 AS x, encode(p_y,'hex')::public.blake3 AS y
+    ), direct AS MATERIALIZED (
+        SELECT c.entity,c.path,c.rating,c.deviation,c.matches
+        FROM ids k CROSS JOIN LATERAL public.laplace_claims_each(
+            ARRAY[k.x,k.y],NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],
+            '{}'::public.blake3[],1::smallint,NULL::public.blake3[],0::bigint,ARRAY[k.x,k.y]) c
+        WHERE public.laplace_path_length(c.path) IN (2,3)
+          AND ((public.laplace_path_starts(c.path,k.x) AND public.laplace_path_ends(c.path,k.y))
+            OR (public.laplace_path_starts(c.path,k.y) AND public.laplace_path_ends(c.path,k.x)))
+        ORDER BY c.rating-2*c.deviation DESC,c.entity LIMIT 1
+    ), coords AS MATERIALIZED (
+        SELECT p.ordinal,p.coord FROM ids k
+        CROSS JOIN LATERAL public.laplace_entities(ARRAY[k.x,k.y]) p
+    ), shape AS (
+        SELECT public.laplace_distance4d(x.coord,y.coord) AS geodesic
+        FROM coords x JOIN coords y ON y.ordinal=2 WHERE x.ordinal=1
+    ), relation_id AS (
+        SELECT CASE WHEN public.laplace_path_length(path)=3
+                    THEN (public.laplace_parts(path))[2] END AS id FROM direct
+    ), metadata AS MATERIALIZED (
+        SELECT * FROM consensus.relation_metadata(
+            ARRAY(SELECT public.blake3_send(id) FROM relation_id WHERE id IS NOT NULL))
+    ), labels AS MATERIALIZED (
+        SELECT * FROM public.laplace_labels(ARRAY(SELECT id FROM relation_id WHERE id IS NOT NULL))
     )
-    SELECT CASE WHEN b.channel IS NULL THEN NULL
-                ELSE concat_ws(' · ', lb.l[1],
-                               COALESCE(lb.rel, CASE WHEN b.channel = 'ancestor' THEN 'both are kinds of' END),
-                               lb.l[2], lb.l[3]) END,
-           b.channel,
-           round((1.0 / (GREATEST(b.depth, 1) * ln(2.0 + b.sharing)))::numeric, 6),
-           s.n,
-           public.laplace_angular_distance_4d(
-               (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = p_x AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1),
-               (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = p_y AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1)),
-           concat_ws('',
-             CASE WHEN b.channel IS NOT NULL THEN 'related via ' || b.channel
-                  ELSE 'no witnessed coupling' END,
-             CASE WHEN s.n > 0 THEN '; shared usage (' || s.n || ')' ELSE '' END)
-    FROM (SELECT 1) one
-    CROSS JOIN shared s
-    LEFT JOIN best b ON true
-    LEFT JOIN labels lb ON true;
+    SELECT (SELECT coalesce(CASE WHEN NOT m.inverse AND m.qualifier_bit<0 THEN m.canonical END,l.content)
+            FROM relation_id r LEFT JOIN metadata m ON m.surface_id=public.blake3_send(r.id)
+            LEFT JOIN labels l ON l.entity=r.id),
+           'direct witnessed claims'::text,(SELECT (rating-2*deviation)::numeric FROM direct),
+           (SELECT matches FROM direct),(SELECT geodesic FROM shape),
+           CASE WHEN EXISTS(SELECT FROM direct)
+                THEN 'A direct witnessed claim connects these entities.'
+                ELSE 'No direct witnessed claim connects these entities.' END;
 END;

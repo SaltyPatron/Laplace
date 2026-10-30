@@ -131,6 +131,24 @@ BEGIN
         WHERE source_id=public.blake3_send(witness) AND source_label=witness::text) THEN
         RAISE EXCEPTION 'an unnamed witness was mislabeled as its first claim';
     END IF;
+    -- A predicate sharing a claim is not a direct endpoint. Logical parts
+    -- also retain a predicate repeated in the subject's compressed run.
+    UPDATE public.consensus s SET rating=3000
+      WHERE s.claim=public.laplace_compose(ARRAY[a,a,b]);
+    IF NOT EXISTS(SELECT FROM consensus.relation_summary(aa,bb)
+        WHERE relation='α' AND mu=2900 AND usage=1)
+       OR NOT EXISTS(SELECT FROM consensus.relation_summary(bb,aa)
+        WHERE relation='α' AND mu=2900 AND usage=1)
+       OR NOT EXISTS(SELECT FROM consensus.relation_summary(aa,public.blake3_send(c))
+        WHERE relation IS NULL AND mu IS NULL AND usage IS NULL) THEN
+        RAISE EXCEPTION 'direct summary confused predicates with endpoints or lost RLE order, standing or reverse orientation';
+    END IF;
+    DELETE FROM public.consensus s WHERE s.claim IN (
+      public.laplace_compose(ARRAY[a,r,b]),public.laplace_compose(ARRAY[b,r,a]),public.laplace_compose(ARRAY[a,a,b]));
+    IF NOT EXISTS(SELECT FROM consensus.relation_summary(aa,bb)
+        WHERE relation IS NULL AND mu=1400 AND usage=1) THEN
+        RAISE EXCEPTION 'direct summary invented a predicate for a Native value claim';
+    END IF;
 END $$;
 ROLLBACK;
 SELECT 'Native endpoint reads: direction, type, RLE, duplicate inputs and value claims passed';
