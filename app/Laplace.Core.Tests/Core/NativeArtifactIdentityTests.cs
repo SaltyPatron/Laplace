@@ -88,7 +88,11 @@ public sealed class NativeArtifactIdentityTests
             string name = $"liblaplace_{library}.so";
             string actual = Assert.Single(LoadedPaths(name));
             string expected = Path.Combine(AppContext.BaseDirectory, name);
-            Assert.Equal(expected, actual);
+            // The kernel reports the versioned image behind an ELF alias. Both
+            // the selected alias and its final target must stay app-local.
+            string image = new FileInfo(expected).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? expected;
+            Assert.Equal(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), Path.GetDirectoryName(image));
+            Assert.Equal(image, actual);
             _out.WriteLine($"{library}: {actual}; sha256={Sha(actual)}");
         }
     }
