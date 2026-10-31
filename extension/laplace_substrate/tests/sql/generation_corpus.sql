@@ -880,12 +880,34 @@ GRANT SELECT ON laplace.attestations TO laplace_membership_reader_test;
 ALTER TABLE laplace.attestations ENABLE ROW LEVEL SECURITY;
 SET LOCAL ROLE laplace_membership_reader_test;
 DO $$ BEGIN
+    PERFORM generation.observation_bindings(
+        ARRAY[public.laplace_hash128_blake3('bindings/operand')]);
+    RAISE EXCEPTION 'FAIL: native observation read bypassed canonical physicality SELECT privilege';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+RESET ROLE;
+-- Observation bindings also read canonical Native paths. Authorize that read
+-- so the legacy attestation RLS check reaches its intended denial boundary.
+GRANT SELECT(entity,path,tier,mask) ON public.physicality TO laplace_membership_reader_test;
+SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM generation.observation_bindings(
         ARRAY[public.laplace_hash128_blake3('bindings/operand')])) THEN
         RAISE EXCEPTION 'FAIL: cached observation read bypassed row security';
     END IF;
 END $$;
 RESET ROLE;
+ALTER TABLE public.physicality ENABLE ROW LEVEL SECURITY;
+SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
+    PERFORM generation.observation_bindings(
+        ARRAY[public.laplace_hash128_blake3('bindings/operand')]);
+    RAISE EXCEPTION 'FAIL: native observation read bypassed canonical physicality row security';
+EXCEPTION WHEN feature_not_supported THEN
+    IF SQLERRM <> 'Native presence requires a canonical shared relation without active RLS' THEN RAISE; END IF;
+END $$;
+RESET ROLE;
+ALTER TABLE public.physicality DISABLE ROW LEVEL SECURITY;
 GRANT SELECT ON laplace.physicalities TO laplace_membership_reader_test;
 ALTER TABLE laplace.physicalities ENABLE ROW LEVEL SECURITY;
 SET LOCAL ROLE laplace_membership_reader_test;
