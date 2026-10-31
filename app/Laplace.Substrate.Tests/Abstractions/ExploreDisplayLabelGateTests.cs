@@ -28,13 +28,19 @@ public sealed class ExploreDisplayLabelGateTests
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
         var fixture = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "tests", "sql", "display_label.sql"));
-        Assert.Contains("INSERT INTO public.entity", fixture, StringComparison.Ordinal);
-        Assert.Contains("realize.display_label_batch", fixture, StringComparison.Ordinal);
-        Assert.Contains("WITH ORDINALITY", fixture, StringComparison.Ordinal);
-        Assert.Contains("labels IS DISTINCT FROM", fixture, StringComparison.Ordinal);
-        Assert.Contains("[dog · λ · 中]", fixture, StringComparison.Ordinal);
-        Assert.Contains("type_id IS NULL", fixture, StringComparison.Ordinal);
-        Assert.DoesNotContain("INSERT INTO laplace.entities", fixture, StringComparison.Ordinal);
+        // Later blocks exercise compatibility storage and malformed paths. The
+        // Native case must still prove its own behavior using canonical rows.
+        const string nativeEndMarker = "END $test$;";
+        int nativeEnd = fixture.IndexOf(nativeEndMarker, StringComparison.Ordinal);
+        Assert.True(nativeEnd >= 0, "The Native display fixture must retain its named test block.");
+        string nativeFixture = fixture[..(nativeEnd + nativeEndMarker.Length)];
+        Assert.Contains("INSERT INTO public.entity", nativeFixture, StringComparison.Ordinal);
+        Assert.Contains("realize.display_label_batch", nativeFixture, StringComparison.Ordinal);
+        Assert.Contains("WITH ORDINALITY", nativeFixture, StringComparison.Ordinal);
+        Assert.Contains("labels IS DISTINCT FROM", nativeFixture, StringComparison.Ordinal);
+        Assert.Contains("[dog · λ · 中]", nativeFixture, StringComparison.Ordinal);
+        Assert.Contains("type_id IS NULL", nativeFixture, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSERT INTO laplace.entities", nativeFixture, StringComparison.Ordinal);
     }
 
     [Fact]
