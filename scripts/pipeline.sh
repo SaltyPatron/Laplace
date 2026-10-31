@@ -308,7 +308,6 @@ phase_build_app() {
 
 phase_build_web() {
   echo "===== PHASE — BUILD WEB ====="
-  local lock_hash stamp previous
   if [[ ! -f "$ROOT/web/openapi/openapi.json" ]]; then
     echo "::notice::web OpenAPI contract absent in clean candidate; generating from endpoint project only"
     LAPLACE_REUSE_INSTALLED_NATIVE=1 dotnet build       "$ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"       -c Release -v minimal --nologo
@@ -318,15 +317,10 @@ phase_build_web() {
     return 1
   }
 
-  mkdir -p "$LAPLACE_BUILD_DIRECTORY/.stamps"
-  lock_hash="$(sha256sum "$ROOT/web/package-lock.json" | awk '{print $1}')"
-  stamp="$LAPLACE_BUILD_DIRECTORY/.stamps/npm-lock.sha256"
-  previous="$(cat "$stamp" 2>/dev/null || true)"
-  if [[ ! -d "$ROOT/web/node_modules" || "$previous" != "$lock_hash" ]]; then
-    ( cd "$ROOT/web" && npm ci --no-audit --no-fund --prefer-offline )
-    printf '%s\n' "$lock_hash" > "$stamp"
-  fi
-  ( cd "$ROOT/web" && npm run build )
+  # The same content/toolchain owner used by the desktop build verifies dist
+  # before reuse. A lockfile-only stamp cannot establish that identity.
+  python3 "$ROOT/scripts/web-artifact.py" build \
+    --root "$ROOT" --manifest "$LAPLACE_BUILD_DIRECTORY/web-build.json"
   [[ -f "$ROOT/web/dist/index.html" ]] || {
     echo "::error::web build completed without dist/index.html" >&2
     return 1

@@ -356,10 +356,8 @@ phase_app() {
   cp "$ROOT/scripts/lib/chess_source_integrity.py" "$stage/app/operations/scripts/lib/"
   cp "$ROOT/deploy/linux/stockfish-release.json" "$stage/app/operations/deploy/linux/"
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || fail "the endpoint build did not write web/openapi/openapi.json"
-  ( cd "$ROOT/web"
-    lock="$(sha256sum package-lock.json | cut -d' ' -f1)"
-    [[ -d node_modules && "$(cat node_modules/.laplace-npm-ci.stamp 2>/dev/null)" == "$lock" ]] || { npm ci --no-audit --no-fund --prefer-offline 8>&-; echo "$lock" > node_modules/.laplace-npm-ci.stamp; }
-    npm run gen:api 8>&-; npm run build 8>&- )
+  python3 "$ROOT/scripts/web-artifact.py" build \
+    --root "$ROOT" --manifest "$SITE_BUILD/web-build.json" 8>&-
   [[ -f "$ROOT/web/dist/index.html" ]] || fail "the web build wrote no dist/index.html"
   mkdir -p "$stage/app/wwwroot"; cp -a "$ROOT/web/dist/." "$stage/app/wwwroot/"
   git -C "$ROOT" rev-parse HEAD | tee "$stage/app/.laplace-source-revision" > "$stage/app/wwwroot/.laplace-web-source-revision"

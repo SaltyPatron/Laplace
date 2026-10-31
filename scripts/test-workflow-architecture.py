@@ -293,7 +293,9 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("need_web", run_build)
         self.assertIn('phases+=(build-web)', run_build)
         self.assertIn("phase_build_web()", pipeline)
-        self.assertIn("npm run build", pipeline)
+        web = shell_function(pipeline, "phase_build_web")
+        self.assertIn('web-artifact.py" build', web)
+        self.assertNotIn("npm run build", web)
         self.assertIn("build-web) phase_build_web", pipeline)
 
     def test_automatic_publication_consumes_qualified_or_installed_web_without_rebuild(self):

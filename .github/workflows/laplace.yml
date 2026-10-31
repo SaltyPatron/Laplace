@@ -113,6 +113,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
 
       - name: Check out canonical Native
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -322,6 +325,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
 
       - name: Check out canonical Native
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

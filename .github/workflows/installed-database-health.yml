@@ -26,6 +26,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Select changes to the installed-database health implementation
         id: health
         shell: bash
