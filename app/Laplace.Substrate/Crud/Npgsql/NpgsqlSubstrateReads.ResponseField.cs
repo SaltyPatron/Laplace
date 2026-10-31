@@ -14,6 +14,14 @@ public static partial class NpgsqlSubstrateReads
                 r.IsDBNull(1) ? null : r.GetString(1), !r.IsDBNull(2) && r.GetBoolean(2),r.GetBoolean(3),r.GetBoolean(4)),
             p => { p.AddWithValue("relations",relations); p.AddWithValue("criteria",criteria); },ct: ct);
 
+    public sealed record LexiconDescriptionRow(byte[] Id,string? Label,bool Identifier);
+
+    public static Task<IReadOnlyList<LexiconDescriptionRow>> LexiconDescriptionsAsync(
+        NpgsqlConnection connection,byte[][] ids,CancellationToken ct=default) =>
+        NpgsqlRead.ReadRowsAsync(connection,SqlCatalog.Get("query.lexicon_descriptions"),
+            static r=>new LexiconDescriptionRow(r.GetFieldValue<byte[]>(0),r.IsDBNull(1)?null:r.GetString(1),r.GetBoolean(2)),
+            p=>p.AddWithValue("ids",ids),ct:ct);
+
     public sealed record ResponseFieldRow(int Round, int Occurrence, byte[]? Anchor, string? AnchorLabel,
         byte[] Entity, string Label, short Route, byte[]? Via, byte[]? Relation, string? RelationLabel,
         double? Rating, double? Deviation, double? Volatility, long? Matches, long? Witnesses,

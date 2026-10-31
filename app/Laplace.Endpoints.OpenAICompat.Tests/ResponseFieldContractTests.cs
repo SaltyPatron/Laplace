@@ -71,6 +71,19 @@ public sealed class ResponseFieldContractTests
     }
 
     [Fact]
+    public async Task EntityLexiconRequiresOnlyOneReference()
+    {
+        await using var factory = new Factory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/v1/explore/lexicon?x=sediment");
+        Assert.Equal(HttpStatusCode.OK,response.StatusCode);
+        var field = await response.Content.ReadFromJsonAsync<ResponseFieldResponse>();
+        Assert.NotNull(field);
+        Assert.Equal("lexicon",field.Object);
+        Assert.Equal(1,field.Rounds);
+    }
+
+    [Fact]
     public async Task LexiconReadHasItsOwnAuthenticatedEndpoint()
     {
         await using var factory = new Factory();

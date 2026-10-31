@@ -7,6 +7,36 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 [Trait("Tier", "live")]
 public sealed class LexiconReadLiveTests
 {
+    [SkippableTheory]
+    [InlineData("sediment")]
+    [InlineData("light")]
+    public async Task EntityReadReturnsDescriptionsAndNamedRelations(string reference)
+    {
+        string? connection = Environment.GetEnvironmentVariable("LAPLACE_LEXICON_ACCEPTANCE_CONNECTION");
+        Skip.If(string.IsNullOrWhiteSpace(connection), "Explicit seeded lexicon acceptance connection not supplied");
+        await using var client = new SubstrateClient(connection);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var field = await client.LexiconAsync(reference,null,cancellation.Token);
+        Assert.NotNull(field);
+        Assert.Equal(1,field.Rounds);
+        Assert.NotEmpty(field.Readings!);
+        Assert.All(field.Readings!,row=>Assert.True(row.Side==1 && row.Witnesses>0 && row.ClaimIds.Count>0));
+        Assert.DoesNotContain(field.Readings!,row=>row.Text.Contains("type of pointer that lemma",StringComparison.OrdinalIgnoreCase));
+        Assert.All(field.Connections!,row=>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(row.Relation));
+            Assert.True(row.Relation.All(ch=>char.IsLetter(ch)||char.IsWhiteSpace(ch)));
+            Assert.NotEqual("identifier vocabulary",row.Relation);
+            Assert.DoesNotMatch(@"^[a-f0-9]{32}$",row.To);
+            Assert.False(Uri.TryCreate(row.To,UriKind.Absolute,out _));
+            Assert.True(row.Witnesses>0);
+            Assert.NotNull(row.ToId);
+        });
+        var directory=Environment.GetEnvironmentVariable("LAPLACE_LIVE_ENTITY_EVIDENCE_DIRECTORY");
+        if(!string.IsNullOrWhiteSpace(directory))
+            await File.WriteAllTextAsync(Path.Combine(directory,reference+"-entity-candidate.json"),JsonSerializer.Serialize(field));
+    }
+
     [SkippableFact]
     public async Task RecordedMeaningsAndExamplesReachBothSidesWithWitnessedConnections()
     {

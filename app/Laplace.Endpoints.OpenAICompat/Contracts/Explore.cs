@@ -177,7 +177,8 @@ public sealed record ExploreEntityResponse(
     [property: JsonPropertyName("constituents")] IReadOnlyList<ExploreConstituentRow> Constituents,
     [property: JsonPropertyName("packed_vertices")] IReadOnlyList<ExplorePackedVertexRow> PackedVertices,
     [property: JsonPropertyName("realized_vertices")] IReadOnlyList<ExploreRealizedVertexRow> RealizedVertices,
-    [property: JsonPropertyName("evidence")] IReadOnlyList<LabeledEvidenceItem> Evidence);
+    [property: JsonPropertyName("evidence")] IReadOnlyList<LabeledEvidenceItem> Evidence,
+    [property: JsonPropertyName("lexicon"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResponseFieldResponse? Lexicon = null);
 
 public sealed record ExploreEntityDetailResponse(
     [property: JsonPropertyName("id")] string Id,

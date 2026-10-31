@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useRouteText } from '../../layout/useRouteText';
+import { exploreLexicon } from '../../query/api';
+import type { ResponseField } from '../../query/types';
 import {
   Button,
   ErrorText,
@@ -30,6 +32,7 @@ import { useExploreStore } from '../store';
 import type { BillingReceipt, ExploreEntityPreviewResponse, ExploreEntityResponse } from '../types';
 import styles from './EntityDetail.module.css';
 import { EntityHeader } from './EntityHeader';
+import { LexiconEntry } from './LexiconEntry';
 import { decomposableSurface, decompositionMatchesEntity } from './decomposeSurface';
 import type { EntityTab, NeighborMode } from './tabs/types';
 
@@ -89,9 +92,27 @@ export function EntityDetail() {
   const [copied, setCopied] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [needsGate, setNeedsGate] = useState(false);
+  const [lexicon, setLexicon] = useState<ResponseField | null>(null);
+  const [lexiconError, setLexiconError] = useState<string | null>(null);
+  const [lexiconGated, setLexiconGated] = useState(false);
+  const [lexiconAttempt, setLexiconAttempt] = useState(0);
+  const [inspectOpen, setInspectOpen] = useState(false);
 
   const quote = exploreQuote || quoteId;
   const walkHighlight = walkPath.map((n) => n.idHex);
+
+  useEffect(() => {
+    let stale = false;
+    setLexicon(null); setLexiconError(null); setLexiconGated(false);
+    exploreLexicon(idHex, undefined, { tenant, quoteId: quote })
+      .then(value => { if (!stale) setLexicon(value); })
+      .catch(failure => {
+        if (stale) return;
+        if (failure instanceof PaymentRequiredError) setLexiconGated(true);
+        else setLexiconError(failure instanceof Error ? failure.message : String(failure));
+      });
+    return () => { stale = true; };
+  }, [idHex, tenant, quote, lexiconAttempt]);
 
   useEffect(() => {
     setEntity(null);
@@ -110,6 +131,7 @@ export function EntityDetail() {
     setDecomposeNodes(null);
     setDetailLoading(false);
     setNeedsGate(false);
+    setInspectOpen(false);
     explorePreview(idHex).then((p) => {
       setPreview(p);
       setBreadcrumb({ entityLabel: p.label, entityId: p.id_hex });
@@ -117,7 +139,7 @@ export function EntityDetail() {
   }, [idHex, setBreadcrumb]);
 
   useEffect(() => {
-    if (!preview || unlocked || detailLoading || needsGate || err) return;
+    if (!inspectOpen || !preview || unlocked || detailLoading || needsGate || err) return;
     setDetailLoading(true);
     void exploreEntity(idHex, { tenant, quoteId: quote })
       .then((res) => {
@@ -133,7 +155,7 @@ export function EntityDetail() {
         setErr(e instanceof Error ? e.message : String(e));
       })
       .finally(() => setDetailLoading(false));
-  }, [preview, unlocked, detailLoading, needsGate, err, idHex, tenant, quote]);
+  }, [inspectOpen, preview, unlocked, detailLoading, needsGate, err, idHex, tenant, quote]);
 
   async function loadFull() {
     if (detailLoading) return;
@@ -285,7 +307,13 @@ export function EntityDetail() {
         onAskSubstrate={askSubstrate}
       />
 
-      {!unlocked ? (
+      {lexiconGated ? <GatePrompt serviceId="inspect" label="Read recorded meanings, usage and relationships." onReady={() => setLexiconAttempt(value => value + 1)} />
+        : <LexiconEntry key={idHex} field={lexicon} error={lexiconError} onRetry={() => setLexiconAttempt(value => value + 1)} />}
+
+      <details className={styles.inspector} open={inspectOpen} onToggle={event => setInspectOpen(event.currentTarget.open)}>
+        <summary>Inspect source records</summary>
+
+      {inspectOpen && !unlocked ? (
         <>
           <Panel title="Preview">
             {detailLoading ? <LoadingText>Loading detail…</LoadingText> : null}
@@ -312,7 +340,7 @@ export function EntityDetail() {
         </>
       ) : null}
 
-      {unlocked && show ? (
+      {inspectOpen && unlocked && show ? (
         <>
           <NavTabs
             tabs={TAB_IDS.map((t) => ({
@@ -384,6 +412,7 @@ export function EntityDetail() {
       ) : null}
 
       {err ? <ErrorText>{err}</ErrorText> : null}
+      </details>
     </div>
   );
 }

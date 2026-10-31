@@ -131,7 +131,7 @@ internal sealed partial class SubstrateClient
                 resolved = await NpgsqlSubstrateReads.ExploreResolveAsync(conn, reference, ct);
                 if (resolved is { Exists: true } value)
                 {
-                    var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
+                    var facts = await ReadPreviewFactsAsync(conn, value.Id, ct);
                     var resolvedHex = Convert.ToHexStringLower(value.Id);
                     return new ExploreResolveResponse(
                         IdHex: resolvedHex,
@@ -193,9 +193,7 @@ internal sealed partial class SubstrateClient
 
             var evidenceCount = await ReadEvidenceCountAsync(conn, id, ct);
             // An id that resolves but was never witnessed has no facts to read.
-            var facts = exists
-                ? await ReadSalientFactsAsync(conn, id, 3, ct)
-                : (IReadOnlyList<SalientFactRow>)Array.Empty<SalientFactRow>();
+            var facts = exists ? await ReadPreviewFactsAsync(conn,id,ct) : [];
 
             return new ExploreEntityPreviewResponse(
                 IdHex: idHex.ToLowerInvariant(),
@@ -284,6 +282,7 @@ internal sealed partial class SubstrateClient
             var consensusOut = await ReadConsensusAsync(conn, id, "out", consensusLimit, ct);
             var consensusIn = await ReadConsensusAsync(conn, id, "in", consensusLimit, ct);
             var senses = await ReadSensesAsync(conn, id, ct);
+            var lexicon = await ReadLexiconEntryAsync(conn,id,ct);
             var constituents = await ReadConstituentsAsync(conn, id, ct);
             var packed = await ReadPackedVerticesAsync(conn, id, ct);
             var realized = await ReadRealizedVerticesAsync(conn, id, ct);
@@ -291,8 +290,7 @@ internal sealed partial class SubstrateClient
             await transaction.CommitAsync(ct);
             IReadOnlyList<SalientFactRow> exactFacts =
             [
-                .. consensusOut.Take(24).Select(c =>
-                    new SalientFactRow(c.Type, c.EntityLabel, c.EffMu, c.Witnesses))
+                .. (lexicon.Readings ?? []).Select(r=>new SalientFactRow("meaning",r.Text,(decimal)r.Standing,r.Witnesses))
             ];
 
             return new ExploreEntityResponse(
@@ -310,7 +308,8 @@ internal sealed partial class SubstrateClient
                 Constituents: constituents,
                 PackedVertices: packed,
                 RealizedVertices: realized,
-                Evidence: evidence);
+                Evidence: evidence,
+                Lexicon: lexicon);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
@@ -877,6 +876,15 @@ internal sealed partial class SubstrateClient
         }
 
         return rows;
+    }
+
+    private static async Task<IReadOnlyList<SalientFactRow>> ReadPreviewFactsAsync(NpgsqlConnection conn,byte[] id,CancellationToken ct)
+    {
+        var senses=await ReadSensesAsync(conn,id,ct);
+        var meanings=senses.Where(s=>IsReadableLexiconValue(s.SynsetLabel,null)).Take(3)
+            .Select(s=>new SalientFactRow("meaning",s.SynsetLabel,s.EffMu,s.Witnesses)).ToArray();
+        return meanings.Length>0?meanings:(await ReadSalientFactsAsync(conn,id,12,ct))
+            .Where(f=>IsReadableLexiconValue(f.Type,null)&&IsReadableLexiconValue(f.Fact,null)).Take(3).ToArray();
     }
 
     private static async Task<IReadOnlyList<ExploreSenseRow>> ReadSensesAsync(

@@ -239,7 +239,7 @@ SQL_QUERY("query.lexicon_relations", "bytea[],text[]",
     "metadata AS MATERIALIZED (SELECT * FROM consensus.relation_metadata($1)), "
     "descriptive AS MATERIALIZED (SELECT DISTINCT p.entity FROM "
     "public.laplace_constituents(ARRAY(SELECT key FROM ids)) p JOIN criteria c ON c.id=p.child) "
-    "SELECT i.id,CASE WHEN m.qualifier_bit<0 THEN m.canonical END,m.inverse,d.entity IS NOT NULL,coalesce(public.laplace_mask_value(e.mask,'kind')=-1,false) "
+    "SELECT i.id,m.canonical,m.inverse,d.entity IS NOT NULL,coalesce(public.laplace_mask_value(e.mask,'kind')=-1,false) "
     "FROM ids i LEFT JOIN metadata m ON m.surface_id=i.id LEFT JOIN descriptive d ON d.entity=i.key "
     "LEFT JOIN public.laplace_physicalities(ARRAY(SELECT key FROM ids)) e ON e.entity=i.key ORDER BY i.id")
 /* Selected roots keep their identity while the first-constituent frontier
@@ -1154,6 +1154,30 @@ SQL_QUERY("consensus.relation_summary", "bytea,bytea",
  * Binding evidence governs which rows may be realized as lexical readings. */
 /* Human lexical reads select admitted claims before realizing text or tracing support.
  * Stored consensus supplies standing; this query never refolds it. */
+/* Resolve selected opaque endpoints through their own recorded descriptions.
+ * This is a single indexed subject frontier, not another lexical expansion. */
+SQL_QUERY("query.lexicon_descriptions", "bytea[]",
+    "WITH roots AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)) ids), "
+    "claims AS MATERIALIZED (SELECT r.ids[c.i::int] anchor,c.entity claim,public.laplace_parts(c.path) parts,c.rating,c.deviation "
+    "FROM roots r CROSS JOIN LATERAL public.laplace_claims_each(r.ids,NULL::bigint, "
+    "ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],1::smallint) c), "
+    "identifiers AS MATERIALIZED (SELECT DISTINCT anchor FROM claims WHERE cardinality(parts)>=3 "
+    "AND parts[2]=public.laplace_text_id('identifier vocabulary')), "
+    "predicates AS MATERIALIZED (SELECT DISTINCT p.entity FROM public.laplace_constituents( "
+    "ARRAY(SELECT DISTINCT parts[2] FROM claims WHERE cardinality(parts)>=3)) p "
+    "WHERE p.child=ANY(ARRAY[public.laplace_text_id('definition'),public.laplace_text_id('definitions')])), "
+    "selected AS MATERIALIZED (SELECT c.* FROM claims c JOIN predicates p ON p.entity=c.parts[2] "
+    "WHERE c.parts[1]=c.anchor AND cardinality(c.parts)>=3), "
+    "support AS MATERIALIZED (SELECT DISTINCT a.claim FROM public.laplace_attested( "
+    "ARRAY(SELECT DISTINCT claim FROM selected),false) a WHERE a.witness), "
+    "labels AS MATERIALIZED (SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT parts[cardinality(parts)] FROM selected))), "
+    "descriptions AS MATERIALIZED (SELECT s.anchor,l.content,s.rating-2*s.deviation standing,s.claim FROM selected s "
+    "JOIN support w ON w.claim=s.claim JOIN labels l ON l.entity=s.parts[cardinality(s.parts)]), "
+    "results AS (SELECT anchor FROM identifiers UNION SELECT anchor FROM descriptions) "
+    "SELECT public.blake3_send(r.anchor),d.content,i.anchor IS NOT NULL FROM results r "
+    "LEFT JOIN descriptions d ON d.anchor=r.anchor LEFT JOIN identifiers i ON i.anchor=r.anchor "
+    "ORDER BY d.standing DESC NULLS LAST,r.anchor,d.claim")
+
 SQL_QUERY("query.lexicon_field", "bytea[]",
     "WITH roots AS MATERIALIZED (\n"
     " SELECT ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)) ids\n"
@@ -1187,9 +1211,10 @@ SQL_QUERY("query.lexicon_field", "bytea[]",
     " LEFT JOIN lexical_bindings tb ON tb.id=c.entity LEFT JOIN forms ef ON ef.id=c.entity\n"
     " LEFT JOIN forms rf ON rf.id=c.rel LEFT JOIN descriptive d ON d.entity=c.rel\n"
     " LEFT JOIN metadata m ON m.surface_id=public.blake3_send(c.rel)\n"
-    " WHERE (c.outbound AND public.laplace_mask_value(ef.mask,'kind')=-1 AND d.entity IS NOT NULL)\n"
-    " OR ((m.qualifier_bit<0 AND m.canonical IS NOT NULL OR public.laplace_mask_value(rf.mask,'kind')=-1)\n"
-    " AND EXISTS(SELECT FROM unnest(ab.origins) a(side),unnest(tb.origins) b(side) WHERE a.side<>b.side))\n"
+    " WHERE c.rel<>public.laplace_text_id('identifier vocabulary') AND ((c.outbound AND public.laplace_mask_value(ef.mask,'kind')=-1 AND d.entity IS NOT NULL)\n"
+    " OR ((m.canonical IS NOT NULL OR public.laplace_mask_value(rf.mask,'kind')=-1)\n"
+    " AND (EXISTS(SELECT FROM unnest(ab.origins) a(side),unnest(tb.origins) b(side) WHERE a.side<>b.side)\n"
+    " OR (cardinality((SELECT ids FROM roots))=1 AND tb.id IS NULL AND public.laplace_mask_value(ef.mask,'kind')=-1))))\n"
     "), ids AS MATERIALIZED (SELECT entity id FROM bound UNION SELECT anchor FROM bound UNION SELECT rel FROM bound WHERE rel IS NOT NULL),\n"
     "labels AS MATERIALIZED (SELECT * FROM public.laplace_labels(ARRAY(SELECT id FROM ids ORDER BY id))),\n"
     "support AS MATERIALIZED (SELECT a.claim,count(*) witnesses FROM public.laplace_attested(ARRAY(SELECT DISTINCT via FROM bound ORDER BY via),false) a WHERE a.witness GROUP BY a.claim)\n"

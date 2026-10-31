@@ -1,3 +1,5 @@
+import type { ResponseField } from '../query/types';
+
 export interface SubstrateCount { metric: string; value: number | null; }
 export interface ConsensusHealth {
   evidenceRows: number | null;
@@ -261,6 +263,7 @@ export interface ExploreEntityResponse {
   packed_vertices: ExplorePackedVertexRow[];
   realized_vertices: ExploreRealizedVertexRow[];
   evidence: LabeledEvidenceItem[];
+  lexicon?: ResponseField | null;
 }
 export interface BillingReceipt {
   quote_id: string;

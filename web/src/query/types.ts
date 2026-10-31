@@ -177,7 +177,7 @@ export interface ResponseField {
   nearest: number;
   rows: ResponseFieldEntry[];
   readings?: LexiconReading[];
-  connections?: { relation: string; claim_id: string; from: string; to: string; witnesses: number }[];
+  connections?: { relation: string; claim_id: string; from: string; to: string; witnesses: number; from_id?: string | null; to_id?: string | null }[];
 }
 
 export interface LexiconReading {
@@ -188,6 +188,7 @@ export interface LexiconReading {
   claim_ids: string[];
   witnesses: number;
   standing: number;
+  anchor_id?: string | null;
 }
 
 export interface MatchupVerdict {

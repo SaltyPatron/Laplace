@@ -6,6 +6,24 @@
     min-width: 0;
   }
 
+  .meanings {
+    margin: 0;
+    padding-left: var(--space-5);
+    display: grid;
+    gap: var(--space-5);
+    max-width: 75ch;
+    font-size: 1.05rem;
+    line-height: 1.6;
+  }
+
+  .meanings p, .readableRelations p { margin: 0 0 var(--space-2); }
+  .sourceEvidence { font-size: var(--text-sm); color: var(--color-text-muted); }
+  .sourceEvidence summary { cursor: pointer; }
+  .readableRelations { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+  .relationLabel { color: var(--color-text-muted); }
+  .inspector > summary { cursor: pointer; padding-block: var(--space-3); }
+  .inspector[open] > summary { margin-bottom: var(--space-3); }
+
   .detailFill {
     height: 100%;
     min-height: 0;

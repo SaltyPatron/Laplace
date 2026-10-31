@@ -644,11 +644,11 @@ internal static class ExploreEndpoints
         app.MapGet("/v1/explore/lexicon", async (string? x, string? y,
             HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
-                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+            if (string.IsNullOrWhiteSpace(x))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'x' is required.");
             return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
             {
-                var response = await substrate.LexiconAsync(x.Trim(), y.Trim(), ct);
+                var response = await substrate.LexiconAsync(x.Trim(), string.IsNullOrWhiteSpace(y) ? null : y.Trim(), ct);
                 return response is null
                     ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
                     : Results.Json(response);

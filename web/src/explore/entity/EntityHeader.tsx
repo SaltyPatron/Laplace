@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Button, Muted } from '@ui';
 import type { ExploreEntityPreviewResponse } from '../types';
@@ -28,17 +29,14 @@ export function EntityHeader({
   onExport: () => void;
   onAskSubstrate: () => void;
 }) {
+  const [inspectionOpen, setInspectionOpen] = useState(false);
   return (
     <header className={styles.header}>
       <div className={styles.titleBlock}>
         <h2>{preview.label}</h2>
-        <Muted className={styles.meta}>
-          composition tier {preview.tier ?? '—'}{preview.type ? ` · ${preview.type}` : ''}{' '}
-          <Button variant="ghost" size="sm" onClick={onCopyId}>
-            {copied ? 'Reference copied' : 'Copy reference'}
-          </Button>
-        </Muted>
-        <PlayerCard preview={preview} />
+        {preview.type && <Muted>{preview.type.replaceAll('_', ' ')}</Muted>}
+        <Button variant="ghost" size="sm" onClick={onCopyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button>
+        {preview.type === 'Chess_Player' && <PlayerCard preview={preview} />}
       </div>
       <div className={styles.actions}>
         {/*
@@ -52,6 +50,10 @@ export function EntityHeader({
             </RouterLink>
           </Button>
         ) : null}
+        <details className={styles.sourceEvidence} onToggle={event => setInspectionOpen(event.currentTarget.open)}>
+          <summary>Inspect and export</summary>
+          <Muted>Composition tier {preview.tier ?? '—'}</Muted>
+          {inspectionOpen && preview.type !== 'Chess_Player' && <PlayerCard preview={preview} />}
         <Button asChild>
           <RouterLink to={`/explore/mesh/${preview.id_hex}`}>View in mesh</RouterLink>
         </Button>
@@ -63,6 +65,7 @@ export function EntityHeader({
         <Button disabled={!unlocked || exportBusy} loading={exportBusy} onClick={onExport}>
           Export for training
         </Button>
+        </details>
         <Button variant="ghost" onClick={onAskSubstrate}>
           Ask substrate
         </Button>

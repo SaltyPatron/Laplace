@@ -990,9 +990,20 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.True(bindingRows.GetInt64(2)>0);
             Assert.False(await bindingRows.ReadAsync());
         }
+        var entry = await NpgsqlSubstrateReads.LexiconFieldAsync(connection,[x.Id.ToBytes()]);
+        var external = Assert.Single(entry,row=>row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes()));
+        Assert.Equal(value.Id.ToBytes(),external.Entity);
+        Assert.Equal(3L,external.Matches);
+        Assert.Equal(1L,external.Witnesses);
+        Assert.Empty(external.Targets);
+        Assert.Equal([1],external.ReadingOrigins);
         var boundField = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,[defined.Id.ToBytes()],512,0);
         Assert.Contains(boundField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
             && row.BindingClaims.Length>0 && row.Witnesses>0);
+        var descriptions = await NpgsqlSubstrateReads.LexiconDescriptionsAsync(connection,[context.Id.ToBytes(),absentId.ToBytes()]);
+        var description = Assert.Single(descriptions);
+        Assert.Equal(context.Id.ToBytes(),description.Id);
+        Assert.Equal("native witnessed definition",description.Label);
         var lexicalField = await NpgsqlSubstrateReads.LexiconFieldAsync(connection,[defined.Id.ToBytes()]);
         Assert.Contains(lexicalField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
             && row.BindingClaims.Length>0 && row.Witnesses>0);
