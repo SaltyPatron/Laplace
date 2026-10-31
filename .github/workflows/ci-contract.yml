@@ -68,6 +68,8 @@ jobs:
         run: TMPDIR="$RUNNER_TEMP" bash tests/operations-contract-incremental.sh
       - name: Verify prepared PostGIS headers preserve unchanged builds
         run: TMPDIR="$RUNNER_TEMP" bash tests/site-externals-incremental.sh
+      - name: Verify recipe Engine source selection across reconfiguration
+        run: cmake "-DSOURCE=$GITHUB_WORKSPACE" "-DWORK=$RUNNER_TEMP/recipe-engine-source" -P tests/recipe-engine-source-defaults.cmake
       - name: Provide pinned grammar queries for managed build
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

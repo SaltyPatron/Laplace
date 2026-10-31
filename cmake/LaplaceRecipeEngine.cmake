@@ -1,0 +1,12 @@
+# Recompute implicit source defaults at configure time. Explicit cache and
+# parent selections retain precedence until the caller changes or clears them.
+if(NOT DEFINED LAPLACE_RECIPE_ENGINE_SOURCE)
+    if(DEFINED ENV{LAPLACE_RECIPE_ENGINE_SOURCE} AND NOT "$ENV{LAPLACE_RECIPE_ENGINE_SOURCE}" STREQUAL "")
+        set(LAPLACE_RECIPE_ENGINE_SOURCE "$ENV{LAPLACE_RECIPE_ENGINE_SOURCE}")
+    else()
+        get_filename_component(_laplace_native_checkout "${LAPLACE_NATIVE}" REALPATH)
+        get_filename_component(_laplace_workspace "${_laplace_native_checkout}" DIRECTORY)
+        set(LAPLACE_RECIPE_ENGINE_SOURCE "${_laplace_workspace}/Laplace-Engine")
+    endif()
+endif()
+file(TO_CMAKE_PATH "${LAPLACE_RECIPE_ENGINE_SOURCE}" LAPLACE_RECIPE_ENGINE_SOURCE)
