@@ -906,6 +906,29 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.Equal(definition.Id.ToBytes(), meaning.Steps[^1].EntityId);
         Assert.Equal("native witnessed definition", meaning.Steps[^1].Label);
         Assert.Equal(1, meaning.Steps[^1].Witnesses);
+        // Inspection must also expose non-dictionary claims, repeated operand
+        // occurrences, and structural routes without adding compatibility edges.
+        var field = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,
+            [x.Id.ToBytes(), y.Id.ToBytes(), x.Id.ToBytes()], 512, 0);
+        foreach (int ordinal in new[] { 1, 3 })
+        {
+            var response = Assert.Single(field.Where(row => row.Round == 1 && row.Occurrence == ordinal
+                && row.Route == 0 && row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes())));
+            Assert.Equal(3L, response.Matches);
+            Assert.Equal(1L, response.Witnesses);
+            Assert.Equal(true, response.Outbound);
+            Assert.Equal(value.Id.ToBytes(), response.Entity);
+            Assert.Equal(predicate.Id.ToBytes(), response.Relation);
+        }
+        Assert.Contains(field, row => row.Round == 1 && row.Route == 1
+            && row.Entity.AsSpan().SequenceEqual(xsense.Id.ToBytes()));
+        Assert.Contains(field, row => row.Round == 2 && row.Route == 0
+            && row.Via!.AsSpan().SequenceEqual(link.Id.ToBytes()) && row.Outbound == false);
+        Assert.All(field.Where(row => row.Route == 0), row => Assert.NotNull(row.Via));
+        Assert.All(field.Where(row => row.Route != 0), row =>
+        {
+            Assert.Null(row.Rating); Assert.Null(row.Matches); Assert.Null(row.Witnesses);
+        });
         var part = new NativeQueryRelation("@fixture/relation", predicate.Id.ToBytes());
         var duplicateProgram = new NativeQueryProgram([[part], [part], [part, part]], [part]);
         var repeated = await NpgsqlSubstrateReads.DeclaredPathsAsync(connection,

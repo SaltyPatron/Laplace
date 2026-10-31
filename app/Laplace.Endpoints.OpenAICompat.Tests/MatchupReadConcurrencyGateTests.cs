@@ -44,7 +44,7 @@ public sealed class MatchupReadConcurrencyGateTests
         Assert.Contains("chess.wins", web);
         Assert.Contains("played against", web);
         Assert.Contains("played against", overview);
-        Assert.Contains("recorded meaning", web);
+        Assert.Contains("Response field", web);
         Assert.Contains("direct claims", web);
         Assert.DoesNotContain(">top rating ·", web, StringComparison.Ordinal);
     }

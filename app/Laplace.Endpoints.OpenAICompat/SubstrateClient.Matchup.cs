@@ -1,7 +1,6 @@
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
-using Laplace.Decomposers.Abstractions;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -55,40 +54,37 @@ internal sealed partial class SubstrateClient
         bool xChess = xChessTask.Result;
         bool yChess = yChessTask.Result;
 
-        var readings = xChess && yChess ? (IReadOnlyList<MatchupReading>[])[[], []]
-            : await ReadDeclaredMeaningsAsync([x.Value.Id, y.Value.Id], ct).ConfigureAwait(false);
-
         var tapeTask = xChess && yChess
             ? ChessTapeAsync(x.Value.Id, x.Value.Label, y.Value.Id, y.Value.Label, ct)
             : TapeAsync(x.Value.Id, y.Value.Id, ct);
-        var xSideTask = SideAsync(xHex, x.Value.Id, x.Value.Label, xChess, readings[0], ct);
-        var ySideTask = SideAsync(yHex, y.Value.Id, y.Value.Label, yChess, readings[1], ct);
+        var xSideTask = SideAsync(xHex, x.Value.Id, x.Value.Label, xChess, ct);
+        var ySideTask = SideAsync(yHex, y.Value.Id, y.Value.Label, yChess, ct);
         await Task.WhenAll(tapeTask, xSideTask, ySideTask).ConfigureAwait(false);
 
         return new MatchupResponse("matchup", xSideTask.Result, ySideTask.Result, tapeTask.Result);
     }
 
-    private async Task<IReadOnlyList<MatchupReading>[]> ReadDeclaredMeaningsAsync(
-        IReadOnlyList<byte[]> roots, CancellationToken ct)
+    public async Task<ResponseFieldResponse?> ResponseFieldAsync(
+        string xRef, string yRef, int fanout, int nearest, CancellationToken ct)
     {
-        var program = await NativeRecipeExecution.QueryProgramAsync(ct).ConfigureAwait(false);
+        var roots = await ResolveTopicsAsync([xRef, yRef], ct).ConfigureAwait(false);
+        if (roots.Any(root => root is null)) return null;
         await using var connection = await _dataSourceReadOnly.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var snapshot = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
-        var paths = await NpgsqlSubstrateReads.DeclaredPathsAsync(connection, roots, program, ct).ConfigureAwait(false);
+        var rows = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,
+            roots.Select(root => root!.Value.Id).ToArray(), fanout, nearest, ct).ConfigureAwait(false);
         await snapshot.CommitAsync(ct).ConfigureAwait(false);
-        return Enumerable.Range(0, roots.Count).Select(root => (IReadOnlyList<MatchupReading>)paths
-            .Where(p => p.RootIndex == root && p.Steps.Count >= 2)
-            .GroupBy(p => (Entity: Convert.ToHexString(p.Steps[^2].EntityId), Definition: Convert.ToHexString(p.Steps[^1].EntityId)))
-            .OrderBy(g => g.Key.Entity, StringComparer.Ordinal).ThenBy(g => g.Key.Definition, StringComparer.Ordinal)
-            .Select(g =>
-            {
-                var last = g.First().Steps[^1];
-                return new MatchupReading(g.Key.Entity.ToLowerInvariant(), g.Key.Definition.ToLowerInvariant(),
-                    last.Label, last.EffMu, last.Witnesses,
-                    g.Select(p => (IReadOnlyList<MatchupReadingStep>)p.Steps.Select(s => new MatchupReadingStep(
-                        Convert.ToHexString(s.ClaimId).ToLowerInvariant(), s.Relation,
-                        Convert.ToHexString(s.EntityId).ToLowerInvariant(), s.Label)).ToArray()).ToArray());
-            }).ToArray()).ToArray();
+        static string? Hex(byte[]? id) => id is null ? null : Convert.ToHexStringLower(id);
+        return new("response.field", 2, fanout, nearest, rows.Select(row =>
+        {
+            if (row.Route == 0 && row.Via is null)
+                throw new InvalidDataException("A Native relation response has no bound claim identity.");
+            return new ResponseFieldEntry(row.Round, row.Occurrence, Hex(row.Anchor), row.AnchorLabel,
+                Hex(row.Entity)!, row.Label,
+                row.Route switch { 0 => "relation", 1 => "containment", 2 => "shape", _ => throw new InvalidDataException("Unknown Native coupling route.") },
+                Hex(row.Via), Hex(row.Relation), row.RelationLabel, row.Rating, row.Deviation, row.Volatility,
+                row.Matches, row.Witnesses, row.Distance, row.Outbound);
+        }).ToArray());
     }
 
     private async Task<bool> IsChessPlayerAsync(byte[] id, CancellationToken ct)
@@ -101,7 +97,7 @@ internal sealed partial class SubstrateClient
     }
 
     private async Task<MatchupSide> SideAsync(
-        string hex, byte[] id, string label, bool chessPlayer, IReadOnlyList<MatchupReading> readings, CancellationToken ct)
+        string hex, byte[] id, string label, bool chessPlayer, CancellationToken ct)
     {
         var recordTask = EntityRecordAsync(hex, ct);
         var factsTask = NpgsqlSubstrateReads.SalientFactsAsync(
@@ -137,8 +133,7 @@ internal sealed partial class SubstrateClient
             chessPlayer ? "Chess_Player" : null,
             peak,
             observations,
-            chess,
-            readings);
+            chess);
     }
 
     private async Task<IReadOnlyList<TapeRow>> TapeAsync(byte[] x, byte[] y, CancellationToken ct)
@@ -257,11 +252,6 @@ internal sealed partial class SubstrateClient
         }
 
         var s = await NpgsqlSubstrateReads.RelationSummaryAsync(_dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError);
-        var meanings = await ReadDeclaredMeaningsAsync([x.Value.Id, y.Value.Id], ct).ConfigureAwait(false);
-        if (meanings.Any(m => m.Count > 1))
-            return new MatchupVerdictResponse("matchup.verdict", s?.Relation, "recorded meanings",
-                s?.Mu, s?.Usage, s?.Geodesic,
-                "Multiple recorded meanings are shown separately. No single meaning has been selected for this comparison.");
         return new MatchupVerdictResponse("matchup.verdict",
             s?.Relation, s?.Plane, s?.Mu, s?.Usage, s?.Geodesic, s?.Verdict);
     }

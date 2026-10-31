@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
-import { exploreMatchup, exploreMatchupVerdict } from '../../query/api';
-import type { Matchup, MatchupSide, MatchupVerdict, TapeRow } from '../../query/types';
+import { exploreMatchup, exploreMatchupVerdict, exploreResponseField } from '../../query/api';
+import type { Matchup, MatchupSide, MatchupVerdict, ResponseField, ResponseFieldEntry, TapeRow } from '../../query/types';
 import { useAppStore } from '../../store';
 import { PaymentRequiredError } from '../../api/client';
 import { GatePrompt } from '../components/GatePrompt';
@@ -33,6 +33,8 @@ export function MatchupView() {
   const [data, setData] = useState<Matchup | null>(null);
   const [verdict, setVerdict] = useState<MatchupVerdict | null>(null);
   const [verdictError, setVerdictError] = useState<string | null>(null);
+  const [responseField, setResponseField] = useState<ResponseField | null>(null);
+  const [responseError, setResponseError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gated, setGated] = useState(false);
@@ -45,11 +47,20 @@ export function MatchupView() {
     setData(null);
     setVerdict(null);
     setVerdictError(null);
+    setResponseField(null);
+    setResponseError(null);
     setGated(false);
 
     const opts = { tenant, quoteId };
     exploreMatchup(x, y, opts)
-      .then((m) => { if (!stale) setData(m); })
+      .then((m) => {
+        if (stale) return;
+        setData(m);
+        if (m.x.chess && m.y.chess) return;
+        exploreResponseField(x, y, opts)
+          .then((field) => { if (!stale) setResponseField(field); })
+          .catch((e) => { if (!stale) setResponseError(e instanceof Error ? e.message : String(e)); });
+      })
       .catch((e) => {
         if (stale) return;
         if (e instanceof PaymentRequiredError) setGated(true);
@@ -57,7 +68,7 @@ export function MatchupView() {
       })
       .finally(() => { if (!stale) setLoading(false); });
 
-    // The verdict is a separate path-search request so the cards and tape render without it.
+    // Direct claims and the broader response field are independent reads.
     exploreMatchupVerdict(x, y, opts)
       .then((v) => { if (!stale) setVerdict(v); })
       .catch((e) => {
@@ -107,6 +118,9 @@ export function MatchupView() {
             </div>
             <SideCard side={data.y} align="right" />
           </div>
+          {data.x.chess == null && data.y.chess == null && (
+            <ResponseFieldView field={responseField} error={responseError} />
+          )}
           <Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} />
         </>
       ) : null}
@@ -120,18 +134,17 @@ function displayRelation(type: string, chessPlayer: boolean) {
 }
 
 function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' }) {
-  const readings = side.readings ?? [];
   const edgeCount = side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted;
   const chess = side.chess ?? null;
   const chessPlayer = chess !== null || side.entity_type === 'Chess_Player';
   const statValue = chess
     ? chess.peak_source_elo
-    : chessPlayer ? side.source_rating_peak ?? null : readings.length;
+    : chessPlayer ? side.source_rating_peak ?? null : edgeCount;
   const statLabel = chess
     ? `peak source Elo · ${chess.games.toLocaleString()} witnessed games`
     : chessPlayer
       ? `peak source Elo · ${side.source_rating_observations ?? 0} rating observations`
-      : `recorded meaning${readings.length === 1 ? '' : 's'} · ${edgeCount} direct claims`;
+      : 'direct claims';
 
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
@@ -157,29 +170,6 @@ function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' 
         <span className={styles.topMu}>{statValue != null ? Number(statValue).toFixed(0) : '—'}</span>
         <span className={styles.topLabel}>{statLabel}</span>
       </div>
-      {!chessPlayer && (
-        <ul className={styles.facts}>
-          {readings.map((reading) => (
-            <li key={`${reading.entity_id}:${reading.definition_id}`}>
-              <RouterLink to={`/explore/entity/${reading.entity_id}`}>{reading.definition}</RouterLink>
-              <details>
-                <summary>Evidence · {reading.witnesses} witness{reading.witnesses === 1 ? '' : 'es'}</summary>
-                {reading.paths.map((path, index) => (
-                  <ol key={index}>
-                    {path.map((step) => (
-                      <li key={step.claim_id}>
-                        <span className={styles.factType}>{step.relation}</span>{' '}
-                        <RouterLink to={`/explore/entity/${step.entity_id}`}>{step.label}</RouterLink>
-                      </li>
-                    ))}
-                  </ol>
-                ))}
-              </details>
-            </li>
-          ))}
-          {readings.length === 0 && <li className={styles.tapeEmpty}>No recorded definitions were found for this entity.</li>}
-        </ul>
-      )}
       {!chessPlayer && <Muted>Direct claims</Muted>}
       <ul className={styles.facts}>
         {side.top_facts.slice(0, 5).map((f, i) => (
@@ -205,10 +195,65 @@ function Verdict({ verdict, error }: { verdict: MatchupVerdict | null; error: st
   if (!verdict.verdict) return <Muted className={styles.verdictPending}>no verdict</Muted>;
   return (
     <div className={styles.verdict}>
+      <Muted>Direct evidence</Muted>
       <span className={styles.verdictText}>{verdict.verdict}</span>
       {verdict.relation && <span className={styles.verdictPath}>{verdict.relation}</span>}
       {verdict.eff_mu != null && <span className={styles.verdictMu}>μ {Number(verdict.eff_mu).toFixed(0)}</span>}
     </div>
+  );
+}
+
+function ResponseFieldView({ field, error }: { field: ResponseField | null; error: string | null }) {
+  const [route, setRoute] = useState<ResponseFieldEntry['route']>('relation');
+  const [page, setPage] = useState(0);
+  if (error) return <Panel title="Response field"><ErrorText>{error}</ErrorText></Panel>;
+  if (!field) return <Panel title="Response field"><LoadingText>Reading relations, containment and shape…</LoadingText></Panel>;
+  const rows = field.rows.filter((row) => row.route === route);
+  const pages = Math.max(1, Math.ceil(rows.length / 50));
+  const current = Math.min(page, pages - 1);
+  return (
+    <Panel title="Response field">
+      <Muted>{field.rows.length.toLocaleString()} responses across {field.rounds} rounds · fan {field.fanout} · {field.nearest} nearest shapes</Muted>
+      <div className={styles.responseControls}>
+        {(['relation', 'containment', 'shape'] as const).map((value) => (
+          <Button key={value} aria-pressed={route === value} onClick={() => { setRoute(value); setPage(0); }}>
+            {value === 'relation' ? 'Relations' : value === 'containment' ? 'Containment' : 'Shape'} ({field.rows.filter((row) => row.route === value).length})
+          </Button>
+        ))}
+      </div>
+      {route === 'containment' && <Muted>Open a container to inspect its ordered constituents, occurrences and trajectory.</Muted>}
+      {route === 'shape' && <Muted>Geometric responses to the pair’s trajectory, ordered here by identity. Distance is shown separately from claim standing.</Muted>}
+      <ol className={styles.responseList} start={current * 50 + 1}>
+        {rows.slice(current * 50, (current + 1) * 50).map((row, index) => (
+          <li key={`${row.round}:${row.occurrence}:${row.entity_id}:${row.claim_id}:${index}`} className={styles.responseRow}>
+            <Muted>Round {row.round}</Muted>{' '}
+            {row.route === 'shape' ? (
+              <><RouterLink to={`/explore/entity/${row.entity_id}`}>{row.label}</RouterLink> · Fréchet {row.distance?.toFixed(5)}</>
+            ) : (
+              <>
+                <RouterLink to={`/explore/entity/${row.anchor_id}`}>{row.anchor ?? row.anchor_id}</RouterLink>{' '}
+                {row.route === 'containment' ? 'is contained in' : row.outbound ? '→' : '←'}{' '}
+                {row.relation && <><span className={styles.factType}>{row.relation}</span>{' '}{row.outbound ? '→' : '←'}{' '}</>}
+                <RouterLink to={`/explore/entity/${row.entity_id}`}>{row.label}</RouterLink>
+              </>
+            )}
+            {row.claim_id && (
+              <details>
+                <summary>Evidence · {row.witnesses ?? 'unknown'} witnesses · {row.usage ?? 'unknown'} uses</summary>
+                <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim</RouterLink>{' '}
+                · rating {row.rating?.toFixed(2)} · deviation {row.deviation?.toFixed(2)} · volatility {row.volatility?.toFixed(6)}
+              </details>
+            )}
+          </li>
+        ))}
+      </ol>
+      {rows.length === 0 && <Muted>No responses in this plane within the selected bounds.</Muted>}
+      <div className={styles.responseControls}>
+        <Button disabled={current === 0} onClick={() => setPage(current - 1)}>Previous</Button>
+        <Muted>Page {current + 1} of {pages}</Muted>
+        <Button disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Next</Button>
+      </div>
+    </Panel>
   );
 }
 

@@ -105,3 +105,29 @@ public sealed record MatchupVerdictResponse(
     [property: JsonPropertyName("usage")] long? Usage,
     [property: JsonPropertyName("geodesic")] double? Geodesic,
     [property: JsonPropertyName("verdict")] string? Verdict);
+
+public sealed record ResponseFieldResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("rounds")] int Rounds,
+    [property: JsonPropertyName("fanout")] int Fanout,
+    [property: JsonPropertyName("nearest")] int Nearest,
+    [property: JsonPropertyName("rows")] IReadOnlyList<ResponseFieldEntry> Rows);
+
+public sealed record ResponseFieldEntry(
+    [property: JsonPropertyName("round")] int Round,
+    [property: JsonPropertyName("occurrence")] int Occurrence,
+    [property: JsonPropertyName("anchor_id")] string? AnchorId,
+    [property: JsonPropertyName("anchor")] string? Anchor,
+    [property: JsonPropertyName("entity_id")] string EntityId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("route")] string Route,
+    [property: JsonPropertyName("claim_id")] string? ClaimId,
+    [property: JsonPropertyName("relation_id")] string? RelationId,
+    [property: JsonPropertyName("relation")] string? Relation,
+    [property: JsonPropertyName("rating")] double? Rating,
+    [property: JsonPropertyName("deviation")] double? Deviation,
+    [property: JsonPropertyName("volatility")] double? Volatility,
+    [property: JsonPropertyName("usage")] long? Usage,
+    [property: JsonPropertyName("witnesses")] long? Witnesses,
+    [property: JsonPropertyName("distance")] double? Distance,
+    [property: JsonPropertyName("outbound")] bool? Outbound);

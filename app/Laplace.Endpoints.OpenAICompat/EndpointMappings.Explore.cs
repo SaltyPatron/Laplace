@@ -641,8 +641,26 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        // Head-to-head verdict. relation_summary runs a path search, so it is a separate
-        // request from the cards and tape.
+        // The response field is an inspection of all Native coupling routes. It
+        // remains separate from the fast cards and the direct-claim summary.
+        app.MapGet("/v1/explore/response-field", async (string? x, string? y, int? fanout, int? nearest,
+            HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+            int selectedFanout = fanout ?? 512, selectedNearest = nearest ?? 16;
+            if (selectedFanout is < 1 or > 4096 || selectedNearest is < 0 or > 256)
+                return EndpointJson.BadRequest("invalid_request_error", "fanout must be 1–4096; nearest must be 0–256.");
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            {
+                var response = await substrate.ResponseFieldAsync(x.Trim(), y.Trim(), selectedFanout, selectedNearest, ct);
+                return response is null
+                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
+                    : Results.Json(response);
+            });
+        }).WithTags("explore").Produces<ResponseFieldResponse>();
+
+        // Direct-claim summary; it does not decide whether an indirect route exists.
         app.MapGet("/v1/explore/matchup/verdict", async (string? x, string? y, HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))

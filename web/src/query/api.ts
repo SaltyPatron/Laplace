@@ -63,6 +63,11 @@ export function exploreMatchupVerdict(x: string, y: string, opts?: ApiOptions) {
     `/v1/explore/matchup/verdict?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, opts);
 }
 
+export function exploreResponseField(x: string, y: string, opts?: ApiOptions) {
+  return apiGet<import('./types').ResponseField>(
+    `/v1/explore/response-field?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, opts);
+}
+
 export interface TaxonomyNode { id: string; label: string; eff_mu?: number | null }
 export interface TaxonomyResponse {
   root_id: string; root_label: string;

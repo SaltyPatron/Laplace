@@ -150,6 +150,34 @@ export interface Matchup {
   tape: TapeRow[];
 }
 
+export interface ResponseFieldEntry {
+  round: number;
+  occurrence: number;
+  anchor_id: string | null;
+  anchor: string | null;
+  entity_id: string;
+  label: string;
+  route: 'relation' | 'containment' | 'shape';
+  claim_id: string | null;
+  relation_id: string | null;
+  relation: string | null;
+  rating: number | null;
+  deviation: number | null;
+  volatility: number | null;
+  usage: number | null;
+  witnesses: number | null;
+  distance: number | null;
+  outbound: boolean | null;
+}
+
+export interface ResponseField {
+  object: 'response.field';
+  rounds: number;
+  fanout: number;
+  nearest: number;
+  rows: ResponseFieldEntry[];
+}
+
 export interface MatchupVerdict {
   relation?: string | null;
   plane?: string | null;

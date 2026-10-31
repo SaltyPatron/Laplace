@@ -153,6 +153,9 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<ResponseFieldResponse?> ResponseFieldAsync(string xRef, string yRef, int fanout, int nearest, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -182,6 +185,8 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
 {
+    public Task<ResponseFieldResponse?> ResponseFieldAsync(string xRef, string yRef, int fanout, int nearest, CancellationToken ct) =>
+        Task.FromResult<ResponseFieldResponse?>(new("response.field", 2, fanout, nearest, []));
     public IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
         string prompt,byte[]? session,ConverseOptions options,CancellationToken ct) =>
         WalkTextStreamAsync(prompt,options.MaxTokens ?? 128,options.Window ?? 5,
