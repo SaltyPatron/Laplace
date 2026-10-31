@@ -994,7 +994,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var external = Assert.Single(entry,row=>row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes()));
         Assert.Equal(value.Id.ToBytes(),external.Entity);
         Assert.Equal(3L,external.Matches);
-        Assert.Equal(1L,external.Witnesses);
+        Assert.Null(external.Witnesses);
         Assert.Empty(external.Targets);
         Assert.Equal([1],external.ReadingOrigins);
         var boundField = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,[defined.Id.ToBytes()],512,0);
@@ -1006,7 +1006,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.Equal("native witnessed definition",description.Label);
         var lexicalField = await NpgsqlSubstrateReads.LexiconFieldAsync(connection,[defined.Id.ToBytes()]);
         Assert.Contains(lexicalField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
-            && row.BindingClaims.Length>0 && row.Witnesses>0);
+            && row.BindingClaims.Length>0 && row.Matches>0 && row.Witnesses is null);
         Assert.All(lexicalField,row => Assert.Equal(0,row.Route));
         await using (var storedBinding = new NpgsqlCommand(
             "SELECT key,witnesses FROM converse.binding_evidence(ARRAY[$1::bytea],NULL,false)",connection,transaction))

@@ -20,7 +20,7 @@ public sealed class LexiconReadLiveTests
         Assert.NotNull(field);
         Assert.Equal(2,field.Rounds);
         Assert.NotEmpty(field.Readings!);
-        Assert.All(field.Readings!,row=>Assert.True(row.Side==1 && row.Witnesses>0 && row.ClaimIds.Count>0));
+        Assert.All(field.Readings!,row=>Assert.True(row.Side==1 && row.Witnesses is null && row.ClaimIds.Count>0));
         Assert.DoesNotContain(field.Readings!,row=>row.Text.Contains("type of pointer that lemma",StringComparison.OrdinalIgnoreCase));
         Assert.All(field.Connections!,row=>
         {
@@ -29,7 +29,7 @@ public sealed class LexiconReadLiveTests
             Assert.NotEqual("identifier vocabulary",row.Relation);
             Assert.DoesNotMatch(@"^[a-f0-9]{32}$",row.To);
             Assert.False(Uri.TryCreate(row.To,UriKind.Absolute,out _));
-            Assert.True(row.Witnesses>0);
+            Assert.Null(row.Witnesses);
             Assert.NotNull(row.ToId);
         });
         var directory=Environment.GetEnvironmentVariable("LAPLACE_LIVE_ENTITY_EVIDENCE_DIRECTORY");

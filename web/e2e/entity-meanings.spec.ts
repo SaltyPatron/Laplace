@@ -12,8 +12,8 @@ test('entity browse leads with meanings and readable facts and fetches inspectio
   } }));
   await page.route('**/v1/explore/lexicon?*', route => route.fulfill({ json: {
     object: 'lexicon', rounds: 2, fanout: 0, nearest: 0,
-    readings: [{ side: 1, text: 'matter that has been deposited by some natural process', relation: 'definition', via: 'sediment', claim_ids: [claim], witnesses: 1, standing: 1087 }],
-    connections: [{ relation: 'at location', claim_id: claim, from: 'sediment', to: 'bottom of sea', from_id: id, to_id: target, witnesses: 1 }],
+    readings: [{ side: 1, text: 'matter that has been deposited by some natural process', relation: 'definition', via: 'sediment', claim_ids: [claim], witnesses: null, standing: 1087 }],
+    connections: [{ relation: 'at location', claim_id: claim, from: 'sediment', to: 'bottom of sea', from_id: id, to_id: target, witnesses: null }],
     rows: [{ claim_id: claim, outbound: true }],
   } }));
   await page.route(`**/v1/explore/entities/${id}`, route => {

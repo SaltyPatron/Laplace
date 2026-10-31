@@ -92,7 +92,7 @@ internal sealed partial class SubstrateClient
         if (lexical && roots.Count == 1)
             (rows,unresolved) = await DescribeLexiconReferencesAsync(connection,rows,relations,ct).ConfigureAwait(false);
         await snapshot.CommitAsync(ct).ConfigureAwait(false);
-        return ProjectLexiconField(rows,relations,lexical,fanout,nearest,roots.Count==1,unresolved);
+        return ProjectLexiconField(rows,relations,lexical,fanout,nearest,roots.Count==1,unresolved,occurrences);
     }
 
     private static async Task<ResponseFieldResponse> ReadLexiconEntryAsync(global::Npgsql.NpgsqlConnection connection,byte[] id,CancellationToken ct)
@@ -102,7 +102,7 @@ internal sealed partial class SubstrateClient
             rows.Where(row=>row.Relation is not null).Select(row=>row.Relation!).DistinctBy(value=>Convert.ToHexStringLower(value)).ToArray(),
             ["definition","definitions","example","examples"],ct).ConfigureAwait(false);
         var (described,unresolved) = await DescribeLexiconReferencesAsync(connection,rows,relations,ct).ConfigureAwait(false);
-        return ProjectLexiconField(described,relations,true,0,0,true,unresolved);
+        return ProjectLexiconField(described,relations,true,0,0,true,unresolved,[id]);
     }
 
     // A source address is useful for inspection, but is not a description.
@@ -113,6 +113,12 @@ internal sealed partial class SubstrateClient
             || (label.Length==32 && label.All(char.IsAsciiHexDigit))
             || (id is not null && label.Equals(Convert.ToHexStringLower(id),StringComparison.OrdinalIgnoreCase)));
 
+    // This selects candidates for a recorded-description lookup only. It does
+    // not assign identity, discard a name, or interpret an assertion.
+    private static bool MayBeLexiconReference(string? label,byte[]? id)
+        => IsEncodedLexiconReference(label,id) || (!string.IsNullOrWhiteSpace(label)
+            && System.Text.RegularExpressions.Regex.IsMatch(label,@"^\w{1,12}[-_.:]?\d{2,}[-\w.]*$"));
+
     private static bool IsReadableLexiconValue(string? label,byte[]? id)
         => !string.IsNullOrWhiteSpace(label) && label.Any(char.IsLetter)
            && !IsEncodedLexiconReference(label,id);
@@ -122,23 +128,31 @@ internal sealed partial class SubstrateClient
         IReadOnlyList<NpgsqlSubstrateReads.LexiconRelationRow> relations,CancellationToken ct)
     {
         var descriptive=relations.Where(row=>row.Descriptive).Select(row=>Convert.ToHexStringLower(row.Id)).ToHashSet();
-        var labels=rows.Where(row=>row.Anchor is not null && row.Outbound==true && row.Witnesses>0 && row.Relation is not null
+        var labels=rows.Where(row=>row.Anchor is not null && row.Outbound==true && row.Matches>0 && row.Relation is not null
                 && descriptive.Contains(Convert.ToHexStringLower(row.Relation)) && IsReadableLexiconValue(row.Label,row.Entity))
             .OrderByDescending(row=>row.Rating-row.Deviation*2)
             .DistinctBy(row=>Convert.ToHexStringLower(row.Anchor!))
             .ToDictionary(row=>Convert.ToHexStringLower(row.Anchor!),row=>row.Label);
-        var references=rows.SelectMany(row=>new[]{row.Entity,row.Anchor}).Where(id=>id is not null)
-            .Select(id=>id!).DistinctBy(Convert.ToHexStringLower).ToArray();
+        var references=rows.SelectMany(row=>new[]{(Id:row.Entity,Label:(string?)row.Label),(Id:row.Anchor,Label:row.AnchorLabel)})
+            .Where(item=>item.Id is not null && MayBeLexiconReference(item.Label,item.Id)
+                && !labels.ContainsKey(Convert.ToHexStringLower(item.Id)))
+            .Select(item=>item.Id!).DistinctBy(Convert.ToHexStringLower).ToArray();
         var descriptions=await NpgsqlSubstrateReads.LexiconDescriptionsAsync(connection,references,ct).ConfigureAwait(false);
         var identifiers=descriptions.Where(row=>row.Identifier).Select(row=>Convert.ToHexStringLower(row.Id)).ToHashSet();
         foreach(var description in descriptions.Where(row=>IsReadableLexiconValue(row.Label,row.Id)))
             labels.TryAdd(Convert.ToHexStringLower(description.Id),description.Label!);
-        bool NeedsDescription(string? label,byte[] id)=>IsEncodedLexiconReference(label,id)||identifiers.Contains(Convert.ToHexStringLower(id));
+        bool NeedsDescription(string? label,byte[] id)=>MayBeLexiconReference(label,id)||identifiers.Contains(Convert.ToHexStringLower(id));
         var described=rows.Select(row=>row with {
             Label=NeedsDescription(row.Label,row.Entity) && labels.TryGetValue(Convert.ToHexStringLower(row.Entity),out var label)?label:row.Label,
             AnchorLabel=row.Anchor is not null && NeedsDescription(row.AnchorLabel,row.Anchor)
                 && labels.TryGetValue(Convert.ToHexStringLower(row.Anchor),out var anchor)?anchor:row.AnchorLabel
         }).ToArray();
+        // Older admissions can predate explicit identifier-family annotations.
+        // Unresolved encoded addresses remain in Rows for source inspection.
+        identifiers.UnionWith(rows.SelectMany(row=>new[]{(Id:row.Entity,Label:(string?)row.Label),(Id:row.Anchor,Label:row.AnchorLabel)})
+            .Where(item=>item.Id is not null && item.Label is not null
+                && System.Text.RegularExpressions.Regex.IsMatch(item.Label,@"^\w{1,12}[-_.:]?\d{4,}[-\w.]*$"))
+            .Select(item=>Convert.ToHexStringLower(item.Id!)));
         identifiers.ExceptWith(labels.Keys);
         return (described,identifiers);
     }
@@ -149,11 +163,11 @@ internal sealed partial class SubstrateClient
     private static ResponseFieldResponse ProjectLexiconField(
         IReadOnlyList<NpgsqlSubstrateReads.ResponseFieldRow> rows,
         IReadOnlyList<NpgsqlSubstrateReads.LexiconRelationRow> relations,
-        bool lexical,int fanout,int nearest,bool singleEntity,HashSet<string>? unresolved=null)
+        bool lexical,int fanout,int nearest,bool singleEntity,HashSet<string>? unresolved=null,IReadOnlyList<byte[]>? roots=null)
     {
         var byRelation = relations.ToDictionary(row => Convert.ToHexStringLower(row.Id));
         static string? Hex(byte[]? id) => id is null ? null : Convert.ToHexStringLower(id);
-        var compared = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Witnesses > 0
+        var compared = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && (singleEntity ? row.Matches>0 : row.Witnesses>0)
                 && (byRelation[Hex(row.Relation)!].Canonical is not null || byRelation[Hex(row.Relation)!].Textual)
                 && (singleEntity
                     ? !byRelation[Hex(row.Relation)!].Descriptive && IsReadableLexiconValue(row.Label,row.Entity)
@@ -164,17 +178,19 @@ internal sealed partial class SubstrateClient
         var comparedClaims = compared.SelectMany(row => row.BindingClaims).Select(id => Hex(id)!).ToHashSet();
         var comparedEntities = compared.SelectMany(row => new[] { Hex(row.Anchor),Hex(row.Entity) }).ToHashSet();
         var readings = rows.Where(row => row.Route == 0 && row.Outbound == true && row.Via is not null && row.Textual
-                && row.Witnesses > 0 && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
+                && (singleEntity ? row.Matches>0 : row.Witnesses>0) && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
                 && byRelation[Hex(row.Relation)!].Descriptive)
             .OrderByDescending(row => comparedEntities.Contains(Hex(row.Anchor)) || row.BindingClaims.Any(id => comparedClaims.Contains(Hex(id)!)))
             .ThenByDescending(row => row.Rating!.Value-2*row.Deviation!.Value)
             .SelectMany(row => row.ReadingOrigins.Select(side => new LexiconReading(side,row.Label,
                 row.RelationLabel!,row.AnchorLabel!,
                 row.BindingClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
-                row.Witnesses!.Value,row.Rating!.Value-2*row.Deviation!.Value,Hex(row.Anchor))))
+                row.Witnesses,row.Rating!.Value-2*row.Deviation!.Value,Hex(row.Anchor))))
             .DistinctBy(row => (row.Side,row.Text)).ToArray();
+        var rootIds=roots?.Select(id=>Hex(id)!).ToHashSet();
         var connections = compared
-            .OrderByDescending(row=>row.Rating-2*row.Deviation)
+            .OrderByDescending(row=>rootIds?.Contains(Hex(row.Anchor)!)??false)
+            .ThenByDescending(row=>row.Rating-2*row.Deviation)
             .ThenBy(row=>row.RelationLabel,StringComparer.Ordinal).ThenBy(row=>row.Label,StringComparer.Ordinal)
             .DistinctBy(row => Hex(row.Via))
             .Select(row =>
@@ -184,7 +200,7 @@ internal sealed partial class SubstrateClient
                 var to=row.Outbound==true?(row.Label,Hex(row.Entity)):(row.AnchorLabel!,Hex(row.Anchor));
                 if(metadata.Canonical is not null && metadata.Inverse)(from,to)=(to,from);
                 return new LexiconConnection(ReadableRelation(metadata.Canonical??row.RelationLabel!),
-                    Hex(row.Via)!,from.Item1,to.Item1,row.Witnesses!.Value,from.Item2,to.Item2);
+                    Hex(row.Via)!,from.Item1,to.Item1,row.Witnesses,from.Item2,to.Item2);
             }).ToArray();
         return new(lexical ? "lexicon" : "response.field", 2, fanout, nearest, rows.Select(row =>
         {

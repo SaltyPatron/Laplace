@@ -290,7 +290,7 @@ internal sealed partial class SubstrateClient
             await transaction.CommitAsync(ct);
             IReadOnlyList<SalientFactRow> exactFacts =
             [
-                .. (lexicon.Readings ?? []).Select(r=>new SalientFactRow("meaning",r.Text,(decimal)r.Standing,r.Witnesses))
+                .. senses.Select(r=>new SalientFactRow("meaning",r.SynsetLabel,r.EffMu,r.Witnesses))
             ];
 
             return new ExploreEntityResponse(

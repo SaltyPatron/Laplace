@@ -23,7 +23,7 @@ export function LexiconEntry({ field, error, onRetry }: {
           <p>{reading.text}</p>
           <details className={styles.sourceEvidence}>
             <summary>View source evidence</summary>
-            <p>{reading.witnesses} {reading.witnesses === 1 ? 'source asserts' : 'sources assert'} this reading.</p>
+            {reading.witnesses != null && <p>{reading.witnesses} {reading.witnesses === 1 ? 'source asserts' : 'sources assert'} this reading.</p>}
             <ul>{reading.claim_ids.map((id, index) => <li key={id}><Link to={`/explore/entity/${id}`}>Recorded claim {index + 1}</Link></li>)}</ul>
           </details>
         </li>)}</ol>}

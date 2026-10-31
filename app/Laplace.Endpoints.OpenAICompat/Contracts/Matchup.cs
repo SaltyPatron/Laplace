@@ -121,7 +121,7 @@ public sealed record LexiconReading(
     [property: JsonPropertyName("relation")] string Relation,
     [property: JsonPropertyName("via")] string Via,
     [property: JsonPropertyName("claim_ids")] IReadOnlyList<string> ClaimIds,
-    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("witnesses")] long? Witnesses,
     [property: JsonPropertyName("standing")] double Standing,
     [property: JsonPropertyName("anchor_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AnchorId = null);
 
@@ -130,7 +130,7 @@ public sealed record LexiconConnection(
     [property: JsonPropertyName("claim_id")] string ClaimId,
     [property: JsonPropertyName("from")] string From,
     [property: JsonPropertyName("to")] string To,
-    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("witnesses")] long? Witnesses,
     [property: JsonPropertyName("from_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FromId = null,
     [property: JsonPropertyName("to_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToId = null);
 
