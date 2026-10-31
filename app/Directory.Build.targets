@@ -14,11 +14,14 @@
           Condition="'$(OS)' != 'Windows_NT' AND '@(LaplaceNativeArtifact)' != ''">
     <Exec Command="bash &quot;$(LaplaceRepoRoot)/scripts/sync-managed-native-artifacts.sh&quot; --output &quot;$(TargetDir).&quot;"
           EnvironmentVariables="LAPLACE_ENGINE_BUILD=$(LAPLACE_ENGINE_BUILD);LAPLACE_REUSE_INSTALLED_NATIVE=$(LAPLACE_REUSE_INSTALLED_NATIVE);LAPLACE_INSTALL_PREFIX=$(LAPLACE_INSTALL_PREFIX)" />
+    <ItemGroup>
+      <FileWrites Include="@(LaplaceNativeArtifact-&gt;'$(TargetDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
   </Target>
 
   <Target Name="LaplacePublishLinuxNative" AfterTargets="CopyFilesToPublishDirectory"
           Condition="'$(OS)' != 'Windows_NT' AND '@(LaplaceNativeArtifact)' != '' AND '$(PublishDir)' != ''">
-    <Exec Command="bash &quot;$(LaplaceRepoRoot)/scripts/sync-managed-native-artifacts.sh&quot; --output &quot;$(PublishDir).&quot;"
+    <Exec Command="bash &quot;$(LaplaceRepoRoot)/scripts/sync-managed-native-artifacts.sh&quot; --materialize --output &quot;$(PublishDir).&quot;"
           EnvironmentVariables="LAPLACE_ENGINE_BUILD=$(LAPLACE_ENGINE_BUILD);LAPLACE_REUSE_INSTALLED_NATIVE=$(LAPLACE_REUSE_INSTALLED_NATIVE);LAPLACE_INSTALL_PREFIX=$(LAPLACE_INSTALL_PREFIX)" />
   </Target>
 

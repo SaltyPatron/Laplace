@@ -69,6 +69,11 @@ output="$managed/app/bin/NativeSyncFixture/Release/net10.0"
 mkdir -p "$output"
 # Reproduce an existing SDK output with three physical copies of the same ELF.
 for source in "$native/core"/liblaplace_core.so*; do cp -L -- "$source" "$output/$(basename "$source")"; done
+# Reproduce the old SDK's ownership record as well: IncrementalClean must not
+# delete libraries now synchronized by the new target.
+intermediate="$managed/app/obj/NativeSyncFixture/Release/net10.0"
+mkdir -p "$intermediate"
+printf '%s\n' "$output"/liblaplace_core.so* > "$intermediate/NativeSyncFixture.csproj.FileListAbsolute.txt"
 build() { dotnet build "$scratch/project/NativeSyncFixture.csproj" -c Release --nologo -v quiet; }
 run() { LD_LIBRARY_PATH="$scratch/external" dotnet "$1/NativeSyncFixture.dll" "$2"; }
 build
@@ -81,13 +86,13 @@ after=$(stat -c '%i %y' "$output/liblaplace_core.so.0.1.0" "$output/liblaplace_c
 [[ "$before" == "$after" ]] || { echo 'Unchanged build rewrote native or managed outputs' >&2; exit 1; }
 echo 'PASS unchanged second build preserves library, alias and assembly inodes/mtimes'
 dotnet publish "$scratch/project/NativeSyncFixture.csproj" -c Release --no-build --nologo -v quiet -o "$scratch/published"
-[[ -L "$scratch/published/liblaplace_core.so" && -L "$scratch/published/liblaplace_core.so.0" ]]
+[[ -f "$scratch/published/liblaplace_core.so" && ! -L "$scratch/published/liblaplace_core.so" && ! -L "$scratch/published/liblaplace_core.so.0" ]]
 run "$scratch/published" 1
-# The real deployment synchronizer must retain the ELF alias chain as well.
+# Published payloads retain the verifier's regular-file contract.
 source "$root/deploy/linux/payload-sync.sh"
 mkdir "$scratch/deployed"
 laplace_sync_payload "$scratch/published" "$scratch/deployed"
-[[ -L "$scratch/deployed/liblaplace_core.so" && -L "$scratch/deployed/liblaplace_core.so.0" ]]
+[[ -f "$scratch/deployed/liblaplace_core.so" && ! -L "$scratch/deployed/liblaplace_core.so" && ! -L "$scratch/deployed/liblaplace_core.so.0" ]]
 run "$scratch/deployed" 1
 build_core 2
 touch -d '2000-01-01 UTC' "$native/core/liblaplace_core.so.0.1.0"

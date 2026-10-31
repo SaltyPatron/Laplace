@@ -9,16 +9,20 @@
 #
 # --output selects one build or publish directory. Without it, synchronize the
 # existing Release outputs used by the managed test profile.
+# --materialize retains the regular-file publication contract; build outputs
+# retain relative ELF aliases. Both modes compare content before replacement.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 outputs=()
+materialize=0
 while (($#)); do
   case $1 in
+    --materialize) materialize=1; shift ;;
     --output)
-      [[ $# -ge 2 && -n $2 ]] || { echo 'Usage: sync-managed-native-artifacts.sh [--output DIRECTORY]...' >&2; exit 2; }
+      [[ $# -ge 2 && -n $2 ]] || { echo 'Usage: sync-managed-native-artifacts.sh [--materialize] [--output DIRECTORY]...' >&2; exit 2; }
       outputs+=("$2"); shift 2 ;;
     *) echo "Unknown native synchronization argument: $1" >&2; exit 2 ;;
   esac
@@ -84,19 +88,28 @@ trap '[[ -z "$pending" ]] || rm -f -- "$pending"' EXIT
 for dir in "${outputs[@]}"; do
   mkdir -p -- "$dir"
   for src in "${artifacts[@]}"; do
-    [[ -f "$src" && ! -L "$src" ]] || continue
+    [[ -f "$src" ]] || continue
+    [[ ! -L "$src" || $materialize == 1 ]] || continue
+    if [[ -L "$src" ]]; then
+      alias=$(basename -- "$(readlink -- "$src")")
+      [[ "$(dirname -- "$src")/$alias" -ef "$src" ]] || {
+        echo "::error::native alias is not contained in its library directory: $src" >&2
+        exit 1
+      }
+    fi
     destination="$dir/$(basename -- "$src")"
     if [[ -f "$destination" && ! -L "$destination" ]] && cmp -s -- "$src" "$destination"; then
       unchanged=$((unchanged + 1))
       continue
     fi
     pending=$(mktemp "$dir/.laplace-native.XXXXXX")
-    cp --preserve=mode,timestamps -- "$src" "$pending"
+    cp --reflink=auto --preserve=mode,timestamps -- "$src" "$pending"
     mv -fT -- "$pending" "$destination"
     pending=
     copied=$((copied + 1))
   done
   for src in "${artifacts[@]}"; do
+    ((materialize == 0)) || continue
     [[ -L "$src" ]] || continue
     alias=$(basename -- "$(readlink -- "$src")")
     [[ "$(dirname -- "$src")/$alias" -ef "$src" ]] || {
