@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from ingest_catalog import canonical_source
+from ingest_catalog import canonical_source, recipe_root
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +24,9 @@ class IngestExitTests(unittest.TestCase):
         for name in ("ingest-source.sh", "classify-ingest-exit.sh", "machine-env.py", "lib/storage.sh", "lib/installation.sh",
                      "win/witness-manifest.json", "ingest_catalog.py"):
             shutil.copy2(ROOT / "scripts" / name, scripts / name)
+        deploy = self.root / "deploy/linux"
+        deploy.mkdir(parents=True)
+        shutil.copy2(ROOT / "deploy/linux/host-lock.sh", deploy / "host-lock.sh")
         (scripts / "lib/fp.sh").write_text("fp_compute() { echo fixture; }\nfp_check() { return 1; }\nfp_record() { :; }\n")
         (scripts / "decomposer-gates.json").write_text('{"sources":{"princeton-wordnet":{"decomposer":"fixture"}}}')
         (scripts / "verify-ingest-journal.sh").write_text('echo checked >> "$PROOF"\nexit "${PROOF_RC:-0}"\n')
@@ -61,6 +64,7 @@ exit "$CLI_RC"
                         GITHUB_ACTIONS="true", GITHUB_OUTPUT=str(self.root / "outputs"),
                         INGEST_LOGDIR=str(self.root / "logs"), PROOF=str(self.root / "proof"),
                         LAPLACE_INSTALL_PREFIX=str(self.root / "prefix"),
+                        LAPLACE_RECIPES=str(recipe_root()),
                         LAPLACE_APP_DIR="", LAPLACE_INGEST_RUNTIME="",
                         LAPLACE_HOST_LOCK=str(self.root / "host-resource.lock"),
                         LAPLACE_WORK=str(self.root / "work"),

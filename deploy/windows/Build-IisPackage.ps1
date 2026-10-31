@@ -59,7 +59,7 @@ if(-not $ManagedBuild){$ManagedBuild=$env:LAPLACE_BUILD_ROOT}
 $ManagedBuild=[IO.Path]::GetFullPath($ManagedBuild)
 $store=Join-Path $env:LAPLACE_WORK 'artifacts/windows-components'
 . (Join-Path $env:LAPLACE_SRC 'Laplace-Operations/installation/storage.ps1')
-$cleanupIis=if(-not $Plan -and $Installation){Read-IisInstallation $Installation}else{$null}
+$cleanupIis=if($Publish -and -not $Plan -and $Installation){Read-IisInstallation $Installation}else{$null}
 $storageOperation=if(-not $Plan){Enter-DesktopStorageOperation}else{$null}
 $published=$null
 try {
