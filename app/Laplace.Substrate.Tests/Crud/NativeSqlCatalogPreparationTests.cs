@@ -925,15 +925,38 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             && row.Entity.AsSpan().SequenceEqual(xsense.Id.ToBytes()));
         Assert.Contains(field, row => row.Round == 2 && row.Route == 0
             && row.Via!.AsSpan().SequenceEqual(link.Id.ToBytes()) && row.Outbound == false);
-        Assert.Contains(field, row => row.Round == 2 && row.Route == 0
-            && row.Via!.AsSpan().SequenceEqual(link.Id.ToBytes())
-            && row.Origins.Contains(1) && row.Targets.Contains(2));
+        Assert.All(field.Where(row => row.Via is not null && row.Via.AsSpan().SequenceEqual(link.Id.ToBytes())),row =>
+        {
+            Assert.Empty(row.Targets);
+            Assert.Empty(row.Anchors);
+        });
         var descriptors = await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
             [definitionRelation.Id.ToBytes(),predicate.Id.ToBytes()],["definition","example"]);
         Assert.Contains(descriptors,row => row.Id.AsSpan().SequenceEqual(definitionRelation.Id.ToBytes()) && row.Descriptive);
         Assert.Contains(descriptors,row => row.Id.AsSpan().SequenceEqual(predicate.Id.ToBytes())
             && !row.Descriptive && row.Canonical == "IS_ANTONYM_OF");
         Assert.All(field.Where(row => row.Route == 0), row => Assert.NotNull(row.Via));
+        // A shared constituent or a related claim does not bind these words
+        // to a meaning. The declared word/language/key record does.
+        Assert.All(field.Where(row => row.Anchor is not null
+            && !row.Anchor.AsSpan().SequenceEqual(x.Id.ToBytes()) && !row.Anchor.AsSpan().SequenceEqual(y.Id.ToBytes())),
+            row => Assert.Empty(row.ReadingOrigins));
+        Assert.Contains(field,row => row.Anchor is not null && row.Anchor.AsSpan().SequenceEqual(x.Id.ToBytes())
+            && row.ReadingOrigins.SequenceEqual([1,3]));
+        await using (var binding = new NpgsqlCommand(
+            "SELECT key,binding,witnesses FROM converse.binding_evidence(ARRAY[$1::bytea])",connection,transaction))
+        {
+            binding.Parameters.AddWithValue(defined.Id.ToBytes());
+            await using var bindingRows = await binding.ExecuteReaderAsync();
+            Assert.True(await bindingRows.ReadAsync());
+            Assert.Equal(context.Id.ToBytes(),bindingRows.GetFieldValue<byte[]>(0));
+            Assert.Equal(definedSense.Id.ToBytes(),bindingRows.GetFieldValue<byte[]>(1));
+            Assert.True(bindingRows.GetInt64(2)>0);
+            Assert.False(await bindingRows.ReadAsync());
+        }
+        var boundField = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,[defined.Id.ToBytes()],512,0);
+        Assert.Contains(boundField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
+            && row.BindingClaims.Length>0 && row.Witnesses>0);
         Assert.All(field.Where(row => row.Route != 0), row =>
         {
             Assert.Null(row.Rating); Assert.Null(row.Matches); Assert.Null(row.Witnesses);

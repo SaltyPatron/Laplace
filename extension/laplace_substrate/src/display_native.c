@@ -3,11 +3,15 @@
 #include "postgres.h"
 #include "funcapi.h"
 #include "utils/array.h"
+#include "utils/builtins.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "spi_common.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/text_identity.h"
+#include "laplace/core/language_law.h"
+#include "laplace/core/sql_catalog.h"
+#include "spi_nested.h"
 
 typedef struct {
     hash128_t surface,canonical;
@@ -67,4 +71,31 @@ Datum pg_relation_metadata(PG_FUNCTION_ARGS)
       tuplestore_putvalues(r->setResult,r->setDesc,values,missing);
     }
     return (Datum)0;
+}
+
+/* Governed language tags are metadata. Resolve the selected surfaces together;
+ * this neither asserts a new type nor deposits language testimony. */
+PG_FUNCTION_INFO_V1(pg_language_codes);
+Datum pg_language_codes(PG_FUNCTION_ARGS)
+{
+    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo*)fcinfo->resultinfo;
+    if(PG_ARGISNULL(0))return (Datum)0;
+    bool finish=false;
+    if(laplace_spi_connect(&finish)!=SPI_OK_CONNECT)elog(ERROR,"language codes SPI connect failed");
+    static SPIPlanPtr plan=NULL;Oid types[]={BYTEAARRAYOID};Datum args[]={PG_GETARG_DATUM(0)};
+    if(SPI_execute_plan(spi_common_ensure_plan(&plan,laplace_sql_query_text("language.code_surfaces"),1,types),args,NULL,true,0)!=SPI_OK_SELECT)
+        elog(ERROR,"language codes read failed");
+    for(uint64 i=0;i<SPI_processed;i++){
+        bool missing;const char *canonical=NULL;
+        Datum id=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&missing);
+        Datum label=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,2,&missing);
+        if(missing)continue;
+        char *tag=TextDatumGetCString(label);
+        if(laplace_language_canonical(tag,&canonical)==0){
+            Datum values[]={id,CStringGetTextDatum(canonical)};bool nulls[]={false,false};
+            tuplestore_putvalues(r->setResult,r->setDesc,values,nulls);
+        }
+        pfree(tag);
+    }
+    SPI_freetuptable(SPI_tuptable);laplace_spi_finish(finish);return (Datum)0;
 }

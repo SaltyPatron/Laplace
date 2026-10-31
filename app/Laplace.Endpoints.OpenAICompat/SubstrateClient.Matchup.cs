@@ -82,17 +82,22 @@ internal sealed partial class SubstrateClient
         var byRelation = relations.ToDictionary(row => Convert.ToHexStringLower(row.Id));
         await snapshot.CommitAsync(ct).ConfigureAwait(false);
         static string? Hex(byte[]? id) => id is null ? null : Convert.ToHexStringLower(id);
+        var compared = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Witnesses > 0
+                && (byRelation[Hex(row.Relation)!].Canonical is not null || byRelation[Hex(row.Relation)!].Textual)
+                && row.Anchors.Any(side => row.Targets.Any(target => target != side))).ToArray();
+        var comparedClaims = compared.SelectMany(row => row.BindingClaims).Select(id => Hex(id)!).ToHashSet();
+        var comparedEntities = compared.SelectMany(row => new[] { Hex(row.Anchor),Hex(row.Entity) }).ToHashSet();
         var readings = rows.Where(row => row.Route == 0 && row.Outbound == true && row.Via is not null && row.Textual
                 && row.Witnesses > 0 && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
                 && byRelation[Hex(row.Relation)!].Descriptive)
-            .SelectMany(row => row.Origins.Select(side => new LexiconReading(side,row.Label,
+            .OrderByDescending(row => comparedEntities.Contains(Hex(row.Anchor)) || row.BindingClaims.Any(id => comparedClaims.Contains(Hex(id)!)))
+            .ThenByDescending(row => row.Rating!.Value-2*row.Deviation!.Value)
+            .SelectMany(row => row.ReadingOrigins.Select(side => new LexiconReading(side,row.Label,
                 row.RelationLabel!,row.AnchorLabel!,
-                row.SupportClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
+                row.BindingClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
                 row.Witnesses!.Value,row.Rating!.Value-2*row.Deviation!.Value)))
-            .OrderByDescending(row => row.Standing).DistinctBy(row => (row.Side,row.Text)).ToArray();
-        var connections = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Witnesses > 0
-                && (byRelation[Hex(row.Relation)!].Canonical is not null || byRelation[Hex(row.Relation)!].Textual)
-                && row.Anchors.Any(side => row.Targets.Any(target => target != side)))
+            .DistinctBy(row => (row.Side,row.Text)).ToArray();
+        var connections = compared
             .DistinctBy(row => Hex(row.Via))
             .Select(row => new LexiconConnection(
                 row.Relation is not null && byRelation[Hex(row.Relation)!] is { Canonical: { } canonical, Inverse: false }

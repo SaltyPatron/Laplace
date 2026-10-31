@@ -12,36 +12,74 @@
 DROP FUNCTION IF EXISTS converse.key_facts(bytea[], int) CASCADE;
 DROP FUNCTION IF EXISTS converse.couple(bytea, bytea, bytea, int) CASCADE;
 
--- K: the bindings of each term. A binding's language is its attestation context
--- (the lexicon's language), so in_lang says whether a source bound this term to this
--- key in the query's language. games is how often the binding was observed (usage).
+-- Binding evidence preserves the word/language/key composition and the
+-- witnessed claim that admits it. Native tuples alone are not testimony:
+-- an admitted claim must connect that carrier to its word or its key.
+CREATE OR REPLACE FUNCTION converse.binding_evidence(p_terms bytea[],p_lang bytea DEFAULT NULL)
+RETURNS TABLE(term bytea,key bytea,binding bytea,claim bytea,language bytea,
+              in_lang boolean,eff_mu numeric,witnesses bigint,games bigint)
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+ WITH roots AS MATERIALIZED (
+  SELECT ARRAY(SELECT DISTINCT encode(id,'hex')::public.blake3 FROM unnest(p_terms) u(id) WHERE id IS NOT NULL) AS ids
+ ), carriers AS MATERIALIZED (
+  -- Both indexed Native keys are required before materializing a carrier.
+  -- A scalar word such as "a" must not fetch every text containing that scalar.
+  SELECT t.id AS word,h.entity,public.laplace_parts(h.path) AS parts
+  FROM roots r JOIN public.physicality h
+   ON h.path OPERATOR(public.&&) r.ids
+   AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind','tuple')]
+  CROSS JOIN LATERAL unnest(r.ids) t(id)
+  WHERE public.laplace_path_length(h.path)=3 AND public.laplace_path_starts(h.path,t.id)
+ ), languages AS MATERIALIZED (
+  SELECT * FROM laplace.language_codes(ARRAY(SELECT DISTINCT public.blake3_send(parts[2]) FROM carriers))
+ ), lexical AS MATERIALIZED (
+  SELECT c.* FROM carriers c JOIN languages l ON l.id=public.blake3_send(c.parts[2])
+ ), cells AS MATERIALIZED (
+  SELECT c.entity,public.laplace_parts(c.path) AS parts,c.rating,c.deviation,c.matches
+  FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM lexical),NULL::bigint,
+   ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+  WHERE public.laplace_path_length(c.path)=3
+ ), admitted AS MATERIALIZED (
+  SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM cells),false) a
+  WHERE a.witness GROUP BY a.claim
+ ), native AS MATERIALIZED (
+  SELECT DISTINCT ON(t.word,t.parts[3],t.entity)
+   public.blake3_send(t.word) AS term,public.blake3_send(t.parts[3]) AS key,
+   public.blake3_send(t.entity) AS binding,public.blake3_send(c.entity) AS claim,
+   public.blake3_send(t.parts[2]) AS language,
+   coalesce(public.blake3_send(t.parts[2])=p_lang,false) AS in_lang,
+   (c.rating-2*c.deviation)::numeric AS eff_mu,a.witnesses,c.matches AS games
+  FROM lexical t JOIN cells c
+   ON (c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+   OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))
+  JOIN admitted a ON a.claim=c.entity
+  ORDER BY t.word,t.parts[3],t.entity,c.rating-2*c.deviation DESC,c.matches DESC,c.entity
+ ), legacy_cells AS MATERIALIZED (
+  SELECT c.id,c.subject_id AS term,c.object_id AS key,c.type_id,c.rating,c.rd,c.witness_count
+  FROM laplace.v_consensus_unrefuted c WHERE c.subject_id=ANY(p_terms)
+   AND c.type_id=ANY(consensus.relation_set_ids('KEY_BINDING')) AND c.object_id IS NOT NULL
+ ), legacy AS (
+  SELECT b.term,b.key,b.key AS binding,b.id AS claim,
+   CASE WHEN coalesce(bool_or(a.context_id=p_lang),false) THEN p_lang END AS language,
+   coalesce(bool_or(a.context_id=p_lang),false) AS in_lang,
+   consensus.eff_mu_display(b.rating,b.rd) AS eff_mu,b.witness_count AS witnesses,
+   coalesce(sum(a.observation_count),0)::bigint AS games
+  FROM legacy_cells b LEFT JOIN laplace.attestations a
+   ON a.subject_id=b.term AND a.type_id=b.type_id AND a.object_id=b.key
+  GROUP BY b.term,b.key,b.id,b.rating,b.rd,b.witness_count
+ ) SELECT * FROM native UNION ALL SELECT * FROM legacy;
+END;
+
+-- K: one election over the same evidence used by lexical and comparison reads.
 CREATE OR REPLACE FUNCTION converse.bindings(p_terms bytea[], p_lang bytea DEFAULT NULL)
     RETURNS TABLE(term bytea, key bytea, in_lang boolean, eff_mu numeric,
                   witnesses bigint, games bigint, rank int)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH b AS MATERIALIZED (
-        SELECT c.subject_id AS term, c.object_id AS key, c.type_id, c.rating, c.rd,
-               c.witness_count
-        FROM laplace.v_consensus_unrefuted c
-        WHERE c.subject_id = ANY (p_terms)
-          AND c.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
-          AND c.object_id IS NOT NULL
-    ), evidence AS (
-        SELECT b.term, b.key, b.rating, b.rd, b.witness_count,
-               COALESCE(sum(a.observation_count), 0)::bigint AS games,
-               COALESCE(bool_or(a.context_id = p_lang), false) AS in_lang
-        FROM b
-        LEFT JOIN laplace.attestations a
-          ON a.subject_id = b.term AND a.type_id = b.type_id AND a.object_id = b.key
-        GROUP BY b.term, b.key, b.rating, b.rd, b.witness_count
-    )
-    SELECT e.term, e.key, e.in_lang, consensus.eff_mu_display(e.rating, e.rd),
-           e.witness_count, e.games,
-           row_number() OVER (PARTITION BY e.term
-                              ORDER BY e.in_lang DESC, e.games DESC,
-                                       consensus.eff_mu(e.rating, e.rd) DESC, e.key)::int
-    FROM evidence e;
+ SELECT e.term,e.key,e.in_lang,e.eff_mu,e.witnesses,e.games,
+  row_number() OVER(PARTITION BY e.term ORDER BY e.in_lang DESC,e.games DESC,e.eff_mu DESC,e.key)::int
+ FROM converse.binding_evidence(p_terms,p_lang) e;
 END;
 
 -- V: each key's own facts with their typed standing, strongest conservative standing
