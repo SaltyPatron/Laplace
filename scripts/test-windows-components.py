@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("windows_components", Path(__file__).with_name("windows-components.py"))
 COMPONENTS = importlib.util.module_from_spec(SPEC)
@@ -62,6 +63,30 @@ class Components(unittest.TestCase):
         self.assertNotEqual(before["migrations"], self.inputs("migrations"))
         for name in ("api", "cli", "uci"):
             self.assertEqual(before[name], self.inputs(name))
+
+    def test_relocated_documentation_changes_invalidate_its_consumer(self):
+        docs = self.root / "external-documentation"
+        docs.mkdir()
+        invention = docs / "INVENTION.md"
+        invention.write_text("original publication resource")
+        project = self.root / "app/Laplace.Cli/Laplace.Cli.csproj"
+        project.write_text('<Project><ItemGroup><Content Include="$(LaplaceDocumentationRoot)/INVENTION.md" /></ItemGroup></Project>')
+        with patch.dict(os.environ, {"LAPLACE_DOCUMENTATION_ROOT": str(docs), "LaplaceDocumentationRoot": ""}):
+            before = self.inputs("cli")
+            invention.write_text("updated publication resource")
+            self.assertNotEqual(before, self.inputs("cli"))
+
+    def test_documentation_selection_matches_msbuild_precedence(self):
+        root = self.root / "workspace/Laplace"
+        candidate = root / ".ci-dependencies/Laplace-Wiki/Repositories/Laplace"
+        with patch.dict(os.environ, {"LaplaceDocumentationRoot": "", "LAPLACE_DOCUMENTATION_ROOT": ""}):
+            self.assertEqual(self.root / "workspace/Laplace-Wiki/Repositories/Laplace", COMPONENTS.documentation_root(root))
+            candidate.mkdir(parents=True)
+            self.assertEqual(candidate, COMPONENTS.documentation_root(root))
+            with patch.dict(os.environ, {"LAPLACE_DOCUMENTATION_ROOT": str(self.root / "declared")}):
+                self.assertEqual(self.root / "declared", COMPONENTS.documentation_root(root))
+                with patch.dict(os.environ, {"LaplaceDocumentationRoot": str(self.root / "property")}):
+                    self.assertEqual(self.root / "property", COMPONENTS.documentation_root(root))
 
     def test_native_abi_change_invalidates_managed_consumers(self):
         library = self.native / "core/laplace_core.dll"
