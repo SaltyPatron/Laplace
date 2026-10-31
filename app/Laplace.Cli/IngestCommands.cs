@@ -661,13 +661,15 @@ internal static partial class IngestCommands
 
     public static async Task<int> StatsAsync(string? sourceKey = null)
     {
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        if (await PrintNativeStatsAsync(ds, sourceKey) is { } nativeResult)
+            return nativeResult;
         IDecomposer? decomposer = null;
         if (!string.IsNullOrWhiteSpace(sourceKey))
         {
             try { decomposer = CliRuntime.Decomposers.Resolve(sourceKey); }
             catch (ArgumentException ex) { return Fail(ex.Message); }
         }
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await PrintIngestValidationAsync(ds, decomposer, exactSourceValidation: true);
         return 0;
     }

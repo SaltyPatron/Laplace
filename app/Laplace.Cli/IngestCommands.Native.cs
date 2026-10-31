@@ -9,6 +9,22 @@ namespace Laplace.Cli;
 
 internal static partial class IngestCommands
 {
+    private static async Task<int?> PrintNativeStatsAsync(global::Npgsql.NpgsqlDataSource data, string? source)
+    {
+        await using var conn = await data.OpenConnectionAsync();
+        var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
+        if (!counts.Any(row => row.Metric == "attestations(MEASURED)")) return null;
+        Console.WriteLine("substrate totals (ESTIMATE: storage estimate; MEASURED: retained assertion count):");
+        foreach (var row in counts)
+            Console.WriteLine($"  {row.Metric,-32}: {row.Value?.ToString("N0") ?? "Not measured",12}");
+        var sources = await NpgsqlSubstrateReads.SourceStatusAsync(data, source, CancellationToken.None);
+        if (source is not null && sources.All(row => !row.Known))
+            return CliRuntime.Fail($"No registered source or ingestion receipt matches '{source}'.");
+        foreach (var row in sources)
+            Console.WriteLine($"  {row.Source}: {row.EvidenceApprox?.ToString("N0") ?? "Not measured"} attestations; ingested={row.Ingested.ToString().ToLowerInvariant()}; last run={row.LastRunStatus ?? "Not recorded"}");
+        return 0;
+    }
+
     internal static async Task<int> IngestNativeRecipeAsync(string source, IngestCliArgs cli, CancellationToken ct = default)
     {
         if (cli.LangOverride is not null || LanguageFilter.ForSource(source)?.IsActive == true)

@@ -217,12 +217,12 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, CancellationToken ct = default) =>
         ScalarLongAsync(conn, SqlCatalog.Get("ingest.model_circuit_trajectory_count"), null, ct, "model_circuit_trajectory_count");
 
-    public readonly record struct SourceEvidenceRow(string? Source, long Evidence, string? SourceId);
+    public readonly record struct SourceEvidenceRow(string? Source, long? Evidence, string? SourceId);
 
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("ingest.attestation_counts_by_source"),
-            static r => new SourceEvidenceRow(r.IsDBNull(0) ? null : r.GetString(0), r.GetInt64(1),
+            static r => new SourceEvidenceRow(r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1),
                 r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");
 
