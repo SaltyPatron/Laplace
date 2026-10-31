@@ -17,7 +17,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 import xml.etree.ElementTree as ET
 
 from ci_managed_projects import load_projects
@@ -179,7 +178,7 @@ def managed(root: Path, name: str, build: Path, native: Path, store: Path,
         return result
     # All four leaves share the same MSBuild output tree. MSBuild compiles shared
     # ProjectReferences once; each leaf publication is recorded independently.
-    temporary = Path(tempfile.mkdtemp(prefix=".publish-", dir=store))
+    temporary = _store.staging_directory(store, ".publish-")
     try:
         published = temporary / "published"
         command(["dotnet", "publish", root / f"app/{PROJECTS[name]}/{PROJECTS[name]}.csproj",
