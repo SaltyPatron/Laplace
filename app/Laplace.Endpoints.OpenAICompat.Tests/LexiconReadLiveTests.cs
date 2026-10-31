@@ -29,6 +29,8 @@ public sealed class LexiconReadLiveTests
             Assert.False(string.IsNullOrWhiteSpace(row.Text));
         });
         Assert.Contains(field.Readings,row => row.Text.Contains("positive emotion",StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(field.Readings.Where(row => row.Side==1).Take(2),
+            row => row.Text.Contains("positive emotion",StringComparison.OrdinalIgnoreCase));
         Assert.Contains(field.Readings,row => row.Text.Contains("dislike",StringComparison.OrdinalIgnoreCase));
         Assert.Contains(field.Readings,row => row.Relation.Contains("example",StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(field.Readings,row => row.Text.Contains("temporary red mark",StringComparison.OrdinalIgnoreCase));
