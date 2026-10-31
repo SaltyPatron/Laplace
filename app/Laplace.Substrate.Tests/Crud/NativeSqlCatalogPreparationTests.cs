@@ -749,6 +749,15 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var health = await NpgsqlSubstrateReads.ConsensusStatsExactAsync(connection, CancellationToken.None);
         Assert.Equal(6L, health!.Value.EvidenceRows);
         Assert.Equal(6L, health.Value.ConsensusRows);
+        await using (var sourceState = new NpgsqlCommand("SELECT evidence_approx,ingested FROM ops.source_status(NULL) WHERE source_id=$1", connection, transaction))
+        {
+            sourceState.Parameters.AddWithValue(witness.Id.ToBytes());
+            await using var rows = await sourceState.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(6L, rows.GetInt64(0));
+            Assert.True(rows.GetBoolean(1));
+            Assert.False(await rows.ReadAsync());
+        }
         await using (var registry = NpgsqlCatalog.Command(connection, transaction, "foundry.source_ids",
             Convert.ToHexString(witness.Id.ToBytes())))
         await using (var rows = await registry.ExecuteReaderAsync())
