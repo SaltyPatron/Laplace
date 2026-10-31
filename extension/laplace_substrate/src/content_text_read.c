@@ -15,6 +15,7 @@
 #include "trajectory_wkb.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "perfcache_native.h"
 #include "laplace/core/sql_catalog.h"
 
 typedef struct TextMatch
@@ -90,6 +91,10 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
         if(nulls[f]) continue;
         text *input=DatumGetTextPP(values[f]);
         if(!VARSIZE_ANY_EXHDR(input)) continue;
+        if(!laplace_perfcache_ready())
+            ereport(ERROR,(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("text containment requires the T0 perfcache"),
+                errhint("Configure laplace_substrate.perfcache_path with the installed Unicode cache.")));
         tier_tree_t *tree=NULL;
         if(laplace_content_tree_build_public((const uint8_t*)VARDATA_ANY(input),VARSIZE_ANY_EXHDR(input),&tree)!=0)
             elog(ERROR,"text containment: canonical composition failed");
@@ -207,5 +212,50 @@ Datum pg_laplace_content_text_containers(PG_FUNCTION_ARGS)
         Datum values[]={hash128_to_datum(&ids[i])};bool nulls[]={false};
         tuplestore_putvalues(r->setResult,r->setDesc,values,nulls);
     }
+    return (Datum)0;
+}
+
+/* A name may start with a word, which starts with a grapheme, which starts
+ * with a scalar. Follow indexed first-constituent frontiers at every grain;
+ * never assume the name's immediate constituent is itself a scalar. */
+PG_FUNCTION_INFO_V1(pg_laplace_first_containers);
+Datum pg_laplace_first_containers(PG_FUNCTION_ARGS)
+{
+    InitMaterializedSRF(fcinfo,MAT_SRF_USE_EXPECTED_DESC);
+    if(PG_ARGISNULL(0)) return (Datum)0;
+    ReturnSetInfo *r=(ReturnSetInfo*)fcinfo->resultinfo;
+    HASHCTL ctl={0};ctl.keysize=ctl.entrysize=sizeof(hash128_t);ctl.hcxt=CurrentMemoryContext;
+    HTAB *seen=hash_create("first constituent closure",128,&ctl,HASH_ELEM|HASH_BLOBS|HASH_CONTEXT);
+    Datum *ids;bool *nulls;int n;
+    deconstruct_array(PG_GETARG_ARRAYTYPE_P(0),BYTEAOID,-1,false,TYPALIGN_INT,&ids,&nulls,&n);
+    for(int i=0;i<n;i++) if(!nulls[i]){
+        hash128_t id=datum_to_hash128(ids[i]);hash_search(seen,&id,HASH_ENTER,NULL);
+    }
+    ArrayType *frontier=set_array(seen);
+    bool finish=false;
+    if(laplace_spi_connect(&finish)!=SPI_OK_CONNECT) elog(ERROR,"first constituent SPI connect failed");
+    static SPIPlanPtr plan=NULL;Oid types[]={BYTEAARRAYOID};
+    while(ArrayGetNItems(ARR_NDIM(frontier),ARR_DIMS(frontier))){
+        CHECK_FOR_INTERRUPTS();
+        Datum args[]={PointerGetDatum(frontier)};
+        if(SPI_execute_plan(spi_common_ensure_plan(&plan,laplace_sql_query_text("content.first_parents"),1,types),args,NULL,true,0)!=SPI_OK_SELECT)
+            elog(ERROR,"first constituent read failed");
+        ArrayBuildState *next=NULL;
+        for(uint64 i=0;i<SPI_processed;i++){
+            bool missing,found;
+            hash128_t id=datum_to_hash128(SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&missing));
+            hash_search(seen,&id,HASH_ENTER,&found);
+            if(!found)next=accumArrayResult(next,hash128_to_datum(&id),false,BYTEAOID,CurrentMemoryContext);
+        }
+        SPI_freetuptable(SPI_tuptable);pfree(frontier);
+        if(!next)break;
+        frontier=DatumGetArrayTypeP(makeArrayResult(next,CurrentMemoryContext));
+    }
+    HASH_SEQ_STATUS scan;hash128_t *id;hash_seq_init(&scan,seen);
+    while((id=hash_seq_search(&scan))){
+        Datum values[]={hash128_to_datum(id)};bool missing[]={false};
+        tuplestore_putvalues(r->setResult,r->setDesc,values,missing);
+    }
+    hash_destroy(seen);laplace_spi_finish(finish);
     return (Datum)0;
 }

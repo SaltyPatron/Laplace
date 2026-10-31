@@ -9,8 +9,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// catalog statement so every surface shows the same label for the same entity.
 ///
 /// Identity and display stay separate: the caller keeps the canonical id, and the label is
-/// a realization of it. When no readable realization exists the label carries a short
-/// form of the canonical id rather than generic unresolved text.
+/// a realization of it. Recorded semantic names remain available across the storage
+/// transition. Unavailable surfaces retain their identity for inspection.
 /// </summary>
 public static class NpgsqlDisplayLabels
 {

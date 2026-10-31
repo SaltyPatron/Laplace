@@ -1,0 +1,82 @@
+{
+  "readings": [
+    {
+      "side": 1,
+      "text": "a strong positive emotion of regard and affection; \"his love for his work\"; \"children need a lot of love\"",
+      "relation": "a definition, one or more example sentences, or both",
+      "via": "i76395",
+      "claim_ids": [
+        "920b3fd2ab4eac0fb022461754c0d11a",
+        "7a58ca2581653dfc963912b7c06de475"
+      ],
+      "witnesses": 1,
+      "standing": 1087.0706196107135
+    },
+    {
+      "side": 2,
+      "text": "COD:  feel intense dislike for or a strong aversion towards",
+      "relation": "come with definitions",
+      "via": "[Experiencer_focus · hate.v]",
+      "claim_ids": [
+        "9d63e3a0ad19731914c5241ca2ebf584",
+        "b9b893b10cc825754a598b84dcde01c4"
+      ],
+      "witnesses": 1,
+      "standing": 1177.3505190364938
+    },
+    {
+      "side": 1,
+      "text": "If I have to read things up , this is a relaxation -- I love music , I love gardening and I love just pottering round the house .",
+      "relation": "example sentence",
+      "via": "[Experiencer_focus · love.v]",
+      "claim_ids": [
+        "064802730e379cb6b8986333e5ecc9ed",
+        "0b01aadf43ec27201bb0e53fe1494d7f"
+      ],
+      "witnesses": 1,
+      "standing": 1087.0706196107135
+    },
+    {
+      "side": 2,
+      "text": "I wore horrible hippy flared dresses , which I hated .",
+      "relation": "example sentence",
+      "via": "[Experiencer_focus · hate.v]",
+      "claim_ids": [
+        "9d63e3a0ad19731914c5241ca2ebf584",
+        "830d299364fd2ea59fca22e17f5f0dc4"
+      ],
+      "witnesses": 1,
+      "standing": 1087.0706196107135
+    }
+  ],
+  "connections": [
+    {
+      "relation": "is antonym of",
+      "claim_id": "1fd8c9492120342e2516dd5631de98c3",
+      "from": "[hate · eng · i30608]",
+      "to": "[love · eng · i30611]",
+      "witnesses": 1
+    },
+    {
+      "relation": "is antonym of",
+      "claim_id": "6e9988208ce92d9ed7b3b7cc9b558062",
+      "from": "[love · eng · i30611]",
+      "to": "[hate · eng · i30608]",
+      "witnesses": 1
+    },
+    {
+      "relation": "is antonym of",
+      "claim_id": "461e9d76d4a4f878417fc598c08f4546",
+      "from": "[hate · eng · i76414]",
+      "to": "[love · eng · i76395]",
+      "witnesses": 1
+    },
+    {
+      "relation": "is antonym of",
+      "claim_id": "b1aab559feb577ebe08fcd5b5f8f79c6",
+      "from": "[love · eng · i76395]",
+      "to": "[hate · eng · i76414]",
+      "witnesses": 1
+    }
+  ]
+}

@@ -21,6 +21,11 @@ CREATE OR REPLACE FUNCTION structural.text_containers(p_forms text[])
     AS 'EXECUTION_LIBRARY', 'pg_laplace_content_text_containers'
     LANGUAGE C STABLE PARALLEL RESTRICTED;
 
+CREATE OR REPLACE FUNCTION structural.first_containers(p_members bytea[])
+    RETURNS TABLE(entity_id bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_first_containers'
+    LANGUAGE C STABLE PARALLEL RESTRICTED;
+
 -- Set containment is a different operation from frontier expansion.  Given
 -- multiple identities, return compositions whose one witnessed trajectory
 -- contains every identity.  This preserves the composition hop: `Captain` and

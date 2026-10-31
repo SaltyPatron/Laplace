@@ -919,11 +919,20 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.Equal(true, response.Outbound);
             Assert.Equal(value.Id.ToBytes(), response.Entity);
             Assert.Equal(predicate.Id.ToBytes(), response.Relation);
+            Assert.Equal([ordinal], response.Origins);
         }
         Assert.Contains(field, row => row.Round == 1 && row.Route == 1
             && row.Entity.AsSpan().SequenceEqual(xsense.Id.ToBytes()));
         Assert.Contains(field, row => row.Round == 2 && row.Route == 0
             && row.Via!.AsSpan().SequenceEqual(link.Id.ToBytes()) && row.Outbound == false);
+        Assert.Contains(field, row => row.Round == 2 && row.Route == 0
+            && row.Via!.AsSpan().SequenceEqual(link.Id.ToBytes())
+            && row.Origins.Contains(1) && row.Targets.Contains(2));
+        var descriptors = await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
+            [definitionRelation.Id.ToBytes(),predicate.Id.ToBytes()],["definition","example"]);
+        Assert.Contains(descriptors,row => row.Id.AsSpan().SequenceEqual(definitionRelation.Id.ToBytes()) && row.Descriptive);
+        Assert.Contains(descriptors,row => row.Id.AsSpan().SequenceEqual(predicate.Id.ToBytes())
+            && !row.Descriptive && row.Canonical == "IS_ANTONYM_OF");
         Assert.All(field.Where(row => row.Route == 0), row => Assert.NotNull(row.Via));
         Assert.All(field.Where(row => row.Route != 0), row =>
         {

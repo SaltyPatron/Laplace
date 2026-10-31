@@ -176,6 +176,18 @@ export interface ResponseField {
   fanout: number;
   nearest: number;
   rows: ResponseFieldEntry[];
+  readings?: LexiconReading[];
+  connections?: { relation: string; claim_id: string; from: string; to: string; witnesses: number }[];
+}
+
+export interface LexiconReading {
+  side: number;
+  text: string;
+  relation: string;
+  via: string;
+  claim_ids: string[];
+  witnesses: number;
+  standing: number;
 }
 
 export interface MatchupVerdict {

@@ -23,12 +23,8 @@ BEGIN ATOMIC
         WHERE length(v) > 0
     ),
     name_ids AS MATERIALIZED (
-        -- This expression is exactly the physicalities_traj_first_id_btree key.
-        SELECT p.entity_id AS name_id
-        FROM laplace.physicalities p, target t
-        WHERE p.type = 1
-          AND p.trajectory IS NOT NULL
-          AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = ANY (t.cps)
+        SELECT p.entity_id AS name_id FROM target t,
+             LATERAL structural.first_containers(t.cps) p
     ),
     players AS MATERIALIZED (
         -- Primary names and aliases are both names: one relation, HAS_NAME, whose
@@ -36,7 +32,10 @@ BEGIN ATOMIC
         SELECT DISTINCT c.subject_id AS player
         FROM laplace.consensus c
         JOIN name_ids n ON n.name_id = c.object_id
+        JOIN laplace.entities e ON e.id=c.subject_id
+          AND e.type_id=laplace.entity_type_id('Chess_Player')
         WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_NAME'))
+          AND c.witness_count > 0
     ),
     rated AS MATERIALIZED (
         SELECT p.player,

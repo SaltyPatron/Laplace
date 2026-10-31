@@ -111,7 +111,25 @@ public sealed record ResponseFieldResponse(
     [property: JsonPropertyName("rounds")] int Rounds,
     [property: JsonPropertyName("fanout")] int Fanout,
     [property: JsonPropertyName("nearest")] int Nearest,
-    [property: JsonPropertyName("rows")] IReadOnlyList<ResponseFieldEntry> Rows);
+    [property: JsonPropertyName("rows")] IReadOnlyList<ResponseFieldEntry> Rows,
+    [property: JsonPropertyName("readings")] IReadOnlyList<LexiconReading>? Readings = null,
+    [property: JsonPropertyName("connections")] IReadOnlyList<LexiconConnection>? Connections = null);
+
+public sealed record LexiconReading(
+    [property: JsonPropertyName("side")] int Side,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("relation")] string Relation,
+    [property: JsonPropertyName("via")] string Via,
+    [property: JsonPropertyName("claim_ids")] IReadOnlyList<string> ClaimIds,
+    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("standing")] double Standing);
+
+public sealed record LexiconConnection(
+    [property: JsonPropertyName("relation")] string Relation,
+    [property: JsonPropertyName("claim_id")] string ClaimId,
+    [property: JsonPropertyName("from")] string From,
+    [property: JsonPropertyName("to")] string To,
+    [property: JsonPropertyName("witnesses")] long Witnesses);
 
 public sealed record ResponseFieldEntry(
     [property: JsonPropertyName("round")] int Round,

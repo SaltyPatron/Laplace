@@ -28,6 +28,10 @@ DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.
  row_id public.blake3; nested public.blake3; opaque public.blake3; shared public.blake3; root_a public.blake3; root_b public.blake3; claim_id public.blake3;
  absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
+ IF NOT EXISTS(SELECT FROM structural.first_containers(ARRAY[laplace.word_id('d')]) WHERE entity_id=decode(dog::text,'hex'))
+ OR EXISTS(SELECT FROM structural.first_containers(ARRAY[laplace.word_id('o')]) WHERE entity_id=decode(dog::text,'hex')) THEN
+  RAISE EXCEPTION 'Native first-constituent closure lost order or a stored word';
+ END IF;
  row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
  nested=pg_temp.display_tuple(ARRAY[row_id,dog,dog],'tuple');
  opaque=pg_temp.display_tuple(ARRAY[nested,row_id],'file');
@@ -53,7 +57,7 @@ BEGIN
  OR EXISTS(SELECT FROM realize.display_label_batch(ARRAY[NULL::bytea])) THEN
   RAISE EXCEPTION 'Native display did not preserve the non-null endpoint batch';
  END IF;
- IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=1 AND type_id IS NULL) THEN
+ IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=2 AND type_id IS NULL) THEN
   RAISE EXCEPTION 'Native facet guessed a semantic type';
  END IF;
  IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(scalar::text,'hex')]) WHERE tier=0 AND type_id IS NOT NULL) THEN
@@ -82,5 +86,27 @@ BEGIN
   RAISE EXCEPTION 'Native typed claims disappeared from graph navigation';
  END IF;
 END $test$;
+-- Recorded names may still reside on the compatibility storage face. The
+-- shared display operation must preserve their semantic realization alongside
+-- Native text and duplicate input positions.
+DO $names$
+DECLARE person bytea=public.laplace_hash128_blake3('display/recorded-person');
+ name bytea=laplace.word_id('Ada'); labels text[];
+BEGIN
+ INSERT INTO laplace.entities(id,tier,type_id) VALUES
+ (person,2,laplace.entity_type_id('Source')),(name,2,laplace.entity_type_id('Word'));
+ INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+ VALUES(public.laplace_hash128_blake3('display/recorded-name'),name,1,
+ 'POINT ZM (0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
+ public.laplace_trajectory_build(ARRAY[laplace.word_id('A'),laplace.word_id('d'),laplace.word_id('a')]),3,now());
+ INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+ VALUES(laplace.consensus_id(person,laplace.relation_type_id('HAS_NAME'),name),person,
+ laplace.relation_type_id('HAS_NAME'),name,1700000000000,30000000000,60000000,1,now());
+ SELECT array_agg(label ORDER BY ord) INTO labels FROM
+ realize.display_label_batch(ARRAY[person,laplace.word_id('dog'),person]) WITH ORDINALITY d(id,label,tier,ord);
+ IF labels IS DISTINCT FROM ARRAY['Ada','dog','Ada'] THEN
+  RAISE EXCEPTION 'Recorded human name lost in mixed Native display batch: %',labels;
+ END IF;
+END $names$;
 ROLLBACK;
 SELECT 'native_display_label: ok';

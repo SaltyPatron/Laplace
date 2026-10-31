@@ -189,3 +189,9 @@
     .right .record, .right .topStat, .right .facts { justify-content: flex-start; text-align: left; }
   }
 }
+.readings { text-align: left; line-height: 1.55; }
+.readings h2 { font-size: 1rem; font-weight: 600; }
+.readings ol { padding-left: 1.4rem; }
+.readings li { margin-bottom: 1.25rem; }
+.readings p { margin: .4rem 0; overflow-wrap: anywhere; }
+.readings details { font-size: .85rem; }

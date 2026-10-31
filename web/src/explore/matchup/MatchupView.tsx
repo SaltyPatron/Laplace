@@ -3,7 +3,7 @@ import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-d
 import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
 import { exploreMatchup, exploreMatchupVerdict, exploreResponseField } from '../../query/api';
-import type { Matchup, MatchupSide, MatchupVerdict, ResponseField, ResponseFieldEntry, TapeRow } from '../../query/types';
+import type { Matchup, MatchupSide, MatchupVerdict, ResponseField, ResponseFieldEntry, LexiconReading, TapeRow } from '../../query/types';
 import { useAppStore } from '../../store';
 import { PaymentRequiredError } from '../../api/client';
 import { GatePrompt } from '../components/GatePrompt';
@@ -111,17 +111,19 @@ export function MatchupView() {
       ) : data ? (
         <>
           <div className={styles.tale}>
-            <SideCard side={data.x} align="left" />
+            <SideCard side={data.x} align="left" readings={responseField?.readings?.filter(row => row.side === 1)} readingError={responseError} />
             <div className={styles.center}>
               <span className={styles.vsBig}>vs</span>
-              <Verdict verdict={verdict} error={verdictError} />
+              {data.x.chess && data.y.chess ? <Verdict verdict={verdict} error={verdictError} /> :
+                <Connections field={responseField} error={responseError} />}
             </div>
-            <SideCard side={data.y} align="right" />
+            <SideCard side={data.y} align="right" readings={responseField?.readings?.filter(row => row.side === 2)} readingError={responseError} />
           </div>
           {data.x.chess == null && data.y.chess == null && (
-            <ResponseFieldView field={responseField} error={responseError} />
+            <details><summary>Inspect supporting records</summary><ResponseFieldView field={responseField} error={responseError} /></details>
           )}
-          <Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} />
+          {data.x.chess && data.y.chess ? <Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /> :
+            <details><summary>Direct claim overlap</summary><Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /></details>}
         </>
       ) : null}
     </div>
@@ -133,7 +135,7 @@ function displayRelation(type: string, chessPlayer: boolean) {
   return chessPlayer && normalized === 'played by' ? 'played against' : normalized;
 }
 
-function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' }) {
+function SideCard({ side, align, readings, readingError }: { side: MatchupSide; align: 'left' | 'right'; readings?: LexiconReading[]; readingError: string | null }) {
   const edgeCount = side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted;
   const chess = side.chess ?? null;
   const chessPlayer = chess !== null || side.entity_type === 'Chess_Player';
@@ -149,6 +151,7 @@ function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' 
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
       <RouterLink className={styles.sideName} to={`/explore/entity/${side.id}`}>{side.label}</RouterLink>
+      {!chessPlayer ? <Readings rows={readings} error={readingError} /> : <>
       <div className={styles.record}>
         {chess ? (
           <>
@@ -176,8 +179,42 @@ function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' 
           <li key={i}><span className={styles.factType}>{displayRelation(f.type, chessPlayer)}</span> {f.fact}</li>
         ))}
       </ul>
+      </>}
     </div>
   );
+}
+
+function Readings({ rows, error }: { rows?: LexiconReading[]; error: string | null }) {
+  const [count, setCount] = useState(6);
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!rows) return <LoadingText>Reading meanings and usage…</LoadingText>;
+  return <div className={styles.readings}>
+    <h2>Meanings and usage</h2>
+    {rows.length === 0 && <Muted>This comparison has not reached a source description or example.</Muted>}
+    <ol>{rows.slice(0, count).map(row => <li key={row.text}>
+      <p>{row.text}</p>
+      <details><summary>Source evidence · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</summary>
+        <p>{row.via} — {row.relation}</p>
+        {row.claim_ids.map((id, index) => <p key={id}><RouterLink to={`/explore/entity/${id}`}>Recorded claim {index + 1}</RouterLink></p>)}
+      </details>
+    </li>)}</ol>
+    {rows.length > count && <Button onClick={() => setCount(count + 6)}>More meanings and usage ({rows.length - count})</Button>}
+  </div>;
+}
+
+function Connections({ field, error }: { field: ResponseField | null; error: string | null }) {
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!field) return <LoadingText>Reading their relationship…</LoadingText>;
+  const connections = field.connections ?? [];
+  const relations = [...new Set(connections.map(row => row.relation))];
+  return <div className={styles.verdict}>
+    {relations.length ? <><Muted>Witnessed relationships between readings</Muted>{relations.map(relation =>
+      <span key={relation} className={styles.verdictText}>{relation}</span>)}
+      <details><summary>Source evidence</summary>{connections.map(row => <p key={row.claim_id}>
+        {row.from} — {row.relation} — {row.to}{' '}
+        <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</RouterLink>
+      </p>)}</details></> : <Muted>No relationship was realized from the evidence read.</Muted>}
+  </div>;
 }
 
 function Rec({ n, label, tone }: { n: number; label: string; tone?: 'confirm' | 'draw' | 'refute' }) {

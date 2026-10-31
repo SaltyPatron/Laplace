@@ -16,7 +16,17 @@ WITH requested AS MATERIALIZED (
  SELECT * FROM @extschema:laplace@.laplace_labels((SELECT ids FROM requested))
 ), entities AS MATERIALIZED (
  SELECT ordinal,tier FROM @extschema:laplace@.laplace_entities((SELECT ids FROM requested))
+), unresolved AS MATERIALIZED (
+ SELECT d.i,decode(d.entity::text,'hex') AS id,e.tier
+ FROM labels d JOIN laplace.entities e ON e.id=decode(d.entity::text,'hex')
+ WHERE d.content=d.entity::text
+), semantic AS MATERIALIZED (
+ SELECT u.i,u.tier,s.label
+ FROM (SELECT array_agg(id ORDER BY i) AS ids FROM unresolved) b
+ CROSS JOIN LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY s(label,ordinal)
+ JOIN (SELECT *,row_number() OVER(ORDER BY i) AS ordinal FROM unresolved) u USING(ordinal)
 )
-SELECT decode(d.entity::text,'hex'),d.content,coalesce(e.tier,CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
-FROM labels d LEFT JOIN entities e ON e.ordinal=d.i ORDER BY d.i
+SELECT decode(d.entity::text,'hex'),coalesce(nullif(s.label,''),d.content),
+ coalesce(e.tier,s.tier,CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
+FROM labels d LEFT JOIN entities e ON e.ordinal=d.i LEFT JOIN semantic s ON s.i=d.i ORDER BY d.i
 $native$;

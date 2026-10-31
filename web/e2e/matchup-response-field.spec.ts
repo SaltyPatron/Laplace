@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
 import field from './fixtures/native-response-field-sample.json' with { type: 'json' };
+import lexicon from './fixtures/native-lexicon-readings-sample.json' with { type: 'json' };
 
 // Selected rows from the real Native read on staging, 2026-10-31. The fixture
 // includes an incoming UCD definition, Native containment, geometry and enough
 // distinct claims to exercise paging without counting paths as meanings.
-test('comparison preserves response planes, evidence direction and paging', async ({ page }) => {
+test('comparison leads with meanings and witnessed relationships, with inspection collapsed', async ({ page }) => {
   const side = (label: string, id: string) => ({
     id, label, record: { confirmed: 0, contested: 0, refuted: 0, thin: 1 }, top_facts: [],
   });
@@ -16,8 +17,15 @@ test('comparison preserves response planes, evidence direction and paging', asyn
   await page.route('**/v1/explore/matchup/verdict?*', (route) => route.fulfill({ json: {
     plane: 'direct witnessed claims', verdict: 'No direct witnessed claim connects these entities.',
   } }));
-  await page.route('**/v1/explore/response-field?*', (route) => route.fulfill({ json: field }));
+  await page.route('**/v1/explore/response-field?*', (route) => route.fulfill({ json: { ...field, ...lexicon } }));
   await page.goto('/explore/matchup/love/hate');
+  await expect(page.getByRole('heading', { name: 'Meanings and usage', exact: true })).toHaveCount(2);
+  await expect(page.getByText(lexicon.readings[0].text, { exact: true })).toBeVisible();
+  await expect(page.getByText(lexicon.readings[1].text, { exact: true })).toBeVisible();
+  await expect(page.getByText('is antonym of', { exact: true })).toBeVisible();
+  await expect(page.getByText('No direct witnessed claim connects these entities.', { exact: true })).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Response field', exact: true })).not.toBeVisible();
+  await page.locator('summary').filter({ hasText: 'Inspect supporting records' }).click();
   await expect(page.getByRole('heading', { name: 'Response field', exact: true })).toBeVisible();
   await expect(page.getByText('No recorded definitions were found for this entity.')).toHaveCount(0);
   await expect(page.getByText('Page 1 of 2', { exact: true })).toBeVisible();

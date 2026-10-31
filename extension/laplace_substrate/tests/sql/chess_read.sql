@@ -1,5 +1,9 @@
 BEGIN;
 
+-- A fresh backend must initialize text composition itself. Previous roster
+-- queries and display rendering must not be prerequisites for search.
+SELECT count(*) FROM structural.text_containers(ARRAY['Carlsen']);
+
 -- chess_moves / chess_player_moves / typed consensus_by_ids: the chess read
 -- surface. Synthetic rows only — one position with three rated continuations
 -- and two provenanced playings (one as White, one as Black) for a player,
@@ -194,6 +198,7 @@ DECLARE
     pl_sc   bytea := laplace.word_id('c');
     cap_t   bytea := laplace.word_id('T');
     tname   bytea := public.laplace_hash128_blake3('t2/name/tal');
+    tword   bytea := public.laplace_hash128_blake3('t2/name/first-word');
     ids_got bytea[];
     n       bigint;
     w       bigint;
@@ -540,13 +545,16 @@ BEGIN
     -- first constituent IS the codepoint, bound to him by a HAS_NAME cell -- and
     -- the same display-scale law on the rating columns.
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
-        (cap_t, 0, type_t), (tname, 0, type_t),
+        (cap_t, 0, type_t), (tname, 0, type_t), (tword,2,laplace.entity_type_id('Word')),
         (profile_only, 0, laplace.entity_type_id('Chess_Player'));
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
             'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
-            public.laplace_trajectory_build(ARRAY[cap_t, en]), 2, now());
+            public.laplace_trajectory_build(ARRAY[tword, pl_sa]), 2, now()),
+           (public.laplace_hash128_blake3('t2/name/first-word-phys'), tword,1,
+            'SRID=0;POINT ZM (0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
+            public.laplace_trajectory_build(ARRAY[cap_t,en]),2,now());
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
@@ -555,7 +563,13 @@ BEGIN
         (public.laplace_hash128_blake3('t2/c_primary_name'), botv, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now()),
         (public.laplace_hash128_blake3('t2/c_profile_alias'), profile_only, laplace.relation_type_id('HAS_NAME'),
+            tname, 1500000000000, 50000000000, 60000000, 1, now()),
+        (public.laplace_hash128_blake3('t2/c_source_name'), src, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now());
+
+    IF EXISTS(SELECT FROM chess.players_by_initial(ARRAY['T'],100,0,'strength','desc') WHERE player_id=src) THEN
+        RAISE EXCEPTION 'FAIL: a named source leaked into the player list';
+    END IF;
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
       FROM chess.players_by_initial(ARRAY['T'], 10, 0, 'strength', 'desc') p WHERE p.player_id = tal;

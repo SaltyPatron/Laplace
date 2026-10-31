@@ -73,8 +73,32 @@ internal sealed partial class SubstrateClient
         await using var snapshot = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
         var rows = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,
             roots.Select(root => root!.Value.Id).ToArray(), fanout, nearest, ct).ConfigureAwait(false);
+        // These are query criteria over recorded predicate content. No corpus
+        // name, corpus identity, or corpus-specific traversal is selected here.
+        var relations = await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
+            rows.Where(row => row.Relation is not null).Select(row => row.Relation!)
+                .DistinctBy(id => Convert.ToHexStringLower(id)).ToArray(),
+            ["definition", "definitions", "example", "examples"],ct).ConfigureAwait(false);
+        var byRelation = relations.ToDictionary(row => Convert.ToHexStringLower(row.Id));
         await snapshot.CommitAsync(ct).ConfigureAwait(false);
         static string? Hex(byte[]? id) => id is null ? null : Convert.ToHexStringLower(id);
+        var readings = rows.Where(row => row.Route == 0 && row.Outbound == true && row.Via is not null && row.Textual
+                && row.Witnesses > 0 && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
+                && byRelation[Hex(row.Relation)!].Descriptive)
+            .SelectMany(row => row.Origins.Select(side => new LexiconReading(side,row.Label,
+                row.RelationLabel!,row.AnchorLabel!,
+                row.SupportClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
+                row.Witnesses!.Value,row.Rating!.Value-2*row.Deviation!.Value)))
+            .OrderByDescending(row => row.Standing).DistinctBy(row => (row.Side,row.Text)).ToArray();
+        var connections = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Witnesses > 0
+                && (byRelation[Hex(row.Relation)!].Canonical is not null || byRelation[Hex(row.Relation)!].Textual)
+                && row.Anchors.Any(side => row.Targets.Any(target => target != side)))
+            .DistinctBy(row => Hex(row.Via))
+            .Select(row => new LexiconConnection(
+                row.Relation is not null && byRelation[Hex(row.Relation)!] is { Canonical: { } canonical, Inverse: false }
+                    ? canonical.Replace('_',' ').ToLowerInvariant() : row.RelationLabel ?? "is connected to",
+                Hex(row.Via)!,row.Outbound == true ? row.AnchorLabel! : row.Label,
+                row.Outbound == true ? row.Label : row.AnchorLabel!,row.Witnesses!.Value)).ToArray();
         return new("response.field", 2, fanout, nearest, rows.Select(row =>
         {
             if (row.Route == 0 && row.Via is null)
@@ -84,7 +108,7 @@ internal sealed partial class SubstrateClient
                 row.Route switch { 0 => "relation", 1 => "containment", 2 => "shape", _ => throw new InvalidDataException("Unknown Native coupling route.") },
                 Hex(row.Via), Hex(row.Relation), row.RelationLabel, row.Rating, row.Deviation, row.Volatility,
                 row.Matches, row.Witnesses, row.Distance, row.Outbound);
-        }).ToArray());
+        }).ToArray(),readings,connections);
     }
 
     private async Task<bool> IsChessPlayerAsync(byte[] id, CancellationToken ct)
