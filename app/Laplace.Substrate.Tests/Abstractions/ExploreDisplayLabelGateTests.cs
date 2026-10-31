@@ -18,9 +18,13 @@ public sealed class ExploreDisplayLabelGateTests
         var adapter = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
         Assert.Contains("FROM @extschema:laplace@.laplace_labels(", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("SPI_execute", adapter, StringComparison.Ordinal);
-        Assert.DoesNotContain("batch_text", adapter, StringComparison.Ordinal);
-        Assert.Contains("pg_relation_metadata", adapter, StringComparison.Ordinal);
+        // The registry projection reads compiled metadata. The later language
+        // metadata function independently resolves surfaces through its catalog.
+        int languageMetadata = adapter.IndexOf("PG_FUNCTION_INFO_V1(pg_language_codes)", StringComparison.Ordinal);
+        string registryProjection = languageMetadata >= 0 ? adapter[..languageMetadata] : adapter;
+        Assert.DoesNotContain("SPI_execute", registryProjection, StringComparison.Ordinal);
+        Assert.DoesNotContain("batch_text", registryProjection, StringComparison.Ordinal);
+        Assert.Contains("pg_relation_metadata", registryProjection, StringComparison.Ordinal);
     }
 
     [Fact]
