@@ -121,7 +121,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 38f4139bab5ea44f860d5e9e2b322b963b7f5a71
+          ref: 4cc4b8cd0a9afe1a8902790f812d5f84ecc8e10a
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
@@ -333,7 +333,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 38f4139bab5ea44f860d5e9e2b322b963b7f5a71
+          ref: 4cc4b8cd0a9afe1a8902790f812d5f84ecc8e10a
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
