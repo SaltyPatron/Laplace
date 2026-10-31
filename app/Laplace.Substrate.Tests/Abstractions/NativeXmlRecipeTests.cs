@@ -145,9 +145,9 @@ public sealed class NativeXmlRecipeTests
     }
 
     [Theory]
-    [InlineData("ucd-invalid-atom")]
-    [InlineData("ucd-invalid-sequence")]
-    public async Task InvalidScalarProductsFailBeforeTheyCanBecomeZeroChildEntities(string fixture)
+    [InlineData("ucd-surrogate-atom")]
+    [InlineData("ucd-surrogate-sequence")]
+    public async Task SurrogateCodepointProductsRetainTheirNativeBytes(string fixture)
     {
         Assert.True(LaplaceInstall.TryRepoRoot(out string repository));
         string path = Path.Combine(repository, "app", "Laplace.Substrate.Tests", "Fixtures", "NativeRecipes",
@@ -156,9 +156,9 @@ public sealed class NativeXmlRecipeTests
         using var error = new MemoryStream();
         int code = await NativeRecipeExecution.Configured().ExecuteAsync(
             new NativeRecipeRequest(NativeRecipeMode.Claims, "unicode", [path], Threads: 1), output, error);
-        Assert.NotEqual(0, code);
-        Assert.Contains("invalid scalar content", Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
-        Assert.Contains(Path.GetFileName(path), Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
+        Assert.True(code == 0, Encoding.UTF8.GetString(error.ToArray()));
+        Assert.True(output.ToArray().AsSpan().IndexOf(new byte[] { 0xed, 0xa0, 0x80 }) >= 0,
+            "U+D800 must survive as its Native codepoint bytes.");
     }
 
     private static async Task<string[]> Claims(string source, string path, int threads, string? missingReference = null)

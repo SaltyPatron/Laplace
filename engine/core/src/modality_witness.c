@@ -56,14 +56,10 @@ static int resolve_number_id(
     const uint8_t* buf, size_t n,
     hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb, uint8_t* out_tier) {
     uint32_t v = 0;
-    const int byte_value = parse_u8_digits(buf, n, &v) == 0;
-    /* A channel byte is the explicit digit composition. Its text ROM may retain
-     * a word recipe floor; that floor is not the height of these digit children. */
-    const uint8_t byte_height = n > 1u ? 1u : 0u;
-    if (byte_value && modality_number_table_is_loaded()) {
+    if (parse_u8_digits(buf, n, &v) == 0
+        && modality_number_table_is_loaded()) {
         if (modality_number_table_lookup_geom(
-                v, out_id, out_coord, out_hb, NULL, NULL) == 0) {
-            *out_tier = byte_height;
+                v, out_id, out_coord, out_hb, NULL, out_tier) == 0) {
             return 0;
         }
     }
@@ -72,7 +68,7 @@ static int resolve_number_id(
     *out_id = scalar.id;
     memcpy(out_coord, scalar.coord, sizeof scalar.coord);
     *out_hb = scalar.hilbert;
-    *out_tier = byte_value ? byte_height : scalar.tier;
+    *out_tier = scalar.tier;
     return 0;
 }
 

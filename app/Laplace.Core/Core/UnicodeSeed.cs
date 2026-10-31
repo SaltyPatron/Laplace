@@ -4,7 +4,7 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class UnicodeSeed
 {
-    public const int CodepointCount = 1_112_064;
+    public const int CodepointCount = 1_114_112;
 
     /// <summary>Read/decompress and parse one UCD XML artifact to completion.</summary>
     public static void ValidateUcdXml(string ucdxmlPath)
@@ -46,11 +46,12 @@ public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
 
         var snapshot = new UnicodeSeedSnapshot();
         snapshot.SetHandle(native);
-        if (snapshot.Count != UnicodeSeed.CodepointCount)
+        int count = snapshot.Count;
+        if (count != UnicodeSeed.CodepointCount)
         {
             snapshot.Dispose();
             throw new InvalidOperationException(
-                $"Unicode source snapshot has {snapshot.Count} records; expected {UnicodeSeed.CodepointCount}.");
+                $"Unicode source snapshot has {count} records; expected {UnicodeSeed.CodepointCount}.");
         }
         return snapshot;
     }

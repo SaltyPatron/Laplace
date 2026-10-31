@@ -112,11 +112,11 @@ public sealed class TextEntityBuilderEmissionTests
         byte[] bytes = Encoding.UTF8.GetBytes("dog");
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out var ents, out _, out var rootId, out var rootTier));
 
-        Assert.Equal((byte)1, rootTier); // A composition directly above scalars.
+        Assert.Equal((byte)2, rootTier); // Native retains the word floor.
         Assert.Single(ents);
 
         var root = Assert.Single(ents, e => e.Id.EqualsBytewise(rootId));
-        Assert.Equal((short)1, root.Tier);
+        Assert.Equal((short)2, root.Tier);
         Assert.Equal(Hash128.Text("Text"), root.TypeId);
     }
 

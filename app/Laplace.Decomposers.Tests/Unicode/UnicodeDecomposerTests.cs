@@ -10,7 +10,7 @@ public sealed class UnicodeDecomposerTests
     public void CompleteScalarFloorRemainsAClientCache()
     {
         CodepointPerfcache.LoadDefault();
-        Assert.Equal(1_112_064, CodepointPerfcache.Count);
+        Assert.Equal(1_114_112, CodepointPerfcache.Count);
     }
 
     [Fact]

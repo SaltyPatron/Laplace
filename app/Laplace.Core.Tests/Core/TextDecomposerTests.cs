@@ -20,7 +20,7 @@ public class TextDecomposerTests
         foreach (var segment in segments)
             Assert.Equal(TextDecomposer.ContentRootId(utf8.AsSpan(segment.Offset, segment.Length)), segment.Id);
         using var word = TextDecomposer.Run("mississippi");
-        Assert.Equal(1, word.GetNode(word.NaturalUnitIndex()).Tier);
+        Assert.Equal(2, word.GetNode(word.NaturalUnitIndex()).Tier);
         Assert.Equal(word.GetNode(word.NaturalUnitIndex()).Id, segments[1].Id);
     }
 

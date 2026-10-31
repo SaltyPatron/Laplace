@@ -22,7 +22,7 @@ public sealed class TierFloorIdentityTests
         var wordId = Hash128.Text("dog");
         var root = tree!.GetNode((uint)tree.NodeCount - 1);
         Assert.Equal(wordId, root.Id);
-        Assert.Equal(1, root.Tier); // Three scalar leaves, one composition above them.
+        Assert.Equal(2, root.Tier); // The Native word floor survives collapsed grapheme wrappers.
         for (uint i = 0; i < tree!.NodeCount; i++)
         {
             var node = tree.GetNode(i);
