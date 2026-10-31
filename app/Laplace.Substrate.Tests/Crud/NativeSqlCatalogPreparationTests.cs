@@ -938,7 +938,11 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.All(field.Where(row => row.Route == 0), row => Assert.NotNull(row.Via));
         // A shared constituent or a related claim does not bind these words
         // to a meaning. The declared word/language/key record does.
-        Assert.All(field,row => Assert.Empty(row.ReadingOrigins));
+        Assert.All(field.Where(row => row.Anchor is not null
+            && !row.Anchor.AsSpan().SequenceEqual(x.Id.ToBytes()) && !row.Anchor.AsSpan().SequenceEqual(y.Id.ToBytes())),
+            row => Assert.Empty(row.ReadingOrigins));
+        Assert.Contains(field,row => row.Anchor is not null && row.Anchor.AsSpan().SequenceEqual(x.Id.ToBytes())
+            && row.ReadingOrigins.SequenceEqual([1,3]));
         await using (var binding = new NpgsqlCommand(
             "SELECT key,binding,witnesses FROM converse.binding_evidence(ARRAY[$1::bytea])",connection,transaction))
         {
