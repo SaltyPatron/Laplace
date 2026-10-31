@@ -1,5 +1,6 @@
 using Laplace.Engine.Core;
 using global::Npgsql;
+using System.Runtime.CompilerServices;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -145,6 +146,8 @@ public sealed partial class NpgsqlSubstrateWriter
         }
     }
 
+    private static readonly ConditionalWeakTable<NpgsqlDataSource, SemaphoreSlim> ApplyControlOwners = new();
+
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt,
         bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
         ApplyStagesCoreAsync(
@@ -155,18 +158,33 @@ public sealed partial class NpgsqlSubstrateWriter
         IngestCompletionRows completions, CancellationToken ct)
     {
         using var connectionDiagnostic = MeasureApplyPhase("connection-and-apply-lock");
-        await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-        bool epochRoute = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
-        if (_leafModulus == 0)
-            _leafModulus = await ResolveLeafModulusAsync(connection, ct).ConfigureAwait(false);
-        await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
-            connection, "laplace_apply_batch", Durability, _log, ct).ConfigureAwait(false);
-        connectionDiagnostic?.Complete();
+        // An apply holds its control connection while its presence/COPY workers
+        // borrow from the same pool. Admit controls before renting connections,
+        // leaving at least one worker slot across all writers sharing this pool.
+        var owners = ApplyControlOwners.GetValue(_ds, static source =>
+        {
+            int maximum = new NpgsqlConnectionStringBuilder(source.ConnectionString).MaxPoolSize;
+            if (maximum < 2)
+                throw new InvalidOperationException("Working-set apply requires a control connection and a worker connection; the configured pool has fewer than two slots.");
+            return new SemaphoreSlim(maximum - 1, maximum - 1);
+        });
+        await owners.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+            bool epochRoute = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
+            if (_leafModulus == 0)
+                _leafModulus = await ResolveLeafModulusAsync(connection, ct).ConfigureAwait(false);
+            await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
+                connection, "laplace_apply_batch", Durability, _log, ct).ConfigureAwait(false);
+            connectionDiagnostic?.Complete();
 
-        return await ApplyPreparedStagesCoreAsync(
-            connection, transaction, epochRoute, stages, workingSetToken,
-            workingSetSource, workingSetSources, transactionParticipant,
-            completions, ct).ConfigureAwait(false);
+            return await ApplyPreparedStagesCoreAsync(
+                connection, transaction, epochRoute, stages, workingSetToken,
+                workingSetSource, workingSetSources, transactionParticipant,
+                completions, ct).ConfigureAwait(false);
+        }
+        finally { owners.Release(); }
     }
 
     private static async Task<int> ResolveLeafModulusAsync(NpgsqlConnection connection, CancellationToken ct)

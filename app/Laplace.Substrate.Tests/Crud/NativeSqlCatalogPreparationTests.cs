@@ -912,8 +912,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             [x.Id.ToBytes(), y.Id.ToBytes(), x.Id.ToBytes()], 512, 0);
         foreach (int ordinal in new[] { 1, 3 })
         {
-            var response = Assert.Single(field.Where(row => row.Round == 1 && row.Occurrence == ordinal
-                && row.Route == 0 && row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes())));
+            var response = Assert.Single(field, row => row.Round == 1 && row.Occurrence == ordinal
+                && row.Route == 0 && row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes()));
             Assert.Equal(3L, response.Matches);
             Assert.Equal(1L, response.Witnesses);
             Assert.Equal(true, response.Outbound);
@@ -949,6 +949,35 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             Assert.False(await rows.ReadAsync());
         }
         await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task ConcurrentAppliesDoNotExhaustAnExplicitTwoConnectionPool()
+    {
+        var configuration = new NpgsqlConnectionStringBuilder(_source.ConnectionString)
+        {
+            MaxPoolSize = 2, MinPoolSize = 0, Timeout = 3, CommandTimeout = 10,
+            ApplicationName = "apply-pool-" + Guid.NewGuid().ToString("N")
+        };
+        await using var limited = LaplaceDataSource.Create(SubstrateAccess.Ingest, configuration.ConnectionString);
+        var firstWriter = new NpgsqlSubstrateWriter(limited);
+        var secondWriter = new NpgsqlSubstrateWriter(limited);
+        var source = Hash128.Text("pool-source-" + Guid.NewGuid().ToString("N"));
+        using var firstBuilder = new SubstrateChangeBuilder(source, "first-pool-apply").DeclareSourcePrior(0.5);
+        using var secondBuilder = new SubstrateChangeBuilder(source, "second-pool-apply").DeclareSourcePrior(0.5);
+        ContentEmitter.Emit(firstBuilder, "first pool observation " + Guid.NewGuid().ToString("N"), source);
+        ContentEmitter.Emit(secondBuilder, "second pool observation " + Guid.NewGuid().ToString("N"), source);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        // A temporarily occupied connection makes both control requests queue
+        // before their presence/COPY phases can obtain a worker connection.
+        await using var occupied = await limited.OpenConnectionAsync(timeout.Token);
+        var first = firstWriter.ApplyAsync(firstBuilder.Build(), timeout.Token);
+        var second = secondWriter.ApplyAsync(secondBuilder.Build(), timeout.Token);
+        await Task.Delay(250, timeout.Token);
+        await occupied.CloseAsync();
+        var results = await Task.WhenAll(first, second);
+        Assert.All(results, result => Assert.True(result.EntitiesInserted > 0));
+        Assert.Equal(2, new NpgsqlConnectionStringBuilder(limited.ConnectionString).MaxPoolSize);
     }
 
     [Fact]
