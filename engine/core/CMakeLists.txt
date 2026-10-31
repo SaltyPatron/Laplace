@@ -283,12 +283,7 @@ add_subdirectory(grammars)
 # The managed host executes the canonical recipe compiler/ingester in its own
 # process. Reuse that source and the Native targets already in this build graph;
 # no second .format/.recipe parser or private recipe instruction language is built.
-if(NOT DEFINED LAPLACE_RECIPE_ENGINE_SOURCE)
-    get_filename_component(_laplace_native_checkout "${LAPLACE_NATIVE}" REALPATH)
-    get_filename_component(_laplace_workspace "${_laplace_native_checkout}" DIRECTORY)
-    set(LAPLACE_RECIPE_ENGINE_SOURCE "${_laplace_workspace}/Laplace-Engine"
-        CACHE PATH "Canonical Laplace-Engine checkout for recipe execution")
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/LaplaceRecipeEngine.cmake")
 if(NOT EXISTS "${LAPLACE_RECIPE_ENGINE_SOURCE}/src/record_stream.c"
    OR NOT EXISTS "${LAPLACE_RECIPE_ENGINE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "The canonical Laplace-Engine checkout is required at ${LAPLACE_RECIPE_ENGINE_SOURCE}. Set LAPLACE_RECIPE_ENGINE_SOURCE to its existing local checkout.")
