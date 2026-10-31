@@ -539,6 +539,9 @@ def install_refresh(config, lock):
             raise ValueError('Credential refresh code requires root-owned, non-writable parents: ' + str(path))
     script = directory / 'database-sync.py'
     SYNC.atomic(script, (HERE / 'database-sync.py').read_text(), 0o755, 0, 0)
+    SYNC.atomic(directory / 'host-lock.sh', (HERE.parent / 'host-lock.sh').read_text(), 0o755, 0, 0)
+    refresh = directory / 'database-refresh'
+    SYNC.atomic(refresh, (HERE / 'database-refresh.sh').read_text(), 0o755, 0, 0)
     arguments = ['--host', config['host'], '--credentials', config['credentials'],
                  '--user', config['runtime_user'], '--prefix', config['prefix'],
                  '--machine-file', config['machine_file'], '--bao-address', config['bao_address'],
@@ -549,7 +552,8 @@ def install_refresh(config, lock):
     checked(command, env=dict(os.environ, LAPLACE_HOST_LOCK_FD=str(lock.fileno())),
             pass_fds=(lock.fileno(),), timeout=120)
     launcher = directory / 'refresh'
-    SYNC.atomic(launcher, '#!/bin/sh\nset -eu\nexec ' + shlex.join(command) + '\n', 0o755, 0, 0)
+    queued = ['/bin/bash', str(refresh), config['host_lock'], *command]
+    SYNC.atomic(launcher, '#!/bin/sh\nset -eu\nexec ' + shlex.join(queued) + '\n', 0o755, 0, 0)
     # Retire the previous timer before enabling its replacement so credentials
     # have one refresh owner during a naming migration.
     legacy_timer = 'laplace-knowledge-refresh.timer'
@@ -560,7 +564,7 @@ def install_refresh(config, lock):
     SYNC.atomic(Path('/etc/systemd/system/laplace-database-refresh.service'),
                 '[Unit]\nDescription=Refresh Laplace monorepo workload credentials through OpenBao\n'
                 'After=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\n'
-                f'ExecStart="{executable}"\nNoNewPrivileges=true\nUMask=0077\n', 0o644, 0, 0)
+                f'ExecStart="{executable}"\nTimeoutStartSec=infinity\nNoNewPrivileges=true\nUMask=0077\n', 0o644, 0, 0)
     SYNC.atomic(Path('/etc/systemd/system/laplace-database-refresh.timer'),
                 '[Unit]\nDescription=Refresh Laplace monorepo workload credentials\n[Timer]\n'
                 'OnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n[Install]\n'
