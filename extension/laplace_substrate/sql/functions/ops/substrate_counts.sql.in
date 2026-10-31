@@ -22,13 +22,22 @@ BEGIN ATOMIC
     -- Containment evidence has no legacy attestation row counter. Omit that
     -- measurement instead of reporting a false zero. pg_stat_all_tables live
     -- tuple estimates include committed COPY windows between ANALYZE runs;
-    -- pg_class.reltuples is the planner fallback. Neither is an exact count(*).
-    SELECT t.metric, COALESCE(sum(COALESCE(s.n_live_tup, GREATEST(c.reltuples, 0)::bigint)), 0)::bigint
+    -- pg_class.reltuples is the planner fallback. Statistics reset/restart can
+    -- leave a present statistics row with all counters zero while the durable
+    -- planner estimate is populated. A measured zero after deletes or table
+    -- maintenance must still remain zero. Neither is an exact count(*).
+    SELECT t.metric, COALESCE(sum(CASE
+        WHEN s.n_live_tup > 0 OR s.n_tup_ins > 0 OR s.n_tup_upd > 0 OR s.n_tup_del > 0
+          OR GREATEST(s.last_analyze, s.last_autoanalyze, s.last_vacuum, s.last_autovacuum) IS NOT NULL
+        THEN s.n_live_tup
+        ELSE GREATEST(c.reltuples, 0)::bigint
+    END), 0)::bigint
     FROM targets t
-    CROSS JOIN LATERAL pg_partition_tree(t.relid) p
-    JOIN pg_class c ON c.oid = p.relid
+    -- pg_partition_tree returns no rows for ordinary, unpartitioned tables.
+    LEFT JOIN LATERAL pg_partition_tree(t.relid) p ON true
+    JOIN pg_class c ON c.oid = COALESCE(p.relid, t.relid)
     LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
-    WHERE p.isleaf
+    WHERE p.isleaf OR p.relid IS NULL
     GROUP BY t.metric, t.ordinal
     ORDER BY t.ordinal;
 END;
