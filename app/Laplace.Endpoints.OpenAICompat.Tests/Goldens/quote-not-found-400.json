@@ -1,7 +1,0 @@
-{
-  "error": {
-    "type": "invalid_request_error",
-    "code": "quote_not_found",
-    "message": "Quote does not exist."
-  }
-}

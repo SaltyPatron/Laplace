@@ -1,4 +1,0 @@
--- (subject_id, type_id) is the typed star prefix; the third key is the
--- content-addressed cell id consensus.upsert's MERGE targets, so one exact cell
--- is proved from the index without fetching every cell of the pair.
-CREATE INDEX IF NOT EXISTS consensus_subject_type_btree ON consensus (subject_id, type_id, id);

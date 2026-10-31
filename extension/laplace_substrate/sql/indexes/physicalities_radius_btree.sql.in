@@ -1,3 +1,0 @@
--- Drops physicalities_radius_btree. radius_origin is only projected, never a
--- predicate, join key, or sort key, so the index serves no read.
-DROP INDEX IF EXISTS physicalities_radius_btree;

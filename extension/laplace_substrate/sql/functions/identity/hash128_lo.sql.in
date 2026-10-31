@@ -1,6 +1,0 @@
--- Leading 64 bits of a content id as bigint: the one lo64 helper for seeds,
--- advisory locks, and walk RNG.
-CREATE OR REPLACE FUNCTION laplace.hash128_lo(p_id bytea)
-    RETURNS bigint
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_hash128_lo'
-    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

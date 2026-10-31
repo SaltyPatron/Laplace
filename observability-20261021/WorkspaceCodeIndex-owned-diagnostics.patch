@@ -1,0 +1,206 @@
+diff --git a/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs b/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
+index efc66b141..053fbc4bd 100644
+--- a/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
++++ b/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
+@@ -35,14 +35,15 @@ internal static class WorkspaceCodeIndex
+         long Length,
+         CodeChunk[] Chunks);
+ 
+-    private sealed record IndexSnapshot(
++    internal sealed record IndexSnapshot(
+         string RootPath,
+         DateTime BuiltAtUtc,
++        int FileCount,
+         CodeChunk[] Chunks,
+         Dictionary<Hash128, List<int>> Postings);
+ 
+     private static readonly Lock SyncLock = new();
+-    private static readonly Dictionary<string, FileEntry> FileCache = new(StringComparer.OrdinalIgnoreCase);
++    private static Dictionary<string, FileEntry> FileCache = new(StringComparer.OrdinalIgnoreCase);
+     private static IndexSnapshot? CurrentSnapshot;
+     private static DateTime LastScanCheckUtc = DateTime.MinValue;
+ 
+@@ -61,8 +62,7 @@ internal static class WorkspaceCodeIndex
+     public static string ResolveWorkspaceRoot()
+     {
+         var envRoot = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+-        if (!string.IsNullOrWhiteSpace(envRoot) && Directory.Exists(envRoot))
+-            return Path.GetFullPath(envRoot);
++        if (!string.IsNullOrWhiteSpace(envRoot)) return RequireWorkspaceRoot(envRoot);
+ 
+         var machineEnv = OperatingSystem.IsWindows()
+             ? @"C:\ProgramData\Laplace\machine.env"
+@@ -75,8 +75,7 @@ internal static class WorkspaceCodeIndex
+                 if (trimmed.StartsWith("LAPLACE_SOURCE_ROOT=", StringComparison.Ordinal))
+                 {
+                     var val = trimmed["LAPLACE_SOURCE_ROOT=".Length..].Trim().Trim('"', '\'');
+-                    if (!string.IsNullOrWhiteSpace(val) && Directory.Exists(val))
+-                        return Path.GetFullPath(val);
++                    if (!string.IsNullOrWhiteSpace(val)) return RequireWorkspaceRoot(val);
+                 }
+             }
+         }
+@@ -87,6 +86,14 @@ internal static class WorkspaceCodeIndex
+         return AppContext.BaseDirectory;
+     }
+ 
++    private static string RequireWorkspaceRoot(string path)
++    {
++        var root = Path.GetFullPath(path);
++        if ((File.GetAttributes(root) & FileAttributes.Directory) == 0)
++            throw new InvalidDataException($"Declared workspace root is not a directory: {root}");
++        return root;
++    }
++
+     private readonly record struct WordVector(
+         Hash128 Id,
+         double X,
+@@ -156,15 +163,8 @@ internal static class WorkspaceCodeIndex
+     {
+         if (dataSource is null)
+             return null;
+-        try
+-        {
+-            return ResolveSemanticPeersAsync(dataSource, wordIds, CancellationToken.None, limitPerWord)
+-                .GetAwaiter().GetResult();
+-        }
+-        catch
+-        {
+-            return null;
+-        }
++        return ResolveSemanticPeersAsync(dataSource, wordIds, CancellationToken.None, limitPerWord)
++            .GetAwaiter().GetResult();
+     }
+ 
+     internal static async Task<IReadOnlyDictionary<Hash128, Hash128[]>?> ResolveSemanticPeersAsync(
+@@ -173,6 +173,7 @@ internal static class WorkspaceCodeIndex
+         CancellationToken ct = default,
+         int limitPerWord = 24)
+     {
++        ct.ThrowIfCancellationRequested();
+         if (dataSource is null)
+             return null;
+ 
+@@ -227,9 +228,12 @@ internal static class WorkspaceCodeIndex
+                         result[wid] = arr;
+                 }
+             }
+-            catch
++            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
++            catch (Exception ex)
+             {
+-                // Substrate DB lookup is optional; return any cached peers.
++                Serilog.Log.ForContext(typeof(WorkspaceCodeIndex)).Warning(ex,
++                    "MCP workspace peer lookup failed; using cached peers. missing_words={MissingWords} cached_words={CachedWords}",
++                    missing.Count, result.Count);
+             }
+         }
+ 
+@@ -741,21 +745,23 @@ internal static class WorkspaceCodeIndex
+         return Math.Min(0.17, boost);
+     }
+ 
+-    private static IndexSnapshot EnsureIndex(bool forceReindex)
++    internal static IndexSnapshot EnsureIndex(bool forceReindex)
+     {
+         var now = DateTime.UtcNow;
++        var rootPath = ResolveWorkspaceRoot();
+         var existing = CurrentSnapshot;
+-        if (!forceReindex && existing is not null && (now - LastScanCheckUtc).TotalSeconds < 120)
++        if (!forceReindex && existing is not null && existing.RootPath == rootPath
++            && (now - LastScanCheckUtc).TotalSeconds < 120)
+             return existing;
+ 
+         lock (SyncLock)
+         {
+             existing = CurrentSnapshot;
+-            if (!forceReindex && existing is not null && (now - LastScanCheckUtc).TotalSeconds < 120)
++            if (!forceReindex && existing is not null && existing.RootPath == rootPath
++                && (now - LastScanCheckUtc).TotalSeconds < 120)
+                 return existing;
+ 
+             CodepointPerfcache.LoadDefault();
+-            var rootPath = ResolveWorkspaceRoot();
+             var files = DiscoverSourceFiles(rootPath);
+             var seenPaths = new HashSet<string>(files.Count, StringComparer.OrdinalIgnoreCase);
+             var toIndex = new List<(string FullPath, string RelativePath, DateTime LastWriteUtc, long Length)>();
+@@ -773,11 +779,13 @@ internal static class WorkspaceCodeIndex
+                 toIndex.Add(f);
+             }
+ 
+-            var removed = FileCache.Keys.Where(k => !seenPaths.Contains(k)).ToList();
++            var nextCache = new Dictionary<string, FileEntry>(FileCache, StringComparer.OrdinalIgnoreCase);
++            var removed = nextCache.Keys.Where(k => !seenPaths.Contains(k)).ToList();
+             foreach (var r in removed)
+-                FileCache.Remove(r);
++                nextCache.Remove(r);
+ 
+-            if (existing is not null && toIndex.Count == 0 && removed.Count == 0 && !forceReindex)
++            if (existing is not null && existing.RootPath == rootPath
++                && toIndex.Count == 0 && removed.Count == 0 && !forceReindex)
+             {
+                 LastScanCheckUtc = now;
+                 return existing;
+@@ -793,18 +801,20 @@ internal static class WorkspaceCodeIndex
+                         var chunks = IndexFile(file.FullPath, file.RelativePath);
+                         indexedBag.Add((file.FullPath, new FileEntry(file.LastWriteUtc, file.Length, chunks)));
+                     }
+-                    catch
++                    catch (Exception ex)
+                     {
+-                        // Skip unreadable or locked file
++                        Serilog.Log.ForContext(typeof(WorkspaceCodeIndex)).Error(ex,
++                            "MCP workspace indexing failed for {SourceFile}.", file.FullPath);
++                        throw;
+                     }
+                 });
+ 
+                 foreach (var (fullPath, entry) in indexedBag)
+-                    FileCache[fullPath] = entry;
++                    nextCache[fullPath] = entry;
+             }
+ 
+-            var allChunks = new List<CodeChunk>(FileCache.Count * 4);
+-            foreach (var kv in FileCache.OrderBy(static k => k.Key, StringComparer.OrdinalIgnoreCase))
++            var allChunks = new List<CodeChunk>(nextCache.Count * 4);
++            foreach (var kv in nextCache.OrderBy(static k => k.Key, StringComparer.OrdinalIgnoreCase))
+                 allChunks.AddRange(kv.Value.Chunks);
+ 
+             var chunkArray = allChunks.ToArray();
+@@ -822,19 +832,17 @@ internal static class WorkspaceCodeIndex
+                 }
+             }
+ 
+-            var snapshot = new IndexSnapshot(rootPath, now, chunkArray, postings);
++            var snapshot = new IndexSnapshot(rootPath, now, nextCache.Count, chunkArray, postings);
++            FileCache = nextCache;
+             CurrentSnapshot = snapshot;
+             LastScanCheckUtc = now;
+             return snapshot;
+         }
+     }
+ 
+-    private static List<(string FullPath, string RelativePath, DateTime LastWriteUtc, long Length)> DiscoverSourceFiles(string rootPath)
++    internal static List<(string FullPath, string RelativePath, DateTime LastWriteUtc, long Length)> DiscoverSourceFiles(string rootPath)
+     {
+         var results = new List<(string, string, DateTime, long)>(3000);
+-        if (!Directory.Exists(rootPath))
+-            return results;
+-
+         var stack = new Stack<string>();
+         stack.Push(rootPath);
+ 
+@@ -865,9 +873,11 @@ internal static class WorkspaceCodeIndex
+                     results.Add((file, rel, info.LastWriteTimeUtc, info.Length));
+                 }
+             }
+-            catch
++            catch (Exception ex)
+             {
+-                // Ignore inaccessible directories
++                Serilog.Log.ForContext(typeof(WorkspaceCodeIndex)).Error(ex,
++                    "MCP workspace discovery failed for {SourceDirectory}.", dir);
++                throw;
+             }
+         }
+ 

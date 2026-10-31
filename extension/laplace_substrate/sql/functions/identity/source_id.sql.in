@@ -1,6 +1,0 @@
--- A source's canonical id from its registry name.
-CREATE OR REPLACE FUNCTION laplace.source_id(p_name text) RETURNS bytea
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT realize.canonical_id('substrate/source/' || p_name || '/v1');
-END;

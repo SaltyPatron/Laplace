@@ -1,8 +1,0 @@
-# Selected UTS #58 link normalization cases (Unicode 17.0.0).
-https://example.com/%CE%B1
-# Comments between pair members are packaging.
-
-https://example.com/α
-
-https://example.com#%CE%B1
-https://example.com#α

@@ -1,0 +1,188 @@
+diff --git a/app/Laplace.Core/Core/LaplaceInstall.cs b/app/Laplace.Core/Core/LaplaceInstall.cs
+index e47d58dff..926908ad6 100644
+--- a/app/Laplace.Core/Core/LaplaceInstall.cs
++++ b/app/Laplace.Core/Core/LaplaceInstall.cs
+@@ -232,11 +232,23 @@ public static class LaplaceInstall
+     /// Mask the password in a connection string for safe logging. Covers both the
+     /// `Password=` and `Pwd=` spellings.
+     /// </summary>
+-    public static string RedactConnectionString(string conn) =>
+-        string.IsNullOrEmpty(conn)
+-            ? conn
+-            : System.Text.RegularExpressions.Regex.Replace(
+-                conn, "(?i)(password|pwd)=[^;]*", "$1=***");
++    public static string RedactConnectionString(string conn)
++    {
++        if (string.IsNullOrEmpty(conn)) return conn;
++        try
++        {
++            var parsed = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = conn };
++            foreach (var key in parsed.Keys.Cast<string>().ToArray())
++                if (key.Contains("password", StringComparison.OrdinalIgnoreCase)
++                    || key.Equals("pwd", StringComparison.OrdinalIgnoreCase)) parsed[key] = "***";
++            return parsed.ConnectionString;
++        }
++        catch (ArgumentException)
++        {
++            // A malformed quoted password cannot safely be redacted with a regex.
++            return "(invalid connection string; contents withheld)";
++        }
++    }
+ 
+     public static string ResolveT0Perfcache()
+     {
+diff --git a/app/Laplace.Endpoints.Mcp/McpHttpHost.cs b/app/Laplace.Endpoints.Mcp/McpHttpHost.cs
+index b58d0f3c4..fafd279b8 100644
+--- a/app/Laplace.Endpoints.Mcp/McpHttpHost.cs
++++ b/app/Laplace.Endpoints.Mcp/McpHttpHost.cs
+@@ -5,6 +5,9 @@ using System.Text.Json;
+ using System.Text.Json.Nodes;
+ using Laplace.Engine.Core;
+ using Laplace.SubstrateCRUD.Npgsql;
++using Laplace.Ops;
++using Serilog;
++using Serilog.Context;
+ 
+ namespace Laplace.Endpoints.Mcp;
+ 
+@@ -45,6 +48,10 @@ internal static class McpHttpHost
+         options.Validate();
+         var database = toolsFactory is null || readiness is null ? ManagedServiceDatabase.Resolve() : null;
+         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
++        builder.Logging.ClearProviders();
++        builder.Logging.AddSerilog(new LoggerConfiguration().MinimumLevel.Information()
++            .Enrich.WithProperty("Transport", "http")
++            .ApplyLaplaceSinks("mcp", console: true).CreateLogger(), dispose: true);
+         // Kestrel binds loopback explicitly, so no ASPNETCORE_URLS override can expose
+         // it; TLS terminates in front of it.
+         builder.WebHost.ConfigureKestrel(k =>
+@@ -54,6 +61,32 @@ internal static class McpHttpHost
+         });
+         builder.Services.AddSingleton(_ => new McpSessions(options, toolsFactory ?? (() => new SubstrateTools(database))));
+         var app = builder.Build();
++        Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(app.Services.GetRequiredService<ILoggerFactory>(), parameterLoggingEnabled: false);
++        app.Use(async (context, next) =>
++        {
++            var id = LaplaceLogging.CorrelationId(context.Request.Headers["X-Correlation-Id"]);
++            context.Response.Headers["X-Correlation-Id"] = id;
++            using var scope = LogContext.PushProperty("CorrelationId", id);
++            try { await next(context); }
++            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
++            {
++                if (!context.Response.HasStarted) context.Response.StatusCode = 499;
++                app.Logger.LogInformation("MCP request was cancelled by the caller.");
++            }
++            catch (Exception ex)
++            {
++                if (!context.Response.HasStarted) context.Response.StatusCode = 500;
++                app.Logger.LogError(ex, "MCP HTTP request failed; response started: {ResponseStarted}.", context.Response.HasStarted);
++                throw;
++            }
++            finally
++            {
++                app.Logger.Log(context.Response.StatusCode >= 500 ? LogLevel.Error
++                    : context.Response.StatusCode >= 400 && context.Response.StatusCode != 499 ? LogLevel.Warning : LogLevel.Information,
++                    "MCP HTTP {RequestMethod} {RequestPath} returned {StatusCode}.",
++                    context.Request.Method, context.Request.Path.Value, context.Response.StatusCode);
++            }
++        });
+         var checkReady = readiness ?? (ct => ReadyAsync(database!, ct));
+         app.MapGet("/health/live", () => Results.Json(new { service = "laplace-mcp", live = true }));
+         app.MapGet("/health/ready", async (CancellationToken ct) =>
+@@ -67,7 +100,7 @@ internal static class McpHttpHost
+             }
+             catch (Exception ex) when (ex is not OutOfMemoryException)
+             {
+-                app.Logger.LogWarning("MCP readiness failed: {ErrorType}", ex.GetType().Name);
++                app.Logger.LogWarning(ex, "MCP readiness failed.");
+                 return Results.Json(new { service = "laplace-mcp", ready = false }, statusCode: 503);
+             }
+         });
+@@ -206,7 +239,7 @@ internal static class McpHttpHost
+             catch (Exception ex)
+             {
+                 context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("mcp")
+-                    .LogError("MCP handler failed: {ErrorType}", ex.GetType().Name);
++                    .LogError(ex, "MCP handler failed.");
+                 reply = McpServer.ErrorReply(message["id"]?.DeepClone(), -32603, "tool dispatch failed");
+             }
+             if (reply is null) { context.Response.StatusCode = 202; return; }
+diff --git a/app/Laplace.Endpoints.Mcp/SubstrateTools.cs b/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
+index 83e7656d5..cca341ed4 100644
+--- a/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
++++ b/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
+@@ -253,18 +257,22 @@ internal sealed class SubstrateTools : IMcpTools
+         }
+         catch (PostgresException ex)
+         {
++            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP tool database query failed.");
+             return ($"substrate error [{ex.SqlState}]: {ex.MessageText}", true);
+         }
+         catch (NpgsqlException ex)
+         {
++            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP tool database connection failed.");
+             return ($"substrate unavailable: {ex.Message}", true);
+         }
+         catch (AgentException ex)
+         {
++            Serilog.Log.ForContext<SubstrateTools>().Warning(ex, "MCP agent operation failed.");
+             return (ex.Message, true);
+         }
+         catch (ArgumentException ex)
+         {
++            Serilog.Log.ForContext<SubstrateTools>().Warning(ex, "MCP tool rejected its arguments.");
+             return (ex.Message, true);
+         }
+     }
+@@ -1008,6 +1016,7 @@ internal sealed class SubstrateTools : IMcpTools
+         catch (Exception ex)
+         {
+             _plainWriterBroken = true;
++            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP writer initialization failed.");
+             Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
+         }
+     }
+@@ -1443,9 +1452,9 @@ internal sealed class SubstrateTools : IMcpTools
+                     }
+                     row["meaning"] = meaningArr;
+                 }
+-                catch (NpgsqlException)
++                catch (NpgsqlException ex)
+                 {
+-                    row["witnessed_in_substrate"] = null;
++                    throw new NpgsqlException("Requested embedding meaning lookup failed; no complete result is available.", ex);
+                 }
+             }
+ 
+@@ -1591,9 +1600,9 @@ internal sealed class SubstrateTools : IMcpTools
+                     combined.Add(item.Row);
+                 }
+             }
+-            catch (NpgsqlException)
++            catch (NpgsqlException ex)
+             {
+-                // Substrate DB lookup is optional when workspace index satisfies code search
++                throw new NpgsqlException("Code search substrate lookup failed; combined results are incomplete.", ex);
+             }
+         }
+ 
+diff --git a/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs b/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs
+index 22366559e..4e490a26f 100644
+--- a/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs
++++ b/app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs
+@@ -177,6 +177,7 @@ internal static class InferenceEndpoints
+                 }
+                 catch (Exception ex) when (ex is not OperationCanceledException)
+                 {
++                    Serilog.Log.ForContext("SourceContext", "Laplace.Inference").Error(ex, "Inference stream failed after the HTTP response started.");
+                     await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
+                 }
+                 await ServerSentEvents.WriteDoneAsync(response, ct);
+@@ -385,6 +386,7 @@ internal static class InferenceEndpoints
+                 }
+                 catch (Exception ex) when (ex is not OperationCanceledException)
+                 {
++                    Serilog.Log.ForContext("SourceContext", "Laplace.Inference").Error(ex, "Inference stream failed after the HTTP response started.");
+                     await ServerSentEvents.WriteErrorAsync(response, "stream_failed", ex.Message, ct);
+                 }
+                 await ServerSentEvents.WriteDoneAsync(response, ct);

@@ -1,6 +1,0 @@
-DROP FUNCTION IF EXISTS laplace.word_curve(bytea);
-CREATE OR REPLACE FUNCTION structural.word_curve(p_word bytea) RETURNS geometry
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
-    SELECT structural.entity_curve(p_word);
-END;

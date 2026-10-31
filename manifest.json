@@ -1,0 +1,232 @@
+[
+  {
+    "original_path": "observability-20261021/audit-catches.cs",
+    "bytes": 1972,
+    "sha256": "a9cc6f51a28214c3d0bfec3f29d97dc1ef2e17e74f0f0ee8935e2d7cc22fe7a2"
+  },
+  {
+    "original_path": "observability-20261021/default-log-path-acceptance.cs",
+    "bytes": 874,
+    "sha256": "84cc74314f5900f21a5f8513a34ffd08fdb04b7154973ac5441f73c7b76ec994"
+  },
+  {
+    "original_path": "observability-20261021/default-log-path-owned.patch",
+    "bytes": 2684,
+    "sha256": "2f74bc1fb15a950b2114eaa93676b7eea368c234cbb22477c3329f7d9a962506"
+  },
+  {
+    "original_path": "observability-20261021/empty-geometry-plan.sql",
+    "bytes": 684,
+    "sha256": "22b26872d301969d86d762d763c0d4f58ff7cc26837e6e0825fd79fa2621659e"
+  },
+  {
+    "original_path": "observability-20261021/generation-private-installed-functions.sql",
+    "bytes": 4009,
+    "sha256": "5c4a3489962845765997a782e3f31b2544e8e5cd159563904a3288dd7100d318"
+  },
+  {
+    "original_path": "observability-20261021/generation-routing-probe.sql",
+    "bytes": 1294,
+    "sha256": "3702281dabf785ec7a2ee1a53ed89b6e4b52e00d9e07b48ae97d3856837859c2"
+  },
+  {
+    "original_path": "observability-20261021/geometry-policy-auto.sql",
+    "bytes": 1350,
+    "sha256": "62fa9539239a1bc158f8c63a0dd2aa93f6e9c45208626a2cc374e5c2facdbb67"
+  },
+  {
+    "original_path": "observability-20261021/geometry-policy-force_custom_plan.sql",
+    "bytes": 1362,
+    "sha256": "883e60c0f8b97a35ca9309f8920eda56d0fe18bc2e214a5c5907e567cb33527d"
+  },
+  {
+    "original_path": "observability-20261021/geometry-policy-force_generic_plan.sql",
+    "bytes": 1363,
+    "sha256": "f0fb255c0665fcc0fa6457108589bd9e9ea0b1533ea56d119c6871ec77aa1d30"
+  },
+  {
+    "original_path": "observability-20261021/ingest-cli-evict-final-procedure-backup.sql",
+    "bytes": 10050,
+    "sha256": "cf7f7fecc40033af70d74b3f195778a581fa79c0d1ef684300490344d7027125"
+  },
+  {
+    "original_path": "observability-20261021/ingest-cli-evict-noop.sql",
+    "bytes": 239,
+    "sha256": "a27fe023326e0929ec05158a2e281b718668c246c37d1b11582e0e9f32c3d817"
+  },
+  {
+    "original_path": "observability-20261021/ingest-cli-evict-procedure-backup.sql",
+    "bytes": 10549,
+    "sha256": "817108ecf06baa4b2188afa9ac3daf7ca04422924f16f4f3c3b81edef0078c81"
+  },
+  {
+    "original_path": "observability-20261021/ingest-cli-evict-seed.sql",
+    "bytes": 468,
+    "sha256": "afb604a164afab0a83c83ef262eda1ed444f4458267d9ec18d5f4a15789cfce9"
+  },
+  {
+    "original_path": "observability-20261021/ingest-native-regress/consensus_upsert.diff",
+    "bytes": 1090,
+    "sha256": "39360483b66b946a65e4ba77265d37453cfa0bb805839bfaad377b1ab6ef56c4"
+  },
+  {
+    "original_path": "observability-20261021/ingest-native-regress/evict_source.diff",
+    "bytes": 10458,
+    "sha256": "8b9803a6a8c0942f460a3695c18794b11ba9b3b96ec99fc484d556a6636c74b5"
+  },
+  {
+    "original_path": "observability-20261021/legacy-log-readers.sql",
+    "bytes": 1261,
+    "sha256": "52b5d3d6fe3a6fb2762c236c8f9f72fe379d831abdab361a75c46e2c71dcd3f2"
+  },
+  {
+    "original_path": "observability-20261021/log-source-sql-acceptance.sql",
+    "bytes": 1753,
+    "sha256": "0f56b822a6d747cf3bf338dfa868a5d337f443c8c2de310f14a7984eabefc8c8"
+  },
+  {
+    "original_path": "observability-20261021/logging-acceptance.cs",
+    "bytes": 1061,
+    "sha256": "1022b87f529c1659a63d16dbbff94fea12fc7d7446afd36bc851b778479b2e4f"
+  },
+  {
+    "original_path": "observability-20261021/logging-owned-hunks.patch",
+    "bytes": 9657,
+    "sha256": "dd06ba63353d521c75c6661ab6ab9258cf41d52d5c1d1aa27fca3c8fdb9189b3"
+  },
+  {
+    "original_path": "observability-20261021/operational-memory-unindexed-diagnostic.sql",
+    "bytes": 35223,
+    "sha256": "0b28473156ed6589e8aba4249334b0eb6f00f969e9363eb6333bc575de84c602"
+  },
+  {
+    "original_path": "observability-20261021/prompt-geometry-auto-policy.sql",
+    "bytes": 1349,
+    "sha256": "b2e844711b9bc112f9d5948ff70e761c2d1f1e4bcdad7270cabbf22a1a69cdf3"
+  },
+  {
+    "original_path": "observability-20261021/prompt-geometry-plan-policy.sql",
+    "bytes": 1363,
+    "sha256": "f0fb255c0665fcc0fa6457108589bd9e9ea0b1533ea56d119c6871ec77aa1d30"
+  },
+  {
+    "original_path": "observability-20261021/sql-reader-permissions.sql",
+    "bytes": 498,
+    "sha256": "5f348a51be5b7508f34e6fb5be1fe1376aa5b5b971db25e1f8c2d4c2e8dd1bfb"
+  },
+  {
+    "original_path": "observability-20261021/sql-readers-acceptance.sql",
+    "bytes": 2228,
+    "sha256": "7b8e0b63e0f818fa0d06b86df023209049671f0442654cbf04286740094e30dd"
+  },
+  {
+    "original_path": "observability-20261021/steer-semantic-diagnostic.sql",
+    "bytes": 28474,
+    "sha256": "1f7969fc16432b5f6b6d7d0929478eb31ba3a33f46bc2ff3717950a3aa705333"
+  },
+  {
+    "original_path": "observability-20261021/steer-semantic-unindexed-diagnostic.sql",
+    "bytes": 28540,
+    "sha256": "1f2dc746ddf9b154f61895e51bba10c0227a0cc8d173ee6c459e84f4f3c933aa"
+  },
+  {
+    "original_path": "observability-20261021/SubstrateTools-before-mcp-process.cs",
+    "bytes": 93190,
+    "sha256": "9fd044bac03f3c27f5b72e1b0a94606eb80d1d6933fe849ff0fb6cc276e860dc"
+  },
+  {
+    "original_path": "observability-20261021/SubstrateTools-owned-mcp-process.patch",
+    "bytes": 2735,
+    "sha256": "bf3329c1cfbe31ed78568d4112c2637bf32452cb403221d781e7d1603b95d243"
+  },
+  {
+    "original_path": "observability-20261021/SubstrateTools-preserved-foreign.patch",
+    "bytes": 1983,
+    "sha256": "fb2613f0cb5eac672268afc7fbb0e3e25ba97e1a088f536e200e79975c62ed03"
+  },
+  {
+    "original_path": "observability-20261021/WorkspaceCodeIndex-before-diagnostics.cs",
+    "bytes": 49591,
+    "sha256": "6c2d8d8693eb5d100c368e52b02483bccc40920788454e93d9418327e9dbde06"
+  },
+  {
+    "original_path": "observability-20261021/WorkspaceCodeIndex-owned-diagnostics.patch",
+    "bytes": 9154,
+    "sha256": "dedd22ea47ce846a16d1d5c2772d91affbc4695b35082bb2c32d5a83c093fc4b"
+  },
+  {
+    "original_path": "observability-20261021/WorkspaceCodeIndex-preserved-foreign.patch",
+    "bytes": 973,
+    "sha256": "28d7e5982417f79cac0af0a68e2965a30f77eef05d224a330bbe31c9469348d4"
+  },
+  {
+    "original_path": "read-path-20261020/inspection-api-acceptance.cs",
+    "bytes": 1429,
+    "sha256": "814006bc29eff86efcb4192ad6729ddc8f8ca57007971721a5d87d1f1e60cb18"
+  },
+  {
+    "original_path": "read-path-20261020/inspection-baseline.cs",
+    "bytes": 1356,
+    "sha256": "d3529cf01d8ffb69f5d457ea912c77d90b39de78ecbfdb4738133a8a5298f365"
+  },
+  {
+    "original_path": "read-path-20261020/leaderboard-acceptance.cs",
+    "bytes": 5105,
+    "sha256": "702992ed30f9416190e637b5a9b236f32aded6af47457ca95ae27f54c0b2daa8"
+  },
+  {
+    "original_path": "read-path-20261020/leaderboard-acceptance.ps1",
+    "bytes": 6533,
+    "sha256": "6851a13039cfb602a5875a93d7214fefe9977622a8eb7e827e688a70b04a32bd"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-baseline.sql",
+    "bytes": 919,
+    "sha256": "e1da0e91eb738d5c97c897feefc38ca811c173a3579e318c30be8e895d49e306"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-parity.sql",
+    "bytes": 390,
+    "sha256": "65d7b4e8c960b91b79364d939008ac5d37ca0c660b0fe03c2cfa9fd15565fa3b"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-permissions.sql",
+    "bytes": 1677,
+    "sha256": "870cd046af1567f2ab38cd5264e6f034fdf8a9fa4bd294acab8a125f68a3a24e"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-plan-acceptance.sql",
+    "bytes": 2642,
+    "sha256": "7fc654d4932d0d8b7bcd339d0618ec3bc0b21a49de63f81894a74588b40dcb3b"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-service-acceptance.cs",
+    "bytes": 3652,
+    "sha256": "3b6837ea085abbf709994701cc2ffda9e01b02760cf07bad83eb41f4d7ab7570"
+  },
+  {
+    "original_path": "read-path-20261020/query-repair-warm.sql",
+    "bytes": 405,
+    "sha256": "7a25d81330cf3099db9546ecfd45e75ee2a088c87a8878c4862da8404cebd4a8"
+  },
+  {
+    "original_path": "read-path-20261020/read-contracts.sql",
+    "bytes": 2080,
+    "sha256": "bf3b8e711f9c64997341f216212a46fc80f04c0b9f6ba40a0ab1112d3633f525"
+  },
+  {
+    "original_path": "read-path-20261020/render-boundary-acceptance.sql",
+    "bytes": 3258,
+    "sha256": "b14c11c4bec4879a806ac66b2b2dd3f246450a96661dae404c12df05f075bfaf"
+  },
+  {
+    "original_path": "read-path-20261020/render-boundary-baseline.sql",
+    "bytes": 652,
+    "sha256": "5323e796c4e6c0445184578daba7587e5f94128867b20bb28bab7c38c73cc9b2"
+  },
+  {
+    "original_path": "read-path-20261020/render-boundary-fixture.sql",
+    "bytes": 1098,
+    "sha256": "46f30f37159d51ebaab7525d87d4951b1fb814fff87d7c3bf66cf7969927fa42"
+  }
+]

@@ -1,5 +1,0 @@
--- Drops laplace_eff_mu(subject, type, object). Readers compute
--- consensus.eff_mu(rating, rd) on the consensus row they hold, which inlines and
--- matches the (rating - 2*rd) expression indexes; a lookup wrapper does neither.
-DROP FUNCTION IF EXISTS laplace.laplace_eff_mu(bytea, bytea, bytea);
-DROP FUNCTION IF EXISTS laplace.laplace_eff_mu(bytea, bytea, bytea);

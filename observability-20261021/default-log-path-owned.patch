@@ -1,0 +1,54 @@
+diff --git a/app/Laplace.Core/Core/LaplaceInstall.cs b/app/Laplace.Core/Core/LaplaceInstall.cs
+index b2b104a8f..53800e11d 100644
+--- a/app/Laplace.Core/Core/LaplaceInstall.cs
++++ b/app/Laplace.Core/Core/LaplaceInstall.cs
+@@ -52,8 +52,8 @@ public static class LaplaceInstall
+ 
+     /// <summary>
+     /// Where the console apps write their CSV diagnostic logs, which SQL reads back through
+-    /// ops.app_log / file_fdw. LAPLACE_OPS_LOG_DIR overrides; an installed binary uses
+-    /// $InstallRoot/logs; a binary inside a working tree uses a per-user state directory.
++    /// ops.app_log / file_fdw. Services declare LAPLACE_OPS_LOG_DIR; interactive
++    /// processes default to per-user state, including installed command-line tools.
+     /// Created on first use by the file sink.
+     /// </summary>
+     public static string OpsLogDirectory
+@@ -64,11 +64,8 @@ public static class LaplaceInstall
+             if (!string.IsNullOrWhiteSpace(fromEnv))
+                 return Path.GetFullPath(fromEnv.Trim());
+ 
+-            // Never inside a working tree: a repo build's $InstallRoot is under app/, and a
+-            // logs/ directory owned by whoever ran the binary would block cleaning the
+-            // checkout. A per-user state directory is outside every checkout.
+-            if (!InBuildTree()) return Path.Combine(InstallRoot, "logs");
+-
++            // Published releases are immutable too: even --help initializes logging.
++            // Default writes must never create files beside installed executables.
+             var state = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+             // GetFolderPath returns "" with no HOME (systemd units, containers); a relative
+             // path there would resolve against the CWD, which may be the working tree.
+@@ -77,24 +74,6 @@ public static class LaplaceInstall
+         }
+     }
+ 
+-    /// <summary>
+-    /// True when the running binary sits under a repo working tree. Walks up from
+-    /// AppContext.BaseDirectory only: TryRepoRoot's stamped path resolves a repo root
+-    /// for INSTALLED binaries too, which inverts the question asked here.
+-    /// </summary>
+-    private static bool InBuildTree()
+-    {
+-        var dir = AppContext.BaseDirectory;
+-        while (dir is not null)
+-        {
+-            if (Directory.Exists(Path.Combine(dir, "app")) && Directory.Exists(Path.Combine(dir, "engine")))
+-                return true;
+-            dir = Directory.GetParent(dir)?.FullName;
+-        }
+-
+-        return false;
+-    }
+-
+     public static string EndpointBaseUrl => $"http://127.0.0.1:{EndpointPort}";
+ 
+     public static bool TryRepoRoot(out string root)

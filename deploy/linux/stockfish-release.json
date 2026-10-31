@@ -1,8 +1,0 @@
-{
-  "version": "19",
-  "tag": "sf_19",
-  "repository": "https://github.com/official-stockfish/Stockfish.git",
-  "commit": "edb0d9db6731067ec50ce619ff372b463bc4dd5d",
-  "release": "https://github.com/official-stockfish/Stockfish/releases/tag/sf_19",
-  "released_at": "2026-09-05T08:33:17Z"
-}

@@ -1,6 +1,0 @@
-node_modules/
-public/architecture/
-dist/
-*.local
-web/test-results/
-openapi/openapi.json

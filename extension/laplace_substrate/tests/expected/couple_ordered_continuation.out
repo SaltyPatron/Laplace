@@ -1,3 +1,0 @@
--- Exact whole-observation continuation participates in COUPLE before ORIENT.
-\set ECHO none
-NOTICE:  ordered continuation: exact observation changed pre-ORIENT program state and remained the selected sequence route

@@ -1,5 +1,0 @@
-DROP FUNCTION IF EXISTS laplace.refuted(bigint, bigint);
-CREATE OR REPLACE FUNCTION consensus.refuted(p_rating bigint, p_rd bigint)
-    RETURNS boolean
-    AS 'MODULE_PATHNAME', 'pg_laplace_refuted'
-    LANGUAGE c LAPLACE_IMMUTABLE STRICT;

@@ -1,0 +1,61 @@
+diff --git a/app/Laplace.Endpoints.Mcp/SubstrateTools.cs b/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
+index cca341ed4..9bafbdd6a 100644
+--- a/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
++++ b/app/Laplace.Endpoints.Mcp/SubstrateTools.cs
+@@ -1129,55 +1129,9 @@ internal sealed class SubstrateTools : IMcpTools
+         if (!File.Exists(path) && !Directory.Exists(path))
+             return ($"path not found: {path}", true);
+ 
+-        var cliPath = Laplace.Ops.IngestProcessRunner.ResolveCliBinary();
+-        if (cliPath is null)
+-            return ("Laplace.Cli binary not found. Publish the CLI at LAPLACE_CLI_EXE or install the release's cli directory.", true);
+-
+-        var psi = new ProcessStartInfo(cliPath)
+-        {
+-            RedirectStandardOutput = true,
+-            RedirectStandardError = true,
+-            UseShellExecute = false,
+-        };
+-        psi.ArgumentList.Add("ingest");
+-        psi.ArgumentList.Add(source);
+-        psi.ArgumentList.Add(path);
+-
+-        using var proc = Process.Start(psi)!;
+-        var stdout = new StringBuilder();
+-        var stderr = new StringBuilder();
+-        proc.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+-        proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+-        proc.BeginOutputReadLine();
+-        proc.BeginErrorReadLine();
+-
+-        var exited = proc.WaitForExit(Math.Max(1, timeoutSeconds) * 1000);
+-        if (!exited)
+-        {
+-            try { proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+-            return ($"ingest '{source}' timed out after {timeoutSeconds}s and was killed (another ingest may " +
+-                     "be holding the substrate-wide lock — retry with a longer timeout_seconds once it clears). " +
+-                     $"Partial output:\n{Tail(stdout.ToString(), 4000)}", true);
+-        }
+-
+-        var combined = stdout.ToString();
+-        if (stderr.Length > 0) combined += "\n--- stderr ---\n" + stderr;
+-        var result = new JsonObject
+-        {
+-            ["rows"] = new JsonArray(new JsonObject
+-            {
+-                ["source"] = source,
+-                ["path"] = path,
+-                ["exit_code"] = proc.ExitCode,
+-                ["output"] = Tail(combined, 4000),
+-            })
+-        };
+-        return (result.ToJsonString(), proc.ExitCode != 0);
++        return IngestProcessCommand.Run(source, path, timeoutSeconds);
+     }
+ 
+-    private static string Tail(string s, int maxChars) =>
+-        s.Length <= maxChars ? s : "...[truncated]...\n" + s[^maxChars..];
+-
+     private static (string, bool) Help(JsonObject? args)
+     {
+         var name = Opt(args, "name");

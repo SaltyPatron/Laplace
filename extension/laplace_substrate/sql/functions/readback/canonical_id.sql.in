@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION realize.canonical_id(p_name text) RETURNS bytea
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'));
-END;

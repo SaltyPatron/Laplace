@@ -1,0 +1,25 @@
+diff --git a/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs b/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
+index 9bf4b0056..efc66b141 100644
+--- a/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
++++ b/app/Laplace.Endpoints.Mcp/WorkspaceCodeIndex.cs
+@@ -669,6 +669,20 @@ internal static class WorkspaceCodeIndex
+             .ToList();
+     }
+ 
++    public static JsonObject Reindex(bool force)
++    {
++        var snapshot = EnsureIndex(force);
++        return new JsonObject
++        {
++            ["root_path"] = snapshot.RootPath,
++            ["built_at_utc"] = snapshot.BuiltAtUtc.ToString("o"),
++            ["indexed_files"] = FileCache.Count,
++            ["indexed_chunks"] = snapshot.Chunks.Length,
++            ["unique_words"] = snapshot.Postings.Count,
++            ["force"] = force,
++        };
++    }
++
+     private static double ComputeSymbolAndPathBoost(CodeChunk chunk, string rawQuery, List<string> queryTokens)
+     {
+         double boost = 0.0;

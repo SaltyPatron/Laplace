@@ -1,0 +1,187 @@
+diff --git "a/E:\\Repositories\\Laplace\\Laplace\\extension\\laplace_substrate\\tests\\expected\\evict_source.out" "b/E:\\Repositories\\Laplace\\.build\\.tmp\\observability-20261021\\ingest-native-regress\\evict_source.out"
+index 3774f49..f7484d9 100644
+--- "a/E:\\Repositories\\Laplace\\Laplace\\extension\\laplace_substrate\\tests\\expected\\evict_source.out"
++++ "b/E:\\Repositories\\Laplace\\.build\\.tmp\\observability-20261021\\ingest-native-regress\\evict_source.out"
+@@ -36,17 +36,17 @@ DECLARE
+     t3       timestamptz := '2026-03-01 00:00:00+00';
+     affected bigint;
+ BEGIN
+-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+-        (src_w, 0, type_t, NULL), (src_a, 0, type_t, NULL),
+-        (rel_p, 0, type_t, src_w), (subj, 0, type_t, src_w),
+-        (o1, 0, type_t, src_w), (o2, 0, type_t, src_w), (o3, 0, type_t, src_w),
+-        (o4, 0, type_t, src_w), (o5, 0, type_t, src_w),
++    INSERT INTO laplace.entities (id, tier, type_id) VALUES
++        (src_w, 0, type_t), (src_a, 0, type_t),
++        (rel_p, 0, type_t), (subj, 0, type_t),
++        (o1, 0, type_t), (o2, 0, type_t), (o3, 0, type_t),
++        (o4, 0, type_t), (o5, 0, type_t),
+         -- m1/m2: the analysis lane's derivation-gate markers (deleted by evict).
+         -- m3: CONTENT first-observed by the analysis source (must survive).
+         -- m4: a marker-typed entity of ANOTHER source (must survive).
+-        (m1, 4, marker_t, src_a), (m2, 4, marker_t, src_a),
+-        (m3, 4, type_t, src_a), (m4, 4, marker_t, src_w),
+-        (f1, 4, type_t, src_a), (f2, 4, type_t, src_a)
++        (m1, 4, marker_t), (m2, 4, marker_t),
++        (m3, 4, type_t), (m4, 4, marker_t),
++        (f1, 4, type_t), (f2, 4, type_t)
+     ON CONFLICT (id) DO NOTHING;
+ 
+     INSERT INTO laplace.ingest_run_journal
+@@ -79,12 +79,12 @@ BEGIN
+         (public.laplace_hash128_blake3('test/evict/a1'), subj, rel_p, o1, src_a, NULL,
+          2, t2, 2, 2 * s_conf, phi_a),
+         (public.laplace_hash128_blake3('test/evict/a2'), subj, rel_p, o1, src_a, NULL,
+-         1, t3, 1, s_ref, phi_a),
++         1, t3, 1, s_ref)phi_a
+         -- cell II (subj, rel_p, o2): MIXED — witness survives, cell refolds
+         (public.laplace_hash128_blake3('test/evict/w1'), subj, rel_p, o2, src_w, NULL,
+          2, t1, 3, 3 * s_conf, phi_w),
+         (public.laplace_hash128_blake3('test/evict/a3'), subj, rel_p, o2, src_a, NULL,
+-         2, t2, 2, s_conf, phi_a),
++         2, t2, 2, s_conf)phi_a
+         -- cell III (subj, rel_p, o3): WITNESS ONLY — untouched, byte-identical
+         (public.laplace_hash128_blake3('test/evict/w2'), subj, rel_p, o3, src_w, NULL,
+          2, t1, 4, 2 * win, phi_w),
+@@ -92,18 +92,18 @@ BEGIN
+         (public.laplace_hash128_blake3('test/evict/w3'), subj, rel_hot, o4, src_w, NULL,
+          2, t1, 2, 2 * s_conf, phi_w),
+         (public.laplace_hash128_blake3('test/evict/a4'), subj, rel_hot, o4, src_a, NULL,
+-         0, t2, 1, 0, phi_a),
++         0, t2, 1, 0)phi_a
+         -- cell V (subj, rel_p, NULL): ANALYSIS ONLY, NULL object — culled
+         (public.laplace_hash128_blake3('test/evict/a5'), subj, rel_p, NULL, src_a, NULL,
+          2, t2, 3, 3 * win, phi_a),
+         -- cell VI (subj, rel_p, o5): interleaved observations — grouped refold pin:
+         -- surviving witness rows t1 and t3 straddle the deleted analysis row t2
+         (public.laplace_hash128_blake3('test/evict/w4'), subj, rel_p, o5, src_w, NULL,
+-         2, t1, 1, win, phi_w),
++         2, t1, 1, win)phi_w
+         (public.laplace_hash128_blake3('test/evict/a6'), subj, rel_p, o5, src_a, NULL,
+          2, t2, 2, 2 * s_conf, phi_a),
+         (public.laplace_hash128_blake3('test/evict/w5'), subj, rel_p, o5, src_w, NULL,
+-         1, t3, 2, s_conf, phi_w);
++         1, t3, 2, s_conf)phi_w
+ 
+     -- Consensus built exactly as ingest builds it: one incremental fold per
+     -- batch against the stored prior, batches in timestamp order.
+@@ -153,13 +153,16 @@ BEGIN
+ 
+     RAISE NOTICE '- evict fixture deposited: 6 cells, 12 evidence rows, 2 markers';
+ END $$;
+-NOTICE:  - evict fixture deposited: 6 cells, 12 evidence rows, 2 markers
++ERROR:  syntax error at or near "phi_a"
++LINE 74:          1, t3, 1, s_ref)phi_a
++                                  ^
+ -- The eviction under test. p_batch = 2 forces multiple delete/refold batches per
+ -- relation; p_drain = false leaves highway_mask_dirty observable so its exact
+ -- contents can be asserted before the logger-bearing drain path is exercised below.
+ CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
+                   ARRAY[laplace.entity_type_id('Evict_TestMarker')],
+                   p_batch => 2, p_drain => false);
++ERROR:  entity_type_id: 'Evict_TestMarker' is not declared in engine/manifest/entity_types.toml
+ DO $$
+ DECLARE
+     src_w    bytea := laplace.source_id('EvictTestWitness');
+@@ -322,7 +325,8 @@ BEGIN
+ 
+     RAISE NOTICE '- evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair';
+ END $$;
+-NOTICE:  - evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair
++ERROR:  relation "_ev_snap_v1" does not exist
++CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 27
+ -- Exercise both maintenance procedures far enough to compile and execute their
+ -- batched progress loggers. The perfcache is optional in a regress database, so
+ -- suppress its environment-dependent warning while retaining any ERROR.
+@@ -342,6 +346,7 @@ NOTICE:  - highway mask drain and rebuild progress paths execute
+ CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
+                   ARRAY[laplace.entity_type_id('Evict_TestMarker')],
+                   p_batch => 2, p_drain => false);
++ERROR:  entity_type_id: 'Evict_TestMarker' is not declared in engine/manifest/entity_types.toml
+ -- Unseeded no-op: a source with zero rows evicts cleanly (0 rows, not an error).
+ CALL ops.evict_source(laplace.source_id('Evict_NoSuchSource'), NULL, NULL,
+                   p_drain => false);
+@@ -364,7 +369,18 @@ BEGIN
+     END IF;
+     RAISE NOTICE '- re-evict and unseeded evict are no-ops';
+ END $$;
+-NOTICE:  - re-evict and unseeded evict are no-ops
++ERROR:  relation "_ev_snap_evicted" does not exist
++LINE 2:     JOIN _ev_snap_evicted s
++                 ^
++QUERY:  SELECT count(*)            FROM laplace.consensus c
++    JOIN _ev_snap_evicted s
++      ON s.subject_id = c.subject_id AND s.type_id = c.type_id
++     AND s.object_id IS NOT DISTINCT FROM c.object_id
++     AND s.rating = c.rating AND s.rd = c.rd AND s.volatility = c.volatility
++     AND s.witness_count = c.witness_count
++     AND s.last_observed_at = c.last_observed_at
++    WHERE c.subject_id = subj
++CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
+ -- Re-derive at v2: the lane re-runs (markers are gone, so the hydrator re-yields
+ -- every unit) and deposits the SAME testimony under fresh evidence rows. Witness
+ -- counts return exactly to the v1 snapshot — the #508 acceptance: no double count.
+@@ -395,11 +411,11 @@ BEGIN
+         (public.laplace_hash128_blake3('test/evict/v2/a1'), subj, rel_p, o1, src_a, NULL,
+          2, t2, 2, 2 * s_conf, phi_a),
+         (public.laplace_hash128_blake3('test/evict/v2/a2'), subj, rel_p, o1, src_a, NULL,
+-         1, t3, 1, s_ref, phi_a),
++         1, t3, 1, s_ref)phi_a
+         (public.laplace_hash128_blake3('test/evict/v2/a3'), subj, rel_p, o2, src_a, NULL,
+-         2, t2, 2, s_conf, phi_a),
++         2, t2, 2, s_conf)phi_a
+         (public.laplace_hash128_blake3('test/evict/v2/a4'), subj, rel_hot, o4, src_a, NULL,
+-         0, t2, 1, 0, phi_a),
++         0, t2, 1, 0)phi_a
+         (public.laplace_hash128_blake3('test/evict/v2/a5'), subj, rel_p, NULL, src_a, NULL,
+          2, t2, 3, 3 * win, phi_a),
+         (public.laplace_hash128_blake3('test/evict/v2/a6'), subj, rel_p, o5, src_a, NULL,
+@@ -456,7 +472,9 @@ BEGIN
+ 
+     RAISE NOTICE '- re-derive at v2: witness counts equal the v1 snapshot (no double count)';
+ END $$;
+-NOTICE:  - re-derive at v2: witness counts equal the v1 snapshot (no double count)
++ERROR:  syntax error at or near "phi_a"
++LINE 28:          1, t3, 1, s_ref)phi_a
++                                  ^
+ -- Cleanup: this file COMMITs (the procedure requires it), so remove the fixture.
+ DO $$
+ DECLARE
+@@ -494,6 +512,8 @@ BEGIN
+     DROP TABLE IF EXISTS _ev_snap_evicted;
+     RAISE NOTICE '- evict fixture cleaned up';
+ END $$;
++NOTICE:  table "_ev_snap_v1" does not exist, skipping
++NOTICE:  table "_ev_snap_evicted" does not exist, skipping
+ NOTICE:  - evict fixture cleaned up
+ -- DEFAULT is hash-subpartitioned into eight leaves. Nine dynamic relation types
+ -- guarantee at least one leaf contains more than one type; relation discovery
+@@ -508,8 +528,8 @@ DECLARE
+     obj    bytea;
+     evid   bytea;
+ BEGIN
+-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+-    VALUES (src, 0, type_t, NULL), (subj, 0, type_t, src);
++    INSERT INTO laplace.entities (id, tier, type_id)
++    VALUES (src, 0, type_t), (subj, 0, type_t);
+ 
+     FOR i IN 1..9 LOOP
+         rel := public.laplace_hash128_blake3(
+@@ -518,8 +538,8 @@ BEGIN
+             convert_to('test/evict/default/object/' || i, 'UTF8'));
+         evid := public.laplace_hash128_blake3(
+             convert_to('test/evict/default/evidence/' || i, 'UTF8'));
+-        INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+-        VALUES (rel, 0, type_t, src), (obj, 0, type_t, src);
++        INSERT INTO laplace.entities (id, tier, type_id)
++        VALUES (rel, 0, type_t), (obj, 0, type_t);
+         INSERT INTO laplace.attestations
+             (id, subject_id, type_id, object_id, source_id, context_id,
+              outcome, last_observed_at, observation_count,
+@@ -558,4 +578,5 @@ BEGIN
+     DELETE FROM laplace.entities WHERE id IN (src, subj);
+     RAISE NOTICE '- default-subpartition discovery evicted all dynamic relations in one call';
+ END $$;
+-NOTICE:  - default-subpartition discovery evicted all dynamic relations in one call
++ERROR:  FAIL: DEFAULT-subpartition discovery left 8 dynamic relation row(s)
++CONTEXT:  PL/pgSQL function inline_code_block line 11 at RAISE
