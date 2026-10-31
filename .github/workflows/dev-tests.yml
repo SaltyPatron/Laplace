@@ -47,11 +47,11 @@ jobs:
     env:
       LAPLACE_REUSE_INSTALLED_NATIVE: '1'
       LAPLACE_EXTERNAL: ${{ github.workspace }}/.ci-dependencies
-      LAPLACE_INSTALL_PREFIX: /opt/laplace/app/cli/native/recipe-engine
-      LAPLACE_RECIPES: /opt/laplace/app/cli/native/recipe-engine/share/laplace/recipes
-      LAPLACE_TIER0: /opt/laplace/app/cli/share/laplace/tier0.bin
-      LAPLACE_FLAGS: /opt/laplace/app/cli/share/laplace/tier0.flags
-      LAPLACE_HIGHWAY: /opt/laplace/app/cli/share/laplace/highway.bin
+      LAPLACE_INSTALL_PREFIX: /opt/laplace
+      LAPLACE_RECIPES: /opt/laplace/share/laplace/recipes
+      LAPLACE_TIER0: /opt/laplace/share/laplace/tier0.bin
+      LAPLACE_FLAGS: /opt/laplace/share/laplace/tier0.flags
+      LAPLACE_HIGHWAY: /opt/laplace/share/laplace/highway.bin
       LAPLACE_DB: Host=/tmp;Username=laplace;Database=postgres;Command Timeout=0
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
