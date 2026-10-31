@@ -38,7 +38,7 @@ function(configure name native environment)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env "LAPLACE_RECIPE_ENGINE_SOURCE=${environment}" "LAPLACE_NATIVE=${native}"
         "${CMAKE_COMMAND}" -S "${WORK}/consumer" -B "${WORK}/${name}" -G Ninja
         "-DSELECTOR=${SELECTOR}" "-DNATIVE_SELECTOR=${NATIVE_SELECTOR}" "-DLAPLACE_EXTERNAL=${WORK}/fallback" ${ARGN}
-        RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+        WORKING_DIRECTORY "${WORK}" RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
     if(NOT status EQUAL 0)
         message(FATAL_ERROR "Configure failed: ${output}\n${error}")
     endif()
@@ -94,4 +94,8 @@ configure(native_parent "${native_b}" "" "-DPARENT_NATIVE=${native_a}" "-DLAPLAC
 check(native_parent 17)
 configure(fallback "" "")
 check(fallback 99)
-message(STATUS "Native/Engine selection: changed environment/sibling defaults, explicit cache, cache removal, parent precedence, fallback and unchanged no-work build passed")
+configure(native_relative "${native_b}" "" "-DLAPLACE_NATIVE=a tree/Laplace-Native")
+check(native_relative 17)
+configure(engine_relative "${native_b}" "" "-DLAPLACE_RECIPE_ENGINE_SOURCE=a tree/Laplace-Engine")
+check(engine_relative 17)
+message(STATUS "Native/Engine selection: changed environment/sibling defaults, explicit and relative cache paths, cache removal, parent precedence, fallback and unchanged no-work build passed")
