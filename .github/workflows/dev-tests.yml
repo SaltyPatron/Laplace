@@ -122,6 +122,8 @@ jobs:
     timeout-minutes: 120
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      # Playwright selects its pinned browser revision in the persistent CI estate.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ env.LAPLACE_CI_WORK }}/playwright
       LAPLACE_CI_NATIVE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_CI_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
       LAPLACE_CI_OPERATIONS_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
