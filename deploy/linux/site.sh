@@ -356,16 +356,14 @@ phase_app() {
   cp "$ROOT/scripts/lib/chess_source_integrity.py" "$stage/app/operations/scripts/lib/"
   cp "$ROOT/deploy/linux/stockfish-release.json" "$stage/app/operations/deploy/linux/"
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || fail "the endpoint build did not write web/openapi/openapi.json"
-  ( cd "$ROOT/web"
-    lock="$(sha256sum package-lock.json | cut -d' ' -f1)"
-    [[ -d node_modules && "$(cat node_modules/.laplace-npm-ci.stamp 2>/dev/null)" == "$lock" ]] || { npm ci --no-audit --no-fund --prefer-offline 8>&-; echo "$lock" > node_modules/.laplace-npm-ci.stamp; }
-    npm run gen:api 8>&-; npm run build 8>&- )
+  python3 "$ROOT/scripts/web-artifact.py" build \
+    --root "$ROOT" --manifest "$SITE_BUILD/web-build.json" 8>&-
   [[ -f "$ROOT/web/dist/index.html" ]] || fail "the web build wrote no dist/index.html"
   mkdir -p "$stage/app/wwwroot"; cp -a "$ROOT/web/dist/." "$stage/app/wwwroot/"
   git -C "$ROOT" rev-parse HEAD | tee "$stage/app/.laplace-source-revision" > "$stage/app/wwwroot/.laplace-web-source-revision"
   # The install phase collected the complete non-platform native closure. Keep
   # it together in every API, CLI, MCP and chess payload sent to another host.
-  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/*.so* "$stage/app/"
+  cp -a --no-preserve=ownership "$LAPLACE_INSTALL_PREFIX"/lib/*.so* "$stage/app/"
   local f
   for f in core dynamics synthesis syzygy; do
     [[ -f "$stage/app/liblaplace_$f.so" ]] || fail "native runtime not staged: liblaplace_$f.so"
@@ -380,21 +378,21 @@ phase_app() {
   [[ -f "$stage/app/Laplace.Endpoints.OpenAICompat.dll" ]] || fail "API not staged"
   # the MCP server (laplace-mcp.service) in its own directory of the app, with the same native closure beside it
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" -c Release --no-self-contained -o "$stage/app/mcp-runtime" -v minimal --nologo
-  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/mcp-runtime/"; done
+  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -a --no-preserve=ownership "$f" "$stage/app/mcp-runtime/"; done
   [[ -f "$stage/app/mcp-runtime/Laplace.Endpoints.Mcp.dll" ]] || fail "MCP server not staged"
   # Chess entry points belong to the same monorepo release and native closure.
   dotnet_app publish "$ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" -c Release --no-self-contained -o "$stage/app/uci" -v minimal --nologo
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" -c Release --no-self-contained -o "$stage/app/lichess-runtime" -v minimal --nologo
   for f in "$stage/app"/lib*.so*; do
     [[ -e "$f" ]] || continue
-    cp -fL "$f" "$stage/app/uci/"
-    cp -fL "$f" "$stage/app/lichess-runtime/"
+    cp -a --no-preserve=ownership "$f" "$stage/app/uci/"
+    cp -a --no-preserve=ownership "$f" "$stage/app/lichess-runtime/"
   done
   [[ -x "$stage/app/uci/laplace-uci" && -f "$stage/app/lichess-runtime/Laplace.Endpoints.Lichess.dll" ]] || fail "chess runtimes not staged"
   # Both API and MCP launch the same installed CLI. A serving host must not
   # depend on a runner checkout or an old in-repository build directory.
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$stage/app/cli" -v minimal --nologo
-  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -fL "$f" "$stage/app/cli/"; done
+  for f in "$stage/app"/lib*.so*; do [[ -e "$f" ]] && cp -a --no-preserve=ownership "$f" "$stage/app/cli/"; done
   # Each entry point can compose identities during assembly initialization,
   # before its host reads environment files. Ship its canonical floor alongside
   # the native libraries; the promotion bundle deduplicates identical files.
@@ -763,7 +761,7 @@ phase_seed() {
   local cli="$SITE_WORK/cli"
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$cli" -v minimal --nologo
   # the CLI runs on the installed native closure (ingest-source.sh compares the two byte for byte)
-  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$cli/"
+  LAPLACE_REUSE_INSTALLED_NATIVE=1 bash "$ROOT/scripts/sync-managed-native-artifacts.sh" --output "$cli"
   mkdir -p "$SITE_WORK/scratch" "$SITE_WORK/ingest-logs/ops"
   # shellcheck disable=SC2086
   INGEST="$LAPLACE_DATA" \

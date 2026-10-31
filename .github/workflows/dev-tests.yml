@@ -57,6 +57,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: tree-sitter/tree-sitter-c
@@ -129,6 +132,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Check out the canonical Native implementation
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

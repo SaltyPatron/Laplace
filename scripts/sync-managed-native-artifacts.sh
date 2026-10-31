@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
 # Make every already-built managed output execute the native artifact from THIS tree.
 #
-# Directory.Build.props copies native libraries beside managed binaries at build time, but
+# Directory.Build.targets synchronizes native libraries beside managed binaries, but
 # native-only source changes do not necessarily invalidate affected-app's C# project graph.
 # On the persistent runner that leaves an older app-local .so in bin/Release. .NET probes
 # the app directory before the OS loader/LD_LIBRARY_PATH, so managed parity tests can then
 # execute stale native code even though build/engine/core contains the new library.
 #
-# This is a synchronization step, not a build: only existing managed output roots are
-# touched, and bytes always come from the exact native build tree the test profile is about
-# to validate.
+# --output selects one build or publish directory. Without it, synchronize the
+# existing Release outputs used by the managed test profile.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+outputs=()
+while (($#)); do
+  case $1 in
+    --output)
+      [[ $# -ge 2 && -n $2 ]] || { echo 'Usage: sync-managed-native-artifacts.sh [--output DIRECTORY]...' >&2; exit 2; }
+      outputs+=("$2"); shift 2 ;;
+    *) echo "Unknown native synchronization argument: $1" >&2; exit 2 ;;
+  esac
+done
+explicit_outputs=${#outputs[@]}
 
 if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
   native_root="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
@@ -40,7 +50,8 @@ if [[ ! -f "$core_source" ]]; then
   exit 1
 fi
 
-mapfile -t outputs < <(
+if (( explicit_outputs == 0 )); then
+  mapfile -t outputs < <(
   for dir in "$ROOT"/app/*/bin/Release/*; do
     [[ -d "$dir" ]] && printf '%s\n' "$dir"
   done
@@ -49,37 +60,64 @@ mapfile -t outputs < <(
       [[ -d "$dir" ]] && printf '%s\n' "$dir"
     done
   fi
-)
+  )
+fi
 
 if (( ${#outputs[@]} == 0 )); then
   echo "::error::no managed Release outputs exist — run pipeline.sh build before managed tests" >&2
   exit 1
 fi
 
+# Keep one physical library per source version. Publish the real files before
+# their aliases, and replace changed files by rename so mapped images retain
+# their old inode. Content comparison also catches restored or older mtimes.
+shopt -s nullglob
+artifacts=()
+for src in "${native[@]}"; do
+  artifacts+=("$src" "$src".[0-9]*)
+done
 copied=0
+linked=0
+unchanged=0
+pending=
+trap '[[ -z "$pending" ]] || rm -f -- "$pending"' EXIT
 for dir in "${outputs[@]}"; do
-  for src in "${native[@]}"; do
-    [[ -f "$src" ]] || continue
-    install -m 775 "$src" "$dir/$(basename "$src")"
+  mkdir -p -- "$dir"
+  for src in "${artifacts[@]}"; do
+    [[ -f "$src" && ! -L "$src" ]] || continue
+    destination="$dir/$(basename -- "$src")"
+    if [[ -f "$destination" && ! -L "$destination" ]] && cmp -s -- "$src" "$destination"; then
+      unchanged=$((unchanged + 1))
+      continue
+    fi
+    pending=$(mktemp "$dir/.laplace-native.XXXXXX")
+    cp --preserve=mode,timestamps -- "$src" "$pending"
+    mv -fT -- "$pending" "$destination"
+    pending=
     copied=$((copied + 1))
   done
+  for src in "${artifacts[@]}"; do
+    [[ -L "$src" ]] || continue
+    alias=$(basename -- "$(readlink -- "$src")")
+    [[ "$(dirname -- "$src")/$alias" -ef "$src" ]] || {
+      echo "::error::native alias is not contained in its library directory: $src" >&2
+      exit 1
+    }
+    destination="$dir/$(basename -- "$src")"
+    if [[ -L "$destination" && $(readlink -- "$destination") == "$alias" ]]; then
+      unchanged=$((unchanged + 1))
+      continue
+    fi
+    pending=$(mktemp "$dir/.laplace-native.XXXXXX")
+    ln -sfn -- "$alias" "$pending"
+    mv -fT -- "$pending" "$destination"
+    pending=
+    linked=$((linked + 1))
+  done
+  cmp -s -- "$core_source" "$dir/$(basename -- "$core_source")" || {
+    echo "::error::managed native core differs from exact $native_label source: $dir" >&2
+    exit 1
+  }
 done
 
-# The strongest contract is the same one NativeArtifactIdentityTests asserts: at least the
-# core test host's app-local image must be byte-identical to build/engine/core.
-core_test="$ROOT/app/Laplace.Core.Tests/bin/Release/net10.0/liblaplace_core.so"
-if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
-  core_test="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Core.Tests/Release/net10.0/liblaplace_core.so"
-fi
-if [[ -d "$(dirname "$core_test")" ]]; then
-  [[ -f "$core_test" ]] || {
-    echo "::error::managed core test output has no app-local liblaplace_core.so after sync" >&2
-    exit 1
-  }
-  cmp -s "$core_source" "$core_test" || {
-    echo "::error::managed core test native image still differs from exact $native_label source" >&2
-    exit 1
-  }
-fi
-
-echo "managed native artifact sync: source=$native_label ${#outputs[@]} output roots, $copied copies"
+echo "managed native artifact sync: source=$native_label ${#outputs[@]} output roots, $copied copies, $linked links, $unchanged unchanged"

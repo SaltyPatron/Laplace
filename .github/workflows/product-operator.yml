@@ -136,6 +136,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Enroll selected existing bindings under the host reservation
         env:
           REQUEST_PATH: ${{ needs.access-contract.outputs.request }}
@@ -195,6 +198,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Read role state under the installed host reservation
         shell: bash
         env:
@@ -288,6 +294,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Execute the same installed-runtime checks used by promotion
         if: inputs.operation == 'verify'
         env:
@@ -324,6 +333,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Operate on the selected installed runtime
         env:
           OPERATION: ${{ inputs.operation }}
@@ -361,6 +373,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Execute ordinary two-turn chat and capture substrate/native lifecycle
         shell: bash
         run: |
@@ -415,6 +430,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Persist verified bindings, activate owner policy and verify serving authority
         env:
           REQUEST_PATH: ${{ matrix.request }}
@@ -517,6 +535,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Audit or clean with the qualified owner
         uses: ./.github/actions/storage
         with:
