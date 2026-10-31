@@ -14,7 +14,7 @@ public sealed class LexiconReadLiveTests
         Skip.If(string.IsNullOrWhiteSpace(connection), "Explicit seeded lexicon acceptance connection not supplied");
         await using var client = new SubstrateClient(connection);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        var field = await client.ResponseFieldAsync("love", "hate",512,0,cancellation.Token);
+        var field = await client.LexiconAsync("love", "hate",cancellation.Token);
         Assert.NotNull(field);
         string? evidence = Environment.GetEnvironmentVariable("LAPLACE_LIVE_READ_EVIDENCE_FILE");
         if (!string.IsNullOrWhiteSpace(evidence))

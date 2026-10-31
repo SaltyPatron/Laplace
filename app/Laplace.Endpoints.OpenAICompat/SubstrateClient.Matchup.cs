@@ -64,15 +64,24 @@ internal sealed partial class SubstrateClient
         return new MatchupResponse("matchup", xSideTask.Result, ySideTask.Result, tapeTask.Result);
     }
 
-    public async Task<ResponseFieldResponse?> ResponseFieldAsync(
+    public Task<ResponseFieldResponse?> ResponseFieldAsync(
         string xRef, string yRef, int fanout, int nearest, CancellationToken ct)
+        => ReadComparisonAsync(xRef, yRef, fanout, nearest, false, ct);
+
+    public Task<ResponseFieldResponse?> LexiconAsync(string xRef, string yRef, CancellationToken ct)
+        => ReadComparisonAsync(xRef, yRef, 0, 0, true, ct);
+
+    private async Task<ResponseFieldResponse?> ReadComparisonAsync(
+        string xRef, string yRef, int fanout, int nearest, bool lexical, CancellationToken ct)
     {
         var roots = await ResolveTopicsAsync([xRef, yRef], ct).ConfigureAwait(false);
         if (roots.Any(root => root is null)) return null;
         await using var connection = await _dataSourceReadOnly.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var snapshot = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
-        var rows = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,
-            roots.Select(root => root!.Value.Id).ToArray(), fanout, nearest, ct).ConfigureAwait(false);
+        var occurrences = roots.Select(root => root!.Value.Id).ToArray();
+        var rows = lexical
+            ? await NpgsqlSubstrateReads.LexiconFieldAsync(connection, occurrences, ct).ConfigureAwait(false)
+            : await NpgsqlSubstrateReads.ResponseFieldAsync(connection, occurrences, fanout, nearest, ct).ConfigureAwait(false);
         // These are query criteria over recorded predicate content. No corpus
         // name, corpus identity, or corpus-specific traversal is selected here.
         var relations = await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
@@ -104,7 +113,7 @@ internal sealed partial class SubstrateClient
                     ? canonical.Replace('_',' ').ToLowerInvariant() : row.RelationLabel ?? "is connected to",
                 Hex(row.Via)!,row.Outbound == true ? row.AnchorLabel! : row.Label,
                 row.Outbound == true ? row.Label : row.AnchorLabel!,row.Witnesses!.Value)).ToArray();
-        return new("response.field", 2, fanout, nearest, rows.Select(row =>
+        return new(lexical ? "lexicon" : "response.field", 2, fanout, nearest, rows.Select(row =>
         {
             if (row.Route == 0 && row.Via is null)
                 throw new InvalidDataException("A Native relation response has no bound claim identity.");

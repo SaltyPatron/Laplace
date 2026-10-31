@@ -641,6 +641,20 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/explore/lexicon", async (string? x, string? y,
+            HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            {
+                var response = await substrate.LexiconAsync(x.Trim(), y.Trim(), ct);
+                return response is null
+                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
+                    : Results.Json(response);
+            });
+        }).WithTags("explore").Produces<ResponseFieldResponse>();
+
         // The response field is an inspection of all Native coupling routes. It
         // remains separate from the fast cards and the direct-claim summary.
         app.MapGet("/v1/explore/response-field", async (string? x, string? y, int? fanout, int? nearest,

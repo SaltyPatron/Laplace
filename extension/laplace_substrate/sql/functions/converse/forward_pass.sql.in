@@ -15,7 +15,7 @@ DROP FUNCTION IF EXISTS converse.couple(bytea, bytea, bytea, int) CASCADE;
 -- Binding evidence preserves the word/language/key composition and the
 -- witnessed claim that admits it. Native tuples alone are not testimony:
 -- an admitted claim must connect that carrier to its word or its key.
-CREATE OR REPLACE FUNCTION converse.binding_evidence(p_terms bytea[],p_lang bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION converse.binding_evidence(p_terms bytea[],p_lang bytea,p_support boolean)
 RETURNS TABLE(term bytea,key bytea,binding bytea,claim bytea,language bytea,
               in_lang boolean,eff_mu numeric,witnesses bigint,games bigint)
 LANGUAGE sql STABLE PARALLEL SAFE
@@ -26,11 +26,10 @@ BEGIN ATOMIC
   -- Both indexed Native keys are required before materializing a carrier.
   -- A scalar word such as "a" must not fetch every text containing that scalar.
   SELECT t.id AS word,h.entity,public.laplace_parts(h.path) AS parts
-  FROM roots r JOIN public.physicality h
-   ON h.path OPERATOR(public.&&) r.ids
+  FROM roots r CROSS JOIN LATERAL unnest(r.ids) t(id) JOIN public.physicality h
+   ON h.path OPERATOR(public.^@) t.id
    AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind','tuple')]
-  CROSS JOIN LATERAL unnest(r.ids) t(id)
-  WHERE public.laplace_path_length(h.path)=3 AND public.laplace_path_starts(h.path,t.id)
+  WHERE public.laplace_path_length(h.path)=3
  ), languages AS MATERIALIZED (
   SELECT * FROM laplace.language_codes(ARRAY(SELECT DISTINCT public.blake3_send(parts[2]) FROM carriers))
  ), lexical AS MATERIALIZED (
@@ -40,9 +39,18 @@ BEGIN ATOMIC
   FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM lexical),NULL::bigint,
    ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
   WHERE public.laplace_path_length(c.path)=3
+ ), binding_cells AS MATERIALIZED (
+  SELECT DISTINCT c.* FROM lexical t JOIN cells c
+   ON (c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+   OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))
  ), admitted AS MATERIALIZED (
-  SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM cells),false) a
+  SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM binding_cells WHERE p_support),false) a
   WHERE a.witness GROUP BY a.claim
+  UNION ALL
+  -- The lexical read consumes the standing admitted during ingestion. Detailed
+  -- source counts are a separate requested measurement, never fabricated from
+  -- games or a registered-source total.
+  SELECT entity,NULL::bigint FROM binding_cells WHERE NOT p_support AND matches>0
  ), native AS MATERIALIZED (
   SELECT DISTINCT ON(t.word,t.parts[3],t.entity)
    public.blake3_send(t.word) AS term,public.blake3_send(t.parts[3]) AS key,
@@ -69,6 +77,14 @@ BEGIN ATOMIC
    ON a.subject_id=b.term AND a.type_id=b.type_id AND a.object_id=b.key
   GROUP BY b.term,b.key,b.id,b.rating,b.rd,b.witness_count
  ) SELECT * FROM native UNION ALL SELECT * FROM legacy;
+END;
+
+CREATE OR REPLACE FUNCTION converse.binding_evidence(p_terms bytea[],p_lang bytea DEFAULT NULL)
+RETURNS TABLE(term bytea,key bytea,binding bytea,claim bytea,language bytea,
+              in_lang boolean,eff_mu numeric,witnesses bigint,games bigint)
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+ SELECT * FROM converse.binding_evidence(p_terms,p_lang,true);
 END;
 
 -- K: one election over the same evidence used by lexical and comparison reads.

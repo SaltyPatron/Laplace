@@ -69,4 +69,21 @@ public sealed class ResponseFieldContractTests
         using var response = await client.GetAsync("/v1/explore/response-field?x=love&y=hate");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task LexiconReadHasItsOwnAuthenticatedEndpoint()
+    {
+        await using var factory = new Factory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/v1/explore/lexicon?x=light&y=dark");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var field = await response.Content.ReadFromJsonAsync<ResponseFieldResponse>();
+        Assert.NotNull(field);
+        Assert.Equal("lexicon", field.Object);
+        Assert.Equal(0, field.Nearest);
+        await using var anonymous = new Factory(false);
+        using var unauthenticated = anonymous.CreateClient();
+        using var refused = await unauthenticated.GetAsync("/v1/explore/lexicon?x=light&y=dark");
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+    }
 }

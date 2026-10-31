@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteText } from '../../layout/useRouteText';
-import { Button, ErrorText, Input, LoadingText, Muted, Panel } from '@ui';
-import { exploreMatchup, exploreMatchupVerdict, exploreResponseField } from '../../query/api';
+import { Button, ErrorText, Input, LoadingText, Muted, Panel, useReadResource } from '@ui';
+import { exploreMatchup, exploreMatchupVerdict, exploreResponseField, exploreLexicon } from '../../query/api';
 import type { Matchup, MatchupSide, MatchupVerdict, ResponseField, ResponseFieldEntry, LexiconReading, TapeRow } from '../../query/types';
 import { useAppStore } from '../../store';
 import { PaymentRequiredError } from '../../api/client';
@@ -57,7 +57,7 @@ export function MatchupView() {
         if (stale) return;
         setData(m);
         if (m.x.chess && m.y.chess) return;
-        exploreResponseField(x, y, opts)
+        exploreLexicon(x, y, opts)
           .then((field) => { if (!stale) setResponseField(field); })
           .catch((e) => { if (!stale) setResponseError(e instanceof Error ? e.message : String(e)); });
       })
@@ -120,7 +120,7 @@ export function MatchupView() {
             <SideCard side={data.y} align="right" readings={responseField?.readings?.filter(row => row.side === 2)} readingError={responseError} />
           </div>
           {data.x.chess == null && data.y.chess == null && (
-            <details><summary>Inspect supporting records</summary><ResponseFieldView field={responseField} error={responseError} /></details>
+            <SupportingRecords key={JSON.stringify([x, y, tenant, quoteId])} x={x} y={y} />
           )}
           {data.x.chess && data.y.chess ? <Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /> :
             <details><summary>Direct claim overlap</summary><Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /></details>}
@@ -128,6 +128,20 @@ export function MatchupView() {
       ) : null}
     </div>
   );
+}
+
+function SupportingRecords({ x, y }: { x: string; y: string }) {
+  const { tenant, quoteId } = useAppStore();
+  const [open, setOpen] = useState(false);
+  const inspection = useReadResource({
+    key: JSON.stringify(['comparison-inspection', x, y, tenant, quoteId]),
+    enabled: open,
+    read: (signal) => exploreResponseField(x, y, { tenant, quoteId, signal }),
+  });
+  return <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>Inspect supporting records</summary>
+    {open && <ResponseFieldView field={inspection.data ?? null} error={inspection.error?.message ?? null} />}
+  </details>;
 }
 
 function displayRelation(type: string, chessPlayer: boolean) {

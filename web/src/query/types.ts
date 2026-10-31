@@ -171,7 +171,7 @@ export interface ResponseFieldEntry {
 }
 
 export interface ResponseField {
-  object: 'response.field';
+  object: 'response.field' | 'lexicon';
   rounds: number;
   fanout: number;
   nearest: number;

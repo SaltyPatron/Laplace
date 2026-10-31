@@ -22,7 +22,16 @@ public static partial class NpgsqlSubstrateReads
     /// <summary>Two batched Native coupling rounds. Relation, containment and shape remain distinct responses.</summary>
     public static Task<IReadOnlyList<ResponseFieldRow>> ResponseFieldAsync(
         NpgsqlConnection connection, IReadOnlyList<byte[]> occurrences, int fanout, int nearest,
-        CancellationToken ct = default) => NpgsqlRead.ReadRowsAsync(connection, SqlCatalog.Get("query.response_field"),
+        CancellationToken ct = default) => ReadFieldAsync(connection, occurrences, fanout, nearest, false, ct);
+
+    public static Task<IReadOnlyList<ResponseFieldRow>> LexiconFieldAsync(
+        NpgsqlConnection connection, IReadOnlyList<byte[]> occurrences,
+        CancellationToken ct = default) => ReadFieldAsync(connection, occurrences, 0, 0, true, ct);
+
+    private static Task<IReadOnlyList<ResponseFieldRow>> ReadFieldAsync(
+        NpgsqlConnection connection, IReadOnlyList<byte[]> occurrences, int fanout, int nearest,
+        bool lexical, CancellationToken ct) => NpgsqlRead.ReadRowsAsync(connection,
+            SqlCatalog.Get(lexical ? "query.lexicon_field" : "query.response_field"),
             static r => new ResponseFieldRow(r.GetInt32(0), r.GetInt32(1),
                 r.IsDBNull(2) ? null : r.GetFieldValue<byte[]>(2), r.IsDBNull(3) ? null : r.GetString(3),
                 r.GetFieldValue<byte[]>(4), r.GetString(5), r.GetInt16(6),
@@ -33,6 +42,9 @@ public static partial class NpgsqlSubstrateReads
                 r.GetInt16(15), r.IsDBNull(16) ? null : r.GetDouble(16),
                 r.IsDBNull(17) ? null : r.GetBoolean(17),r.GetFieldValue<int[]>(18),
                 r.GetFieldValue<int[]>(19),r.GetFieldValue<byte[][]>(20),r.GetFieldValue<int[]>(21),r.GetBoolean(22),r.GetFieldValue<int[]>(23)),
-            p => { p.AddWithValue("occurrences", occurrences.ToArray()); p.AddWithValue("fanout", fanout); p.AddWithValue("nearest", nearest); },
+            p => {
+                p.AddWithValue("occurrences", occurrences.ToArray());
+                if (!lexical) { p.AddWithValue("fanout", fanout); p.AddWithValue("nearest", nearest); }
+            },
             ct: ct);
 }

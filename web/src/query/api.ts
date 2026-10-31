@@ -65,7 +65,12 @@ export function exploreMatchupVerdict(x: string, y: string, opts?: ApiOptions) {
 
 export function exploreResponseField(x: string, y: string, opts?: ApiOptions) {
   return apiGet<import('./types').ResponseField>(
-    `/v1/explore/response-field?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, opts);
+    `/v1/explore/response-field?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}&fanout=64&nearest=8`, opts);
+}
+
+export function exploreLexicon(x: string, y: string, opts?: ApiOptions) {
+  return apiGet<import('./types').ResponseField>(
+    `/v1/explore/lexicon?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`, opts);
 }
 
 export interface TaxonomyNode { id: string; label: string; eff_mu?: number | null }

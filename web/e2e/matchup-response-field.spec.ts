@@ -18,6 +18,9 @@ test('comparison leads with meanings and witnessed relationships, with inspectio
     plane: 'direct witnessed claims', verdict: 'No direct witnessed claim connects these entities.',
   } }));
   await page.route('**/v1/explore/response-field?*', (route) => route.fulfill({ json: { ...field, ...lexicon } }));
+  await page.route('**/v1/explore/lexicon?*', (route) => route.fulfill({ json: { ...field, ...lexicon, object: 'lexicon' } }));
+  const inspectionRequests: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('/v1/explore/response-field?')) inspectionRequests.push(request.url()); });
   await page.goto('/explore/matchup/love/hate');
   await expect(page.getByRole('heading', { name: 'Meanings and usage', exact: true })).toHaveCount(2);
   await expect(page.getByText(lexicon.readings[0].text, { exact: true })).toBeVisible();
@@ -25,6 +28,7 @@ test('comparison leads with meanings and witnessed relationships, with inspectio
   await expect(page.getByText('is antonym of', { exact: true })).toBeVisible();
   await expect(page.getByText('No direct witnessed claim connects these entities.', { exact: true })).not.toBeVisible();
   await expect(page.getByRole('heading', { name: 'Response field', exact: true })).not.toBeVisible();
+  expect(inspectionRequests).toHaveLength(0);
   await page.locator('summary').filter({ hasText: 'Inspect supporting records' }).click();
   await expect(page.getByRole('heading', { name: 'Response field', exact: true })).toBeVisible();
   await expect(page.getByText('No recorded definitions were found for this entity.')).toHaveCount(0);
