@@ -16,7 +16,7 @@ export function LexiconEntry({ field, error, onRetry }: {
   if (!field) return <Panel title="Meanings and usage"><LoadingText>Reading recorded meanings and usage…</LoadingText></Panel>;
   const readings = field.readings ?? [];
   const relationships = field.connections ?? [];
-  return <Stack gap={4}>
+  return <Stack gap={4} className={styles.lexiconEntry}>
     <Panel title="Meanings and usage">
       {readings.length === 0 ? <Muted>No recorded description or usage example was found for this entry.</Muted> :
         <ol className={styles.meanings}>{readings.slice(0, limit).map(reading => <li key={reading.text}>

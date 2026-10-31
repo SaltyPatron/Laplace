@@ -5,6 +5,7 @@ const claim = '22222222222222222222222222222222';
 const target = '33333333333333333333333333333333';
 
 test('entity browse leads with meanings and readable facts and fetches inspection on demand', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 700 });
   const inspection: string[] = [];
   await page.route('**/v1/auth/me', route => route.fulfill({ json: { authenticated: false, user: null, providers: [], devPrincipal: 'test' } }));
   await page.route(`**/v1/explore/entities/${id}/preview`, route => route.fulfill({ json: {
@@ -13,7 +14,14 @@ test('entity browse leads with meanings and readable facts and fetches inspectio
   await page.route('**/v1/explore/lexicon?*', route => route.fulfill({ json: {
     object: 'lexicon', rounds: 2, fanout: 0, nearest: 0,
     readings: [{ side: 1, text: 'matter that has been deposited by some natural process', relation: 'definition', via: 'sediment', claim_ids: [claim], witnesses: null, standing: 1087 }],
-    connections: [{ relation: 'at location', claim_id: claim, from: 'sediment', to: 'bottom of sea', from_id: id, to_id: target, witnesses: null }],
+    connections: [
+      { relation: 'at location', claim_id: claim, from: 'sediment', to: 'bottom of sea', from_id: id, to_id: target, witnesses: null },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        relation: 'is a', claim_id: '4'.repeat(31) + index.toString(16),
+        from: `Related deposited material ${index + 1}, carried by a natural process and left where the movement slows down`,
+        to: 'matter that has been deposited by some natural process', from_id: target, to_id: id, witnesses: null,
+      })),
+    ],
     rows: [{ claim_id: claim, outbound: true }],
   } }));
   await page.route(`**/v1/explore/entities/${id}`, route => {
@@ -24,7 +32,7 @@ test('entity browse leads with meanings and readable facts and fetches inspectio
   page.on('request', request => { if (request.url().endsWith('/record')) standing.push(request.url()); });
   await page.goto(`/explore/entity/${id}`);
   await expect(page.getByRole('heading', { name: 'sediment', exact: true })).toBeVisible();
-  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true })).toBeVisible();
+  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('at location', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'bottom of sea', exact: true })).toHaveAttribute('href', `/explore/entity/${target}`);
   await expect(page.getByRole('heading', { name: 'Salient facts', exact: true })).toHaveCount(0);
@@ -35,5 +43,5 @@ test('entity browse leads with meanings and readable facts and fetches inspectio
   await page.getByText('Inspect source records', { exact: true }).click();
   await expect.poll(() => inspection.length).toBe(1);
   // A failed inspection must not replace the readable primary answer.
-  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true })).toBeVisible();
+  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true }).first()).toBeVisible();
 });

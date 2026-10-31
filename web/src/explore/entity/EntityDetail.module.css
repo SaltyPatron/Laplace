@@ -16,6 +16,8 @@
     line-height: 1.6;
   }
 
+  .lexiconEntry { flex: 0 0 auto; }
+
   .meanings p, .readableRelations p { margin: 0 0 var(--space-2); }
   .sourceEvidence { font-size: var(--text-sm); color: var(--color-text-muted); }
   .sourceEvidence summary { cursor: pointer; }
