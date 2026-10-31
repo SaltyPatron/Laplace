@@ -6,7 +6,7 @@
       "relation": "a definition, one or more example sentences, or both",
       "via": "i76395",
       "claim_ids": [
-        "920b3fd2ab4eac0fb022461754c0d11a",
+        "f1fcd569d21bef9a8dabfbf7c563c0cf",
         "7a58ca2581653dfc963912b7c06de475"
       ],
       "witnesses": 1,
@@ -14,36 +14,36 @@
     },
     {
       "side": 2,
-      "text": "COD:  feel intense dislike for or a strong aversion towards",
-      "relation": "come with definitions",
-      "via": "[Experiencer_focus · hate.v]",
+      "text": "the emotion of intense dislike; a feeling of dislike so strong that it demands action",
+      "relation": "a definition, one or more example sentences, or both",
+      "via": "i76414",
       "claim_ids": [
-        "9d63e3a0ad19731914c5241ca2ebf584",
-        "b9b893b10cc825754a598b84dcde01c4"
-      ],
-      "witnesses": 1,
-      "standing": 1177.3505190364938
-    },
-    {
-      "side": 1,
-      "text": "If I have to read things up , this is a relaxation -- I love music , I love gardening and I love just pottering round the house .",
-      "relation": "example sentence",
-      "via": "[Experiencer_focus · love.v]",
-      "claim_ids": [
-        "064802730e379cb6b8986333e5ecc9ed",
-        "0b01aadf43ec27201bb0e53fe1494d7f"
+        "02feb31ba7d92cc4e8fdc4ea1225af80",
+        "c901085fe8db75977c15030e7aa63ad0"
       ],
       "witnesses": 1,
       "standing": 1087.0706196107135
     },
     {
-      "side": 2,
-      "text": "I wore horrible hippy flared dresses , which I hated .",
-      "relation": "example sentence",
-      "via": "[Experiencer_focus · hate.v]",
+      "side": 1,
+      "text": "a score of zero in tennis or squash; \"it was 40 love\"",
+      "relation": "a definition, one or more example sentences, or both",
+      "via": "i108148",
       "claim_ids": [
-        "9d63e3a0ad19731914c5241ca2ebf584",
-        "830d299364fd2ea59fca22e17f5f0dc4"
+        "6ff3f549d60171aef07da6f902418ef0",
+        "d1e80872504e023befbfb10517c1b984"
+      ],
+      "witnesses": 1,
+      "standing": 1087.0706196107135
+    },
+    {
+      "side": 1,
+      "text": "a deep feeling of sexual desire and attraction; \"their love left them indifferent to their surroundings\"; \"she was his first love\"",
+      "relation": "a definition, one or more example sentences, or both",
+      "via": "i76091",
+      "claim_ids": [
+        "fc7b148dd67de90857be7b2669302ffe",
+        "2d553224547afe7859099b3e0ad02870"
       ],
       "witnesses": 1,
       "standing": 1087.0706196107135

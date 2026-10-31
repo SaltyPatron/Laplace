@@ -24,14 +24,14 @@ public sealed class LexiconReadLiveTests
         Assert.Contains(field.Readings,row => row.Side == 2);
         Assert.All(field.Readings,row =>
         {
-            Assert.NotEmpty(row.ClaimIds);
+            Assert.True(row.ClaimIds.Count >= 2);
             Assert.True(row.Witnesses > 0);
             Assert.False(string.IsNullOrWhiteSpace(row.Text));
         });
         Assert.Contains(field.Readings,row => row.Text.Contains("positive emotion",StringComparison.OrdinalIgnoreCase));
         Assert.Contains(field.Readings,row => row.Text.Contains("dislike",StringComparison.OrdinalIgnoreCase));
         Assert.Contains(field.Readings,row => row.Relation.Contains("example",StringComparison.OrdinalIgnoreCase));
-        Assert.True(field.Readings.Select(row => row.Relation).Distinct().Count() > 1);
+        Assert.DoesNotContain(field.Readings,row => row.Text.Contains("temporary red mark",StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(field.Connections);
         Assert.All(field.Connections,row => Assert.False(row.Relation.StartsWith('[')));
         Assert.Contains(field.Connections,row => row.Relation == "is antonym of" && row.Witnesses > 0);

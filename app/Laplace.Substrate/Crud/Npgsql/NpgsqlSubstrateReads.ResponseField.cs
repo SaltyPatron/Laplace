@@ -17,7 +17,7 @@ public static partial class NpgsqlSubstrateReads
     public sealed record ResponseFieldRow(int Round, int Occurrence, byte[]? Anchor, string? AnchorLabel,
         byte[] Entity, string Label, short Route, byte[]? Via, byte[]? Relation, string? RelationLabel,
         double? Rating, double? Deviation, double? Volatility, long? Matches, long? Witnesses,
-        short Tier, double? Distance, bool? Outbound, int[] Origins, int[] Targets, byte[][] SupportClaims, int[] Anchors, bool Textual);
+        short Tier, double? Distance, bool? Outbound, int[] Origins, int[] Targets, byte[][] BindingClaims, int[] Anchors, bool Textual, int[] ReadingOrigins);
 
     /// <summary>Two batched Native coupling rounds. Relation, containment and shape remain distinct responses.</summary>
     public static Task<IReadOnlyList<ResponseFieldRow>> ResponseFieldAsync(
@@ -32,7 +32,7 @@ public static partial class NpgsqlSubstrateReads
                 r.IsDBNull(13) ? null : r.GetInt64(13), r.IsDBNull(14) ? null : r.GetInt64(14),
                 r.GetInt16(15), r.IsDBNull(16) ? null : r.GetDouble(16),
                 r.IsDBNull(17) ? null : r.GetBoolean(17),r.GetFieldValue<int[]>(18),
-                r.GetFieldValue<int[]>(19),r.GetFieldValue<byte[][]>(20),r.GetFieldValue<int[]>(21),r.GetBoolean(22)),
+                r.GetFieldValue<int[]>(19),r.GetFieldValue<byte[][]>(20),r.GetFieldValue<int[]>(21),r.GetBoolean(22),r.GetFieldValue<int[]>(23)),
             p => { p.AddWithValue("occurrences", occurrences.ToArray()); p.AddWithValue("fanout", fanout); p.AddWithValue("nearest", nearest); },
             ct: ct);
 }

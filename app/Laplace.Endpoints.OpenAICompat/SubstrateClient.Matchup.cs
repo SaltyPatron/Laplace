@@ -85,9 +85,9 @@ internal sealed partial class SubstrateClient
         var readings = rows.Where(row => row.Route == 0 && row.Outbound == true && row.Via is not null && row.Textual
                 && row.Witnesses > 0 && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
                 && byRelation[Hex(row.Relation)!].Descriptive)
-            .SelectMany(row => row.Origins.Select(side => new LexiconReading(side,row.Label,
+            .SelectMany(row => row.ReadingOrigins.Select(side => new LexiconReading(side,row.Label,
                 row.RelationLabel!,row.AnchorLabel!,
-                row.SupportClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
+                row.BindingClaims.Append(row.Via!).Select(id => Hex(id)!).Distinct().ToArray(),
                 row.Witnesses!.Value,row.Rating!.Value-2*row.Deviation!.Value)))
             .OrderByDescending(row => row.Standing).DistinctBy(row => (row.Side,row.Text)).ToArray();
         var connections = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Witnesses > 0

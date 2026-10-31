@@ -228,6 +228,9 @@ SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[
         "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")
 
 SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu(),consensus.glicko2_initial_rd()")
+SQL_QUERY("language.code_surfaces", "bytea[]",
+    "SELECT public.blake3_send(entity),content FROM public.laplace_labels("
+    "ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id) WHERE id IS NOT NULL))")
 /* Lexicon selection is a query over the source's recorded predicate content,
  * not a list of corpus IDs. Registry metadata interprets declared aliases. */
 SQL_QUERY("query.lexicon_relations", "bytea[],text[]",
@@ -1147,16 +1150,17 @@ SQL_QUERY("consensus.relation_summary", "bytea,bytea",
 
 /* Inspection of the same Native coupling operator used by the forward program.
  * All admitted relation identities, containment and shape are eligible. The
- * second round is one set call over the first response field, without selecting
- * a dictionary, definition predicate, language or winning interpretation. */
+ * second round reads the response field and the words' witnessed bindings.
+ * Binding evidence governs which rows may be realized as lexical readings. */
 SQL_QUERY("query.response_field", "bytea[],int4,int4",
     "WITH roots AS MATERIALIZED ("
     " SELECT ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)) AS ids"
-    "), first AS MATERIALIZED ("
+    "), bindings AS MATERIALIZED (SELECT * FROM converse.binding_evidence($1,NULL)), first AS MATERIALIZED ("
     " SELECT 1 AS round,k.ids[c.occ] AS anchor,c.* FROM roots k"
     " CROSS JOIN LATERAL public.laplace_couple(k.ids,$2::bigint,'{}'::public.blake3[],0::smallint,0.0::float8,$3) c"
     "), frontier AS MATERIALIZED ("
-    " SELECT ARRAY(SELECT DISTINCT entity FROM first ORDER BY entity) AS ids"
+    " SELECT ARRAY(SELECT entity FROM first UNION SELECT encode(key,'hex')::public.blake3 FROM bindings"
+    " UNION SELECT encode(binding,'hex')::public.blake3 FROM bindings ORDER BY 1) AS ids"
     "), second AS MATERIALIZED ("
     " SELECT 2 AS round,k.ids[c.occ] AS anchor,c.* FROM frontier k"
     " CROSS JOIN LATERAL public.laplace_couple(k.ids,$2::bigint,'{}'::public.blake3[],-1::smallint,0.0::float8,0) c"
@@ -1175,14 +1179,12 @@ SQL_QUERY("query.response_field", "bytea[],int4,int4",
     " ORDER BY r.round,r.occ,r.route,r.entity,c.entity),"
     " ids AS MATERIALIZED (SELECT entity AS id FROM bound UNION SELECT anchor FROM bound WHERE anchor IS NOT NULL"
     " UNION SELECT rel FROM bound WHERE rel IS NOT NULL),"
-    " lexical_matches AS MATERIALIZED (SELECT p.entity AS id,t.ordinal::int AS ordinal"
-    " FROM public.laplace_constituents(ARRAY(SELECT id FROM ids ORDER BY id)) p"
-    " CROSS JOIN roots k CROSS JOIN LATERAL unnest(k.ids) WITH ORDINALITY t(id,ordinal) WHERE p.child=t.id"
+    " lexical_matches AS MATERIALIZED (SELECT encode(v.id,'hex')::public.blake3 AS id,t.ordinal::int AS ordinal"
+    " FROM bindings b CROSS JOIN LATERAL(VALUES(b.key),(b.binding)) v(id)"
+    " CROSS JOIN roots k CROSS JOIN LATERAL unnest(k.ids) WITH ORDINALITY t(id,ordinal) WHERE b.term=public.blake3_send(t.id)"
     " UNION SELECT t.id,t.ordinal::int FROM roots k,unnest(k.ids) WITH ORDINALITY t(id,ordinal)),"
     " lexical_bindings AS MATERIALIZED (SELECT id,array_agg(DISTINCT ordinal ORDER BY ordinal) AS origins FROM lexical_matches GROUP BY id),"
     " entity_forms AS MATERIALIZED (SELECT entity AS id,mask FROM public.laplace_physicalities(ARRAY(SELECT id FROM ids ORDER BY id))),"
-    " anchor_support AS MATERIALIZED (SELECT b.entity,array_agg(DISTINCT public.blake3_send(b.via)) AS claims"
-    " FROM bound b WHERE b.round=1 AND b.route=0 AND b.via IS NOT NULL GROUP BY b.entity),"
     " labels AS MATERIALIZED (SELECT * FROM public.laplace_labels(ARRAY(SELECT id FROM ids ORDER BY id))),"
     " support AS MATERIALIZED (SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested("
     " ARRAY(SELECT DISTINCT via FROM bound WHERE via IS NOT NULL ORDER BY via),false) a WHERE a.witness GROUP BY a.claim)"
@@ -1191,13 +1193,14 @@ SQL_QUERY("query.response_field", "bytea[],int4,int4",
     " r.rating,r.deviation,r.volatility,r.matches,s.witnesses,r.tier,r.distance,r.outbound,"
     " CASE WHEN r.round=1 THEN ARRAY[r.occ::int] ELSE ARRAY(SELECT DISTINCT f.occ::int FROM first f WHERE f.route<>2 AND f.entity=r.anchor ORDER BY 1) END,"
     " coalesce(target_binding.origins,'{}'::int[]),"
-    " coalesce(ass.claims,'{}'::bytea[]),"
-    " coalesce(anchor_binding.origins,'{}'::int[]),coalesce(public.laplace_mask_value(ef.mask,'kind')=-1,false)"
+    " ARRAY(SELECT DISTINCT b.claim FROM bindings b WHERE public.blake3_send(r.anchor) IN(b.key,b.binding)),"
+    " coalesce(anchor_binding.origins,'{}'::int[]),coalesce(public.laplace_mask_value(ef.mask,'kind')=-1,false),"
+    " ARRAY(SELECT DISTINCT t.ordinal::int FROM bindings b CROSS JOIN roots k,unnest(k.ids) WITH ORDINALITY t(id,ordinal)"
+    " WHERE b.term=public.blake3_send(t.id) AND public.blake3_send(r.anchor) IN(b.key,b.binding) ORDER BY 1)"
     " FROM bound r LEFT JOIN labels al ON al.entity=r.anchor LEFT JOIN labels el ON el.entity=r.entity"
     " LEFT JOIN labels rl ON rl.entity=r.rel"
     " LEFT JOIN lexical_bindings target_binding ON target_binding.id=r.entity"
     " LEFT JOIN lexical_bindings anchor_binding ON anchor_binding.id=r.anchor"
-    " LEFT JOIN anchor_support ass ON ass.entity=r.anchor"
     " LEFT JOIN entity_forms ef ON ef.id=r.entity"
     " LEFT JOIN support s ON s.claim=r.via"
     " ORDER BY r.round,r.occ,r.route,r.entity,r.via,r.rel")
