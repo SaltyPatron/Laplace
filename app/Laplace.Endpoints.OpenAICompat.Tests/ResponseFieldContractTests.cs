@@ -80,7 +80,7 @@ public sealed class ResponseFieldContractTests
         var field = await response.Content.ReadFromJsonAsync<ResponseFieldResponse>();
         Assert.NotNull(field);
         Assert.Equal("lexicon",field.Object);
-        Assert.Equal(1,field.Rounds);
+        Assert.Equal(2,field.Rounds);
     }
 
     [Fact]

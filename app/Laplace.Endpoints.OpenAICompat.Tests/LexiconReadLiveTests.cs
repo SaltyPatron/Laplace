@@ -18,7 +18,7 @@ public sealed class LexiconReadLiveTests
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var field = await client.LexiconAsync(reference,null,cancellation.Token);
         Assert.NotNull(field);
-        Assert.Equal(1,field.Rounds);
+        Assert.Equal(2,field.Rounds);
         Assert.NotEmpty(field.Readings!);
         Assert.All(field.Readings!,row=>Assert.True(row.Side==1 && row.Witnesses>0 && row.ClaimIds.Count>0));
         Assert.DoesNotContain(field.Readings!,row=>row.Text.Contains("type of pointer that lemma",StringComparison.OrdinalIgnoreCase));

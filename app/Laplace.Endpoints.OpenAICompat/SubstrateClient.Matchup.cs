@@ -186,7 +186,7 @@ internal sealed partial class SubstrateClient
                 return new LexiconConnection(ReadableRelation(metadata.Canonical??row.RelationLabel!),
                     Hex(row.Via)!,from.Item1,to.Item1,row.Witnesses!.Value,from.Item2,to.Item2);
             }).ToArray();
-        return new(lexical ? "lexicon" : "response.field", singleEntity ? 1 : 2, fanout, nearest, rows.Select(row =>
+        return new(lexical ? "lexicon" : "response.field", 2, fanout, nearest, rows.Select(row =>
         {
             if (row.Route == 0 && row.Via is null)
                 throw new InvalidDataException("A Native relation response has no bound claim identity.");
