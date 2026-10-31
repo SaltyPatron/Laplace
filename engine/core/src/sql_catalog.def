@@ -1223,10 +1223,13 @@ SQL_QUERY("query.lexicon_field", "bytea[]",
     "FROM bound r LEFT JOIN labels al ON al.entity=r.anchor LEFT JOIN labels el ON el.entity=r.entity LEFT JOIN labels rl ON rl.entity=r.rel\n"
     "ORDER BY r.anchor,r.entity,r.via")
 
+/* Keep all typed responses. A structural response is an inspectable reference,
+ * not a request to reconstruct its body for a label. Claim standing is already
+ * stored; exact source ancestry belongs to the selected claim's inspection. */
 SQL_QUERY("query.response_field", "bytea[],int4,int4",
     "WITH roots AS MATERIALIZED ("
     " SELECT ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)) AS ids"
-    "), bindings AS MATERIALIZED (SELECT * FROM converse.binding_evidence($1,NULL)), first AS MATERIALIZED ("
+    "), bindings AS MATERIALIZED (SELECT * FROM converse.binding_evidence($1,NULL,false)), first AS MATERIALIZED ("
     " SELECT 1 AS round,k.ids[c.occ] AS anchor,c.* FROM roots k"
     " CROSS JOIN LATERAL public.laplace_couple(k.ids,$2::bigint,'{}'::public.blake3[],0::smallint,0.0::float8,$3) c"
     "), frontier AS MATERIALIZED ("
@@ -1256,12 +1259,12 @@ SQL_QUERY("query.response_field", "bytea[],int4,int4",
     " UNION SELECT t.id,t.ordinal::int FROM roots k,unnest(k.ids) WITH ORDINALITY t(id,ordinal)),"
     " lexical_bindings AS MATERIALIZED (SELECT id,array_agg(DISTINCT ordinal ORDER BY ordinal) AS origins FROM lexical_matches GROUP BY id),"
     " entity_forms AS MATERIALIZED (SELECT entity AS id,mask FROM public.laplace_physicalities(ARRAY(SELECT id FROM ids ORDER BY id))),"
-    " labels AS MATERIALIZED (SELECT * FROM public.laplace_labels(ARRAY(SELECT id FROM ids ORDER BY id))),"
-    " support AS MATERIALIZED (SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested("
-    " ARRAY(SELECT DISTINCT via FROM bound WHERE via IS NOT NULL ORDER BY via),false) a WHERE a.witness GROUP BY a.claim)"
+    " labels AS MATERIALIZED (SELECT * FROM public.laplace_labels(ARRAY("
+    " SELECT entity id FROM bound WHERE route=0 UNION SELECT anchor FROM bound WHERE route=0"
+    " UNION SELECT rel FROM bound WHERE route=0 AND rel IS NOT NULL ORDER BY 1)))"
     " SELECT r.round,r.occ,public.blake3_send(r.anchor),al.content,public.blake3_send(r.entity),"
     " coalesce(el.content,r.entity::text),r.route,public.blake3_send(r.via),public.blake3_send(r.rel),rl.content,"
-    " r.rating,r.deviation,r.volatility,r.matches,s.witnesses,r.tier,r.distance,r.outbound,"
+    " r.rating,r.deviation,r.volatility,r.matches,NULL::bigint witnesses,r.tier,r.distance,r.outbound,"
     " CASE WHEN r.round=1 THEN ARRAY[r.occ::int] ELSE ARRAY(SELECT DISTINCT f.occ::int FROM first f WHERE f.route<>2 AND f.entity=r.anchor ORDER BY 1) END,"
     " coalesce(target_binding.origins,'{}'::int[]),"
     " ARRAY(SELECT DISTINCT b.claim FROM bindings b WHERE public.blake3_send(r.anchor) IN(b.key,b.binding)),"
@@ -1274,7 +1277,6 @@ SQL_QUERY("query.response_field", "bytea[],int4,int4",
     " LEFT JOIN lexical_bindings target_binding ON target_binding.id=r.entity"
     " LEFT JOIN lexical_bindings anchor_binding ON anchor_binding.id=r.anchor"
     " LEFT JOIN entity_forms ef ON ef.id=r.entity"
-    " LEFT JOIN support s ON s.claim=r.via"
     " ORDER BY r.round,r.occ,r.route,r.entity,r.via,r.rel")
 
 SQL_QUERY("ops.source_roster", "bytea,int4",

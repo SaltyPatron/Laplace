@@ -954,7 +954,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             var response = Assert.Single(field, row => row.Round == 1 && row.Occurrence == ordinal
                 && row.Route == 0 && row.Via!.AsSpan().SequenceEqual(xc.Id.ToBytes()));
             Assert.Equal(3L, response.Matches);
-            Assert.Equal(1L, response.Witnesses);
+            Assert.Null(response.Witnesses);
             Assert.Equal(true, response.Outbound);
             Assert.Equal(value.Id.ToBytes(), response.Entity);
             Assert.Equal(predicate.Id.ToBytes(), response.Relation);
@@ -1002,7 +1002,7 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.Equal([1],external.ReadingOrigins);
         var boundField = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,[defined.Id.ToBytes()],512,0);
         Assert.Contains(boundField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
-            && row.BindingClaims.Length>0 && row.Witnesses>0);
+            && row.BindingClaims.Length>0 && row.Matches>0 && row.Witnesses is null);
         await using (var literalRead = new NpgsqlCommand("SELECT public.blake3_send(entity),content,textual FROM converse.lexicon_texts(ARRAY[$1,$2]::public.blake3[])",connection,transaction))
         {
             literalRead.Parameters.AddWithValue(localizedDefinition.Id);

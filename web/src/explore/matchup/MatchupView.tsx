@@ -290,7 +290,7 @@ function ResponseFieldView({ field, error }: { field: ResponseField | null; erro
             )}
             {row.claim_id && (
               <details>
-                <summary>Evidence · {row.witnesses ?? 'unknown'} witnesses · {row.usage ?? 'unknown'} uses</summary>
+                <summary>Claim standing{row.witnesses != null && <> · {row.witnesses} sources</>}{row.usage != null && <> · {row.usage} observations</>}</summary>
                 <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim</RouterLink>{' '}
                 · rating {row.rating?.toFixed(2)} · deviation {row.deviation?.toFixed(2)} · volatility {row.volatility?.toFixed(6)}
               </details>

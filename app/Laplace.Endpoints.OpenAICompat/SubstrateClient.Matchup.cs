@@ -167,7 +167,7 @@ internal sealed partial class SubstrateClient
     {
         var byRelation = relations.ToDictionary(row => Convert.ToHexStringLower(row.Id));
         static string? Hex(byte[]? id) => id is null ? null : Convert.ToHexStringLower(id);
-        var compared = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && (lexical ? row.Matches>0 : row.Witnesses>0)
+        var compared = rows.Where(row => row.Route == 0 && row.Via is not null && row.Relation is not null && row.Matches>0
                 && (byRelation[Hex(row.Relation)!].Canonical is not null || byRelation[Hex(row.Relation)!].Textual)
                 && (singleEntity
                     ? row.Textual && !byRelation[Hex(row.Relation)!].Descriptive && IsReadableLexiconValue(row.Label,row.Entity)
@@ -178,7 +178,7 @@ internal sealed partial class SubstrateClient
         var comparedClaims = compared.SelectMany(row => row.BindingClaims).Select(id => Hex(id)!).ToHashSet();
         var comparedEntities = compared.SelectMany(row => new[] { Hex(row.Anchor),Hex(row.Entity) }).ToHashSet();
         var readings = rows.Where(row => row.Route == 0 && row.Outbound == true && row.Via is not null && row.Textual
-                && (lexical ? row.Matches>0 : row.Witnesses>0) && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
+                && row.Matches>0 && row.Relation is not null && row.Label != Hex(row.Entity) && row.Label.Any(char.IsLetter)
                 && byRelation[Hex(row.Relation)!].Descriptive)
             .OrderByDescending(row => comparedEntities.Contains(Hex(row.Anchor)) || row.BindingClaims.Any(id => comparedClaims.Contains(Hex(id)!)))
             .ThenByDescending(row => row.Rating!.Value-2*row.Deviation!.Value)
