@@ -118,21 +118,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 817f9b7ba32dc847225936f1db0fc8a69a7f2770
+          ref: 140273083f149358b2c8f3cce3e69c781df889b2
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 8285086298dbb70cd324740a5c7e597a44bd9301
+          ref: 49bfe7b55300350e5108cd7d07e61bcc18903afd
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 5fb21bacfadb2ba52041dc58fcdbebf6c4b1040f
+          ref: 03f616b8880e3bf0b817a8f872411e411f1b65d3
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -327,21 +327,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 817f9b7ba32dc847225936f1db0fc8a69a7f2770
+          ref: 140273083f149358b2c8f3cce3e69c781df889b2
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 8285086298dbb70cd324740a5c7e597a44bd9301
+          ref: 49bfe7b55300350e5108cd7d07e61bcc18903afd
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 5fb21bacfadb2ba52041dc58fcdbebf6c4b1040f
+          ref: 03f616b8880e3bf0b817a8f872411e411f1b65d3
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
