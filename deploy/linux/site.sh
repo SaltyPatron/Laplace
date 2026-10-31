@@ -654,7 +654,7 @@ verify_cli_package() {
   local engine="$cli/native/recipe-engine/bin/laplace" estate="$cli/native/recipe-engine/share/laplace" program
   [[ -x "$engine" && -s "$estate/firmware/program.firmware" ]] || { echo "CLI Native query compiler is missing" >&2; return 1; }
   program=$(env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
-    LD_LIBRARY_PATH="$cli" LAPLACE_RECIPES="$estate/recipes" \
+    LD_LIBRARY_PATH="$cli" LAPLACE_RECIPES="$estate/recipes" LAPLACE_GRAMMARS="$(dirname "$engine")/grammars" \
     LAPLACE_TIER0="$cli/share/laplace/tier0.bin" LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
     "$engine" firmware --operation pull --firmware "$estate/firmware/program.firmware") || return 1
   [[ -n "$program" ]] || { echo "Native query compiler returned no declarations" >&2; return 1; }

@@ -58,6 +58,24 @@ public sealed class NativeRecipeExecutionTests
             .Select(r => Convert.ToHexString(r.Entity)).SequenceEqual(program.Up.Select(r => Convert.ToHexString(r.Entity))));
     }
 
+    [Fact]
+    public async Task QueryCompilationUsesTheSelectedGrammarBundle()
+    {
+        var configured = NativeRecipeExecution.Configured();
+        string empty = Path.Combine(Path.GetTempPath(), "native-query-grammars-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(empty);
+        try
+        {
+            // A build-machine grammar directory must not conceal an incomplete
+            // received package. Compilation must use the selected bundle.
+            var execution = new NativeRecipeExecution(configured.Executable, configured.Recipes, empty,
+                configured.Tier0, configured.Highway);
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() => execution.CompileQueryProgramAsync());
+            Assert.Contains(empty, error.Message, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(empty); }
+    }
+
     [Theory]
     [InlineData("{\"up\":[],\"chains\":[]}")]
     [InlineData("{\"up\":[{\"name\":\"@producer/field\",\"entity\":\"01\"}],\"chains\":[[{\"name\":\"@producer/field\",\"entity\":\"01\"}]]}")]

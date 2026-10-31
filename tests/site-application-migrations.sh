@@ -61,6 +61,7 @@ cat > "$work/bundle/app/cli/native/recipe-engine/bin/laplace" <<'ENGINE'
 set -euo pipefail
 [[ $1 == firmware && $2 == --operation && $3 == pull && $4 == --firmware && -s $5 ]]
 [[ -s "$LAPLACE_TIER0" && -s "$LAPLACE_HIGHWAY" ]]
+[[ "$LAPLACE_GRAMMARS" == "$(dirname "$0")/grammars" ]]
 printf '{"paths":[]}\n'
 ENGINE
 chmod 755 "$work/bundle/app/cli/native/recipe-engine/bin/laplace"

@@ -46,6 +46,7 @@ public sealed class NativeRecipeExecution
         start.Environment["LAPLACE_RECIPES"] = Recipes;
         start.Environment["LAPLACE_TIER0"] = Tier0;
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
+        start.Environment["LAPLACE_GRAMMARS"] = Grammars;
         using var output = new MemoryStream();
         using var error = new MemoryStream();
         int result = await ExecuteAsync(start, output, error, ct).ConfigureAwait(false);
