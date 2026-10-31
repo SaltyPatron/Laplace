@@ -116,7 +116,7 @@ extern "C" void laplace_unicode_seed_snapshot_free(
 
 extern "C" size_t laplace_unicode_seed_snapshot_count(
     const laplace_unicode_seed_snapshot_t* snapshot) {
-    return snapshot ? LAPLACE_SCALAR_COUNT : 0u;
+    return snapshot ? LAPLACE_CODEPOINT_COUNT : 0u;
 }
 
 extern "C" int laplace_unicode_seed_snapshot_xml_copy(
@@ -141,7 +141,7 @@ extern "C" int laplace_unicode_seed_snapshot_copy_record(
     const laplace_unicode_seed_snapshot_t* snapshot,
     size_t index,
     codepoint_entry_t* out_record) {
-    if (!snapshot || !out_record || index >= LAPLACE_SCALAR_COUNT) return -1;
+    if (!snapshot || !out_record || index >= LAPLACE_CODEPOINT_COUNT) return -1;
     *out_record = snapshot->records[index];
     return 0;
 }

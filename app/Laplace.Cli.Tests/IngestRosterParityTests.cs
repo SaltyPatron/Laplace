@@ -94,8 +94,9 @@ public sealed class IngestRosterParityTests
             .Select(static l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0])
             .ToList();
 
-        Assert.Equal(sources, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
-        Assert.Equal(sources, IngestDispatchTable.CanonicalSourceKeys);
+        Assert.Equal(sources, Laplace.Decomposers.Abstractions.EtlManifest.ReadSourceOrder(
+            Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot));
+        Assert.Equal(Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder, IngestDispatchTable.CanonicalSourceKeys);
         var directories = Directory.EnumerateDirectories(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot)
             .Where(directory => File.Exists(Path.Combine(directory, "source")))
             .Select(Path.GetFileName).OrderBy(static name => name, StringComparer.Ordinal).ToArray();

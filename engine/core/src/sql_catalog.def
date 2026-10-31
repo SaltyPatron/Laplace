@@ -1889,3 +1889,13 @@ SQL_QUERY("geometry.prompt.frechet", "float8[],float8[],float8[],float8[],bytea[
 
 SQL_QUERY("native.claim_witness_counts", "bytea[]",
     "WITH requested AS MATERIALIZED (SELECT ordinal,encode(id,'hex')::public.blake3 AS claim FROM unnest($1::bytea[]) WITH ORDINALITY u(id,ordinal)), keys AS MATERIALIZED (SELECT DISTINCT claim FROM requested), counts AS MATERIALIZED (SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT claim FROM keys ORDER BY claim),false) a WHERE a.witness GROUP BY a.claim) SELECT r.ordinal,coalesce(c.witnesses,0)::bigint FROM requested r LEFT JOIN counts c USING(claim) ORDER BY r.ordinal")
+SQL_QUERY("account.preview_invitation", "bytea,uuid",
+    "SELECT t.display_name, i.role, i.expires_at, "
+    "coalesce(u.display_name, u.email, 'Workspace administrator'), m.role "
+    "FROM app.workspace_invitations i "
+    "JOIN app.tenants t ON t.tenant_id = i.tenant_id "
+    "JOIN app.users u ON u.user_id = i.created_by "
+    "JOIN app.tenant_memberships inviter ON inviter.tenant_id = i.tenant_id AND inviter.user_id = i.created_by "
+    "LEFT JOIN app.tenant_memberships m ON m.tenant_id = i.tenant_id AND m.user_id = $2 "
+    "WHERE i.token_hash = $1 AND i.revoked_at IS NULL AND i.accepted_at IS NULL AND i.expires_at > now() "
+    "AND (inviter.role = 'owner' OR (inviter.role = 'admin' AND i.role = 'member'))")

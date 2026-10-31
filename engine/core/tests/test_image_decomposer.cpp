@@ -92,7 +92,7 @@ TEST(ImageDecomposer, WhitePixelNumberIdMatchesContentRoot) {
     for (uint32_t ch = 0; ch < 4; ++ch) {
         tier_node_view_t num;
         ASSERT_EQ(tier_tree_get_node(tree, 12 + ch, &num), 0);
-        EXPECT_EQ(num.tier, LAPLACE_IMAGE_TIER_NUMBER);
+        EXPECT_EQ(num.tier, 2); // The shared Native text composition retains its word floor.
         EXPECT_EQ(hash128_compare(&num.id, &expect), 0) << "channel " << ch;
     }
     tier_tree_free(tree);

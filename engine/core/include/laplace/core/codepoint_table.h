@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/* The Native headerless scalar-cache ABI, in memcmp(hash) order. Codepoint
+/* The Native headerless codepoint-cache ABI, in memcmp(hash) order. Codepoint
  * ordinals are lookup keys, never offsets into this mapped array. */
 typedef struct {
     hash128_t hash;
@@ -18,7 +18,7 @@ typedef struct {
     uint64_t native_hilbert;
     uint32_t uca_order, pad;
 } codepoint_entry_t;
-#define LAPLACE_SCALAR_COUNT 1112064u
+#define LAPLACE_CODEPOINT_COUNT 1114112u
 
 int codepoint_table_load_perfcache(const char* path);
 

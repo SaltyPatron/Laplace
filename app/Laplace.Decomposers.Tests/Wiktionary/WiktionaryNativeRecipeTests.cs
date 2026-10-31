@@ -23,13 +23,13 @@ public sealed class WiktionaryNativeRecipeTests
             "[gl, free, verb]\tname of the language\tGalician",
         };
         foreach (string tag in new[] { "alt-of", "colloquial", "pronunciation-spelling" })
-            expected.Add("Pronunciation spelling of three\t" + tag);
+            expected.Add("Pronunciation spelling of three\tqualifier of this form or sense\t" + tag);
         foreach (string pronunciation in new[] { "frē", "/fɹiː/", "[fɹɪi̯]", "/fɹɪj/", "/fɹi/" })
             expected.Add("[en, free, num]\tpronunciation\t" + pronunciation);
         expected.AddRange(new[]
         {
-            "/fɹiː/\tReceived-Pronunciation", "[fɹɪi̯]\tReceived-Pronunciation",
-            "/fɹɪj/\tBritish", "/fɹɪj/\tSouthern", "/fɹɪj/\tStandard", "/fɹi/\tGeneral-American",
+            "/fɹiː/\tqualifier of this form or sense\tReceived-Pronunciation", "[fɹɪi̯]\tqualifier of this form or sense\tReceived-Pronunciation",
+            "/fɹɪj/\tqualifier of this form or sense\tBritish", "/fɹɪj/\tqualifier of this form or sense\tSouthern", "/fɹɪj/\tqualifier of this form or sense\tStandard", "/fɹi/\tqualifier of this form or sense\tGeneral-American",
         });
         AddSense("first/third-person singular present subjunctive",
             ["first-person", "form-of", "present", "singular", "subjunctive", "third-person"]);
@@ -43,7 +43,7 @@ public sealed class WiktionaryNativeRecipeTests
             string sense = "inflection of frear:" + detail;
             expected.Add("[gl, free, verb]\tword sense\t" + sense);
             expected.Add(sense + "\tinflected form of\tfrear");
-            expected.AddRange(tags.Select(tag => sense + "\t" + tag));
+            expected.AddRange(tags.Select(tag => sense + "\tqualifier of this form or sense\t" + tag));
         }
     }
 

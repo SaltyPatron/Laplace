@@ -182,6 +182,25 @@ internal static class AccountEndpoints
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent() : Results.NotFound();
         }).WithTags("account");
 
+        app.MapPost("/v1/account/invitations/preview", async (HttpContext http, AcceptInvitationRequest request,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to review an invitation.");
+            if (request.Token is not { Length: 64 } || !request.Token.All(Uri.IsHexDigit))
+                return Error(400, "invalid_invitation", "This invitation is invalid or expired.");
+            // Keep the bearer token in the request body, out of URL logs and referrers.
+            http.Response.Headers.CacheControl = "private, no-store";
+            await using var command = NpgsqlCatalog.Command(application, "account.preview_invitation",
+                SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)), account.User);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return Error(404, "invalid_invitation", "This invitation is invalid, expired, or already used.");
+            return Results.Ok(new
+            {
+                workspaceName = reader.GetString(0), role = reader.GetString(1), expiresAt = reader.GetFieldValue<DateTimeOffset>(2),
+                invitedBy = reader.GetString(3), currentRole = reader.IsDBNull(4) ? null : reader.GetString(4)
+            });
+        }).WithTags("account");
+
         app.MapPost("/v1/account/invitations/accept", async (HttpContext http, AcceptInvitationRequest request,
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {

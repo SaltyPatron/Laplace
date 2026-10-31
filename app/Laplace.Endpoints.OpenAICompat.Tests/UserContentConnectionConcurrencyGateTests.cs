@@ -27,7 +27,7 @@ public sealed class UserContentConnectionConcurrencyGateTests
     {
         var dir = new DirectoryInfo(Path.GetDirectoryName(thisFile)!);
         while (dir is not null &&
-               !(Directory.Exists(Path.Combine(dir.FullName, "docs"))
+               !(Directory.Exists(Path.Combine(dir.FullName, "engine"))
                  && Directory.Exists(Path.Combine(dir.FullName, "app"))))
             dir = dir.Parent;
         return dir?.FullName

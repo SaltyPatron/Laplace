@@ -81,7 +81,9 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
             [new OrderedCompositionRequest(Components(tree), role, source, 0)], result);
         var root = tree.GetNode(tree.NaturalUnitIndex());
         Assert.Equal(root.Id, result[0].Id);
-        Assert.Equal(root.Tier, result[0].Tier);
+        // The decomposer's word tier is a recipe floor. This fixture collapses
+        // singleton graphemes to atoms and records their composition at height 1.
+        Assert.Equal((byte)1, result[0].Tier);
         return result[0];
     }
 

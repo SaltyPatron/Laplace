@@ -228,6 +228,10 @@ internal sealed class SubstrateTools : IMcpTools
                          ("offset", "integer", "pagination offset, default 0", false),
                          ("reindex", "boolean", "force a fresh scan of workspace source files, default false", false)),
             (s, a) => s.CodeSearch(a)),
+        new("reindex", "Refresh the workspace declaration chunk index for code_search.",
+            "Ensure or force-rebuild the in-memory workspace declaration chunk index (4-D S^3 trajectories and word-tier constituent postings) used by code_search.",
+            () => Schema(("force", "boolean", "force re-indexing all workspace source files regardless of mtime/size cache, default false", false)),
+            (_, a) => Reindex(a)),
         new("help", "List every tool (one-line each), or full detail for one name.",
             "Catalog introspection for THIS tool surface, same idea as ops.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
@@ -1278,7 +1282,7 @@ internal sealed class SubstrateTools : IMcpTools
     internal static unsafe int PerfcacheResolver(
         uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
     {
-        if (!CodepointPerfcache.TryLookupScalar(atom, out var r)) return -1;
+        if (!CodepointPerfcache.TryLookupCodepoint(atom, out var r)) return -1;
         *outId = r.Hash;
         outCoord[0] = r.CoordX;
         outCoord[1] = r.CoordY;
@@ -1514,5 +1518,15 @@ internal sealed class SubstrateTools : IMcpTools
             ["rows"] = new JsonArray(combined.Select(static r => (JsonNode)r).ToArray()),
         };
         return (result.ToJsonString(), false);
+    }
+
+    private static (string, bool) Reindex(JsonObject? args)
+    {
+        var force = args?["force"]?.GetValue<bool>() ?? false;
+        var summary = WorkspaceCodeIndex.Reindex(force);
+        return (new JsonObject
+        {
+            ["rows"] = new JsonArray(summary),
+        }.ToJsonString(), false);
     }
 }

@@ -67,6 +67,14 @@ def closure(root: Path, name: str) -> set[str]:
     return result
 
 
+def documentation_root(root: Path) -> Path:
+    declared = os.environ.get("LaplaceDocumentationRoot") or os.environ.get("LAPLACE_DOCUMENTATION_ROOT")
+    if declared:
+        return Path(declared)
+    candidate = root / ".ci-dependencies/Laplace-Wiki/Repositories/Laplace"
+    return candidate if candidate.is_dir() else root.parent / "Laplace-Wiki/Repositories/Laplace"
+
+
 def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
     projects = closure(root, name)
     tracked = subprocess.run(
@@ -84,6 +92,7 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
             external = match[1]
     runtime = Path(os.environ.get("LAPLACE_RECIPE_RUNTIME") or native / "core/recipe_engine/runtime")
     properties = {"LAPLACE_ENGINE_BUILD": str(native), "LaplaceRecipeRuntime": str(runtime),
+                  "LaplaceDocumentationRoot": str(documentation_root(root)),
                   "LAPLACE_RECIPE_RUNTIME": str(runtime), "LAPLACE_EXTERNAL": external,
                   "LaplaceGrammarRoot": str(Path(external) / "tree-sitter-grammars") if external else ""}
     for project in projects:

@@ -115,7 +115,7 @@ internal sealed class ExploreDecomposeService
     public UnicodePointResponse UnicodePoint(uint codepoint)
     {
         EnsurePerfcache();
-        ref readonly var r = ref CodepointPerfcache.LookupScalar(codepoint);
+        ref readonly var r = ref CodepointPerfcache.LookupCodepoint(codepoint);
         string display = Rune.IsValid((int)codepoint) ? new Rune((int)codepoint).ToString() : string.Empty;
         double radius = Math.Sqrt(r.CoordX*r.CoordX+r.CoordY*r.CoordY+r.CoordZ*r.CoordZ+r.CoordM*r.CoordM);
         return new UnicodePointResponse(codepoint, display, Convert.ToHexStringLower(r.Hash.ToBytes()),
@@ -259,7 +259,7 @@ internal sealed class ExploreDecomposeService
             uint? ducetRank = null;
             if (node.Tier == 0)
             {
-                if (!CodepointPerfcache.TryLookupScalar(node.Atom, out var atom))
+                if (!CodepointPerfcache.TryLookupCodepoint(node.Atom, out var atom))
                     throw new InvalidOperationException(
                         $"Tier-0 atom U+{node.Atom:X} is outside the published perfcache ROM.");
                 if (node.Id != atom.Hash
@@ -487,7 +487,7 @@ internal sealed class ExploreDecomposeService
     private static unsafe int PerfcacheResolver(
         uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
     {
-        if (!CodepointPerfcache.TryLookupScalar(atom, out var r)) return -1;
+        if (!CodepointPerfcache.TryLookupCodepoint(atom, out var r)) return -1;
         *outId = r.Hash;
         outCoord[0] = r.CoordX;
         outCoord[1] = r.CoordY;

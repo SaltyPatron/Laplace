@@ -77,7 +77,7 @@ public sealed class NativeTextIdentityTests
         var floorPath = Environment.GetEnvironmentVariable("LAPLACE_TIER0")
             ?? throw new InvalidOperationException("Set LAPLACE_TIER0 to the canonical Native scalar cache.");
         using var floor = File.OpenRead(floorPath);
-        Assert.Equal(1_112_064L * 64, floor.Length);
+        Assert.Equal(1_114_112L * 64, floor.Length);
         for (uint i = 0; i < tree.NodeCount; i++)
         {
             var node = tree.GetNode(i);

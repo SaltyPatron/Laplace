@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Button, ErrorText, Muted, Select, useReadResource } from '@ui';
 import { apiGet, apiPost } from '../api/client';
 import { roleName } from './access';
-import type { AuthProvider, AuthUser } from '../store';
+import { useAppStore, type AuthProvider, type AuthUser } from '../store';
 import styles from './AccountControls.module.css';
 
 export interface AccountControlsProps {
@@ -17,7 +17,8 @@ const invitationStorageKey = 'laplace.pending-workspace-invitation';
 export function AccountControls({ user, providers, returnUrl }: AccountControlsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const workspaces = useReadResource({ key: JSON.stringify(['header-workspaces', user?.id, user?.tenantId]), enabled: !!user,
+  const tenant = useAppStore((state) => state.tenant);
+  const workspaces = useReadResource({ key: JSON.stringify(['account', user?.id, tenant, '/v1/account']), enabled: !!user,
     read: (signal) => apiGet<{ tenantId: string; workspaces: { tenantId: string; displayName: string; role: string }[] }>('/v1/account', { signal }) });
 
   useEffect(() => {
@@ -52,6 +53,8 @@ export function AccountControls({ user, providers, returnUrl }: AccountControlsP
           } catch (failure) { setError(failure instanceof Error ? failure.message : 'Workspace switch failed.'); setBusy(false); }
         }}>{!workspaces.data.workspaces.some((workspace) => workspace.tenantId === workspaces.data?.tenantId) && <option value={workspaces.data.tenantId} disabled>Choose a workspace…</option>}
           {workspaces.data.workspaces.map((workspace) => <option key={workspace.tenantId} value={workspace.tenantId}>{workspace.displayName} · {roleName(workspace.role)}</option>)}</Select></label>}
+        {workspaces.busy && !workspaces.data && <Muted>Loading workspaces…</Muted>}
+        {workspaces.error && <div role="alert"><ErrorText>Workspaces could not be loaded: {workspaces.error.message}</ErrorText><Button variant="ghost" size="sm" disabled={workspaces.busy} onClick={() => void workspaces.refresh()}>Retry workspaces</Button></div>}
         <Button variant="ghost" size="sm" disabled={busy} onClick={async () => {
           setBusy(true); setError('');
           try {
