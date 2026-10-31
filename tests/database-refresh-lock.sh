@@ -34,10 +34,10 @@ env -u LAPLACE_HOST_LOCK_WAIT_SECONDS bash "$installed/database-refresh" "$lock"
   bash "$work/credential check" 'argument with spaces' 8>&- 2>"$work/waiting" &
 waiter=$!
 for ((attempt=0; attempt<100; attempt++)); do
-  if rg -q '^Waiting ' "$work/waiting"; then break; fi
+  if grep -q '^Waiting ' "$work/waiting"; then break; fi
   sleep .02
 done
-rg -q '^Waiting ' "$work/waiting"
+grep -q '^Waiting ' "$work/waiting"
 kill -0 "$waiter"
 [[ ! -e $work/credential-entered ]]
 # Later readers must not overtake the queued credential writer.
