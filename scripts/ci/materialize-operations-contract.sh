@@ -15,8 +15,25 @@ fi
 while read -r blob path; do
   [[ -z "$blob" || "$blob" == \#* ]] && continue
   destination="$output/$path"
+  [[ ! -L "$destination" ]] || { echo "Build contract output may not be a link: $path" >&2; exit 1; }
+  [[ ! -e "$destination" || -f "$destination" ]] || { echo "Build contract output must be a regular file: $path" >&2; exit 1; }
+  if [[ -f "$destination" && $(git hash-object --no-filters "$destination") == "$blob" ]]; then
+    continue
+  fi
   mkdir -p "$(dirname "$destination")"
-  git -c "safe.directory=$source" -C "$source" cat-file blob "$blob" > "$destination"
-  actual=$(git hash-object --no-filters "$destination")
-  [[ "$actual" == "$blob" ]] || { echo "Operations contract differs from its pin: $path" >&2; exit 1; }
+  (
+    pending=$(mktemp "$destination.XXXXXXXX")
+    trap 'rm -f -- "$pending"' EXIT
+    git -c "safe.directory=$source" -C "$source" cat-file blob "$blob" > "$pending"
+    actual=$(git hash-object --no-filters "$pending")
+    [[ "$actual" == "$blob" ]] || { echo "Operations contract differs from its pin: $path" >&2; exit 1; }
+    if [[ -f "$destination" ]]; then
+      chmod --reference="$destination" "$pending"
+    else
+      mask=$(umask)
+      printf -v mode '%03o' "$((0666 & ~8#$mask))"
+      chmod "$mode" "$pending"
+    fi
+    mv -f -- "$pending" "$destination"
+  )
 done < "$manifest"

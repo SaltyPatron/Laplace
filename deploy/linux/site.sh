@@ -149,13 +149,25 @@ EOF
   # liblwgeom's headers as an installed set (PostGIS 3 installs none): liblwgeom.h reads "../postgis_config.h" and that
   # reads "postgis_revision.h", which an out-of-tree build without git metadata does not write
   local inc="$d/pgsql-18/include" rev
-  sed 's|#include "../postgis_config.h"|#include "postgis_config.h"|' "$LAPLACE_POSTGIS_BUILD/liblwgeom/liblwgeom.h" > "$inc/liblwgeom.h"
-  cp -f "$LAPLACE_POSTGIS_BUILD/postgis_config.h" "$inc/postgis_config.h"
+  (
+    headers=$(mktemp -d "$inc/.headers.XXXXXXXX")
+    trap 'rm -rf -- "$headers"' EXIT
+    sed 's|#include "../postgis_config.h"|#include "postgis_config.h"|' "$LAPLACE_POSTGIS_BUILD/liblwgeom/liblwgeom.h" > "$headers/liblwgeom.h"
+    chmod 664 "$headers/liblwgeom.h"
+    cmake -E copy_if_different "$headers/liblwgeom.h" "$inc/liblwgeom.h"
+    cmake -E copy_if_different "$LAPLACE_POSTGIS_BUILD/postgis_config.h" "$inc/postgis_config.h"
+    if [[ -f "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" ]]; then
+      cmake -E copy_if_different "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" "$inc/postgis_revision.h"
+    elif [[ -f "$LAPLACE_DEPSRC/postgis/postgis_revision.h" ]]; then
+      cmake -E copy_if_different "$LAPLACE_DEPSRC/postgis/postgis_revision.h" "$inc/postgis_revision.h"
+    else
+      rev="$(git -C "$LAPLACE_DEPSRC/postgis" rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
+      echo "#define POSTGIS_REVISION $rev" > "$headers/postgis_revision.h"
+      chmod 664 "$headers/postgis_revision.h"
+      cmake -E copy_if_different "$headers/postgis_revision.h" "$inc/postgis_revision.h"
+    fi
+  )
   ln -sfn "$LAPLACE_DEPSRC/postgis/liblwgeom/lwinline.h" "$inc/lwinline.h"
-  if [[ -f "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" ]]; then cp -f "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" "$inc/"
-  elif [[ -f "$LAPLACE_DEPSRC/postgis/postgis_revision.h" ]]; then cp -f "$LAPLACE_DEPSRC/postgis/postgis_revision.h" "$inc/"
-  else rev="$(git -C "$LAPLACE_DEPSRC/postgis" rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
-       echo "#define POSTGIS_REVISION $rev" > "$inc/postgis_revision.h"; fi
   ln -sfn "$LAPLACE_POSTGIS_BUILD/liblwgeom/.libs/liblwgeom.a" "$d/pgsql-18/lib/liblwgeom.a"
   echo "  deps prefix            $d (geos, proj -> $LAPLACE_GEOS_PROJ_PREFIX; liblwgeom -> $LAPLACE_POSTGIS_BUILD)"
 }
