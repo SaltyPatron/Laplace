@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
-  <PropertyGroup><AssemblyName>Laplace.Endpoints.Lichess</AssemblyName></PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="../Laplace.Chess/Laplace.Chess.csproj" />
-    <ProjectReference Include="../Laplace.Ops/Laplace.Ops.csproj" />
-    <InternalsVisibleTo Include="Laplace.Endpoints.Lichess.Tests" />
-  </ItemGroup>
-</Project>

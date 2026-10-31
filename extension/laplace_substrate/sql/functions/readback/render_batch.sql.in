@@ -1,9 +1,0 @@
--- Compatibility render/name policy over selected ids, implemented by
--- render_or_label_batch_internal in realize_batch.c. This can follow lexical or
--- name bindings; exact content reconstruction is realize.render_text_batch or
--- realize.render_bytes_batch, not this function.
-DROP FUNCTION IF EXISTS laplace.render_batch(bytea[]);
-CREATE OR REPLACE FUNCTION realize.render_batch(p_ids bytea[])
-    RETURNS text[]
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_render_batch'
-    LANGUAGE C STABLE STRICT PARALLEL SAFE;

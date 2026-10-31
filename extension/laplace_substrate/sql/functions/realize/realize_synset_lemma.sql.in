@@ -1,8 +1,0 @@
--- Singleton lexicalization delegates to the native batch owner.
-DROP FUNCTION IF EXISTS laplace._realize_synset_lemma(bytea, bytea);
-CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAULT NULL)
-    RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT (realize.lexicalize_batch(ARRAY[p_id], p_lang))[1];
-END;

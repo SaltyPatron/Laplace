@@ -1,8 +1,0 @@
--- Membership over a Set physicality's member ids (type 5). A Content
--- trajectory's order carries sequence and a set's does not, so "contains this
--- child at some ordinal" and "this member is in the set" keep separate posting
--- lists, and set writes stay out of the Content index's pending list. Set ids
--- are content-addressed, so the index grows with distinct member sets.
-CREATE INDEX IF NOT EXISTS physicalities_set_constituents_gin
-    ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
-    WHERE type = 5 AND trajectory IS NOT NULL;

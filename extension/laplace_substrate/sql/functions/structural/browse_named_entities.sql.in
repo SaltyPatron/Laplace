@@ -1,7 +1,0 @@
--- Retire the short-lived structural Browse alias. The reusable Browse operation is
--- consensus.browse_named_entities(...), which owns the name-family/standing fold and
--- calls the sanctioned structural containment operator internally. Keeping a second
--- SQL wrapper here made extension installation order semantically significant because
--- this manifest entry precedes consensus/edges.sql.in on both fresh install and upgrade.
--- Product callers use the canonical consensus operation directly instead.
-DROP FUNCTION IF EXISTS structural.browse_named_entities(bytea[], bytea, int, int, int);

@@ -1,7 +1,0 @@
--- Consensus cells that are not refuted (NOT consensus.refuted). Unary cells
--- and non-positive-but-unrefuted cells stay; v_consensus_edges is the narrower
--- binary, positive-standing view.
-CREATE OR REPLACE VIEW laplace.v_consensus_unrefuted AS
-SELECT c.*
-FROM laplace.consensus c
-WHERE NOT consensus.refuted(c.rating, c.rd);

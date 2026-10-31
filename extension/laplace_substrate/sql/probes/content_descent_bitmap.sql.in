@@ -1,7 +1,0 @@
--- Id presence bitmap. The trunk-to-leaf descent is scheduled by the caller
--- (TierTreeDescent) through tier_batch_existence_probe() rounds; `parents` is
--- validated for shape only. See pg_laplace_content_descent_bitmap().
-CREATE OR REPLACE FUNCTION laplace.content_descent_bitmap(ids bytea[], parents int[])
-    RETURNS bytea
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_content_descent_bitmap'
-    LANGUAGE C STABLE;

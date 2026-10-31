@@ -1,5 +1,0 @@
--- Entity-to-physicality lookup. The trailing id serves REALIZE's recursive
--- probe `entity_id = ? ORDER BY id LIMIT 1` on each HASH(id) leaf directly,
--- instead of walking the leaf PK in id order.
-CREATE INDEX physicalities_entity_btree
-    ON laplace.physicalities USING btree (entity_id, id);

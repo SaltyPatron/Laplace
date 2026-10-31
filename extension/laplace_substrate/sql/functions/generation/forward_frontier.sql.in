@@ -1,3 +1,0 @@
--- Routing is owned by generation.forward_prompt and the native explore-web
--- implementation. Obsolete SQL wrappers are retired after forward_text is
--- rebound in walk_text.sql.in, preserving RESTRICT-safe upgrade ordering.

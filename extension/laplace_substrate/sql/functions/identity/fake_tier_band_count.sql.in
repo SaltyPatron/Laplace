@@ -1,8 +1,0 @@
-CREATE OR REPLACE FUNCTION laplace.fake_tier_band_count()
-RETURNS bigint
-LANGUAGE sql
-STABLE
-BEGIN ATOMIC
-    SELECT count(*)::bigint FROM laplace.entities e
-    WHERE e.tier IN (247, 248, 250);
-END;

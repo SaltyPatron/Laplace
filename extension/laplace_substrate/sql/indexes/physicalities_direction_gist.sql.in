@@ -1,9 +1,0 @@
--- Exact angular KNN. coord <<->> mixes angular separation with radius, so no
--- over-fetch recovers the true angular nearest rows; unit directions lie on S3,
--- where chord distance is monotone with angle, so KNN over
--- laplace_direction_4d(coord) orders exactly by angle. Content (type 1) only:
--- one direction per entity, and no Set/projection write pays for it.
-CREATE INDEX IF NOT EXISTS physicalities_direction_gist
-    ON physicalities USING gist (
-        public.laplace_direction_4d(coord) gist_geometry_ops_nd)
-    WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL;

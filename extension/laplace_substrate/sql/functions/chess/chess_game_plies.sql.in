@@ -1,5 +1,0 @@
--- Exact boards, UCI and FEN are deterministically replayed from the decomposed move stream.
--- Ordered position ids live in the line physicality. Retire the SQL per-ply projection and
--- remove both pre-purpose and purpose-schema names on upgrade.
-DROP FUNCTION IF EXISTS laplace.chess_game_plies(bytea);
-DROP FUNCTION IF EXISTS chess.game_plies(bytea);

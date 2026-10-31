@@ -1,7 +1,0 @@
--- RETIRED: consensus is derived from durable attestations. A function that
--- directly mutates one consensus leaf creates state no witness can reproduce and
--- bypasses the canonical fold/refold law. No caller exists in SQL, C, app,
--- scripts, or tests; keep the upgrade surface as DROP-only so old installations
--- lose the hazardous alternate implementation.
-DROP FUNCTION IF EXISTS generation.decay(bytea, bytea, bytea, float8);
-DROP FUNCTION IF EXISTS laplace.laplace_decay(bytea, bytea, bytea, float8);

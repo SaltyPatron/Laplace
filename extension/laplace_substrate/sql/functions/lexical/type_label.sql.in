@@ -1,7 +1,0 @@
--- A type id's label from the governed relation / entity-type registries (native, O(1)).
--- A NULL result marks an id neither registry declares; callers COALESCE it to '?'.
-DROP FUNCTION IF EXISTS laplace.type_label(bytea);
-CREATE OR REPLACE FUNCTION lexical.type_label(p_type bytea)
-    RETURNS text
-    AS 'MODULE_PATHNAME', 'pg_laplace_type_label'
-    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
