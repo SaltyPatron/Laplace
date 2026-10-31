@@ -22,20 +22,23 @@ BEGIN ATOMIC
         FROM unnest(p_initials) q(v)
         WHERE length(v) > 0
     ),
-    name_ids AS MATERIALIZED (
-        SELECT p.entity_id AS name_id FROM target t,
-             LATERAL structural.first_containers(t.cps) p
-    ),
-    players AS MATERIALIZED (
+    candidates AS MATERIALIZED (
         -- Primary names and aliases are both names: one relation, HAS_NAME, whose
         -- qualifiers say which name a claim states.
-        SELECT DISTINCT c.subject_id AS player
+        SELECT DISTINCT c.subject_id AS player,c.object_id AS name_id
         FROM laplace.consensus c
-        JOIN name_ids n ON n.name_id = c.object_id
         JOIN laplace.entities e ON e.id=c.subject_id
           AND e.type_id=laplace.entity_type_id('Chess_Player')
         WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_NAME'))
           AND c.witness_count > 0
+    ),
+    names AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT name_id FROM candidates WHERE name_id IS NOT NULL) AS ids),
+    name_ids AS MATERIALIZED (
+        SELECT p.entity_id AS name_id FROM names n,target t,
+             LATERAL structural.starts_with(n.ids,t.cps) p
+    ),
+    players AS MATERIALIZED (
+        SELECT DISTINCT c.player FROM candidates c JOIN name_ids n USING(name_id)
     ),
     rated AS MATERIALIZED (
         SELECT p.player,
@@ -94,3 +97,6 @@ BEGIN ATOMIC
              THEN page.sort_value END DESC,
         page.player;
 END;
+
+-- Retire the unscoped reverse walk after replacing its parsed dependent.
+DROP FUNCTION IF EXISTS structural.first_containers(bytea[]);

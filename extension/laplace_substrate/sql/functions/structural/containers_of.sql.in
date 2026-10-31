@@ -21,9 +21,9 @@ CREATE OR REPLACE FUNCTION structural.text_containers(p_forms text[])
     AS 'EXECUTION_LIBRARY', 'pg_laplace_content_text_containers'
     LANGUAGE C STABLE PARALLEL RESTRICTED;
 
-CREATE OR REPLACE FUNCTION structural.first_containers(p_members bytea[])
+CREATE OR REPLACE FUNCTION structural.starts_with(p_entities bytea[],p_first bytea[])
     RETURNS TABLE(entity_id bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_first_containers'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_starts_with'
     LANGUAGE C STABLE PARALLEL RESTRICTED;
 
 -- Set containment is a different operation from frontier expansion.  Given

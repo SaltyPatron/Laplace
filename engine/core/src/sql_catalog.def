@@ -239,14 +239,15 @@ SQL_QUERY("query.lexicon_relations", "bytea[],text[]",
     "SELECT i.id,CASE WHEN m.qualifier_bit<0 THEN m.canonical END,m.inverse,d.entity IS NOT NULL,coalesce(public.laplace_mask_value(e.mask,'kind')=-1,false) "
     "FROM ids i LEFT JOIN metadata m ON m.surface_id=i.id LEFT JOIN descriptive d ON d.entity=i.key "
     "LEFT JOIN public.laplace_physicalities(ARRAY(SELECT key FROM ids)) e ON e.entity=i.key ORDER BY i.id")
-/* Whole first-constituent frontiers, through either installed storage face. */
-SQL_QUERY("content.first_parents", "bytea[]",
-    "SELECT p.entity_id FROM laplace.physicalities p "
-    "WHERE p.type=1 AND p.trajectory IS NOT NULL "
-    "AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1]=ANY($1) "
-    "UNION SELECT public.blake3_send(p.entity) FROM "
-    "public.laplace_holders(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)),'{}'::public.blake3[]) p "
-    "WHERE (public.laplace_parts(p.path))[1]=ANY(ARRAY(SELECT encode(id,'hex')::public.blake3 FROM unnest($1::bytea[]) u(id)))")
+/* Selected roots keep their identity while the first-constituent frontier
+ * descends. No reverse probe from a common scalar through the corpus. */
+SQL_QUERY("content.first_children", "bytea[],bytea[]",
+    "WITH frontier AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::bytea[]) f(root,node)), "
+    "children AS MATERIALIZED (SELECT p.entity_id AS id,(public.laplace_trajectory_constituent_ids(p.trajectory))[1] AS child "
+    "FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL AND p.entity_id=ANY($2::bytea[]) "
+    "UNION SELECT public.blake3_send(c.entity),public.blake3_send(c.child) FROM "
+    "public.laplace_constituents(ARRAY(SELECT DISTINCT encode(node,'hex')::public.blake3 FROM frontier)) c WHERE c.ordinal=1) "
+    "SELECT f.root,c.child FROM frontier f JOIN children c ON c.id=f.node WHERE c.child IS NOT NULL")
 SQL_QUERY("chess.search_exact", "text[],bytea,bytea,bytea",
     "SELECT e.id FROM unnest($1) WITH ORDINALITY q(value,ord) "
     "JOIN laplace.entities e ON e.id=chess.player_id(q.value) AND e.type_id=$2 "

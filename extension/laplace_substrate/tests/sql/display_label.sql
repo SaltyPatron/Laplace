@@ -28,8 +28,8 @@ DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.
  row_id public.blake3; nested public.blake3; opaque public.blake3; shared public.blake3; root_a public.blake3; root_b public.blake3; claim_id public.blake3;
  absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
- IF NOT EXISTS(SELECT FROM structural.first_containers(ARRAY[laplace.word_id('d')]) WHERE entity_id=decode(dog::text,'hex'))
- OR EXISTS(SELECT FROM structural.first_containers(ARRAY[laplace.word_id('o')]) WHERE entity_id=decode(dog::text,'hex')) THEN
+ IF NOT EXISTS(SELECT FROM structural.starts_with(ARRAY[decode(dog::text,'hex')],ARRAY[laplace.word_id('d')]) WHERE entity_id=decode(dog::text,'hex'))
+ OR EXISTS(SELECT FROM structural.starts_with(ARRAY[decode(dog::text,'hex')],ARRAY[laplace.word_id('o')]) WHERE entity_id=decode(dog::text,'hex')) THEN
   RAISE EXCEPTION 'Native first-constituent closure lost order or a stored word';
  END IF;
  row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
@@ -108,5 +108,19 @@ BEGIN
   RAISE EXCEPTION 'Recorded human name lost in mixed Native display batch: %',labels;
  END IF;
 END $names$;
+DO $first_paths$
+DECLARE cyclic bytea=public.laplace_hash128_blake3('display/cyclic-name'); got bytea[];
+BEGIN
+ INSERT INTO laplace.entities(id,tier,type_id) VALUES(cyclic,2,laplace.entity_type_id('Word'));
+ INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+ VALUES(public.laplace_hash128_blake3('display/cyclic-name/path'),cyclic,1,
+ 'POINT ZM (0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
+ public.laplace_trajectory_build(ARRAY[cyclic]),1,now());
+ SELECT array_agg(entity_id) INTO got FROM structural.starts_with(
+ ARRAY[cyclic,laplace.word_id('dog')],ARRAY[laplace.word_id('d')]);
+ IF got IS DISTINCT FROM ARRAY[laplace.word_id('dog')] THEN
+  RAISE EXCEPTION 'Scoped first paths lost a match or failed to terminate a cycle: %',got;
+ END IF;
+END $first_paths$;
 ROLLBACK;
 SELECT 'native_display_label: ok';
