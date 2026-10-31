@@ -64,6 +64,10 @@ jobs:
         run: TMPDIR="$RUNNER_TEMP" bash tests/native-artifact-sync.sh
       - name: Verify checkout cleanup preserves incremental build inputs
         run: TMPDIR="$RUNNER_TEMP" bash tests/checkout-incremental.sh
+      - name: Verify immutable Operations inputs do not invalidate unchanged builds
+        run: TMPDIR="$RUNNER_TEMP" bash tests/operations-contract-incremental.sh
+      - name: Verify prepared PostGIS headers preserve unchanged builds
+        run: TMPDIR="$RUNNER_TEMP" bash tests/site-externals-incremental.sh
       - name: Provide pinned grammar queries for managed build
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
