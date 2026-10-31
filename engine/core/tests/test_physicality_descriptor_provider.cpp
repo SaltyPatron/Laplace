@@ -490,7 +490,7 @@ TEST(PhysicalityDescriptorVocabulary, FloorIndexPreparationIsBoundedReportedAndR
     ASSERT_TRUE(codepoint_table_id_index_ready());
     uint64_t floor_count = 0;
     ASSERT_EQ(codepoint_table_records(nullptr, &floor_count), 0);
-    ASSERT_EQ(floor_count, LAPLACE_SCALAR_COUNT);
+    ASSERT_EQ(floor_count, LAPLACE_CODEPOINT_COUNT);
     size_t added = 99;
     EXPECT_EQ(codepoint_table_prepare_id_index(0, &added), 0);
     EXPECT_EQ(added, 0u);

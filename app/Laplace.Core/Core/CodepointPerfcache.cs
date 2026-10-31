@@ -21,8 +21,8 @@ public static unsafe class CodepointPerfcache
                 string why = rc switch
                 {
                     -1 => "open/stat/mmap failure (missing or unreadable file)",
-                    -3 => "expected exactly 1,112,064 Native 64-byte scalar records",
-                    -4 => "selected file differs from the canonical Native scalar floor",
+                    -3 => "expected exactly 1,114,112 Native 64-byte codepoint records",
+                    -4 => "selected file differs from the canonical Native codepoint floor",
                     -5 => "canonical Native LAPLACE_TIER0 mapping unavailable",
                     _ => "unknown error",
                 };
@@ -151,21 +151,35 @@ public static unsafe class CodepointPerfcache
 
     public static bool IsKnownCodepointId(Hash128 id) => TryLookupCodepoint(id, out _);
 
-    public static bool TryLookupScalar(uint scalar, out CodepointRecord record)
+    public static bool TryLookupCodepoint(uint codepoint, out CodepointRecord record)
     {
         record = default;
         if (!_ready) return false;
-        var entry = NativeInterop.CodepointTableLookup(scalar);
+        var entry = NativeInterop.CodepointTableLookup(codepoint);
         if (entry == null) return false;
         record = *entry; return true;
     }
 
+    public static ref readonly CodepointRecord LookupCodepoint(uint codepoint)
+    {
+        if (!_ready) throw new InvalidOperationException("Load the Native codepoint floor before lookup.");
+        var entry = NativeInterop.CodepointTableLookup(codepoint);
+        if (entry == null) throw new ArgumentOutOfRangeException(nameof(codepoint), "Outside the Unicode codespace.");
+        return ref *entry;
+    }
+
+    public static bool TryLookupScalar(uint scalar, out CodepointRecord record)
+    {
+        record = default;
+        return scalar < 0x110000 && (scalar < 0xd800 || scalar > 0xdfff)
+            && TryLookupCodepoint(scalar, out record);
+    }
+
     public static ref readonly CodepointRecord LookupScalar(uint scalar)
     {
-        if (!_ready) throw new InvalidOperationException("Load the Native scalar floor before lookup.");
-        var entry = NativeInterop.CodepointTableLookup(scalar);
-        if (entry == null) throw new ArgumentOutOfRangeException(nameof(scalar), "Not a Unicode scalar in the Native floor.");
-        return ref *entry;
+        if (scalar >= 0x110000 || scalar is >= 0xd800 and <= 0xdfff)
+            throw new ArgumentOutOfRangeException(nameof(scalar), "Not a Unicode scalar.");
+        return ref LookupCodepoint(scalar);
     }
 
     /// <summary>One native batch over the mapped floor; zero bits remain unresolved.</summary>

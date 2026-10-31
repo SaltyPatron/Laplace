@@ -68,7 +68,7 @@ TEST(LaplaceCoreCodepointTable, UcdPropertyCensusRejectsAllOtherOrTruncatedTable
     uint64_t count = 0;
     ASSERT_EQ(codepoint_table_records(&records, &count), 0);
     ASSERT_NE(records, nullptr);
-    ASSERT_EQ(count, static_cast<uint64_t>(LAPLACE_SCALAR_COUNT));
+    ASSERT_EQ(count, static_cast<uint64_t>(LAPLACE_CODEPOINT_COUNT));
 
     for (uint32_t cp = 0; cp < 0x110000; ++cp) {
         const uint8_t wb = codepoint_table_wb(cp);
@@ -111,7 +111,7 @@ TEST(LaplaceCoreCodepointTable, CanonicalComposition) {
 TEST(LaplaceCoreCodepointTable, BulkRecordsAreNativeSizedAndIdSorted) {
     const codepoint_entry_t *records = nullptr; uint64_t count = 0;
     ASSERT_EQ(codepoint_table_records(&records, &count), 0);
-    ASSERT_NE(records, nullptr); ASSERT_EQ(count, 1112064u); ASSERT_EQ(sizeof(*records), 64u);
+    ASSERT_NE(records, nullptr); ASSERT_EQ(count, 1114112u); ASSERT_EQ(sizeof(*records), 64u);
     for (uint64_t i = 1; i < count; i++)
         ASSERT_LT(std::memcmp(&records[i - 1].hash, &records[i].hash, 16), 0);
 }
@@ -140,11 +140,19 @@ TEST(LaplaceCoreCodepointTable, BatchMembershipPreservesPositionsAndUnknowns) {
     EXPECT_EQ(codepoint_table_presence_bitmap(nullptr, 0, nullptr, 0), 0);
 }
 
-TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndRejectsSurrogates) {
+TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndSurrogateCodepoints) {
     uint32_t cp = 42;
     ASSERT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0)->hash, &cp), 0);
     EXPECT_EQ(cp, 0u);
-    EXPECT_EQ(codepoint_table_lookup(0xd800), nullptr); EXPECT_EQ(codepoint_table_lookup(0xdfff), nullptr);
+    for (uint32_t value : {0xd800u, 0xdfffu}) {
+        const auto *record = codepoint_table_lookup(value); ASSERT_NE(record, nullptr);
+        ASSERT_EQ(codepoint_table_lookup_id(&record->hash, &cp), 0); EXPECT_EQ(cp, value);
+        hash128_t id; double coord[4]; hilbert128_t placement;
+        ASSERT_EQ(codepoint_table_resolve_atom(value, &id, coord, &placement), 0);
+        EXPECT_EQ(std::memcmp(&id, &record->hash, sizeof id), 0);
+        for (int axis = 0; axis < 4; ++axis)
+            EXPECT_EQ(coord[axis], (double)record->mantissa[axis] / 9007199254740992.0);
+    }
 }
 
 TEST(LaplaceCoreCodepointTable, RejectsLegacyBandedPerfcacheFormat) {

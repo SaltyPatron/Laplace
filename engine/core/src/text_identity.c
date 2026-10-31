@@ -85,7 +85,7 @@ int hash128_text(const uint8_t *bytes, size_t length, hash128_t *out) {
 void *text_identity_thread_context(void) { return thread_text(); }
 
 int text_identity_atom(uint32_t scalar, hash128_t *id, double coord[4], hilbert128_t *hilbert) {
-    if (!id || !coord || !hilbert || !lp_unicode_scalar(scalar)) return -1;
+    if (!id || !coord || !hilbert || scalar >= LP_NCP) return -1;
     const lp_tier0_record *floor = text_identity_scalar_floor();
     if (!floor) return -2;
     lp_ref atom = lp_ref_atom(floor, scalar);

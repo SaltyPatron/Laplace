@@ -23,7 +23,7 @@ public sealed unsafe class NativeScalarFloorParityTests
             var map = Marshal.GetDelegateForFunctionPointer<Map>(NativeLibrary.GetExport(library, "lp_tier0_map"));
             nint native = map(CodepointPerfcache.ResolveDefaultPath());
             Assert.NotEqual(nint.Zero, native);
-            Assert.Equal(1_112_064, CodepointPerfcache.Count);
+            Assert.Equal(1_114_112, CodepointPerfcache.Count);
             var records = CodepointPerfcache.Records;
             var expected = new ReadOnlySpan<byte>((void*)native, checked(records.Length * 64));
             Assert.True(expected.SequenceEqual(MemoryMarshal.AsBytes(records)),
@@ -36,6 +36,14 @@ public sealed unsafe class NativeScalarFloorParityTests
                 Assert.Equal(cp, record.Codepoint);
                 Assert.True(CodepointPerfcache.TryLookupCodepoint(record.Hash, out uint reverse));
                 Assert.Equal(cp, reverse);
+            }
+            foreach (uint cp in new uint[] { 0xd800, 0xdfff })
+            {
+                Assert.True(CodepointPerfcache.TryLookupCodepoint(cp, out var record));
+                Assert.Equal(cp, record.Codepoint);
+                Assert.True(CodepointPerfcache.TryLookupCodepoint(record.Hash, out uint reverse));
+                Assert.Equal(cp, reverse);
+                Assert.Equal(record.Hash, CodepointPerfcache.LookupCodepoint(cp).Hash);
             }
             Assert.False(CodepointPerfcache.TryLookupScalar(0xd800, out _));
             Assert.False(CodepointPerfcache.TryLookupScalar(0xdfff, out _));
@@ -73,7 +81,7 @@ public sealed unsafe class NativeScalarFloorParityTests
         try
         {
             using var snapshot = UnicodeSeed.OpenSnapshot(xml, ducet);
-            Assert.Equal(1_112_064, snapshot.Count);
+            Assert.Equal(1_114_112, snapshot.Count);
             Assert.Equal(CodepointPerfcache.Records[0].Hash, snapshot.RecordAt(0).Hash);
             var copy = Marshal.GetDelegateForFunctionPointer<CopyRecord>(
                 NativeLibrary.GetExport(library, "laplace_unicode_seed_snapshot_copy_record"));
