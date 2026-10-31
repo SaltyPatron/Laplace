@@ -184,7 +184,10 @@ jobs:
       - name: UCI handshake
         run: bash scripts/ci/hosted-dev-tests.sh uci
       - name: Browser suites
-        run: bash scripts/ci/hosted-dev-tests.sh browser
+        run: |
+          # Playwright selects its pinned browser revision in the persistent CI estate.
+          export PLAYWRIGHT_BROWSERS_PATH="$LAPLACE_CI_WORK/playwright"
+          bash scripts/ci/hosted-dev-tests.sh browser
       - name: Keep managed test results
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
