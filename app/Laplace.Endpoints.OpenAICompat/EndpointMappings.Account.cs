@@ -182,6 +182,36 @@ internal static class AccountEndpoints
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent() : Results.NotFound();
         }).WithTags("account");
 
+        app.MapPost("/v1/account/invitations/preview", async (HttpContext http, AcceptInvitationRequest request,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to review an invitation.");
+            if (request.Token is not { Length: 64 } || !request.Token.All(Uri.IsHexDigit))
+                return Error(400, "invalid_invitation", "This invitation is invalid or expired.");
+            // Keep the bearer token in the request body, out of URL logs and referrers.
+            http.Response.Headers.CacheControl = "private, no-store";
+            await using var command = application.CreateCommand("""
+                SELECT t.display_name, i.role, i.expires_at,
+                    coalesce(u.display_name, u.email, 'Workspace administrator'), m.role
+                FROM app.workspace_invitations i
+                JOIN app.tenants t ON t.tenant_id = i.tenant_id
+                JOIN app.users u ON u.user_id = i.created_by
+                JOIN app.tenant_memberships inviter ON inviter.tenant_id = i.tenant_id AND inviter.user_id = i.created_by
+                LEFT JOIN app.tenant_memberships m ON m.tenant_id = i.tenant_id AND m.user_id = $2
+                WHERE i.token_hash = $1 AND i.revoked_at IS NULL AND i.accepted_at IS NULL AND i.expires_at > now()
+                    AND (inviter.role = 'owner' OR (inviter.role = 'admin' AND i.role = 'member'))
+                """);
+            command.Parameters.AddWithValue(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
+            command.Parameters.AddWithValue(account.User);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return Error(404, "invalid_invitation", "This invitation is invalid, expired, or already used.");
+            return Results.Ok(new
+            {
+                workspaceName = reader.GetString(0), role = reader.GetString(1), expiresAt = reader.GetFieldValue<DateTimeOffset>(2),
+                invitedBy = reader.GetString(3), currentRole = reader.IsDBNull(4) ? null : reader.GetString(4)
+            });
+        }).WithTags("account");
+
         app.MapPost("/v1/account/invitations/accept", async (HttpContext http, AcceptInvitationRequest request,
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {

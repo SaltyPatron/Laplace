@@ -218,7 +218,8 @@ internal sealed class ApiKeyEnforcementMiddleware
                 // selected workspace is removed. These endpoints authorize the target.
                 var accountDiscovery = (HttpMethods.IsGet(request.Method) && path.Equals("/v1/account", StringComparison.OrdinalIgnoreCase))
                     || (HttpMethods.IsPost(request.Method) && context.GetEndpoint() is RouteEndpoint accountEndpoint
-                        && accountEndpoint.RoutePattern.RawText is "/v1/account/workspaces" or "/v1/account/workspaces/{tenantId}/select");
+                        && accountEndpoint.RoutePattern.RawText is "/v1/account/workspaces" or "/v1/account/workspaces/{tenantId}/select"
+                            or "/v1/account/invitations/preview" or "/v1/account/invitations/accept");
                 if (role is null && !path.Equals("/v1/access", StringComparison.OrdinalIgnoreCase) && !accountDiscovery)
                 {
                     await Reject(context, "workspace_membership_required", "This account no longer belongs to the selected workspace.", 403); return;

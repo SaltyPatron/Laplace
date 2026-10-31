@@ -79,3 +79,77 @@ test('phone navigation reaches services without horizontal page overflow', async
   await expect(page.getByRole('heading', { name: 'MCP', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('workspace removal requires review and preserves the member when refused', async ({ page }) => {
+  await page.goto(`${fixture}?reject=1&page=${encodeURIComponent('/settings?section=members')}`);
+  await page.getByRole('searchbox', { name: 'Find a member', exact: true }).fill('manager@example.test');
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('manager@example.test');
+  await expect(page.getByRole('dialog')).toContainText('Laplace team');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove member', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Your permissions changed');
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
+});
+
+test('named API keys remain available to save and revocation has visible results', async ({ page }) => {
+  await page.goto(`${fixture}?page=${encodeURIComponent('/settings?section=clients')}`);
+  await expect(page.getByRole('button', { name: 'Create API key', exact: true })).toBeDisabled();
+  await page.getByRole('textbox', { name: 'Application name', exact: true }).fill('Research importer');
+  await page.getByRole('button', { name: 'Create API key', exact: true }).click();
+  await expect(page.getByLabel('Save this key now', { exact: true })).toHaveAttribute('type', 'password');
+  await page.getByRole('button', { name: 'Show key', exact: true }).click();
+  await expect(page.getByLabel('Save this key now', { exact: true })).toHaveValue('lp_fixture_1_not_a_real_secret');
+  await page.getByRole('textbox', { name: 'Application name', exact: true }).fill('Another importer');
+  await expect(page.getByRole('button', { name: 'Create API key', exact: true })).toBeDisabled();
+  await page.getByRole('searchbox', { name: 'Find an API client', exact: true }).fill('Analytics integration');
+  await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Revoke key', exact: true }).click();
+  await expect(page.getByLabel('Save this key now', { exact: true })).toHaveValue('lp_fixture_1_not_a_real_secret');
+  await page.getByRole('button', { name: 'I have saved this key', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Find an API client', exact: true }).fill('Research importer');
+  await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Research importer');
+  await page.getByRole('dialog').getByRole('button', { name: 'Revoke key', exact: true }).click();
+  await expect(page.getByText('No API clients match these filters.', { exact: true })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Include revoked keys' }).check();
+  await expect(page.getByRole('region', { name: 'API clients', exact: true })).toContainText('Research importer');
+  await expect(page.getByRole('button', { name: 'Revoke key', exact: true })).toHaveCount(0);
+});
+
+test('invitation names the destination and retries selection without accepting twice', async ({ page }) => {
+  await page.goto(`${fixture}?page=${encodeURIComponent(`/settings#join=${'a'.repeat(64)}`)}`);
+  await expect(page.getByRole('region', { name: 'Workspace invitation' })).toContainText('Research team');
+  await expect(page.getByRole('region', { name: 'Workspace invitation' })).toContainText('Member');
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('0');
+  await page.getByRole('button', { name: 'Accept invitation', exact: true }).click();
+  await expect(page.getByText(/You joined the workspace, but switching to it failed/)).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Current workspace', exact: true }).first()).toContainText('Research team');
+  await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('1');
+});
+
+test('workspace creation retries switching without creating a duplicate workspace', async ({ page }) => {
+  await page.goto(`${fixture}?page=${encodeURIComponent('/settings')}`);
+  await page.getByRole('textbox', { name: 'New company workspace', exact: true }).fill('Client research');
+  await page.getByRole('button', { name: 'Create workspace', exact: true }).click();
+  await expect(page.getByText(/Workspace "Client research" was created, but switching to it failed/)).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Current workspace', exact: true }).first()).toContainText('Client research');
+  await page.getByRole('button', { name: 'Open created workspace', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Submitted changes' })).toHaveText('1');
+  await expect(page.getByRole('textbox', { name: 'New company workspace', exact: true })).toBeDisabled();
+});
+
+test('workspace load failures offer retry and phone settings remain navigable', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${fixture}?accountError=1&page=${encodeURIComponent('/settings?section=members')}`);
+  await expect(page.getByRole('button', { name: 'Retry workspaces', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Restore account read', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry workspaces', exact: true }).click();
+  await expect(page.getByRole('searchbox', { name: 'Find a member' })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Settings page', exact: true }).selectOption('clients');
+  await expect(page.getByRole('textbox', { name: 'Application name', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

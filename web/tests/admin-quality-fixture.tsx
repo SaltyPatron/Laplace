@@ -39,17 +39,60 @@ let refreshOutput: () => void = () => {};
 const events: unknown[] = [];
 const workspaceEvents: unknown[] = [];
 const jobs: unknown[] = [];
+let failAccount = query.get('accountError') === '1';
+const invitations: { invitationId: string; role: string; expiresAt: string }[] = [];
+const keys = [{ key_prefix: 'lp_demo', label: 'Analytics integration', created_at: new Date().toISOString(), revoked_at: null as string | null }];
+let acceptedInvitation = false;
 const denied = () => Response.json({ error: { message: 'Keep at least one platform administrator. Assign another administrator first.' } }, { status: 409 });
 window.fetch = async (input, init) => {
   const url = new URL(String(input), location.origin); const path = url.pathname;
   const method = init?.method ?? 'GET'; const payload = init?.body ? JSON.parse(String(init.body)) : {};
   if (path === '/v1/access') return failAccess ? Response.json({ error: { message: 'Access service unavailable' } }, { status: 503 })
     : Response.json({ authenticated: !anonymous, userId: anonymous ? null : user.id, workspace: { tenantId: user.tenantId, role: 'owner' }, platform: { role: platformRole, permissions: roleDefinitions.find((r) => r.id === platformRole)?.permissions ?? [] }, roles: roleDefinitions });
-  if (path === '/v1/account') return Response.json(account);
-  if (path === '/v1/account/members') return Response.json({ members });
-  if (path === '/v1/account/invitations') return Response.json({ invitations: [] });
+  if (path === '/v1/account') return failAccount ? Response.json({ error: { message: 'Account service unavailable' } }, { status: 503 }) : Response.json(account);
+  if (path === '/v1/account/members' && method === 'GET') return Response.json({ members });
+  if (path === '/v1/account/workspace' && method === 'PUT') {
+    account.workspaces[0].displayName = payload.name; mutations++; refreshOutput(); return new Response(null, { status: 204 });
+  }
+  if (path === '/v1/account/workspaces' && method === 'POST') {
+    const workspace = { tenantId: 'created-workspace', displayName: payload.name, kind: 'organization', role: 'owner' };
+    account.workspaces.push(workspace); mutations++; refreshOutput(); return Response.json(workspace);
+  }
+  if (path === '/v1/account/invitations' && method === 'GET') return Response.json({ invitations });
+  if (path === '/v1/account/invitations' && method === 'POST') {
+    const invitation = { invitationId: `invitation-${invitations.length}`, role: payload.role, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() };
+    invitations.push(invitation); mutations++; refreshOutput(); return Response.json({ ...invitation, invitationPath: `/settings#join=${'a'.repeat(64)}` });
+  }
+  if (path === '/v1/account/invitations/preview') {
+    if (acceptedInvitation || query.get('invitationError') === '1') return Response.json({ error: { message: 'This invitation is invalid, expired, or already used.' } }, { status: 404 });
+    return Response.json({ workspaceName: 'Research team', role: 'member', invitedBy: 'Workspace Owner', expiresAt: new Date(Date.now() + 86400000).toISOString(), currentRole: null });
+  }
+  if (path === '/v1/account/invitations/accept') {
+    if (acceptedInvitation) return Response.json({ error: { message: 'This invitation is already used.' } }, { status: 404 });
+    acceptedInvitation = true;
+    account.workspaces.push({ tenantId: 'research-team', displayName: 'Research team', kind: 'organization', role: 'member' });
+    mutations++; refreshOutput(); return Response.json({ tenantId: 'research-team' });
+  }
+  if (path === '/v1/account/workspaces/research-team/select' || path === '/v1/account/workspaces/created-workspace/select') return Response.json({ error: { message: 'Workspace selection unavailable' } }, { status: 503 });
+  if (method === 'DELETE' && path.startsWith('/v1/account/')) {
+    if (rejectChanges) return Response.json({ error: { message: 'Your permissions changed. Refresh your account before trying again.' } }, { status: 403 });
+    const collection = path.includes('/members/') ? members : invitations;
+    const index = collection.findIndex((item) => path.endsWith('userId' in item ? item.userId : item.invitationId));
+    if (index >= 0) collection.splice(index, 1);
+    mutations++; refreshOutput(); return new Response(null, { status: 204 });
+  }
   if (path === '/v1/account/role-events') return Response.json({ events: workspaceEvents });
-  if (path === '/v1/billing/keys') return Response.json({ keys: [{ key_prefix: 'lp_demo', label: 'Analytics integration', created_at: new Date().toISOString(), revoked_at: null }] });
+  if (path === '/v1/billing/keys' && method === 'GET') return Response.json({ keys });
+  if (path === '/v1/billing/keys' && method === 'POST') {
+    const key = { key_prefix: `lp_fixture_${keys.length}`, label: payload.label, created_at: new Date().toISOString(), revoked_at: null };
+    keys.push(key); mutations++; refreshOutput(); return Response.json({ key: `${key.key_prefix}_not_a_real_secret`, keyPrefix: key.key_prefix });
+  }
+  if (path === '/v1/billing/keys/revoke') {
+    if (rejectChanges) return Response.json({ error: { message: 'Your permissions changed. Refresh your account before trying again.' } }, { status: 403 });
+    const key = keys.find((item) => item.key_prefix === payload.key_prefix); if (key) key.revoked_at = new Date().toISOString();
+    mutations++; refreshOutput(); return new Response(null, { status: 204 });
+  }
+  if (path === '/v1/auth/sessions') return Response.json({ sessions: [{ sessionId: 'current-session', current: true, createdAt: new Date().toISOString(), lastSeenAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() }] });
   if (path === '/v1/admin/access/people') return Response.json({ people: people.filter((p) => p.email.includes(url.searchParams.get('search') ?? '')), limit: 100 });
   if (path === '/v1/admin/access/events') return Response.json({ events, limit: 50 });
   if (method === 'PUT' && path.endsWith('/role')) {
@@ -90,6 +133,7 @@ function Fixture() {
   return <>{query.get('preview') !== '1' && <div style={{ padding: '8px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
     <span>Browser verification fixture</span><button onClick={() => { rejectChanges = !rejectChanges; }}>Toggle rejected changes</button>
     <button onClick={() => { platformRole = null; }}>Revoke platform role</button><button onClick={() => { failAccess = false; }}>Restore access read</button>
+    <button onClick={() => { failAccount = false; }}>Restore account read</button>
     <output aria-label="Submitted changes">{mutations}</output></div>}
     <div style={{ maxWidth: '100%', margin: '0 auto' }}>
       <AccountControls user={anonymous ? null : user} providers={providers} returnUrl="/operator" />

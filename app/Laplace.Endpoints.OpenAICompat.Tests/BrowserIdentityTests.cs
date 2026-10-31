@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using Laplace.Endpoints.OpenAICompat.Auth;
@@ -106,6 +107,17 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
         using var login = await client.GetAsync("/v1/auth/login/microsoft");
         Assert.Equal(HttpStatusCode.NotFound, login.StatusCode);
         Assert.Contains("provider_not_configured", await login.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("preview")]
+    [InlineData("accept")]
+    public async Task WorkspaceInvitationsRequireBrowserSignIn(string action)
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.PostAsJsonAsync($"/v1/account/invitations/{action}", new { token = new string('a', 64) });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("sign_in_required", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

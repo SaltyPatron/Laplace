@@ -1,14 +1,15 @@
-import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const endpoint = process.env.LAPLACE_API_URL ?? 'http://localhost:5187';
 
 export default defineConfig({
+  cacheDir: process.env.LAPLACE_VITE_CACHE ?? 'node_modules/.vite',
   plugins: [react()],
   resolve: {
     alias: {
-      '@ui': path.resolve(__dirname, 'src/ui'),
+      '@ui': fileURLToPath(new URL('./src/ui', import.meta.url)),
     },
     // One Matrix4 prototype across R3F + force-graph (avoids determinantAffine crashes).
     dedupe: ['three'],
