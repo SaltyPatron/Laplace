@@ -159,9 +159,7 @@ test.describe('chess UI', () => {
     await expect(page.getByRole('grid')).toBeVisible();
   });
 
-  // The gauntlet's whole premise is that you can read the command before you spend an hour
-  // of engine time on it — and that the command is the one the server would actually run,
-  // built by CutechessRunner.BuildArguments rather than re-derived in the browser.
+  // The preview uses CutechessRunner.BuildArguments, matching the server command.
   test('gauntlet previews the exact cutechess command', async ({ page }) => {
     await page.goto('/lab/gauntlet');
     await expect(page.getByRole('heading', { name: 'Engine Gauntlet' })).toBeVisible();

@@ -1,5 +1,5 @@
 // Executes the production transport/read controller, not a copied implementation.
-// HTTP is substituted only at fetch; these tests do not claim native/database proof.
+// HTTP tests use injected fetch responses.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';

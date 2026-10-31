@@ -268,8 +268,8 @@ def verify(directory, manifest, base, timeout_seconds):
     last = installed(directory, manifest)
     if first != last:
         raise ValueError("API payload changed during verification")
-    # Readiness/typed operation need not touch dynamics/synthesis/Syzygy. They
-    # are present and byte-verified; do not claim execution of lazy libraries.
+    # Byte verification includes dynamics/synthesis/Syzygy even when readiness
+    # and typed operations leave these lazy libraries unloaded.
     return {"schema": "laplace.api-payload-verification/v1", "status": "passed",
             "has_data": has_data, "product_ready": product_ready,
             "boot_id": floor.acceptance.boot_id(),

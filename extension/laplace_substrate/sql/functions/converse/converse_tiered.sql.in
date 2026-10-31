@@ -63,7 +63,7 @@ CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
 -- NO NEUTRAL SUBTRACTION. consensus_adjacency's export weight uses
 -- (consensus.eff_mu - neutral) so consensus.refuted edges sign-flip, and copying that here was a bug
 -- caught before it shipped: consensus.eff_mu arrives in the fold's INTERNAL units (~1e12,
--- so Glicko 1500 is 1.5e12), and consensus.eff_mu = rating - 2*rd puts every honestly
+-- so Glicko 1500 is 1.5e12), and consensus.eff_mu = rating - 2*rd puts every
 -- weakly-witnessed edge BELOW neutral. Measured on pawn: the whole gloss family
 -- sits at 1.17e12-1.37e12, i.e. Glicko 1170-1370. Subtracting neutral and
 -- keeping w > 0 would have dropped every unit and fallen back to template prose

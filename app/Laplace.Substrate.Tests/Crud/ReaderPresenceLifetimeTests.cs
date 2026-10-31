@@ -6,9 +6,8 @@ using Xunit;
 
 namespace Laplace.Substrate.Tests.Crud;
 
-// Exercise the real reader and its shared batcher with controlled transport.
-// These controls do not claim PostgreSQL execution; the chess migration's
-// context-substitution case covers the real backend eviction/rebuild path.
+// Exercise the reader and shared batcher with injected transport.
+// The chess migration's context-substitution case covers backend eviction/rebuild.
 public sealed class ReaderPresenceLifetimeTests
 {
     private static readonly Hash128 Marker = new(0x93d7aa3167c901e2UL, 0x5428f318e84aa629UL);

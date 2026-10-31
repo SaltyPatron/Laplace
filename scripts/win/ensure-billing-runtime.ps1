@@ -1,7 +1,6 @@
 #requires -Version 7
 # Ensure Lichess + Stripe secrets are in deploy/secrets and the Stripe CLI
 # webhook forwarder is installed/running. Called from publish-deploy / setup-host.
-# No separate human checklist — this IS the billing runtime contract on Windows.
 [CmdletBinding()]
 param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,

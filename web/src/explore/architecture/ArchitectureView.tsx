@@ -47,7 +47,7 @@ function Architecture({ catalog }: { catalog: Catalog }) {
   return <Stack className={styles.workspace} gap={4}>
     <header><h2>Architecture & operations</h2><p>Follow Laplace from source admission through cognition, effects and learning. Compare the contract with each implementation and inspect the evidence behind the diagram.</p></header>
     <NavTabs tabs={sections.map(([id, label]) => ({ id, label, active: section === id, href: address({ section: id }), onClick: () => setParams({ section: id }) }))} />
-    <Muted>{catalog.coverage.operations} specification operations · {catalog.coverage.registrations} source registrations · {catalog.coverage.diagrams} diagrams and figures. These are different inventories, not counts of working capabilities.</Muted>
+    <Muted>{catalog.coverage.operations} specification operations · {catalog.coverage.registrations} source registrations · {catalog.coverage.diagrams} diagrams and figures.</Muted>
     {section === 'diagrams' ? <DiagramBrowser catalog={catalog} /> : section === 'sources' ? <SourceBrowser /> : <>
       <Field label="Search this inventory"><Input value={q} onChange={(e) => set({ q: e.target.value })} type="search" /></Field>
       {section === 'operations' ? <Operations catalog={catalog} query={q} /> : section === 'registrations' ? <Registrations catalog={catalog} query={q} /> : section === 'conflicts' ? <Stack>{catalog.conflicts.filter((c) => `${c.title} ${c.text}`.toLowerCase().includes(q.toLowerCase())).map((c) => <Panel key={c.title} title={plain(c.title)}>
@@ -56,7 +56,7 @@ function Architecture({ catalog }: { catalog: Catalog }) {
         <Muted>{c.path}:{c.line}</Muted>
       </Panel>)}</Stack> : <Panel title="Unknown architecture section"><RouteLink to={root}>Return to system and flows</RouteLink></Panel>}
     </>}
-    <details><summary>What has been checked</summary><p>{catalog.validation.scope}</p><p>{catalog.validation.sourceFilesChecked} available source files matched recorded hashes; {catalog.validation.unavailableSourceFiles} require their separate checkout for a fresh comparison.</p><p>Syntax extraction reports {catalog.coverage.sourceParseErrors} files with parse errors. A source link, successful rendering, or a passing interface test does not establish semantic completeness or deployed acceptance.</p><a href={asset('catalog.json')} download>Download architecture evidence</a></details>
+    <details><summary>What has been checked</summary><p>{catalog.validation.scope}</p><p>{catalog.validation.sourceFilesChecked} available source files matched recorded hashes; {catalog.validation.unavailableSourceFiles} require their separate checkout for a fresh comparison.</p><p>Syntax extraction reports {catalog.coverage.sourceParseErrors} files with parse errors.</p><a href={asset('catalog.json')} download>Download architecture evidence</a></details>
   </Stack>;
 }
 function DiagramBrowser({ catalog }: { catalog: Catalog }) {

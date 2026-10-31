@@ -8,19 +8,9 @@ namespace Laplace.Chess.Service;
 /// <summary>
 /// Per-run tally of records a chess lane REFUSED, by reason.
 ///
-/// WHY THIS EXISTS. Every drop site in the chess lanes called
-/// <c>System.Diagnostics.Trace.TraceWarning</c> and moved on. No trace listener is
-/// registered in the CLI, so those strings were written to nothing: a run that refused
-/// a third of its input and a run that refused none produced byte-identical output, and
-/// <c>INGEST_COMPLETE ... failed=0 status=ok</c> in both cases. "An unattested id is not
-/// an id attested false" is the read-side rule; the same applies to the write side — a
-/// record the parser could not read is a fact about the corpus, and a fact nobody counts
-/// is a fact nobody can act on.
-///
 /// The ledger is a process-global counter set because the parse sites are static and run
-/// across the file-worker pool. One ingest at a time is already the operating rule, so a
-/// single set is the right grain; <see cref="Reset"/> at run start keeps repeated
-/// in-process runs (tests, the MCP server) honest.
+/// across the file-worker pool. <see cref="Reset"/> clears the counters at the start
+/// of each in-process run.
 /// </summary>
 internal static class ChessDropLedger
 {

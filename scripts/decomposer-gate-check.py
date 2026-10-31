@@ -182,7 +182,7 @@ def check_source(
         # pass at all). The attestation-joined physicality probe below finds nothing for
         # it, because the lines it decorates were attested by a DIFFERENT source. Its
         # markers are entities first-observed by this decomposer, so count those: that is
-        # the row the lane's own idempotency gate reads, and the honest proof it ran.
+        # the row the lane's own idempotency gate reads.
         marker_type = src["marker_entities"]
         try:
             n = int(

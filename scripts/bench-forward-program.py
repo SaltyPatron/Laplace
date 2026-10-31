@@ -15,8 +15,7 @@ One measured iteration has three distinct phases:
      count. Replay time is recorded separately and is not counted as measured
      execution time.
 
-The benchmark does not turn PostgreSQL planner cost into currency and does not
-pretend output text length describes the work.  It records declared hops/fanout,
+The benchmark records declared hops/fanout,
 planner rows/cost, actual function rows/buffers/WAL, routing/candidate/evidence
 receipt fields, final semantic fingerprint, and plan-vs-actual row error.
 """

@@ -6,9 +6,8 @@ export type TerminalDirection = 'send' | 'recv';
 
 export interface TerminalLine {
   /**
-   * Monotonic per job. A gap is not noise — it is exactly the lines this viewer missed,
-   * to ring eviction or to backpressure, and the pane draws it rather than pretending
-   * the transcript is continuous.
+   * Monotonic per job. Gaps identify lines missed through ring eviction or
+   * backpressure and are displayed by the pane.
    */
   seq: number;
   at: string;
@@ -144,8 +143,8 @@ export interface TranscriptRow {
   hidden: number;
   /**
    * Lines before this one that never reached this viewer — evicted from the server ring
-   * before it connected, or dropped under backpressure. Not the same thing as `hidden`, and
-   * conflating them is how a pane quietly turns "you lost data" into "you filtered it out".
+   * before it connected, or dropped under backpressure. These are distinct from
+   * the lines excluded by the viewer's filters in `hidden`.
    */
   lost: number;
 }

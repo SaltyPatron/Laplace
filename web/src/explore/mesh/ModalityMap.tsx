@@ -60,7 +60,7 @@ export function ModalityMap() {
     <section className={styles.map} aria-label="Modalities">
       <div className={styles.head}>
         <span className={styles.title}>One law, every modality</span>
-        <Muted className={styles.sub}>same identity, same rating math — resident where seeded, honest where not</Muted>
+        <Muted className={styles.sub}>same identity, same rating math — seeded data and ingest availability</Muted>
       </div>
       <div className={styles.grid}>
         {CARDS.map((m) => {

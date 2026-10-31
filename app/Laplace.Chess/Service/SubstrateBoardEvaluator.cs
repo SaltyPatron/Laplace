@@ -16,8 +16,7 @@ public readonly record struct ChessPositionPlaneScore(
 /// <summary>
 /// Search-position evaluator that can expose the typed contribution split used to produce its
 /// scalar search value. Search itself still consumes <see cref="ISearchPositionEvaluator"/>;
-/// receipt wrappers can retain the plane boundary instead of pretending one opaque cp number is
-/// proof that every advertised provider participated.
+/// receipt wrappers retain the separate provider contributions.
 /// </summary>
 public interface IChessSearchPositionPlanes : ISearchPositionEvaluator
 {

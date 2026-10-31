@@ -23,9 +23,8 @@ internal readonly record struct OperatorLanguage(string Code, byte[] Id, string 
         if (LanguageReference.ResolveSystemCode() is { } systemCode)
             return FromCode(systemCode, "system");
 
-        // An invariant or unconfigured host has no honest default.  SQL can still
-        // infer the prompt language, so absence remains absence instead of becoming
-        // an invented English preference.
+        // An invariant or unconfigured host has no default language.
+        // Return null so SQL can infer the prompt language.
         return null;
     }
 

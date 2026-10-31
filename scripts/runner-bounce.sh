@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# Bounce the wedged GitHub Actions runner — GUARD FIRST, ALWAYS.
-#
-# The runner service restart is the recovery for the stale-busy state measured
-# 2026-08-06 (Listener busy=true, no Runner.Worker, queue wedged ~15min). The
-# restart is SAFE ONLY WHEN NOTHING IS RUNNING: a bounce during a live CI job
-# kills it mid-deploy, and a bounce while a seed ingest runs destroys hours of
-# work (the 2026-08-05 ChessPgn kill class). Every guard below must pass or
-# this script refuses and prints why. There is no --force. If a guard blocks
-# you and you believe it is wrong, fix the guard's evidence, not the guard.
+# Restart a stale-busy GitHub Actions runner after all inactivity probes pass.
+# Active jobs, ingestion, database work, or CLI processes prevent the restart.
 set -euo pipefail
 
 UNIT="actions.runner.SaltyPatron-Laplace.hart-server.service"
@@ -17,7 +10,7 @@ fail() { echo "REFUSED: $1" >&2; exit 1; }
 
 # 1. No ingest run open in the journal (the substrate's own ledger).
 running=$("${PSQL[@]}" -c "SELECT count(*) FROM ops.ingest_runs(50) WHERE status = 'running';") \
-    || fail "journal probe failed — cannot PROVE quiet, so not quiet (fail closed)"
+    || fail "journal query failed; runner inactivity could not be verified"
 [ "$running" = "0" ] || fail "ingest_run_journal shows $running run(s) status=running"
 
 # 2. No active backend on the database (COPY, fold, anything non-idle).

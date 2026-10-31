@@ -85,8 +85,8 @@ public sealed record IngestSourceProfile(
     /// PredicateMatrix v1.3 row — about 330 UTF-8 bytes on disk, retained as 27
     /// normalized fields plus its compact bridge projections until the working set drains.
     /// It admits governed references and attestations rather than content trees, so there is
-    /// one compose unit; the distinct resident estimate keeps the input batch large without
-    /// pretending the parsed object graph costs only its serialized bytes.
+    /// one compose unit; the resident estimate accounts for the parsed object graph
+    /// separately from its serialized bytes.
     /// </summary>
     public static readonly IngestSourceProfile PredicateMatrix =
         new(384, 1, ResidentBytesPerComposeUnit: 2_048);

@@ -279,7 +279,7 @@ int bilinear_candidates_calibrate_at_arena(
 #endif
         if (!std::isfinite(value)) return -2;
         // A zero-energy circuit makes every relation unknown.  Do not feed 0/0
-        // to score.c and do not pretend a tie is positive evidence.
+        // to score.c; use a neutral draw score.
         int64_t score = arena == 0.0
             ? 500000000LL
             : (int64_t)std::llround(0.5 * (1.0 + std::tanh(value / arena)) * 1e9);

@@ -30,10 +30,7 @@
 -- now consensus.belief_logit: eff_mu on Glicko-2's own scale. p descending and eff_mu
 -- descending are therefore the same order by construction, not by coincidence.
 --
--- ABSTENTION IS THE POINT. No candidates -> no rows. A softmax cannot express
--- "couples to nothing under this relation"; it sums to 1 over whatever vector it
--- was handed, which is why a model fabricates a capital for a country it has no
--- edge for. The empty set is the honest answer and this returns it.
+-- Return no rows when the relation has no candidates.
 --
 -- Refuted edges are NOT filtered. A refutation drives rating below neutral, so
 -- its logit is negative and exp() suppresses it to near zero without a gate --

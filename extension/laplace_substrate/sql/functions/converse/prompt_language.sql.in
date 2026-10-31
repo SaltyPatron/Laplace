@@ -26,7 +26,7 @@
 --
 -- NO FLOOR AND NO MINIMUM MARGIN: the fold already carries confidence, ties
 -- break on the id for determinism, and a prompt with no language evidence
--- returns NULL -- the honest answer when the prompt genuinely does not say.
+-- returns NULL when there is no language evidence.
 --
 -- Returns the ranked tally, not just the winner, because an elector wants to
 -- BIAS toward a language rather than hard-filter to it: a genuinely

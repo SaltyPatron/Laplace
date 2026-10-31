@@ -117,26 +117,8 @@ PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
 PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
 RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server-Laplace.service"   # agents.sh names it <host>-<repo>
 
-# THE OPERATOR — the human this host belongs to, not whoever is running us.
-#
-# This was `${SUDO_USER:-ahart}`, which is wrong under the ONE invocation the
-# repo documents. setup-host.sh is run as `sudo bash scripts/setup-host.sh`, so
-# it is already root when it calls `sudo "$BOOTSTRAP" bootstrap` — and a nested
-# sudo sets SUDO_USER=root. So the operator resolved to `root` on every normal
-# run, and:
-#   * bootstrap_pg_bounce_sudoers granted the NOPASSWD postgres bounce to root
-#     (which already had it) instead of to the human, so pipeline.sh's
-#     restart_postgres found "no rootless path" and dumped a pending_restart on
-#     the operator to finish by hand — the exact "script leaves it broken" bug.
-#   * bootstrap_runner_gh_auth looked for /home/root/.config/gh/hosts.yml, a path
-#     that cannot exist because root's home is /root, and skipped every time.
-#   * the Verification block ran `gh api` as root and printed nothing.
-# All three reported success or a benign skip. None of them worked.
-#
-# LAPLACE_OPERATOR is passed explicitly by setup-host.sh (which still has the
-# real SUDO_USER); logname covers a direct `sudo bootstrap-laplace-runner.sh`.
-# If neither resolves to a human, say so — granting root a grant it already has
-# and calling it done is how this hid for so long.
+# LAPLACE_OPERATOR preserves the original caller across nested sudo invocations.
+# Fall back to SUDO_USER, then logname; root is not a valid operator identity.
 GH_SUDO_USER="${LAPLACE_OPERATOR:-}"
 if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
     GH_SUDO_USER="${SUDO_USER:-}"

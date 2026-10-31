@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for selection precedence and honest corpus acceptance receipts."""
+"""Regression tests for selection precedence and corpus acceptance receipts."""
 import copy
 import importlib.util
 import hashlib

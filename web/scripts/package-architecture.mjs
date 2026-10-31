@@ -94,7 +94,7 @@ const catalog = {
   validation: { sourceFilesChecked: [...snapshots.values()].filter((s) => s.startsWith('matches working source')).length,
     modifiedSourceFiles: [...snapshots.values()].filter((s) => s === 'working source modified since diagram review').length,
     unavailableSourceFiles: [...snapshots.values()].filter((s) => s === 'recorded snapshot; source checkout unavailable').length,
-    scope: 'Export presence, UML syntax markers, references and available source hashes. Semantic review and runtime acceptance are separate.' },
+    scope: 'Diagram exports, UML syntax markers, references, and available source hashes.' },
 };
 await writeFile(path.join(out, 'catalog.json'), JSON.stringify(catalog));
 console.log(JSON.stringify({ architecture: catalog.coverage, validation: catalog.validation,

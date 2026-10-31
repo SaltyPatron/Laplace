@@ -1,16 +1,7 @@
 -- converse.chat_scaffold — per-language connective templates for converse.chat.
 --
--- GH #901: converse.chat()'s render side was gluing realized labels with hardcoded English
--- connectives while the parse side and language tally were language-agnostic.
--- A Bulgarian prompt correctly resolved lang, then wrapped Bulgarian labels in
--- English scaffolding — the 2026-07-25 Bulgarian-dog defect one layer down.
---
--- This is the minimal per-language template table (keyed on the resolved lang
--- id). English and Bulgarian ship as first citizens (the two languages that
--- exposed the defect). Every other lang falls back to a typographic form that
--- carries no English verbs: "Topic: labels." That is honest S9 fallback, not a
--- pretend translation. Connectives-as-realized-entities through consensus remains
--- the longer inventively-correct path; this stops the lie now.
+-- Templates are keyed by the resolved language id. English and Bulgarian have
+-- language-specific templates; other languages use the typographic form "Topic: labels."
 --
 -- p_key is a fixed slot name (parts / kinds / related / core / no_edges / no_type /
 -- no_forward / band). p_topic and p_labels / p_extra fill the slots. Missing

@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
 """Claim-citation gate: a comment that cites file:line must still point at what it claims.
 
-A citation in prose or a code comment is a claim about the tree. It has no owner and no
-expiry, so it decays silently while reading with the same authority as the code beside it.
-This gate gives that class a losing condition.
-
 Checks every `path:line` citation found in tracked comments and docs:
   MISSING_FILE  cited path does not resolve
   SHORT_FILE    cited line is past EOF
   BLANK_LINE    cited line is empty or a lone brace/comment marker
   OK            line has content
 
-NOT WIRED INTO CI, and must not be until MISSING_FILE is clean. Three false-positive
-classes are known and unhandled:
+Known unresolved citation sources:
 
   1. generated artifacts — highway_manifest.h, relation_law.c and friends are codegen
      outputs and gitignored, so a correct citation to them resolves to nothing;
   2. ambiguous basenames — resolve() gives up when two files share a name
      (NativeInterop.cs exists under both Core/Dynamics and Core/Synthesis);
   3. self-reference — example citations inside this file's own prose are matched.
-
-Arming it before those are handled turns a correct commit red for being correct,
-which is how a gate gets disabled instead of fixed.
 
 Shrink-only, like scripts/model-payload-gate-check.py.
 
@@ -42,9 +34,7 @@ CITE = re.compile(
     r"(?<![\w./-])((?:[\w.\-]+/)*[\w\-]+(?:\.\w+)*?"
     r"\.(?:sql\.in|cs|cpp|hpp|sql|py|sh|toml|md|txt|yml|c|h|in)):(\d{1,6})\b")
 
-# Citations into source that is not this repository. A reference to PostgreSQL's
-# own tree is a legitimate claim; it is simply not resolvable here, and counting
-# it as decay would fail the build for being correct.
+# External source paths excluded from local citation resolution.
 EXTERNAL = {
     "clauses.c",            # postgres/src/backend/optimizer/plan
     "tests/CMakeLists.txt",

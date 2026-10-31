@@ -72,8 +72,7 @@ if [[ -f "$JOURNAL_DDL" ]]; then
 fi
 
 pass=0; fail=0
-# expect_ok / expect_fail assert the EXIT CODE, which is the whole point: a lane that
-# reads nothing must not report success, and a lane handed a real corpus must not error.
+# expect_ok / expect_fail assert CLI exit codes for empty and populated inputs.
 lane() {
   local expect="$1"; shift
   local label="$1"; shift

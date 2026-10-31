@@ -76,7 +76,7 @@ $completion_provenance$;
 
 -- The exact prompt trunk is itself the first cognition operand. A typed result
 -- attached to that trunk denotes the whole admitted request, so it must be able
--- to discharge the request without pretending one constituent was the root.
+-- to discharge the request using that trunk as the root.
 DO $whole_trunk_grounding$
 DECLARE
     prompt text := 'cognitionalpha cognitionbeta';

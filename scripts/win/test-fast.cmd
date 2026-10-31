@@ -1,7 +1,7 @@
 @echo off
 setlocal
 rem ============================================================================
-rem  test-fast.cmd — the sub-minute unit gate, honestly named.
+rem  test-fast.cmd — unit test profile.
 rem
 rem  Runs ONLY unit-shaped tests: Tier!=perf AND Tier!=db (the 12 PG-bound
 rem  integration classes are tagged Tier=db), and skips the chess engine suite

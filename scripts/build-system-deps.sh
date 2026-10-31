@@ -316,8 +316,7 @@ if [ "$(id -u)" -eq 0 ]; then
   # from a Jul-17 `ahart` run, six ExternalProject_Add configure_file failures).
   # One-time REPAIR of trees already poisoned before assert_single_build_identity
   # existed. Prevention is that guard; this only clears the historical damage, because
-  # without it the very next $RUN_AS build still EPERMs on the old files. Idempotent,
-  # and it keeps the human out of `sudo rm -rf /opt/laplace/build`.
+  # without it the next $RUN_AS build still EPERMs on the old files. Idempotent.
   if id -u "$RUN_AS" >/dev/null 2>&1 && [ -d "$BUILD" ]; then
     foreign="$(find "$BUILD" ! -user "$RUN_AS" -print -quit 2>/dev/null || true)"
     if [ -n "$foreign" ]; then

@@ -17,12 +17,7 @@ BEGIN ATOMIC
         FROM laplace.v_word_points w
         WHERE w.type_id = laplace.entity_type_id('Document')
           AND w.trajectory IS NOT NULL
-        -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
-        -- an ordering is a missing ranking. The honest ranking is by trajectory length,
-        -- but MEASURED 2026-08-01 that plans as a seq scan of every physicality partition
-        -- plus a full sort (no index serves n_constituents), so it trades an arbitrary
-        -- sample for an unusable one. Left arbitrary DELIBERATELY until an index exists
-        -- that ingest is willing to pay for; the defect is recorded, not hidden.
+        -- Sample deterministically by content hash and physicality id.
         ORDER BY w.id, w.physicality_id
         LIMIT p_docs
     ),

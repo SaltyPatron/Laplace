@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# THE human host entry point for Laplace on Linux.
+# Linux host provisioning entry point.
 #
 #   sudo bash scripts/setup-host.sh
 #
@@ -19,11 +19,8 @@ MANAGED_BOOTSTRAP="$REPO_DIR/deploy/linux/laplace-managed-deploy"
 MIGRATIONS_PROJ="$REPO_DIR/app/Laplace.Migrations/Laplace.Migrations.csproj"
 RUNNER_USER="laplace-runner"
 
-# THE OPERATOR, resolved ONCE here, where SUDO_USER is still the human.
-# Each nested `sudo ... "$BOOTSTRAP"` below runs from an ALREADY-ROOT process, and
-# a nested sudo resets SUDO_USER to root — so the bootstrap could never see who
-# this host belongs to, and granted its operator permissions to root instead.
-# Passed explicitly rather than re-derived on the far side.
+# Resolve the original operator before nested sudo replaces SUDO_USER with root.
+# Pass the resolved identity to child provisioning scripts.
 LAPLACE_OPERATOR="${SUDO_USER:-$(logname 2>/dev/null || true)}"
 export LAPLACE_OPERATOR
 

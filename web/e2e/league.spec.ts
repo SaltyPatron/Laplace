@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test';
 import nativeClaims from './fixtures/native-claim-leaders.json' with { type: 'json' };
 
-// The unified shell: every surface is a route, and the header nav is identical
-// everywhere — no page hides another. Previously entering Explore dropped the
-// nav to two items and stranded you.
+// Header navigation is shared by all routes, including nested Explore pages.
 test('full nav is present on every surface, including deep inside Explore', async ({ page }) => {
   await page.goto('/explore/matchup/dog/cat');
   for (const tab of ['Home', 'Chat', 'Query', 'Explore', 'Play', 'Lab', 'Billing']) {
@@ -82,15 +80,14 @@ test('mesh drill shows belongs-to, roster, and re-centers on a member', async ({
   await expect(page.getByText('Belongs to')).toBeVisible();
 });
 
-// The omni-modal map is honest: the resident modality reads live, the absent
-// ones read "awaiting ingest" — never a faked scoreboard.
-test('mesh landing shows the honest modality map', async ({ page }) => {
+// Resident modalities use live reads; unseeded modalities display "awaiting ingest".
+test('mesh landing shows modality availability', async ({ page }) => {
   await page.goto('/explore/mesh');
   await expect(page.getByText('One law, every modality')).toBeVisible({ timeout: 15_000 });
   // Text is the resident foundation → live
   const text = page.locator('section[aria-label="Modalities"]').getByText('Text', { exact: true });
   await expect(text).toBeVisible();
-  // an unseeded modality is honestly labelled, not shown as a zero scoreboard
+  // Unseeded modalities display an availability label.
   await expect(page.getByText('awaiting ingest').first()).toBeVisible();
 });
 
@@ -107,7 +104,7 @@ test('stage drills into a live source with a roster', async ({ page }) => {
   await expect(page.locator('a[href*="/explore/entity/"]').first()).toBeVisible({ timeout: 30_000 });
 });
 
-test('unseeded cadence source is honestly labelled on the stage page', async ({ page }) => {
+test('unseeded cadence source has an availability label on the stage page', async ({ page }) => {
   await page.goto('/explore/stage/relations');
   await expect(page.getByText('not yet ingested').first()).toBeVisible({ timeout: 15_000 });
 });

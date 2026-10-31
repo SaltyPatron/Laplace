@@ -201,8 +201,7 @@ public static partial class CutechessRunner
     private static partial Regex GameEndRegex();
 
     // "option name UCI_Elo type spin default 1350 min 1350 max 2850" — the bounds differ
-    // between Stockfish releases, so the only honest source for them is the engine that is
-    // actually running.
+    // between Stockfish releases, so read them from the running engine.
     [GeneratedRegex(@"option name UCI_Elo type spin.*?min (\d+) max (\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex UciEloRangeRegex();
 

@@ -25,11 +25,8 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
   <!--
-    Tier=db RUNS by default. It was previously excluded here and in
-    scripts/test-parallel.sh, so 66 useful PostgreSQL-backed tests executed nowhere,
-    including the fold's bit-exact determinism proof. DB-tier tests must own/create
-    their fixture state and may depend on PostgreSQL, but not on a particular seeded
-    product corpus.
+    Tier=db is included by default. DB-tier tests create their fixture state and
+    may depend on PostgreSQL, but not on a particular seeded product corpus.
 
     Tier=live is intentionally different: it exercises the standing shared substrate
     and may require foundation/content seeds or deposit durable product episodes.
@@ -63,24 +60,8 @@
                       Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))" />
   </ItemGroup>
   <!--
-    THE TEST MUST EXECUTE THE ARTIFACT BUILT FROM THIS TREE.
-
-    /etc/ld.so.conf.d puts /opt/laplace/lib on the system loader path, so a bare
-    `dotnet test` resolved liblaplace_core.so to the INSTALLED copy and never to
-    build/engine/core. scripts/test-parallel.sh exports LD_LIBRARY_PATH and is
-    correct; the bare invocation this file's own docs recommend for running a
-    single test was not, and nothing said so.
-
-    Measured 2026-08-24: LAPLACE_GLICKO2_NEUTRAL_MU_FP was changed 1500 -> 1400 and
-    the library relinked, and NeutralMu_MatchesServerConstant stayed GREEN. It
-    asserts a hard literal and would have caught the change; it was reading a copy
-    installed 21 minutes earlier. Every native-backed parity assertion —
-    Glicko2FoldParity, ConsensusKeysParity, CollapseIndexParity,
-    QkPairsThresholdParity, RootIdNativeParityProbe — could pass against a stale
-    installed library while the source defining the invariant was broken.
-
-    Copying the built libraries beside the test binary fixes it for every
-    invocation rather than for the ones that remember an environment variable:
+    Copy candidate native libraries beside the managed test binary so it loads
+    the selected build instead of the installed /opt/laplace/lib copy:
     .NET probes NATIVE_DLL_SEARCH_DIRECTORIES, which includes the app base
     directory, BEFORE handing off to the OS loader — so an app-local copy wins
     over /opt/laplace/lib without touching a shared path.

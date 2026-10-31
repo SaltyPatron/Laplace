@@ -1,6 +1,6 @@
 -- Canonical relation-in/relation-out shape cluster.
 --
--- p_limit has one honest meaning for resource use and output: at most p_limit
+-- p_limit bounds resource use and output: at most p_limit
 -- deterministic coordinate-nearest candidates are admitted per DISTINCT resolved seed,
 -- and therefore at most p_limit survivors can be returned for that seed. The old scalar
 -- hid GREATEST(p_limit * 20, 2000), so asking for ten results silently realized and scored

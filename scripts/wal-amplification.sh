@@ -50,8 +50,7 @@ after)
 
     # pg_waldump gives the authoritative FPI/record split. It reads WAL SEGMENTS, which
     # are recycled once a checkpoint passes them, so this only works when the segments
-    # spanning the run still exist -- report that honestly instead of printing a number
-    # derived from whatever happens to be left on disk.
+    # spanning the run still exist. Missing segments make the split unavailable.
     waldir=$(q "SELECT setting FROM pg_settings WHERE name='data_directory';")/pg_wal
     dump=$(command -v pg_waldump || echo "${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin/pg_waldump")
     if [[ -x "$dump" ]]; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Receipt-only controls; these fixtures do not claim actual PG execution."""
+"""Test receipt validation with controlled transport and process fixtures."""
 import copy
 import hashlib
 import importlib.util

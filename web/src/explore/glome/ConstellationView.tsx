@@ -100,8 +100,8 @@ export function ConstellationView() {
     <div className={styles.root}>
       <h2>Substrate constellation</h2>
       <Muted className={styles.lead}>
-        Hilbert-stratified S³ coverage of stored physicalities — not a top-relations leaderboard.
-        Entity paint and point mass now encode log evidence volume; they do not claim semantic truth.
+        Hilbert-stratified S³ coverage of stored physicalities.
+        Entity paint and point mass encode log evidence volume.
         {graph ? ` ${nodes.length} occupied strata shown.` : ''}
       </Muted>
       {needsGate ? (

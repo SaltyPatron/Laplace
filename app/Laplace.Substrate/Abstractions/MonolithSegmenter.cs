@@ -183,11 +183,8 @@ public static class MonolithSegmenter
                 var config = configFactory(seg).WithWorkingSetConcurrency(segments);
                 await foreach (var change in IngestBatchPipeline.RunAsync(recStream, handler, config, ct))
                     await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct).ConfigureAwait(false);
-                // Segments are NOT files. Emitting period-boundary/ here inflated
-                // files_done above files_total (CONSOLIDATION Q5: 66/0, 44/10) and let
-                // status=ok pretend a partial FrameNet run finished. File completion is
-                // signaled only by RunMultiFileAsync's one boundary (or file-failed/) per
-                // real file — after every segment of that file has drained.
+                // RunMultiFileAsync emits one period-boundary/ or file-failed/ per
+                // file after all its segments drain. Segments do not emit file completion.
             });
         }
 

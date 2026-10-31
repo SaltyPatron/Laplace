@@ -24,8 +24,6 @@ public static class GrammarRowReader
     /// <summary>
     /// Line-framed delimiter bridge for legacy standards files whose delimiter has no
     /// registered tree-sitter grammar. Registered formats must use <see cref="ReadFieldsAsync"/>.
-    /// This keeps delimiter ownership out of individual decomposers without pretending
-    /// an unregistered pipe format is TSV/CSV.
     /// </summary>
     public static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadDelimitedFieldsAsync(
         string filePath,

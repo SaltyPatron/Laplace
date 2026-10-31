@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Named fail-loud gate for empty / thin / mid-ingest / structurally-invalid substrate.
 #
-# Fail modes (exact strings — grep these in CI logs / agent claims):
+# Diagnostic codes:
 #   INVALID_INDEXES             — installed index-health operation reports an invalid index
 #   INGEST_JOURNAL_NONTERMINAL  — status='running' row(s) in ingest_run_journal
 #   THIN_SUBSTRATE              — database or laplace_substrate extension missing
@@ -9,7 +9,6 @@
 #                                 contract proof failed; receipt has counterexamples
 #
 # Heal path depends on the failed coordinate. This script NEVER reseeds or repairs.
-# Push/deploy/product proof must stay red until the selected live state is real.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,7 +39,7 @@ if [[ "${running:-0}" -gt 0 ]]; then
   psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -P pager=off -c \
     "SELECT source_name, status, input_units_done, input_units_total, now() - started_at AS elapsed, error
      FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
-  echo "Heal: wait for the run to terminal, or mark a true orphan cancelled/failed — do not claim live results over it."
+  echo "Wait for active ingestion to finish, or reconcile an orphaned journal row as cancelled/failed."
   exit 1
 fi
 
@@ -50,7 +49,7 @@ fi
 ext=$("${PSQL[@]}" -d "$DB" -tAc "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate';")
 if [[ -z "${ext}" ]]; then
   echo "::error::THIN_SUBSTRATE: laplace_substrate is not installed on ${DB}"
-  echo "Heal: pipeline.sh migrate / CREATE EXTENSION laplace_substrate. Do not seed to prove cmake."
+  echo "Install the extension with pipeline.sh migrate / CREATE EXTENSION laplace_substrate."
   exit 1
 fi
 

@@ -674,9 +674,7 @@ internal sealed class SubstrateTools : IMcpTools
             .GetAwaiter().GetResult();
         var counts = NpgsqlSubstrateReads.SubstrateCountsAsync(_dbReadOnly, default)
             .GetAwaiter().GetResult();
-        // JsonValue.Create(null) emits JSON null, which is the honest rendering of a metric
-        // that was not measured. Rendering it as "0" or "" would make a skipped deep check
-        // read as a clean one.
+        // JsonValue.Create(null) preserves an unmeasured metric as JSON null.
         var rows = health.Select(h => new JsonObject
             {
                 ["metric"] = h.Metric,
@@ -1198,9 +1196,8 @@ internal sealed class SubstrateTools : IMcpTools
 
     /// <summary>
     /// Text half of a text-or-entity tool: either is accepted, but not neither.
-    /// Returning null when an entity was supplied keeps the SQL CASE honest — the
-    /// text branch is never evaluated, so an absent term is not a silent empty
-    /// converse.resolve() that would read as "the substrate doesn't know this".
+    /// Returning null when an entity was supplied selects the entity branch of the
+    /// SQL CASE without resolving an empty text value.
     /// </summary>
     private static string? NodeText(JsonObject? args, string name)
     {

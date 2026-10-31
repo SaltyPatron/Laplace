@@ -393,8 +393,8 @@ BEGIN
         RAISE EXCEPTION 'FAIL: empty observation scope reopened the corpus';
     END IF;
 
-    -- A witnessed context binds a trajectory without pretending that the
-    -- context itself is a sequence position. A shared root is read once even
+    -- A witnessed context binds a trajectory separately from its sequence
+    -- positions. A shared root is read once even
     -- when several attestations reach it.
     INSERT INTO laplace.attestations
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,

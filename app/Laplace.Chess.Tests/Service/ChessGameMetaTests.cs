@@ -27,10 +27,7 @@ public sealed class ChessGameMetaTests
         Assert.Equal(fen, initial.Board.ToFen());
     }
 
-    // Was InitialState_GarbageFen_FallsBackToStandardWithoutThrowing, which pinned the
-    // substitution as intended behaviour. It is not: a start position we cannot read is not
-    // the standard start, and replaying a game from a board it never had records a game that
-    // was never played -- under a run reporting status=ok, failed=0.
+    // Reject an unreadable FEN instead of substituting the standard start position.
     [Fact]
     public void InitialState_GarbageFen_IsRefused()
     {
@@ -38,12 +35,7 @@ public sealed class ChessGameMetaTests
         Assert.Null(ChessAnalyze.InitialState("not a real fen", m));
     }
 
-    // chess.com exports X-FEN/Shredder file-letter castling for every Chess960 game (GBgb,
-    // GDgd, GCgc ...). Three behaviours have now existed here, and only the third is right:
-    //   1. map each unknown letter to CastleRights.None -> the game replayed as one whose
-    //      rooks could not castle. A wrong game, recorded and folded.
-    //   2. refuse the position outright -> honest, and cost 1,866 games.
-    //   3. model it. The rights are read, the rooks keep their files, the game replays.
+    // X-FEN/Shredder file-letter castling preserves each Chess960 rook's file.
     [Theory]
     [InlineData("qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1")]
     [InlineData("nbbrknrq/pppppppp/8/8/8/8/PPPPPPPP/NBBRKNRQ w GDgd - 0 1")]

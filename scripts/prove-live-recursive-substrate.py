@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Read-only live proof/falsification gate for recursive Laplace physicality.
 
-The bounded-composition theorem is mathematical; this program does not pretend a
-finite database scan proves it.  It exhaustively checks the selected installed
-finite content estate against the current executable representation contract.
+Exhaustively check the selected installed content estate against the current
+executable representation contract.
 
 Packed GeometryZM trajectory values are never interpreted as child positions.
 Every child geometry check first decodes the child id and resolves the child's

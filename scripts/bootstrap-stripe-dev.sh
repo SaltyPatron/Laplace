@@ -2,15 +2,8 @@
 
 set -euo pipefail
 
-# THE OPERATOR'S home, not root's. setup-host.sh runs this under sudo, where $HOME
-# is /root — so this wrote /root/.config/laplace/stripe-dev.env and appended the
-# source line to /root/.zshrc, while the operator's own config sat untouched and the
-# key never reached the shell that needed it (2026-08-12).
-#
-# setup-host.sh already resolves this ONCE, at the only point where SUDO_USER is
-# still the human, and exports it as LAPLACE_OPERATOR — the same nested-sudo problem
-# its own comment documents for the bootstrap. Honour it here; fall back to
-# SUDO_USER, then to $HOME for a non-sudo invocation.
+# Resolve the operator's home across nested sudo invocations.
+# LAPLACE_OPERATOR takes precedence over SUDO_USER; otherwise use HOME.
 _op="${LAPLACE_OPERATOR:-${SUDO_USER:-}}"
 if [ -n "$_op" ] && [ "$_op" != root ]; then
     OP_HOME="$(getent passwd "$_op" | cut -d: -f6)"
