@@ -139,7 +139,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 38f4139bab5ea44f860d5e9e2b322b963b7f5a71
+          ref: eb00ac7f86318127f39605905641f8a90ba70f4e
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out the canonical recipe Engine
