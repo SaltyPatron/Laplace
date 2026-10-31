@@ -54,6 +54,16 @@ for cache in tier0.flags tier0.flags.layout; do
 done
 printf '#!/bin/sh\nexit 0\n' > "$work/bundle/app/cli/Laplace.Cli"
 chmod 755 "$work/bundle/app/cli/Laplace.Cli"
+mkdir -p "$work/bundle/app/cli/native/recipe-engine/bin" "$work/bundle/app/cli/native/recipe-engine/share/laplace/firmware"
+printf fixture > "$work/bundle/app/cli/native/recipe-engine/share/laplace/firmware/program.firmware"
+cat > "$work/bundle/app/cli/native/recipe-engine/bin/laplace" <<'ENGINE'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == firmware && $2 == --operation && $3 == pull && $4 == --firmware && -s $5 ]]
+[[ -s "$LAPLACE_TIER0" && -s "$LAPLACE_HIGHWAY" ]]
+printf '{"paths":[]}\n'
+ENGINE
+chmod 755 "$work/bundle/app/cli/native/recipe-engine/bin/laplace"
 printf new > "$work/bundle/share/laplace/cache"
 printf old > "$work/installed/share/laplace/cache"
 tar -cf "$work/bundle/laplace-site.tar" -C "$work/bundle" app share
@@ -62,6 +72,14 @@ LAPLACE_INSTALL_PREFIX="$work/installed" bash -c 'set -euo pipefail; fail() { ec
 [[ "$(cat "$work/stage/share/laplace/cache")" == new ]]
 [[ -x "$work/stage/app/cli/Laplace.Cli" ]]
 echo 'PASS receive stages caches without replacing the serving copy'
+mv "$work/stage/app/cli/native/recipe-engine/bin/laplace" "$work/stage/app/cli/native/recipe-engine/bin/laplace.expected"
+printf '#!/bin/sh\nexit 127\n' > "$work/stage/app/cli/native/recipe-engine/bin/laplace"
+chmod 755 "$work/stage/app/cli/native/recipe-engine/bin/laplace"
+if bash -c 'set -euo pipefail; source "$SITE_WORK/functions.sh"; verify_cli_package "$SITE_WORK/stage/app/cli"' > "$work/missing-native-result" 2>&1; then
+  echo 'FAIL accepted Native query compiler loader failure'; exit 1
+fi
+mv "$work/stage/app/cli/native/recipe-engine/bin/laplace.expected" "$work/stage/app/cli/native/recipe-engine/bin/laplace"
+echo 'PASS Native query compiler failure blocks receipt even when managed decomposition passes'
 rm "$work/stage/app/cli/share/laplace/highway.bin"
 if bash -c 'set -euo pipefail; source "$SITE_WORK/functions.sh"; verify_cli_package "$SITE_WORK/stage/app/cli"' > "$work/missing-cache-result" 2>&1; then
   echo 'FAIL accepted CLI package without its highway cache'; exit 1

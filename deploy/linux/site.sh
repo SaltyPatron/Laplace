@@ -26,6 +26,7 @@ umask 0002
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=deploy/linux/host-lock.sh
 source "$ROOT/deploy/linux/host-lock.sh"
+source "$ROOT/deploy/linux/native-runtime.sh"
 # the Operations environment, when the runner did not already give it (runner/.env carries the build and work roots)
 if [[ -z "${LAPLACE_PG_DIR:-}" && -r "${LAPLACE_OPERATIONS:-/repos/src/Laplace-Operations}/laplace.env" ]]; then
   # shellcheck disable=SC1090,SC1091
@@ -244,13 +245,14 @@ phase_install() {
   # except the host's C/C++ platform runtime; the receiving host has no build
   # prefixes from which to load ICU, libxml2, or another declared dependency.
   # MKL's dynamically selected kernels are added explicitly below.
-  local lib; local -A want=()
-  while IFS= read -r lib; do want[$lib]=1; done < <(
-    find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec ldd {} + 2>/dev/null |
-      awk '$2 == "=>" && $3 ~ "^/" {
-        name=$3; sub(/^.*\//, "", name)
-        if (name !~ /^(lib(c|m|dl|pthread|rt|gcc_s|stdc\+\+|resolv|util|anl)|ld-linux)[-.]/) print $3
-      }' | sort -u)
+  local lib resolved; local -A want=()
+  local -a native_inputs=()
+  while IFS= read -r -d '' lib; do native_inputs+=("$lib"); done < <(
+    find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -print0)
+  [[ -x "$LAPLACE_INSTALL_PREFIX/bin/laplace" ]] || fail "Native recipe executable was not installed"
+  native_inputs+=("$LAPLACE_INSTALL_PREFIX/bin/laplace")
+  resolved=$(native_runtime_libraries "${native_inputs[@]}") || fail "Native release dependency discovery failed"
+  while IFS= read -r lib; do [[ -z "$lib" ]] || want[$lib]=1; done <<< "$resolved"
   for lib in "${MKLROOT:-/opt/intel/oneapi/mkl/latest}"/lib/libmkl_{core,def,mc3,avx2,avx512,vml_def,vml_mc3,vml_avx2,vml_avx512,vml_cmpt,intel_thread,sequential,tbb_thread,intel_lp64,intel_ilp64}.so.[0-9]; do
     [[ -e "$lib" ]] && want[$lib]=1; done
   # SDL opens this runtime dynamically, so it may have no DT_NEEDED edge for
@@ -261,9 +263,8 @@ phase_install() {
   want[$openmp_runtime]=1
   for lib in "${!want[@]}"; do cp -fL "$lib" "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" && mv -f "$LAPLACE_INSTALL_PREFIX/lib/.$(basename "$lib").new" "$LAPLACE_INSTALL_PREFIX/lib/$(basename "$lib")"; done
   echo "  native dependencies beside the libraries: ${#want[@]} files"
-  local missing
-  missing="$(find "$LAPLACE_INSTALL_PREFIX/lib" -maxdepth 3 -name '*.so*' -type f -exec env LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" ldd {} + 2>/dev/null | grep 'not found' | sort -u || true)"
-  [[ -z "$missing" ]] || fail "unresolved libraries under $LAPLACE_INSTALL_PREFIX/lib: $missing"
+  LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" native_runtime_libraries "${native_inputs[@]}" >/dev/null \
+    || fail "Native release dependencies do not resolve"
   local openings_src
   for openings_src in "${LAPLACE_CHESS_OPENINGS:-}" "$LAPLACE_DATA/Games/Chess/lichess-openings" "$LAPLACE_DATA/Games/Chess/openings"; do
     if [[ -n "$openings_src" && -f "$openings_src/a.tsv" ]]; then
@@ -649,7 +650,14 @@ verify_cli_package() {
     LAPLACE_TIER0="$cli/share/laplace/tier0.bin" \
     LAPLACE_PERFCACHE_BIN="$cli/share/laplace/tier0.bin" \
     LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
-    "$cli/Laplace.Cli" decompose Laplace)
+    "$cli/Laplace.Cli" decompose Laplace) || return $?
+  local engine="$cli/native/recipe-engine/bin/laplace" estate="$cli/native/recipe-engine/share/laplace" program
+  [[ -x "$engine" && -s "$estate/firmware/program.firmware" ]] || { echo "CLI Native query compiler is missing" >&2; return 1; }
+  program=$(env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
+    LD_LIBRARY_PATH="$cli" LAPLACE_RECIPES="$estate/recipes" \
+    LAPLACE_TIER0="$cli/share/laplace/tier0.bin" LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
+    "$engine" firmware --operation pull --firmware "$estate/firmware/program.firmware") || return 1
+  [[ -n "$program" ]] || { echo "Native query compiler returned no declarations" >&2; return 1; }
 }
 
 phase_receive() {
