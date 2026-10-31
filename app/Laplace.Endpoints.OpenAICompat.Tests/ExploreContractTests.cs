@@ -149,14 +149,18 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
     [Theory]
     [InlineData(0x41)]
     [InlineData(0x3A9)]
+    [InlineData(0xD800)]
+    [InlineData(0xDBFF)]
+    [InlineData(0xDC00)]
+    [InlineData(0xDFFF)]
     [InlineData(0x10000)]
-    public async Task ExploreUnicodePoint_UsesScalarLookup(int scalar)
+    public async Task ExploreUnicodePoint_UsesCompleteCodepointLookup(int scalar)
     {
         using var response = await _client.GetAsync($"/v1/explore/unicode/{scalar}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<UnicodePointResponse>();
         Assert.NotNull(body);
-        var expected = CodepointPerfcache.LookupScalar((uint)scalar);
+        var expected = CodepointPerfcache.LookupCodepoint((uint)scalar);
         Assert.Equal((uint)scalar, body.Codepoint);
         Assert.Equal(Convert.ToHexStringLower(expected.Hash.ToBytes()), body.IdHex);
         Assert.Equal(expected.CoordX, body.X);
