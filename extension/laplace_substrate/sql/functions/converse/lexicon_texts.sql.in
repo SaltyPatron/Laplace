@@ -1,0 +1,28 @@
+-- Human lexical text is a read of recorded content. A language-tagged literal
+-- holds its text and language separately; its identity and exact renderer stay
+-- intact. Only the declared language-shaped pair admits this projection.
+CREATE OR REPLACE FUNCTION converse.lexicon_texts(p_ids @extschema:laplace@.blake3[])
+RETURNS TABLE(entity @extschema:laplace@.blake3,content text,textual boolean)
+LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+ WITH requested AS MATERIALIZED (SELECT DISTINCT id FROM unnest(p_ids) u(id)),
+ forms AS MATERIALIZED (SELECT * FROM @extschema:laplace@.laplace_physicalities(p_ids)),
+ pairs AS MATERIALIZED (
+  SELECT p.entity,(array_agg(p.child ORDER BY p.ordinal))[1] literal,
+    (array_agg(p.child ORDER BY p.ordinal))[2] language
+  FROM @extschema:laplace@.laplace_constituents(ARRAY(SELECT f.entity FROM forms f
+    WHERE f.mask OPERATOR(@extschema:laplace@.?&) ARRAY[@extschema:laplace@.laplace_bank_bit('kind','tuple')])) p
+  GROUP BY p.entity HAVING count(*)=2 AND bool_and(p.run_length=1)
+ ), languages AS MATERIALIZED (
+  SELECT * FROM laplace.language_codes(ARRAY(SELECT DISTINCT @extschema:laplace@.blake3_send(language) FROM pairs))
+ ), literals AS MATERIALIZED (
+  SELECT p.entity,p.literal FROM pairs p JOIN languages l
+   ON l.id=@extschema:laplace@.blake3_send(p.language) WHERE l.canonical IS NOT NULL
+ ), labels AS MATERIALIZED (
+  SELECT * FROM @extschema:laplace@.laplace_labels(ARRAY(
+   SELECT coalesce(l.literal,r.id) FROM requested r LEFT JOIN literals l ON l.entity OPERATOR(@extschema:laplace@.=) r.id))
+ ) SELECT r.id,d.content,l.entity IS NOT NULL OR coalesce(@extschema:laplace@.laplace_mask_value(f.mask,'kind'),-1)=-1
+ FROM requested r LEFT JOIN forms f ON f.entity OPERATOR(@extschema:laplace@.=) r.id
+ LEFT JOIN literals l ON l.entity OPERATOR(@extschema:laplace@.=) r.id
+ JOIN labels d ON d.entity OPERATOR(@extschema:laplace@.=) coalesce(l.literal,r.id);
+END;

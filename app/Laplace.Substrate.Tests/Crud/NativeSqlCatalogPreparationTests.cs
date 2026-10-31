@@ -668,10 +668,12 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         Assert.Equal(referenceRelation.Id.ToBytes(), declared.Paths[0][1].Entity);
         Assert.Equal(definitionRelation.Id.ToBytes(), declared.Paths[0][2].Entity);
         var definedSense = Compose([defined, language, context], 4);
+        var localizedDefinition = Compose([definition,language],4);
+        var nonLanguagePair = Compose([definition,context],4);
         var declaredClaims = new[] { Compose([defined, senseRelation, definedSense], 1),
             Compose([definedSense, referenceRelation, context], 1), Compose([context, definitionRelation, definition], 1) };
         for (int index = 0; index < declaredClaims.Length; index++) declaredClaims[index].Said = 1;
-        var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims]);
+        var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims,localizedDefinition,nonLanguagePair]);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
         await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(structural.entity_curve($1))", connection, transaction))
@@ -679,7 +681,8 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             curve.Parameters.AddWithValue(witness.Id.ToBytes());
             // The repeated xc run must remain three ordered points. The curve
             // comes entirely from Native carriers while compatibility rows are absent.
-            Assert.Equal(8, await curve.ExecuteScalarAsync());
+            // Eight original source positions and the two literal-shape records.
+            Assert.Equal(10, await curve.ExecuteScalarAsync());
         }
         await using (var absent = new NpgsqlCommand("SELECT count(*) FROM laplace.entities WHERE id=ANY($1)", connection, transaction))
         {
@@ -1000,6 +1003,21 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var boundField = await NpgsqlSubstrateReads.ResponseFieldAsync(connection,[defined.Id.ToBytes()],512,0);
         Assert.Contains(boundField,row => row.Label == "native witnessed definition" && row.ReadingOrigins.SequenceEqual([1])
             && row.BindingClaims.Length>0 && row.Witnesses>0);
+        await using (var literalRead = new NpgsqlCommand("SELECT public.blake3_send(entity),content,textual FROM converse.lexicon_texts(ARRAY[$1,$2]::public.blake3[])",connection,transaction))
+        {
+            literalRead.Parameters.AddWithValue(localizedDefinition.Id);
+            literalRead.Parameters.AddWithValue(nonLanguagePair.Id);
+            await using var literals=await literalRead.ExecuteReaderAsync();
+            int returned=0;
+            while(await literals.ReadAsync())
+            {
+                bool localized=literals.GetFieldValue<byte[]>(0).AsSpan().SequenceEqual(localizedDefinition.Id.ToBytes());
+                Assert.Equal(localized,literals.GetBoolean(2));
+                if(localized)Assert.Equal("native witnessed definition",literals.GetString(1));
+                returned++;
+            }
+            Assert.Equal(2,returned);
+        }
         var descriptions = await NpgsqlSubstrateReads.LexiconDescriptionsAsync(connection,[context.Id.ToBytes(),absentId.ToBytes()]);
         var description = Assert.Single(descriptions);
         Assert.Equal(context.Id.ToBytes(),description.Id);

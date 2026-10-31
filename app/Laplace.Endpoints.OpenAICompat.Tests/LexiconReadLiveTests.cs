@@ -55,7 +55,7 @@ public sealed class LexiconReadLiveTests
         Assert.All(field.Readings,row =>
         {
             Assert.True(row.ClaimIds.Count >= 2);
-            Assert.True(row.Witnesses > 0);
+            Assert.Null(row.Witnesses);
             Assert.False(string.IsNullOrWhiteSpace(row.Text));
         });
         Assert.Contains(field.Readings,row => row.Text.Contains("positive emotion",StringComparison.OrdinalIgnoreCase));
@@ -66,6 +66,6 @@ public sealed class LexiconReadLiveTests
         Assert.DoesNotContain(field.Readings,row => row.Text.Contains("temporary red mark",StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(field.Connections);
         Assert.All(field.Connections,row => Assert.False(row.Relation.StartsWith('[')));
-        Assert.Contains(field.Connections,row => row.Relation == "is antonym of" && row.Witnesses > 0);
+        Assert.Contains(field.Connections,row => row.Relation == "is antonym of");
     }
 }

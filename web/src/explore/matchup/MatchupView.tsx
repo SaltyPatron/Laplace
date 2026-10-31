@@ -207,7 +207,7 @@ function Readings({ rows, error }: { rows?: LexiconReading[]; error: string | nu
     {rows.length === 0 && <Muted>This comparison has not reached a source description or example.</Muted>}
     <ol>{rows.slice(0, count).map(row => <li key={row.text}>
       <p>{row.text}</p>
-      <details><summary>Source evidence · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</summary>
+      <details><summary>Source evidence{row.witnesses != null && <> · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</>}</summary>
         <p>{row.via} — {row.relation}</p>
         {row.claim_ids.map((id, index) => <p key={id}><RouterLink to={`/explore/entity/${id}`}>Recorded claim {index + 1}</RouterLink></p>)}
       </details>
@@ -226,7 +226,7 @@ function Connections({ field, error }: { field: ResponseField | null; error: str
       <span key={relation} className={styles.verdictText}>{relation}</span>)}
       <details><summary>Source evidence</summary>{connections.map(row => <p key={row.claim_id}>
         {row.from} — {row.relation} — {row.to}{' '}
-        <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</RouterLink>
+        <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim{row.witnesses != null && <> · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</>}</RouterLink>
       </p>)}</details></> : <Muted>No relationship was realized from the evidence read.</Muted>}
   </div>;
 }
