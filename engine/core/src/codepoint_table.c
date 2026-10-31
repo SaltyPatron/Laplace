@@ -1,4 +1,4 @@
-/* One scalar mapping: Native owns validation, IDs, coordinates and indexes. */
+/* One codepoint mapping: Native owns validation, IDs, coordinates and indexes. */
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/text_identity.h"
 #include "laplace/core/utf8.h"
@@ -8,7 +8,8 @@
 #include <stdatomic.h>
 #include <string.h>
 
-_Static_assert(sizeof(codepoint_entry_t) == sizeof(lp_tier0_record), "Native scalar ABI");
+_Static_assert(LAPLACE_CODEPOINT_COUNT == LP_TIER0_COUNT, "complete Native codepoint count");
+_Static_assert(sizeof(codepoint_entry_t) == sizeof(lp_tier0_record), "Native codepoint ABI");
 _Static_assert(offsetof(codepoint_entry_t, mantissa) == 16, "Native fixed coordinates");
 _Static_assert(offsetof(codepoint_entry_t, uca_order) == 56, "Native collation rank");
 

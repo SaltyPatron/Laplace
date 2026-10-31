@@ -5,7 +5,6 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/ucd_property_values.h"
-#include <laplace/tier0.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +18,7 @@ typedef struct {
     uint64_t native_hilbert;
     uint32_t uca_order, pad;
 } codepoint_entry_t;
-#define LAPLACE_CODEPOINT_COUNT LP_TIER0_COUNT
+#define LAPLACE_CODEPOINT_COUNT 1114112u
 
 int codepoint_table_load_perfcache(const char* path);
 
