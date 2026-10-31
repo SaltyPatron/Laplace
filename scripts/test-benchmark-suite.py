@@ -397,13 +397,6 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
         self.assertNotIn("partition_docs", text)
         self.assertNotIn("scale._worker", text)
 
-    def test_first_scaling_receipt_is_documented_as_makespan_not_serialization(self):
-        text = (ROOT / "docs/benchmarks/SCALING_MODES.md").read_text(encoding="utf-8")
-        self.assertIn("33608791817", text)
-        self.assertIn("41,601,961", text)
-        self.assertRegex(text.lower(), r"unique-corpus(?:, file-grain)? makespan")
-        self.assertIn("independent-stream", text.lower())
-
 
 class ChessRuntimeEnvironmentTests(unittest.TestCase):
     def test_declared_application_and_chess_paths_reach_the_child(self):

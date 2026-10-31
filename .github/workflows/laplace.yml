@@ -147,6 +147,8 @@ jobs:
           checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: begin
 
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - name: Externals and build (engine, perf-caches, extensions)
         # Delivery staging remains owned across separate build/publish steps.
         run: deploy/linux/site.sh externals build
@@ -354,6 +356,8 @@ jobs:
           checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           operation: begin
 
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - name: Externals and build (engine, perf-caches, extensions)
         run: deploy/linux/site.sh externals build
 

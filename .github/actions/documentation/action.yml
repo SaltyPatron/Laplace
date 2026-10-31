@@ -1,0 +1,25 @@
+name: Document packaging inputs
+description: Check out the Wiki documents included in operational seed packages.
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+        repository: SaltyPatron/Laplace-Wiki
+        ref: 5f2d1488cb99030e1a006d2e867a4335ab9d5492
+        path: .ci-dependencies/Laplace-Wiki
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          /Repositories/Laplace/docs/operation-atlas/
+          /Repositories/Laplace/docs/INVENTION.md
+          /Repositories/Laplace/docs/INVENTIONS.md
+          /Repositories/Laplace/docs/specs/05_Substrate_Invariants.txt
+          /Repositories/Laplace/docs/specs/06_Engineering_Ruleset.txt
+          /Repositories/Laplace/docs/specs/08_Record_vs_Calculate_Spec.txt
+          /Repositories/Laplace/docs/specs/09_Substrate_LM_Synthesis.txt
+          /Repositories/Laplace/docs/specs/11_Chess_Provenance_Consensus_Spec.txt
+          /Repositories/Laplace/docs/specs/33_Perfcache_Blob_Law.md
+          /Repositories/Laplace/docs/specs/34_Conversational_Provenance.md
+          /Repositories/Laplace/docs/specs/36_Laplace_Forward_Pass.md
+          /Repositories/Laplace/docs/specs/37_Substrate_Operation_ISA.md

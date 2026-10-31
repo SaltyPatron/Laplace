@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF="$ROOT/scripts/dataset-estate-refresh.sh"
 SOURCES="${LAPLACE_DATA_REFRESH_SOURCES:-$ROOT/scripts/dataset-estate-refresh.sources.psv}"
-SOURCE_ESTATE="${LAPLACE_SOURCE_ESTATE:-$ROOT/docs/source-estate.tsv}"
+SOURCE_ESTATE="${LAPLACE_SOURCE_ESTATE:-$ROOT/config/source-estate.tsv}"
 DATA_ROOT="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
 STAGE_ROOT="${LAPLACE_DATA_REFRESH_ROOT:-$DATA_ROOT/.refresh-20260903}"
 JOB_ROOT="$STAGE_ROOT/.jobs"

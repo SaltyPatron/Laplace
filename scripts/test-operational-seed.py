@@ -185,6 +185,7 @@ class OperationalSeedTests(unittest.TestCase):
                 if not link.startswith("seeds/operational/"):
                     continue
                 for include in item.get("Include", "").split(";"):
+                    include = include.replace("$(LaplaceDocumentationRoot)", str(SEED.documentation_root(ROOT)))
                     source = (project.parent / include).resolve()
                     relative = link.removeprefix("seeds/operational/").replace(
                         "%(Filename)%(Extension)", source.name)

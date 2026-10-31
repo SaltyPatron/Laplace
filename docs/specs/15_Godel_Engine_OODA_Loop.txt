@@ -1,9 +1,0 @@
-RELOCATED DESIGN/BUILD RECORD
-============================
-
-The annotated OODA design and build tracker is preserved at
-`docs/archive/specs-v1/15_Godel_Engine_OODA_Loop.txt`.
-
-It is historical rationale, not current status. The normative loop is specified by
-`36_Laplace_Forward_Pass.md`, `37_Substrate_Operation_ISA.md`, and
-`34_Conversational_Provenance.md`.

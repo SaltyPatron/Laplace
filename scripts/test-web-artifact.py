@@ -149,7 +149,7 @@ class WebArtifactTests(unittest.TestCase):
         external.mkdir()
         source = external / "core.c"
         source.write_text("first source\n")
-        atlas = self.repo / "docs/operation-atlas"
+        atlas = self.repo.parent / "Laplace-Wiki/Repositories/Laplace/docs/operation-atlas"
         atlas.mkdir(parents=True)
         (atlas / "traces.json").write_text(json.dumps([{"evidence": [
             {"path": "Laplace-Native/core.c", "sha256": "reviewed source hash"}

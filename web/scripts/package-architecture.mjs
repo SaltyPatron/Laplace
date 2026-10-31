@@ -2,10 +2,14 @@ import { readFile, writeFile, mkdir, copyFile, readdir, stat } from 'node:fs/pro
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 const web = fileURLToPath(new URL('../', import.meta.url));
 const repo = path.dirname(web);
-const atlas = path.join(repo, 'docs/operation-atlas');
+const dependency = path.join(repo, '.ci-dependencies/Laplace-Wiki/Repositories/Laplace');
+const documentation = process.env.LAPLACE_DOCUMENTATION_ROOT
+  ?? (existsSync(dependency) ? dependency : path.resolve(repo, '../Laplace-Wiki/Repositories/Laplace'));
+const atlas = path.join(documentation, 'docs/operation-atlas');
 const out = path.join(web, 'public/architecture');
 const read = async (name) => JSON.parse(await readFile(path.join(atlas, name), 'utf8'));
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');

@@ -13,6 +13,8 @@ import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 
+from documentation import documentation_root
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "OperationalDecomposer"
 EXPECTED_ARTIFACTS = 15
@@ -32,11 +34,18 @@ def authored_selection(root: Path) -> dict[str, Path]:
         if not link.endswith("%(Filename)%(Extension)"):
             raise RuntimeError("operational bundle Link must declare a literal directory and filename")
         for include in item.get("Include", "").split(";"):
+            boundary = root.resolve()
+            prefix = "$(LaplaceDocumentationRoot)/"
+            if include.startswith(prefix):
+                boundary = documentation_root(root)
+                include = include.removeprefix(prefix)
+                source = (boundary / include).resolve()
+            else:
+                source = (project.parent / include).resolve()
             if not include or any(c in include for c in "*?%$"):
                 raise RuntimeError("operational bundle inputs must remain literal authored files")
-            source = (project.parent / include).resolve()
-            if not source.is_relative_to(root.resolve()):
-                raise RuntimeError("operational artifact is outside the source checkout")
+            if not source.is_relative_to(boundary):
+                raise RuntimeError("operational artifact is outside its declared checkout")
             relative = link.removeprefix("seeds/operational/").replace(
                 "%(Filename)%(Extension)", source.name)
             if (Path(relative).is_absolute() or ".." in Path(relative).parts
@@ -211,7 +220,7 @@ def main() -> int:
         if args.report is not None:
             parser.error("--report belongs to --ingest")
         try:
-            paths = sorted({path.relative_to(ROOT.resolve()).as_posix()
+            paths = sorted({Path(os.path.relpath(path, ROOT)).as_posix()
                             for path in authored_selection(ROOT).values()})
         except (OSError, ValueError, RuntimeError, ET.ParseError) as error:
             print(f"OPERATIONAL_SELECTION_FAIL {error}", file=sys.stderr)

@@ -168,13 +168,6 @@ public sealed class ConversationProvenanceGateTests
         return text[start..end];
     }
 
-    [Fact]
-    public void Spec34_Exists()
-    {
-        Assert.True(File.Exists(RepoPath("docs/specs/34_Conversational_Provenance.md")),
-            "spec 34 (conversational provenance) is binding and must exist");
-    }
-
     private static IEnumerable<string> EndpointSources() =>
         Directory.EnumerateFiles(
             RepoPath("app/Laplace.Endpoints.OpenAICompat"), "EndpointMappings.*.cs",

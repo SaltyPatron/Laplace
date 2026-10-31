@@ -88,13 +88,16 @@ def write_atomic(path: Path, payload: dict) -> None:
 def build_inputs(root: Path, tools: dict) -> str:
     """Content inputs of the SPA, including its generated API/architecture edges."""
     names = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard',
-                            '--', 'web', 'docs/operation-atlas'], cwd=root, check=True, capture_output=True).stdout
+                            '--', 'web'], cwd=root, check=True, capture_output=True).stdout
     paths = {root / os.fsdecode(name) for name in names.split(b'\0') if name}
     paths.update(root / 'web' / name for name in
                  ('openapi/openapi.json', '.env', '.env.local', '.env.production', '.env.production.local'))
     # package-architecture reads working sources only for these evidence entries;
     # the full source-map is a static snapshot, not 3,000 live build dependencies.
-    atlas = root / 'docs/operation-atlas'
+    from documentation import documentation_root
+    atlas = documentation_root(root) / 'docs/operation-atlas'
+    paths.update(path for path in atlas.rglob('*')
+                 if path.is_file() and '__pycache__' not in path.parts)
     evidence = []
     if (atlas / 'machine.json').is_file():
         for diagram in json.loads((atlas / 'machine.json').read_text(encoding='utf-8'))['diagrams'].values():
