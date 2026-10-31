@@ -7,4 +7,4 @@ HOOKS="$ROOT/scripts/githooks"
 
 chmod +x "$HOOKS/pre-commit" 2>/dev/null || true
 git -C "$ROOT" config core.hooksPath scripts/githooks
-echo ">>> core.hooksPath=scripts/githooks (pre-commit auto-refreshes docs/INVENTORY.md)"
+echo ">>> core.hooksPath=scripts/githooks"

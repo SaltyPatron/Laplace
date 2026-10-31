@@ -50,6 +50,8 @@ jobs:
           ref: ${{ inputs.target_sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - name: Execute through the installed host lifecycle
         env:
           OPERATION: ${{ inputs.operation }}

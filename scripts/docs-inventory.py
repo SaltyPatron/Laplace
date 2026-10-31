@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/INVENTORY.md from the repository source tree."""
+"""Generate the Wiki's repository inventory from the source tree."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ import re
 import sys
 from pathlib import Path
 
+from documentation import documentation_root
+
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "docs" / "INVENTORY.md"
+OUT = documentation_root(ROOT) / "docs" / "INVENTORY.md"
 
 CLASS_RX = re.compile(r"^\s*(?:public\s+|internal\s+)?(?:sealed\s+|abstract\s+|partial\s+|static\s+)*class\s+(\w+Decomposer)\b", re.M)
 
@@ -123,13 +125,13 @@ def main() -> int:
     check = "--check" in sys.argv[1:]
     existing = OUT.read_text(encoding="utf-8") if OUT.exists() else None
     if existing == content:
-        print(f"docs-inventory: {OUT.relative_to(ROOT)} up to date")
+        print(f"docs-inventory: {OUT} up to date")
         return 0
     if check:
-        print(f"docs-inventory: {OUT.relative_to(ROOT)} is stale — run scripts/docs-inventory.py", file=sys.stderr)
+        print(f"docs-inventory: {OUT} is stale — run scripts/docs-inventory.py", file=sys.stderr)
         return 1
     OUT.write_text(content, encoding="utf-8", newline="\n")
-    print(f"docs-inventory: wrote {OUT.relative_to(ROOT)}")
+    print(f"docs-inventory: wrote {OUT}")
     return 0
 
 

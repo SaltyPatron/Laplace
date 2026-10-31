@@ -183,7 +183,7 @@ if [ "$hooks_path" = "scripts/githooks" ]; then
     printf "${green}✓${reset} %-30s → %s\n" "git core.hooksPath" "$hooks_path"
     ok=$((ok + 1))
 else
-    printf "${yellow}!${reset} %-30s run scripts/install-githooks.sh (INVENTORY auto-regen)\n" \
+    printf "${yellow}!${reset} %-30s run scripts/install-githooks.sh\n" \
         "git core.hooksPath"
     warnings=$((warnings + 1))
 fi

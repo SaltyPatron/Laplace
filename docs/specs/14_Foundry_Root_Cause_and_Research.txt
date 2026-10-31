@@ -1,9 +1,0 @@
-RELOCATED RESEARCH RECORD
-=========================
-
-The dated Foundry experiments, literature survey, execution log, and corrections are
-preserved at `docs/archive/specs-v1/14_Foundry_Root_Cause_and_Research.txt`.
-
-They are historical evidence, not current specification or implementation status.
-Current model-synthesis law is `09_Substrate_LM_Synthesis.txt`; current product
-acceptance is `docs/plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md`.

@@ -4,6 +4,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Laplace.Decomposers</RootNamespace>
     <AssemblyName>Laplace.Decomposers</AssemblyName>
+    <LaplaceDocumentationRoot Condition="'$(LaplaceDocumentationRoot)' == '' AND '$(LAPLACE_DOCUMENTATION_ROOT)' != ''">$(LAPLACE_DOCUMENTATION_ROOT)</LaplaceDocumentationRoot>
+    <LaplaceDocumentationRoot Condition="'$(LaplaceDocumentationRoot)' == '' AND Exists('$(MSBuildThisFileDirectory)../../.ci-dependencies/Laplace-Wiki/Repositories/Laplace')">$(MSBuildThisFileDirectory)../../.ci-dependencies/Laplace-Wiki/Repositories/Laplace</LaplaceDocumentationRoot>
+    <LaplaceDocumentationRoot Condition="'$(LaplaceDocumentationRoot)' == ''">$(MSBuildThisFileDirectory)../../../Laplace-Wiki/Repositories/Laplace</LaplaceDocumentationRoot>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -49,10 +52,10 @@
              Condition="'$(LaplaceRecipeRuntime)' != ''"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
     <!-- Copy the selected authority artifacts themselves. No generated lexical or ISA summaries. -->
-    <Content Include="../../docs/INVENTION.md;../../docs/INVENTIONS.md"
+    <Content Include="$(LaplaceDocumentationRoot)/docs/INVENTION.md;$(LaplaceDocumentationRoot)/docs/INVENTIONS.md"
              Link="seeds/operational/docs/%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../docs/specs/05_Substrate_Invariants.txt;../../docs/specs/06_Engineering_Ruleset.txt;../../docs/specs/08_Record_vs_Calculate_Spec.txt;../../docs/specs/09_Substrate_LM_Synthesis.txt;../../docs/specs/11_Chess_Provenance_Consensus_Spec.txt;../../docs/specs/33_Perfcache_Blob_Law.md;../../docs/specs/34_Conversational_Provenance.md;../../docs/specs/36_Laplace_Forward_Pass.md;../../docs/specs/37_Substrate_Operation_ISA.md"
+    <Content Include="$(LaplaceDocumentationRoot)/docs/specs/05_Substrate_Invariants.txt;$(LaplaceDocumentationRoot)/docs/specs/06_Engineering_Ruleset.txt;$(LaplaceDocumentationRoot)/docs/specs/08_Record_vs_Calculate_Spec.txt;$(LaplaceDocumentationRoot)/docs/specs/09_Substrate_LM_Synthesis.txt;$(LaplaceDocumentationRoot)/docs/specs/11_Chess_Provenance_Consensus_Spec.txt;$(LaplaceDocumentationRoot)/docs/specs/33_Perfcache_Blob_Law.md;$(LaplaceDocumentationRoot)/docs/specs/34_Conversational_Provenance.md;$(LaplaceDocumentationRoot)/docs/specs/36_Laplace_Forward_Pass.md;$(LaplaceDocumentationRoot)/docs/specs/37_Substrate_Operation_ISA.md"
              Link="seeds/operational/docs/specs/%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../seeds/operational/exemplars/en_define.conllu"

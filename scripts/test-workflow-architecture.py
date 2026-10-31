@@ -415,31 +415,6 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("scripts/laplace --help", text)
         self.assertIn('exec bash scripts/ensure-foundation.sh', text)
 
-    def test_operator_runbook_documents_every_operator_and_internal_surface(self):
-        runbook = (ROOT / "docs" / "guides" / "CI_OPERATOR_RUNBOOK.md").read_text(encoding="utf-8")
-        for name in (
-            "Product — main delivery",
-            "Product — maintenance",
-            "Product — competitive proof",
-            "Audit — full product qualification",
-            "Database — maintenance",
-            "Data — foundation ingest",
-            "Data — content ingest",
-            "Data — documents ingest",
-            "Data — code ingest",
-            "Data — chess ingest",
-            "Data — models ingest",
-            "Observe — API",
-            "Observe — UI",
-            "Measure — benchmark",
-            "Policy — CI contract",
-            "Internal — product stage",
-            "Internal — substrate ingest",
-        ):
-            self.assertIn(name, runbook)
-        self.assertIn("Resource / concurrency contract", runbook)
-        self.assertIn("Outputs", runbook)
-
     def test_internal_workflows_are_not_manually_dispatchable(self):
         for name in ("product-stage.yml", "seed.yml"):
             text = (WORKFLOWS / name).read_text(encoding="utf-8")

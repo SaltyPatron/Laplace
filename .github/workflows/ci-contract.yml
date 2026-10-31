@@ -55,6 +55,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.402'
@@ -164,6 +166,8 @@ jobs:
       - name: Exercise publication permissions on NTFS
         shell: pwsh
         run: ./scripts/test-iis-access.ps1 -Work $env:RUNNER_TEMP
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.402'
@@ -201,6 +205,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Check out document packaging inputs
+        uses: ./.github/actions/documentation
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.402'
