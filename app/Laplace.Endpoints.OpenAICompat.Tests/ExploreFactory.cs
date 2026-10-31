@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
@@ -11,6 +12,7 @@ public sealed class ExploreFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IHostedService>();
             services.RemoveAll<ISubstrateClient>();
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
             services.PostConfigure<StripeBillingOptions>(o =>

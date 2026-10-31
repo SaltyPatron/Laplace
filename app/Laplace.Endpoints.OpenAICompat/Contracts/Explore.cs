@@ -13,7 +13,7 @@ public sealed record ExploreCatalogResponse(
 
 public sealed record ExploreSourceRow(
     [property: JsonPropertyName("key")] string Key,
-    [property: JsonPropertyName("evidence")] long Evidence,
+    [property: JsonPropertyName("evidence")] long? Evidence,
     [property: JsonPropertyName("content")] long? Content,
     [property: JsonPropertyName("stage")] string? Stage,
     [property: JsonPropertyName("layer")] string? Layer,

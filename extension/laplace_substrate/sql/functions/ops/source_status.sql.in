@@ -5,12 +5,9 @@
 -- projected beside the latest run status, so a later marker skip does not hide
 -- it, and an `unmeasured` verdict stays visible.
 --
--- Attestation source ids are included beside the journal. A recipe witness is
--- the composition [authority, release] (rendered Unicode/UCD17.0.0, oewn2025+,
--- FrameNet1.7). Older journal rows stored source_id(sourceName), which is a
--- different entity and has no attestations. A zero-evidence journal name is
--- folded onto the witness whose realized label extends that name, so OEWN
--- reads the oewn2025+ evidence instead of a second empty row.
+-- Native witness ids are actual source trunks; counts and names come from
+-- their retained assertion measurement and source record. Compatibility
+-- installations retain their historical table projection below.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -39,7 +36,7 @@ CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH by_evidence AS (
-    SELECT s.source_id, s.evidence_approx
+    SELECT s.source_id, s.evidence_approx, s.source
     FROM ops.source_counts_approx() s
 ),
 -- The journal is authoritative about the last run, never about what the
@@ -76,11 +73,13 @@ ids AS (
 ),
 rolled AS (
     SELECT i.source_id,
-           COALESCE(at.evidence, ev.evidence_approx, 0)            AS evidence_approx,
+           CASE WHEN to_regclass('public.entity') IS NOT NULL THEN ev.evidence_approx
+                ELSE COALESCE(at.evidence, ev.evidence_approx, 0) END AS evidence_approx,
            -- Entities are source-independent; a source's content presence is
            -- its attestation presence.
-           COALESCE(at.evidence, ev.evidence_approx, 0) > 0        AS has_entities,
-           jr.source_name                                          AS journal_name,
+           CASE WHEN to_regclass('public.entity') IS NOT NULL THEN ev.source_id IS NOT NULL
+                ELSE COALESCE(at.evidence, ev.evidence_approx, 0) > 0 END AS has_entities,
+           COALESCE(jr.source_name,ev.source)                       AS journal_name,
            jr.status                                               AS last_run_status,
            jr.started_at                                           AS last_run_at,
            tp.throughput_status,
@@ -96,7 +95,9 @@ rolled AS (
 ), rolled_numbered AS MATERIALIZED (
     SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
 ), rendered AS MATERIALIZED (
-    SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels
+    SELECT CASE WHEN to_regclass('public.entity') IS NOT NULL
+                THEN array_agg(COALESCE(journal_name,encode(source_id,'hex')) ORDER BY rn)
+                ELSE realize.render_batch(array_agg(source_id ORDER BY rn)) END AS labels
     FROM rolled_numbered
 ),
 matched AS (
@@ -105,7 +106,7 @@ matched AS (
                regexp_replace(
                    x.labels[r.rn], '^substrate/source/(.+)/v1$', '\1')) AS source,
            r.source_id,
-           (r.evidence_approx > 0 OR r.has_entities)                AS ingested,
+           COALESCE(r.evidence_approx > 0 OR r.has_entities,false)  AS ingested,
            true                                                     AS known,
            r.evidence_approx,
            r.has_entities,

@@ -32,6 +32,21 @@ check(){
   fi
 }
 check '40,120,80'
+assert_sql(){
+  local actual
+  actual=$(P "$name" -c "$1")
+  [[ "$actual" == t ]] || { echo "FAIL $1 returned $actual" >&2; exit 1; }
+}
+# A pre-upgrade source has unknown assertion cardinality, never a measured zero.
+assert_sql "SELECT value IS NULL FROM ops.substrate_counts() WHERE metric='attestations(MEASURED)'"
+P "$name" -c 'CREATE TABLE public.witness(id integer,attestations bigint CHECK(attestations>=0)); INSERT INTO public.witness VALUES(1,2),(2,NULL)' >/dev/null
+assert_sql 'SELECT ops.attestation_count() IS NULL'
+P "$name" -c 'UPDATE public.witness SET attestations=3 WHERE id=2' >/dev/null
+assert_sql 'SELECT ops.attestation_count()=5'
+assert_sql "SELECT value=5 FROM ops.substrate_counts() WHERE metric='attestations(MEASURED)'"
+P "$name" -c 'DELETE FROM public.witness' >/dev/null
+assert_sql 'SELECT ops.attestation_count()=0'
+P "$name" -c 'DROP TABLE public.witness' >/dev/null
 P "$name" -c 'SELECT pg_stat_reset()' >/dev/null
 check '40,120,80'
 # A real measured zero must override the old nonzero planner estimate.

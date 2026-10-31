@@ -780,11 +780,11 @@ internal static partial class IngestCommands
             NpgsqlIngestOps.EvidenceCountForRelationAndSourceIdAsync(
                 conn, relationType, sourceId.ToBytes());
 
-        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE, ops.evidence_count(), or ops.substrate_counts() for exact):");
+        Console.WriteLine("substrate totals (ops.substrate_counts(): pg_class.reltuples ESTIMATE is not count(*); MEASURED values are retained assertion counts):");
         {
             var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
             foreach (var row in counts)
-                Console.WriteLine($"  {row.Metric,-32}: {row.Value,12:N0}");
+                Console.WriteLine($"  {row.Metric,-32}: {row.Value?.ToString("N0") ?? "Not measured",12}");
         }
         long summaryMs = phase.ElapsedMilliseconds;
         Console.WriteLine(

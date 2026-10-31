@@ -94,6 +94,12 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         cmd.Add(new NpgsqlParameter { Value = status });
     });
 
+    public void OnNativeAttestationMeasurement(bool measured) => Execute("journal.native_attestation_measurement", cmd =>
+    {
+        cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+        cmd.Add(new NpgsqlParameter { Value = measured });
+    });
+
     public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true, ILogger? logger = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));

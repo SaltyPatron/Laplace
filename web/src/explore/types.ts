@@ -1,6 +1,6 @@
-export interface SubstrateCount { metric: string; value: number; }
+export interface SubstrateCount { metric: string; value: number | null; }
 export interface ConsensusHealth {
-  evidenceRows: number;
+  evidenceRows: number | null;
   consensusRows: number;
   dedupRatio?: number | null;
   avgWitnesses?: number | null;
@@ -18,7 +18,7 @@ export interface VisualizationEdge {
 }
 export interface ExploreSourceRow {
   key: string;
-  evidence: number;
+  evidence: number | null;
   content: number | null;
   stage?: string | null;
   layer?: string | null;

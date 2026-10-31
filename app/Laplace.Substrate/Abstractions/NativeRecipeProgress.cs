@@ -4,4 +4,5 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed record NativeRecipeProgress(
     string Event, string? Source, int FilesTotal, int FilesDone, long BytesDone,
     long Entities, long Physicalities, string? File, long FileBytes,
-    long Records, string? FileId, string? SourceId);
+    long Records, string? FileId, string? SourceId,
+    long? Attestations = null, bool? AttestationsMeasured = null);

@@ -34,7 +34,7 @@ function SourceWorkspace({ sourceKey, tenant, quoteId }: { sourceKey: string; te
       {source && <>
         <Muted>Stage {source.stage ?? 'Not recorded'} · Layer {source.layer ?? 'Not recorded'}</Muted>
         <div className={styles.statGrid}>
-          <StatCard label="Attestations" value={source.evidence.toLocaleString()} />
+          <StatCard label="Attestations" value={source.evidence?.toLocaleString() ?? 'Not measured'} />
           <StatCard label="Content entities" value={source.content?.toLocaleString() ?? 'Not recorded'} />
         </div>
         {source.role && <Muted>{source.role}</Muted>}

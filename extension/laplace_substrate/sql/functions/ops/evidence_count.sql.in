@@ -3,8 +3,38 @@ DROP FUNCTION IF EXISTS laplace.evidence_count(bytea, bytea, bytea);
 CREATE OR REPLACE FUNCTION ops.evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
+    LANGUAGE plpgsql STABLE
+AS $evidence$
+DECLARE measured bigint;
+BEGIN
+    IF to_regclass('public.entity') IS NOT NULL THEN
+        IF p_type IS NULL AND p_object IS NULL THEN
+            IF p_source IS NULL THEN RETURN ops.attestation_count(); END IF;
+            IF NOT EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
+                          AND attname='attestations' AND NOT attisdropped) THEN RETURN NULL; END IF;
+            EXECUTE 'SELECT attestations FROM public.witness WHERE id=encode($1,''hex'')::public.blake3'
+                INTO measured USING p_source;
+            IF NOT EXISTS(SELECT FROM public.witness WHERE id=encode(p_source,'hex')::public.blake3) THEN RETURN 0; END IF;
+            RETURN measured;
+        END IF;
+        -- Filter actual claim endpoints, then count claim/trunk pairs. Repeated
+        -- observations and shared dependence roots do not change cardinality.
+        WITH candidates AS MATERIALIZED (
+            SELECT c.entity AS claim FROM public.laplace_claims(
+                ARRAY(SELECT encode(v,'hex')::public.blake3 FROM unnest(ARRAY[p_type,p_object]) v WHERE v IS NOT NULL),
+                NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+        ), parts AS MATERIALIZED (
+            SELECT p.entity FROM public.laplace_claim_preview(ARRAY(SELECT claim FROM candidates)) p
+            WHERE (p_type IS NULL OR p.predicate=encode(p_type,'hex')::public.blake3)
+              AND (p_object IS NULL OR p.object=encode(p_object,'hex')::public.blake3)
+        )
+        SELECT count(*) INTO measured FROM (
+            SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT entity FROM parts),false) a
+            WHERE a.witness AND (p_source IS NULL OR a.trunk=encode(p_source,'hex')::public.blake3)
+        ) assertions;
+        RETURN measured;
+    END IF;
+    RETURN (
     -- Branch on which optional filters are present so each one is a plain
     -- equality the planner can index (type / source / object btrees,
     -- bitmap-ANDed when several are set); an `(p IS NULL OR col = p)` form is
@@ -29,5 +59,6 @@ BEGIN ATOMIC
                   WHERE a.type_id = p_type AND a.source_id = p_source)
         ELSE (SELECT count(*) FROM laplace.attestations a
               WHERE a.type_id = p_type AND a.source_id = p_source AND a.object_id = p_object)
-    END;
-END;
+    END);
+END
+$evidence$;

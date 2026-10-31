@@ -20,8 +20,8 @@ export function WarehouseHome() {
   if (err) return <ErrorText>{err}</ErrorText>;
   if (!catalog) return <LoadingText>Loading warehouse…</LoadingText>;
 
-  const entities = catalog.counts.find((c) => c.metric.startsWith('entities'))?.value ?? 0;
-  const attestations = catalog.counts.find((c) => c.metric.startsWith('attestations'))?.value ?? 0;
+  const entities = catalog.counts.find((c) => c.metric.startsWith('entities'))?.value;
+  const attestations = catalog.counts.find((c) => c.metric.startsWith('attestations'))?.value;
   const consensus = catalog.consensus?.consensusRows ?? 0;
   const sourceQuery = params.get('sources') ?? '';
   const sourceNeedle = sourceQuery.trim().toLocaleLowerCase();
@@ -43,8 +43,8 @@ export function WarehouseHome() {
       </header>
 
       <div className={styles.statGrid}>
-        <StatCard label="Entities" value={entities.toLocaleString()} />
-        <StatCard label="Attestations" value={attestations.toLocaleString()} />
+        <StatCard label="Entities" value={entities?.toLocaleString() ?? 'Not measured'} />
+        <StatCard label="Attestations" value={attestations?.toLocaleString() ?? 'Not measured'} />
         <StatCard label="Consensus edges" value={consensus.toLocaleString()} />
         {catalog.multi_source_entity_count != null ? (
           <StatCard label="Multi-source" value={catalog.multi_source_entity_count.toLocaleString()} />
@@ -121,7 +121,7 @@ export function WarehouseHome() {
                   <Link to={`/explore/source/${encodeURIComponent(s.key)}`}>{s.key}</Link>
                 </Td>
                 <Td>{s.stage ?? '—'}</Td>
-                <Td>{s.evidence.toLocaleString()}</Td>
+                <Td>{s.evidence?.toLocaleString() ?? 'Not measured'}</Td>
                 <Td>{s.content?.toLocaleString() ?? "—"}</Td>
               </tr>
             ))}

@@ -722,6 +722,33 @@ public sealed class NativeSqlCatalogPreparationTests : IAsyncLifetime
             games.Parameters.AddWithValue(xc.Id);
             Assert.Equal(3L, await games.ExecuteScalarAsync());
         }
+        // Cardinality belongs to claim/witness pairs. An old, unmeasured
+        // source remains unknown; three games on xc do not make three assertions.
+        await using (var totals = new NpgsqlCommand("SELECT ops.attestation_count()", connection, transaction))
+            Assert.Equal(DBNull.Value, await totals.ExecuteScalarAsync());
+        await using (var sourceCount = new NpgsqlCommand("SELECT ops.evidence_count(p_source=>$1)", connection, transaction))
+        {
+            sourceCount.Parameters.AddWithValue(witness.Id.ToBytes());
+            Assert.Equal(DBNull.Value, await sourceCount.ExecuteScalarAsync());
+        }
+        await using (var measure = new NpgsqlCommand("UPDATE public.witness SET attestations=6 WHERE id=$1", connection, transaction))
+        {
+            measure.Parameters.AddWithValue(witness.Id);
+            Assert.Equal(1, await measure.ExecuteNonQueryAsync());
+        }
+        await using (var totals = new NpgsqlCommand("SELECT ops.attestation_count()", connection, transaction))
+            Assert.Equal(6L, await totals.ExecuteScalarAsync());
+        await using (var selected = new NpgsqlCommand("SELECT ops.evidence_count(p_type=>$1)", connection, transaction))
+        {
+            selected.Parameters.AddWithValue(predicate.Id.ToBytes());
+            Assert.Equal(3L, await selected.ExecuteScalarAsync());
+        }
+        var inventory = await NpgsqlSubstrateReads.SourceCountsAsync(connection, CancellationToken.None);
+        Assert.Equal(6L, Assert.Single(inventory).Evidence);
+        Assert.Null(inventory[0].Content);
+        var health = await NpgsqlSubstrateReads.ConsensusStatsExactAsync(connection, CancellationToken.None);
+        Assert.Equal(6L, health!.Value.EvidenceRows);
+        Assert.Equal(6L, health.Value.ConsensusRows);
         await using (var registry = NpgsqlCatalog.Command(connection, transaction, "foundry.source_ids",
             Convert.ToHexString(witness.Id.ToBytes())))
         await using (var rows = await registry.ExecuteReaderAsync())

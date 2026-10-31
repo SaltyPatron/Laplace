@@ -1,8 +1,21 @@
 DROP FUNCTION IF EXISTS laplace.source_counts_approx();
 CREATE OR REPLACE FUNCTION ops.source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
+    LANGUAGE plpgsql STABLE
+AS $source_counts$
+BEGIN
+    IF to_regclass('public.entity') IS NOT NULL THEN
+        RETURN QUERY EXECUTE format(
+            'SELECT coalesce(j.source_name,c.source_label,w.id::text),public.blake3_send(w.id),%s
+             FROM public.witness w LEFT JOIN ops.witness_catalog() c ON c.id=w.id
+             LEFT JOIN LATERAL (SELECT source_name FROM laplace.ingest_run_journal
+                WHERE source_id=public.blake3_send(w.id) ORDER BY started_at DESC LIMIT 1) j ON true
+             ORDER BY w.id',
+            CASE WHEN EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
+                 AND attname='attestations' AND NOT attisdropped) THEN 'w.attestations' ELSE 'NULL::bigint' END);
+        RETURN;
+    END IF;
+    RETURN QUERY
     -- Planner-statistics form of ops.source_counts(), which full-scans
     -- attestations: per-source evidence = source_id MCV frequency x reltuples.
     -- ANALYZE freshness bounds the error; sources below the MCV cutoff do not
@@ -30,4 +43,5 @@ BEGIN ATOMIC
     )
     SELECT b.labels[n.rn], n.source_id, n.evidence_approx
     FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
-END;
+END
+$source_counts$;

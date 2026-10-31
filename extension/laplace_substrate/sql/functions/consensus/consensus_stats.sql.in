@@ -2,8 +2,16 @@ DROP FUNCTION IF EXISTS laplace.consensus_stats();
 CREATE OR REPLACE FUNCTION consensus.stats()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
                   avg_witnesses numeric, max_witnesses bigint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
+    LANGUAGE plpgsql STABLE
+AS $stats$
+BEGIN
+    IF to_regclass('public.entity') IS NOT NULL THEN
+        RETURN QUERY SELECT ops.attestation_count(),count(*)::bigint,
+             round(ops.attestation_count()::numeric/NULLIF(count(*),0),3),NULL::numeric,NULL::bigint
+        FROM public.consensus;
+        RETURN;
+    END IF;
+    RETURN QUERY
     SELECT a.cnt, c.cnt,
            round(a.cnt::numeric / NULLIF(c.cnt, 0), 3),
            c.avg_w, c.max_w
@@ -12,4 +20,5 @@ BEGIN ATOMIC
                  round(avg(witness_count), 3) AS avg_w,
                  max(witness_count)::bigint AS max_w
           FROM laplace.consensus) c;
-END;
+END
+$stats$;

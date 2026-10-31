@@ -204,7 +204,7 @@ public static partial class NpgsqlSubstrateReads
     // Connection overloads let a caller run several of these on one connection, sharing
     // session state such as TEMP scopes.
 
-    public readonly record struct MetricCountRow(string Metric, long Value);
+    public readonly record struct MetricCountRow(string Metric, long? Value);
 
     /// <summary><c>ops.substrate_counts()</c> — inventory metrics (planner-labeled).</summary>
     public static Task<IReadOnlyList<MetricCountRow>> SubstrateCountsAsync(
@@ -212,7 +212,7 @@ public static partial class NpgsqlSubstrateReads
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
             SqlCatalog.Get("ops.substrate_counts"),
-            static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
+            static r => new MetricCountRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
     /// <inheritdoc cref="SubstrateCountsAsync(NpgsqlConnection, CancellationToken, int, NpgsqlRead.ErrorTranslator?)"/>
@@ -221,15 +221,15 @@ public static partial class NpgsqlSubstrateReads
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource,
             SqlCatalog.Get("ops.substrate_counts"),
-            static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
+            static r => new MetricCountRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
     public readonly record struct ConsensusStatsRow(
-        long EvidenceRows, long ConsensusRows, decimal? DedupRatio,
+        long? EvidenceRows, long ConsensusRows, decimal? DedupRatio,
         decimal? AvgWitnesses, long? MaxWitnesses);
 
     private static ConsensusStatsRow MapConsensusStats(NpgsqlDataReader r) => new(
-        r.GetInt64(0), r.GetInt64(1),
+        r.IsDBNull(0) ? null : r.GetInt64(0), r.GetInt64(1),
         r.IsDBNull(2) ? null : r.GetDecimal(2),
         r.IsDBNull(3) ? null : r.GetDecimal(3),
         r.IsDBNull(4) ? null : r.GetInt64(4));
@@ -259,7 +259,7 @@ public static partial class NpgsqlSubstrateReads
     }
 
     public readonly record struct SourceCountRow(
-        string Source, long Evidence, long? Content, string? IdHex);
+        string Source, long? Evidence, long? Content, string? IdHex);
 
     /// <summary><c>ops.source_counts()</c> — exact per-source evidence+content (unbounded).</summary>
     public static Task<IReadOnlyList<SourceCountRow>> SourceCountsAsync(
@@ -268,7 +268,7 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn,
             SqlCatalog.Get("ops.source_counts"),
             static r => new SourceCountRow(
-                SourceLabel(r, 0, 3), r.GetInt64(1), r.GetInt64(2),
+                SourceLabel(r, 0, 3), r.IsDBNull(1) ? null : r.GetInt64(1), r.IsDBNull(2) ? null : r.GetInt64(2),
                 r.IsDBNull(3) ? null : r.GetString(3)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "source_counts", onError: onError);
 
@@ -286,7 +286,7 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn,
             SqlCatalog.Get("ops.source_counts_approx"),
             static r => new SourceCountRow(
-                SourceLabel(r, 0, 2), r.GetInt64(1), null,
+                SourceLabel(r, 0, 2), r.IsDBNull(1) ? null : r.GetInt64(1), null,
                 r.IsDBNull(2) ? null : r.GetString(2)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "source_counts_approx", onError: onError);
 
@@ -392,7 +392,7 @@ public static partial class NpgsqlSubstrateReads
     /// <summary>One source's ingest state — see <c>ops.source_status()</c>.</summary>
     public readonly record struct SourceStatusRow(
         string Source, byte[] SourceId, bool Known, bool Ingested,
-        long EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt,
+        long? EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt,
         string? ThroughputStatus, bool ThroughputCompared, double? ThroughputRowsPerS,
         double? ThroughputBaselineRowsPerS, double? ThroughputSlowdownRatio);
 
@@ -410,7 +410,7 @@ public static partial class NpgsqlSubstrateReads
             SqlCatalog.Get("ops.source_status"),
             static r => new SourceStatusRow(
                 r.GetString(0), (byte[])r[1], r.GetBoolean(2), r.GetBoolean(3),
-                r.GetInt64(4), r.GetBoolean(5),
+                r.IsDBNull(4) ? null : r.GetInt64(4), r.GetBoolean(5),
                 r.IsDBNull(6) ? null : r.GetString(6),
                 r.IsDBNull(7) ? null : r.GetDateTime(7),
                 r.IsDBNull(8) ? null : r.GetString(8),

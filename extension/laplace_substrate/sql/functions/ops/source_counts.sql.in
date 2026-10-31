@@ -1,8 +1,14 @@
 DROP FUNCTION IF EXISTS laplace.source_counts();
 CREATE OR REPLACE FUNCTION ops.source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
+    LANGUAGE plpgsql STABLE
+AS $source_counts$
+BEGIN
+    IF to_regclass('public.entity') IS NOT NULL THEN
+        RETURN QUERY SELECT c.source,c.source_id,c.evidence_approx,NULL::bigint FROM ops.source_counts_approx() c;
+        RETURN;
+    END IF;
+    RETURN QUERY
     WITH raw AS MATERIALIZED (
     SELECT COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,
@@ -20,10 +26,11 @@ BEGIN ATOMIC
                GROUP BY s.source_id) ct
       ON ev.sid = ct.sid
     ), numbered AS MATERIALIZED (
-      SELECT r.*, row_number() OVER (ORDER BY evidence DESC NULLS LAST, source_id) AS rn FROM raw r
+      SELECT r.*, row_number() OVER (ORDER BY r.evidence DESC NULLS LAST, r.source_id) AS rn FROM raw r
     ), batch AS MATERIALIZED (
       SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
     )
     SELECT b.labels[n.rn], n.source_id, n.evidence, n.content
     FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
-END;
+END
+$source_counts$;

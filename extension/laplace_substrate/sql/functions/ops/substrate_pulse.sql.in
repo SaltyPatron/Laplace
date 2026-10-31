@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION ops.substrate_pulse()
 BEGIN ATOMIC
     SELECT
       (SELECT value FROM ops.substrate_counts() WHERE metric = 'entities(ESTIMATE)'),
-      (SELECT value FROM ops.substrate_counts() WHERE metric = 'attestations(ESTIMATE)'),
+      (SELECT value FROM ops.substrate_counts() WHERE metric IN ('attestations(ESTIMATE)','attestations(MEASURED)')),
       (SELECT value FROM ops.substrate_counts() WHERE metric = 'consensus(ESTIMATE)'),
       (SELECT value FROM ops.substrate_counts() WHERE metric = 'physicalities(ESTIMATE)'),
       (SELECT max(applied_at) FROM laplace.ingest_flush_journal),

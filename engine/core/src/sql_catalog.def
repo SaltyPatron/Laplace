@@ -1770,6 +1770,8 @@ SQL_QUERY("journal.native_inventory", "uuid,int8",
     "UPDATE laplace.ingest_run_journal SET files_total=$2,input_units_total=$2 WHERE run_id=$1")
 SQL_QUERY("journal.native_source", "uuid,bytea",
     "UPDATE laplace.ingest_run_journal SET source_id=$2 WHERE run_id=$1")
+SQL_QUERY("journal.native_attestation_measurement", "uuid,bool",
+    "UPDATE laplace.ingest_run_journal SET attestations_measured=$2 WHERE run_id=$1")
 SQL_QUERY("journal.native_files_finished", "uuid,text",
     "UPDATE laplace.ingest_file_journal SET status=$2,ended_at=clock_timestamp() WHERE run_id=$1 AND status IN ('running','composed')")
 SQL_QUERY("journal.run_start_unidentified", "uuid,text,int4,int8,int8,bool",

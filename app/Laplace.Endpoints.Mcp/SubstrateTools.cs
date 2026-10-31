@@ -684,7 +684,8 @@ internal sealed class SubstrateTools : IMcpTools
                 ["metric"] = h.Metric,
                 ["value"] = h.Value is null ? null : JsonValue.Create(h.Value),
             })
-            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }))
+            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric,
+                ["value"] = c.Value is { } measured ? JsonValue.Create(measured) : null }))
             .Append(new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory });
         return JsonRows(rows);
     }

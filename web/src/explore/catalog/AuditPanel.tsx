@@ -37,7 +37,7 @@ export function AuditPanel() {
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
           {report?.counts?.map((c) => (
-            <li key={c.metric}>{c.metric}: {c.value.toLocaleString()}</li>
+            <li key={c.metric}>{c.metric}: {c.value?.toLocaleString() ?? 'Not measured'}</li>
           ))}
         </ul>
       )}
