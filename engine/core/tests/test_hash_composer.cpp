@@ -304,3 +304,31 @@ TEST(LaplaceCoreHashComposer, FrontierWorkersRejectZeroGrantAndPreserveResolverE
     EXPECT_EQ(-42, hash_composer_run_workers(failed, err_resolver, nullptr, 4));
     tier_tree_free(failed);
 }
+
+TEST(LaplaceNativeCompose, RefComposeRunsAndFactorParityWithExpandedComposition) {
+    const lp_ref a = native_atom('a');
+    const lp_ref b = native_atom('b');
+    const lp_ref c = native_atom('c');
+
+    const lp_ref expanded[6] = {a, a, a, b, c, c};
+    const lp_ref expected = lp_ref_compose(expanded, 6, 2);
+
+    const lp_ref runs_children[3] = {a, b, c};
+    const uint64_t runs_counts[3] = {3, 1, 2};
+    lp_ref compressed{};
+    ASSERT_TRUE(lp_ref_compose_runs(runs_children, runs_counts, 3, 2, &compressed));
+    EXPECT_EQ(0, std::memcmp(&expected.id, &compressed.id, sizeof(lp_id)));
+    EXPECT_EQ(0, std::memcmp(&expected.c, &compressed.c, sizeof(lp_coord)));
+    EXPECT_EQ(2, compressed.tier);
+
+    const lp_ref pattern[6] = {a, b, a, b, a, b};
+    lp_ref factored[6] = {};
+    const size_t factored_n = lp_factor(pattern, 6, factored, nullptr, nullptr);
+    ASSERT_EQ(3u, factored_n);
+    const lp_ref block = lp_ref_compose(pattern, 2, 1);
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(0, std::memcmp(&block.id, &factored[i].id, sizeof(lp_id)));
+        EXPECT_EQ(0, std::memcmp(&block.c, &factored[i].c, sizeof(lp_coord)));
+        EXPECT_EQ(1, factored[i].tier);
+    }
+}

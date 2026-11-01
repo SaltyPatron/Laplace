@@ -422,3 +422,103 @@ pg_laplace_perfcache_receipt(PG_FUNCTION_ARGS)
     memcpy(VARDATA(out), &receipt, sizeof(receipt));
     PG_RETURN_BYTEA_P(out);
 }
+
+static void
+read_required_id16(Datum arg, bool isnull, const char *fn_name, const char *param_name, hash128_t *out)
+{
+    bytea *b;
+    Size   len;
+
+    if (isnull)
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: %s must not be NULL", fn_name, param_name)));
+    b = DatumGetByteaPP(arg);
+    len = VARSIZE_ANY_EXHDR(b);
+    if (len != sizeof(hash128_t))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("%s: %s has length %zu, expected %zu",
+                        fn_name, param_name, (size_t) len, sizeof(hash128_t))));
+    memcpy(out, VARDATA_ANY(b), sizeof(hash128_t));
+}
+
+static void
+text_arg_root_id(text *t, const char *fn_name, const char *param_name, hash128_t *out)
+{
+    const char *data = VARDATA_ANY(t);
+    Size        len  = VARSIZE_ANY_EXHDR(t);
+    int         rc;
+
+    if (len == 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("%s: %s must not be empty", fn_name, param_name)));
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("%s requires the T0 perfcache", fn_name)));
+    rc = laplace_content_root_id((const uint8_t *) data, (size_t) len, out);
+    if (rc != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("%s: content decomposition failed for %s (rc=%d)",
+                        fn_name, param_name, rc)));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_id);
+
+Datum
+pg_laplace_consensus_id(PG_FUNCTION_ARGS)
+{
+    hash128_t children[3];
+    size_t    n = 2;
+    bytea    *out;
+
+    read_required_id16(PG_GETARG_DATUM(0), PG_ARGISNULL(0), "consensus_id", "subject_id", &children[0]);
+    read_required_id16(PG_GETARG_DATUM(1), PG_ARGISNULL(1), "consensus_id", "type_id", &children[1]);
+    if (!PG_ARGISNULL(2))
+    {
+        read_required_id16(PG_GETARG_DATUM(2), false, "consensus_id", "object_id", &children[2]);
+        n = 3;
+    }
+
+    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
+    hash128_merkle(0, children, n, (hash128_t *) VARDATA(out));
+    PG_RETURN_BYTEA_P(out);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_property_value_id);
+
+Datum
+pg_laplace_property_value_id(PG_FUNCTION_ARGS)
+{
+    hash128_t children[2];
+    bytea    *out;
+
+    text_arg_root_id(PG_GETARG_TEXT_PP(0), "property_value_id", "property", &children[0]);
+    text_arg_root_id(PG_GETARG_TEXT_PP(1), "property_value_id", "value", &children[1]);
+
+    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
+    hash128_merkle(0, children, 2, (hash128_t *) VARDATA(out));
+    PG_RETURN_BYTEA_P(out);
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_witness_id);
+
+Datum
+pg_laplace_witness_id(PG_FUNCTION_ARGS)
+{
+    hash128_t children[2];
+    bytea    *out;
+
+    text_arg_root_id(PG_GETARG_TEXT_PP(0), "witness_id", "authority", &children[0]);
+    text_arg_root_id(PG_GETARG_TEXT_PP(1), "witness_id", "release", &children[1]);
+
+    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
+    hash128_merkle(0, children, 2, (hash128_t *) VARDATA(out));
+    PG_RETURN_BYTEA_P(out);
+}

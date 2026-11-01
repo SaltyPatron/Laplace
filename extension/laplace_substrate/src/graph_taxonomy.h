@@ -47,4 +47,8 @@ extern int tax_bfs_up_weighted(const hash128_t *seeds,
                                const hash128_t *up_types, int up_type_n,
                                TaxNode **nodes_out);
 
+/* Read a manifest-declared relation set (consensus.relation_set_ids) into
+ * caller-context hash128_t storage. */
+extern void tax_fetch_relation_set(const char *name, hash128_t **types_out, int *n_out);
+
 #endif                          

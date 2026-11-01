@@ -154,9 +154,9 @@ render_entity_text(HTAB *memo, Datum id, int32 max_depth)
         rendered = pstrdup("");
     else
     {
-        text *t = DatumGetTextPP(SPI_getbinval(SPI_tuptable->vals[0],
-                                               SPI_tuptable->tupdesc, 1, &isnull));
-        rendered = isnull ? pstrdup("") : text_to_cstring(t);
+        Datum d = SPI_getbinval(SPI_tuptable->vals[0],
+                                SPI_tuptable->tupdesc, 1, &isnull);
+        rendered = (isnull || d == (Datum) 0) ? pstrdup("") : text_to_cstring(DatumGetTextPP(d));
     }
 
     if (e != NULL)

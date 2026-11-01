@@ -14,8 +14,14 @@ _Static_assert(offsetof(codepoint_entry_t, mantissa) == 16, "Native fixed coordi
 _Static_assert(offsetof(codepoint_entry_t, uca_order) == 56, "Native collation rank");
 
 static _Atomic(const lp_tier0_record *) active_floor;
+static _Atomic int explicitly_unloaded;
 static const lp_tier0_record *current_floor(void) {
-    return atomic_load_explicit(&active_floor, memory_order_acquire);
+    const lp_tier0_record *floor = atomic_load_explicit(&active_floor, memory_order_acquire);
+    if (!floor && !atomic_load_explicit(&explicitly_unloaded, memory_order_acquire)) {
+        floor = (const lp_tier0_record *)text_identity_scalar_floor();
+        if (floor) atomic_store_explicit(&active_floor, floor, memory_order_release);
+    }
+    return floor;
 }
 
 int codepoint_table_load_perfcache(const char *path) {
@@ -32,11 +38,15 @@ int codepoint_table_load_perfcache(const char *path) {
     int same = memcmp(candidate, canonical, bytes) == 0;
     lp_unmap_file(candidate, size);
     if (!same) return -4;
+    atomic_store_explicit(&explicitly_unloaded, 0, memory_order_release);
     atomic_store_explicit(&active_floor, canonical, memory_order_release);
     return 0;
 }
 
-void codepoint_table_unload(void) { atomic_store_explicit(&active_floor, NULL, memory_order_release); }
+void codepoint_table_unload(void) {
+    atomic_store_explicit(&explicitly_unloaded, 1, memory_order_release);
+    atomic_store_explicit(&active_floor, NULL, memory_order_release);
+}
 int codepoint_table_is_loaded(void) { return current_floor() != NULL; }
 
 int codepoint_table_copy_receipt(hash128_t *out) {

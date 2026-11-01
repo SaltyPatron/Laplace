@@ -8,6 +8,7 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/geometry.h"
 
 namespace {
 struct ExpandedTrajectoryItem {
@@ -402,4 +403,74 @@ TEST(LaplaceCoreTrajectoryRle, LogicalEquivalencePreservesOrderFlagsAndCount) {
         baseline_ids, baseline_flags, 2, shortened));
     EXPECT_EQ(0, trajectory_equivalent(baseline, 3, shortened, 2));
     EXPECT_EQ(-1, trajectory_equivalent(nullptr, 1, baseline, 3));
+}
+
+TEST(LaplaceNativePath, EwkbRunsSpareAndClaimAnnotationsRoundTrip) {
+    lp_id ids[4];
+    for (int i = 0; i < 4; ++i) {
+        ids[i] = {};
+        ids[i].b[0] = static_cast<uint8_t>(0xA0 + i);
+        ids[i].b[7] = static_cast<uint8_t>(0x55 ^ i);
+        ids[i].b[15] = static_cast<uint8_t>(0x11 * (i + 1));
+    }
+
+    uint32_t sp[4] = {};
+    uint32_t oc[4] = {};
+    const double scores[4] = {1.0, 0.5, 0.0, 0.7311234};
+    for (int i = 0; i < 4; ++i) {
+        oc[i] = lp_outcome_of(scores[i], &sp[i]);
+    }
+    EXPECT_EQ(LP_OUTCOME_WIN, oc[0]);
+    EXPECT_EQ(LP_OUTCOME_DRAW, oc[1]);
+    EXPECT_EQ(LP_OUTCOME_LOSS, oc[2]);
+    EXPECT_EQ(LP_OUTCOME_SCORE, oc[3]);
+    EXPECT_EQ(0u, sp[0]);
+    EXPECT_EQ(0u, sp[1]);
+    EXPECT_EQ(0u, sp[2]);
+    EXPECT_EQ(LP_SPARE_SCORE, lp_spare_tag(sp[3]));
+
+    const uint64_t ms[4] = {
+        lp_m_full(3, LP_SAID_CLAIM, oc[0], 1),
+        lp_m_full(1, LP_SAID_RECORD, oc[1], 42),
+        lp_m_full((1u << LP_M_RUN_BITS) - 1u, LP_SAID_TUPLE, oc[2], LP_M_POSITION_MAX),
+        lp_m_full(2, LP_SAID_VOICE, oc[3], 17),
+    };
+
+    uint8_t ewkb[256];
+    size_t len = lp_ewkb_runs_spare(ids, ms, sp, 4, ewkb, sizeof(ewkb));
+    ASSERT_EQ(9u + 4u * 32u, len);
+
+    const uint8_t* raw_vertices = nullptr;
+    ASSERT_EQ(4u, lp_ewkb_vertices(ewkb, len, &raw_vertices));
+    ASSERT_NE(nullptr, raw_vertices);
+
+    lp_vertex decoded[4] = {};
+    ASSERT_EQ(4u, lp_path_decode(lp_path_of(ewkb, len), decoded, 4));
+
+    EXPECT_EQ(0, std::memcmp(&ids[0], &decoded[0].id, 16));
+    EXPECT_EQ(3u, decoded[0].run);
+    EXPECT_EQ(LP_SAID_CLAIM, decoded[0].said);
+    EXPECT_EQ(LP_OUTCOME_WIN, decoded[0].outcome);
+    EXPECT_EQ(1u, decoded[0].position);
+    EXPECT_EQ(0u, decoded[0].spare);
+
+    EXPECT_EQ(0, std::memcmp(&ids[1], &decoded[1].id, 16));
+    EXPECT_EQ(1u, decoded[1].run);
+    EXPECT_EQ(LP_SAID_RECORD, decoded[1].said);
+    EXPECT_EQ(LP_OUTCOME_DRAW, decoded[1].outcome);
+    EXPECT_EQ(42u, decoded[1].position);
+
+    EXPECT_EQ(0, std::memcmp(&ids[2], &decoded[2].id, 16));
+    EXPECT_EQ((1u << LP_M_RUN_BITS) - 1u, decoded[2].run);
+    EXPECT_EQ(LP_SAID_TUPLE, decoded[2].said);
+    EXPECT_EQ(LP_OUTCOME_LOSS, decoded[2].outcome);
+    EXPECT_EQ(LP_M_POSITION_MAX, decoded[2].position);
+
+    EXPECT_EQ(0, std::memcmp(&ids[3], &decoded[3].id, 16));
+    EXPECT_EQ(2u, decoded[3].run);
+    EXPECT_EQ(LP_SAID_VOICE, decoded[3].said);
+    EXPECT_EQ(LP_OUTCOME_SCORE, decoded[3].outcome);
+    EXPECT_EQ(17u, decoded[3].position);
+    EXPECT_EQ(sp[3], decoded[3].spare);
+    EXPECT_DOUBLE_EQ(lp_score_carried(scores[3]), lp_outcome_score(decoded[3].outcome, decoded[3].spare));
 }

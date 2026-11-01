@@ -240,7 +240,7 @@ add_library(laplace_core_objects OBJECT ${LAPLACE_CORE_SOURCES})
 add_dependencies(laplace_core_objects laplace_attestation_codegen)
 target_compile_definitions(laplace_core_objects PRIVATE
     LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
-target_include_directories(laplace_core_objects PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(laplace_core_objects PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${LAPLACE_NATIVE}/include")
 target_link_libraries(laplace_core_objects PRIVATE
     laplace_eigen laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
 
@@ -251,7 +251,8 @@ add_library(laplace_core SHARED $<TARGET_OBJECTS:laplace_core_objects>)
 laplace_refresh_windows_exports(laplace_core)
 add_library(laplace_core_static STATIC $<TARGET_OBJECTS:laplace_core_objects>)
 target_include_directories(laplace_core_static PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${LAPLACE_NATIVE}/include>)
 target_link_libraries(laplace_core_static
     PUBLIC laplace_eigen
     PRIVATE laplace_text blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
@@ -674,6 +675,7 @@ set_target_properties(laplace_core PROPERTIES
 target_include_directories(laplace_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${LAPLACE_NATIVE}/include>
         $<INSTALL_INTERFACE:include>
 )
 

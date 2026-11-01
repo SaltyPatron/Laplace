@@ -669,3 +669,28 @@ TEST(LaplaceAttestationEngine, ResolvedBuildAppliesRelationRankLikeSurfaceBuild)
     EXPECT_NE(laplace_attestation_witness_phi(0.85),
               laplace_attestation_witness_phi(def->rank * 0.85));
 }
+
+TEST(LaplaceRelationLaw, DeclaredRelationSetsResolveToCachedCanonicalIds) {
+    const hash128_t* upward = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(0, laplace_relation_set_ids("PATH_UPWARD", &upward, &count));
+    ASSERT_EQ(2u, count);
+    ASSERT_NE(nullptr, upward);
+    hash128_t isa = relation_type_id("IS_A");
+    hash128_t inst = relation_type_id("IS_INSTANCE_OF");
+    EXPECT_TRUE(hash128_equals(&upward[0], &isa));
+    EXPECT_TRUE(hash128_equals(&upward[1], &inst));
+
+    const hash128_t* isa_upward = nullptr;
+    size_t isa_count = 0;
+    ASSERT_EQ(0, laplace_relation_set_ids("ISA_UPWARD", &isa_upward, &isa_count));
+    ASSERT_EQ(1u, isa_count);
+    EXPECT_TRUE(hash128_equals(&isa_upward[0], &isa));
+
+    const hash128_t* features = nullptr;
+    size_t feat_count = 0;
+    ASSERT_EQ(0, laplace_relation_set_ids("CONTRAST_FEATURES", &features, &feat_count));
+    EXPECT_EQ(7u, feat_count);
+
+    EXPECT_EQ(-1, laplace_relation_set_ids("NOT_A_DECLARED_SET", &upward, &count));
+}

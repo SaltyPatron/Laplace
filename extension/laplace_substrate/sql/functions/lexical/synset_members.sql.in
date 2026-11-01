@@ -3,7 +3,13 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    WITH syn AS (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('IS_INSTANCE_OF') AS is_instance_of,
+               laplace.relation_type_id('IS_SENSE_OF')    AS is_sense_of,
+               laplace.relation_type_id('IS_SYNONYM_OF')  AS is_synonym_of,
+               laplace.relation_type_id('HAS_LANGUAGE')   AS has_language
+    ),
+    syn AS (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM lexical.senses(p_word) s
         -- Instance synsets (proper nouns) are excluded, but only on a STANDING
@@ -13,9 +19,9 @@ BEGIN ATOMIC
         -- outcome column; refutation is a non-positive consensus.eff_mu, the same test the
         -- walk uses to dead-end an edge. An absent edge still excludes nothing.
         WHERE NOT EXISTS (
-            SELECT 1 FROM laplace.consensus i
+            SELECT 1 FROM laplace.consensus i, rel r
             WHERE i.subject_id = s.synset_id
-              AND i.type_id = laplace.relation_type_id('IS_INSTANCE_OF')
+              AND i.type_id = r.is_instance_of
               AND consensus.eff_mu(i.rating, i.rd) > 0)
         GROUP BY s.synset_id
     ),
@@ -30,9 +36,10 @@ BEGIN ATOMIC
         UNION ALL
         SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
         FROM syn
+        CROSS JOIN rel r
         JOIN laplace.consensus ss
           ON ss.object_id = syn.id
-         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+         AND ss.type_id = r.is_sense_of
         JOIN laplace.consensus hs
           ON hs.object_id = ss.subject_id
          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
@@ -40,12 +47,12 @@ BEGIN ATOMIC
         -- OMW and other resources without a source sense key may still make a direct
         -- lexical membership assertion. Keep that distinct source shape readable.
         SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM laplace.consensus c JOIN syn ON c.subject_id = syn.id
-        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
+        FROM laplace.consensus c JOIN syn ON c.subject_id = syn.id CROSS JOIN rel r
+        WHERE c.type_id = r.is_synonym_of AND c.object_id IS NOT NULL
         UNION ALL
         SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM laplace.consensus c JOIN syn ON c.object_id = syn.id
-        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
+        FROM laplace.consensus c JOIN syn ON c.object_id = syn.id CROSS JOIN rel r
+        WHERE c.type_id = r.is_synonym_of
     ),
     -- MATERIALIZED is load-bearing: it forces lexical.lexical_peers(a ~75ms native-KNN
     -- call) to run ONCE per synset_members call. The bare
@@ -70,6 +77,7 @@ BEGIN ATOMIC
     )
     SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
     FROM agg a
+    CROSS JOIN rel r
     LEFT JOIN laplace.consensus hl
-      ON hl.subject_id = a.w AND hl.type_id = laplace.relation_type_id('HAS_LANGUAGE');
+      ON hl.subject_id = a.w AND hl.type_id = r.has_language;
 END;

@@ -90,28 +90,14 @@ typedef struct
     __int128 weakest;
 } Ranked;
 
-static SPIPlanPtr set_plan = NULL;
-
 static ArrayType *
 relation_set(const char *name)
 {
-    Datum arg = CStringGetTextDatum(name);
-    bool isnull;
-    Datum value;
-    if (set_plan == NULL)
-    {
-        Oid types[1] = {TEXTOID};
-        set_plan = SPI_prepare_cursor("SELECT consensus.relation_set_ids($1)", 1, types,
-                                      CURSOR_OPT_PARALLEL_OK);
-        if (set_plan == NULL || SPI_keepplan(set_plan) != 0)
-            elog(ERROR, "respond: cannot retain the relation-set read");
-    }
-    if (SPI_execute_plan(set_plan, &arg, NULL, true, 1) != SPI_OK_SELECT || SPI_processed != 1)
+    const hash128_t *ids = NULL;
+    size_t n = 0;
+    if (laplace_relation_set_ids(name, &ids, &n) != 0)
         elog(ERROR, "respond: relation set %s is unavailable", name);
-    value = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        return construct_empty_array(BYTEAOID);
-    return DatumGetArrayTypePCopy(value);
+    return hash128_array_from_ids(ids, (int) n);
 }
 
 /* A small governed id set, read once per call into a lookup table. */

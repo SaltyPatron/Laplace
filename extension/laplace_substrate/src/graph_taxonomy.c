@@ -102,8 +102,12 @@ spi_top_synset(Datum word)
         1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
-    return copy_bytea_datum(
-        SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
+    {
+        Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+        if (isnull)
+            return (Datum) 0;
+        return copy_bytea_datum(d);
+    }
 }
 
 static bool
@@ -388,7 +392,6 @@ typedef struct RelateDirect
 } RelateDirect;
 
 static SPIPlanPtr relate_senses_plan = NULL;
-static SPIPlanPtr relation_set_plan = NULL;
 
 static void
 ensure_relate_plans(void)
@@ -403,15 +406,6 @@ ensure_relate_plans(void)
             1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (relate_senses_plan == NULL || SPI_keepplan(relate_senses_plan) != 0)
             elog(ERROR, "relate_path_raw: could not prepare lexical sense plan");
-    }
-    if (relation_set_plan == NULL)
-    {
-        Oid argtypes[1] = { TEXTOID };
-
-        relation_set_plan = SPI_prepare_cursor(
-            "SELECT consensus.relation_set_ids($1)", 1, argtypes, CURSOR_OPT_PARALLEL_OK);
-        if (relation_set_plan == NULL || SPI_keepplan(relation_set_plan) != 0)
-            elog(ERROR, "relate_path_raw: could not prepare relation-set plan");
     }
 }
 
@@ -487,34 +481,20 @@ fetch_relate_seeds(Datum endpoint, RelateSeed **seeds_out)
     return n;
 }
 
-static void
-fetch_relation_set(const char *name, hash128_t **types_out, int *n_out)
+void
+tax_fetch_relation_set(const char *name, hash128_t **types_out, int *n_out)
 {
-    Datum      args[1] = { CStringGetTextDatum(name) };
-    int        rc = SPI_execute_plan(relation_set_plan, args, NULL, true, 1);
-    bool       isnull;
-    Datum      arr_d;
-    Datum     *values;
-    bool      *nulls;
-    int        n;
-    hash128_t *types;
+    const hash128_t *slice = NULL;
+    size_t           n = 0;
+    hash128_t       *types;
 
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
+    if (laplace_relation_set_ids(name, &slice, &n) != 0)
         elog(ERROR, "relate_path_raw: relation set %s is unavailable", name);
-    arr_d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        elog(ERROR, "relate_path_raw: relation set %s is NULL", name);
-    deconstruct_array(DatumGetArrayTypePCopy(arr_d), BYTEAOID,
-                      -1, false, TYPALIGN_INT, &values, &nulls, &n);
     types = (hash128_t *) palloc(sizeof(hash128_t) * (n > 0 ? n : 1));
-    for (int i = 0; i < n; i++)
-    {
-        if (nulls[i])
-            elog(ERROR, "relate_path_raw: relation set %s contains NULL", name);
-        types[i] = datum_to_hash128(values[i]);
-    }
+    if (n > 0)
+        memcpy(types, slice, sizeof(hash128_t) * n);
     *types_out = types;
-    *n_out = n;
+    *n_out = (int) n;
 }
 
 static bool
@@ -637,8 +617,8 @@ pg_laplace_relate_path_raw(PG_FUNCTION_ARGS)
         ensure_relate_plans();
         n_sx = fetch_relate_seeds(x, &sx);
         n_sy = fetch_relate_seeds(y, &sy);
-        fetch_relation_set("PATH_UPWARD", &up_types, &n_up);
-        fetch_relation_set("PATH_LATERAL", &lateral_types, &n_lateral);
+        tax_fetch_relation_set("PATH_UPWARD", &up_types, &n_up);
+        tax_fetch_relation_set("PATH_LATERAL", &lateral_types, &n_lateral);
 
         {
             Datum *type_datums = (Datum *) palloc(sizeof(Datum) * n_lateral);
@@ -806,7 +786,8 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
     TaxNode       *nodes;
     int            n_nodes;
     Datum          lang;
-    hash128_t      up_types[2];
+    hash128_t     *up_types;
+    int            n_up;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("hypernyms: p_word must not be NULL")));
@@ -829,12 +810,11 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
     }
 
     lang = spi_word_language(word);
-    up_types[0] = rel_type_id("IS_A");
-    up_types[1] = rel_type_id("IS_INSTANCE_OF");
+    tax_fetch_relation_set("PATH_UPWARD", &up_types, &n_up);
 
     {
         hash128_t seed = datum_to_hash128(start);
-        n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, 2, &nodes);
+        n_nodes = tax_bfs_up(&seed, 1, max_depth, up_types, n_up, &nodes);
     }
 
     /* REALIZE the emitted ancestors as one set: labels through
@@ -921,7 +901,8 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
     int32          max_depth;
     TaxNode       *nodes = NULL;
     int            n_nodes = 0;
-    hash128_t      up_types[1];
+    hash128_t     *up_types;
+    int            n_up;
     hash128_t     *targets;
     int            n_targets = 0;
     int            best = -1;
@@ -940,7 +921,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "isa_path: SPI_connect failed");
 
-    up_types[0] = rel_type_id("IS_A");
+    tax_fetch_relation_set("ISA_UPWARD", &up_types, &n_up);
 
     {
         Datum *synsets;
@@ -988,8 +969,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         starts[n_starts++] = datum_to_hash128(x);
         for (int i = 0; i < ns; i++)
             starts[n_starts++] = datum_to_hash128(synsets[i]);
-
-        n_nodes = tax_bfs_up(starts, n_starts, max_depth, up_types, 1, &nodes);
+        n_nodes = tax_bfs_up(starts, n_starts, max_depth, up_types, n_up, &nodes);
         pfree(starts);
     }
 

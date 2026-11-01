@@ -2,43 +2,34 @@
 #define LAPLACE_TRAJECTORY_WKB_H
 
 #include "postgres.h"
+#include "laplace/geometry.h"
 
 /* ISO-WKB or the geometry type's binary-send EWKB framing of a stored trajectory:
  * POINT ZM (one vertex) or LINESTRING ZM, with optional EWKB SRID,
- * four binary64 per vertex. Returns the first vertex; callers copy vertices into
- * aligned doubles before unpacking the manifest (child id, ordinal, run, flags). */
+ * four binary64 per vertex. Validated and unpacked through Laplace-Native's
+ * lp_ewkb_visit / lp_ewkb_vertices so both extensions share one EWKB parser. */
 static inline const unsigned char *
 laplace_trajectory_wkb_points(const bytea *wkb, uint32 *count)
 {
-    const unsigned char *base = (const unsigned char *) VARDATA_ANY(wkb);
+    const uint8_t *base = (const uint8_t *) VARDATA_ANY(wkb);
     Size len = VARSIZE_ANY_EXHDR(wkb);
-    Size offset;
-    uint32 type;
+    const uint8_t *vertices = NULL;
+    lp_ewkb_info info;
+
     if (len < 5 || base[0] != 1)
         ereport(ERROR, (errmsg("trajectory: expected little-endian WKB")));
-    memcpy(&type, base + 1, sizeof(type));
-    offset = 5;
-    if ((type & 0xc0000000u) == 0xc0000000u) {
-        if (type & 0x20000000u) {
-            if (len < offset + 4)
-                ereport(ERROR, (errmsg("trajectory: truncated EWKB SRID")));
-            offset += 4;
-        }
-        type = (type & 0x1fffffffu) + 3000u;
-    }
-    if (type == 3001u) {
-        *count = 1;
-    } else if (type == 3002u) {
-        if (len < offset + 4)
-            ereport(ERROR, (errmsg("trajectory: truncated LINESTRING ZM WKB")));
-        memcpy(count, base + offset, sizeof(*count));
-        offset += 4;
-    } else {
-        ereport(ERROR, (errmsg("trajectory: expected POINT/LINESTRING ZM, got type %u", type)));
-    }
-    if ((Size) *count > (len - offset) / (4 * sizeof(double)))
-        ereport(ERROR, (errmsg("trajectory: truncated WKB vertex payload")));
-    return base + offset;
+    if (!lp_ewkb_visit(base, len, NULL, NULL, &info))
+        ereport(ERROR, (errmsg("trajectory: invalid or truncated POINT/LINESTRING ZM WKB")));
+    if (info.type != LP_POINT && info.type != LP_LINESTRING)
+        ereport(ERROR, (errmsg("trajectory: expected POINT/LINESTRING ZM, got type %u", info.type)));
+    if (info.vertices > PG_UINT32_MAX)
+        ereport(ERROR, (errmsg("trajectory: vertex count exceeds uint32")));
+    *count = (uint32) info.vertices;
+    if (info.vertices == 0)
+        return base + (info.has_srid ? 9 : 5) + (info.type == LP_LINESTRING ? 4 : 0);
+    if (lp_ewkb_vertices(base, len, &vertices) != info.vertices || vertices == NULL)
+        ereport(ERROR, (errmsg("trajectory: failed to resolve contiguous WKB vertex block")));
+    return vertices;
 }
 
 #endif

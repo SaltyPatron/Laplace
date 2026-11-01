@@ -38,9 +38,15 @@
 static inline Datum
 copy_bytea_datum(Datum d)
 {
-    bytea *src = DatumGetByteaPP(d);
-    Size   len = VARSIZE_ANY(src);
-    bytea *dst = (bytea *) palloc(len);
+    bytea *src;
+    Size   len;
+    bytea *dst;
+
+    if (d == (Datum) 0)
+        return (Datum) 0;
+    src = DatumGetByteaPP(d);
+    len = VARSIZE_ANY(src);
+    dst = (bytea *) palloc(len);
 
     memcpy(dst, src, len);
     return PointerGetDatum(dst);
@@ -172,18 +178,6 @@ fp_display_numeric(int64 fp)
 
     return DirectFunctionCall2(numeric_round, d, Int32GetDatum(3));
 }
-
-static inline hash128_t
-rel_type_id(const char *name)
-{
-    hash128_t id;
-
-    if (laplace_relation_type_id(name, &id) < 0)
-        ereport(ERROR, (errmsg("laplace_substrate: unknown relation type %s", name)));
-    return id;
-}
-
-
 
 static inline SPIPlanPtr
 spi_common_ensure_plan(SPIPlanPtr *slot, const char *sql, int nargs, Oid *argtypes)
@@ -371,14 +365,16 @@ spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
                  errdetail("Requested %llu sense ids.",
                            (unsigned long long) SPI_processed)));
     *out_ids = (Datum *) palloc(sizeof(Datum) * (Size) SPI_processed);
+    int valid = 0;
     for (uint64 r = 0; r < SPI_processed; r++)
     {
-        bool isnull;
+        bool  isnull;
+        Datum d = SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull);
 
-        (*out_ids)[r] = copy_bytea_datum(
-            SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull));
+        if (!isnull && d != (Datum) 0)
+            (*out_ids)[valid++] = copy_bytea_datum(d);
     }
-    *out_n = (int) SPI_processed;
+    *out_n = valid;
     return *out_n;
 }
 

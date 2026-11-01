@@ -165,9 +165,12 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     Datum          x, y, lang;
     int32          lim;
-    hash128_t      up_types[2];
-    hash128_t      feat_types[7];
-    int            feat_n = 7;
+    hash128_t     *up_types;
+    hash128_t     *isa_types;
+    hash128_t     *feat_types;
+    int            n_up = 0;
+    int            n_isa = 0;
+    int            feat_n = 0;
     TaxNode       *ax, *ay;
     int            n_ax, n_ay;
     Datum         *synsets_x = NULL, *synsets_y = NULL;
@@ -190,17 +193,11 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
         elog(ERROR, "contrast: SPI_connect failed");
     ensure_subject_edges_plan();
 
-    up_types[0] = rel_type_id("IS_A");
-    up_types[1] = rel_type_id("IS_INSTANCE_OF");
+    tax_fetch_relation_set("PATH_UPWARD", &up_types, &n_up);
+    tax_fetch_relation_set("ISA_UPWARD", &isa_types, &n_isa);
     /* HAS_PART holds every meronymy (part, member, substance); the kind is the
      * claim's qualifier, not a relation of its own. */
-    feat_types[0] = rel_type_id("HAS_PART");
-    feat_types[1] = rel_type_id("HAS_ATTRIBUTE");
-    feat_types[2] = rel_type_id("CAUSES");
-    feat_types[3] = rel_type_id("USED_FOR");
-    feat_types[4] = rel_type_id("IS_ANTONYM_OF");
-    feat_types[5] = rel_type_id("IS_SIMILAR_TO");
-    feat_types[6] = rel_type_id("PERTAINS_TO");
+    tax_fetch_relation_set("CONTRAST_FEATURES", &feat_types, &feat_n);
 
     {
         hash128_t *seeds_x, *seeds_y;
@@ -220,8 +217,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             seeds_y[ny++] = datum_to_hash128(synsets_y[i]);
 
         {
-            n_ax = tax_bfs_up(seeds_x, nx, PG_INT32_MAX, up_types, 2, &ax);
-            n_ay = tax_bfs_up(seeds_y, ny, PG_INT32_MAX, up_types, 2, &ay);
+            n_ax = tax_bfs_up(seeds_x, nx, PG_INT32_MAX, up_types, n_up, &ax);
+            n_ay = tax_bfs_up(seeds_y, ny, PG_INT32_MAX, up_types, n_up, &ay);
         }
         pfree(seeds_x);
         pfree(seeds_y);
@@ -239,7 +236,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
                              HASH_ELEM | HASH_BLOBS);
     }
   {
-    hash128_t isa_tid = up_types[0];
+    hash128_t isa_tid = isa_types[0];
     for (int i = 0; i < n_ax; i++)
         if (ax[i].depth > 0)
             contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap,
