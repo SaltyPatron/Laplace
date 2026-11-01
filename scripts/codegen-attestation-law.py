@@ -241,6 +241,32 @@ def emit_relation_law(rel: dict) -> None:
     # which element and qualifier carry its meaning now.
     alias_entries.sort(key=lambda e: e[0])
 
+    sets = rel.get("set", [])
+    retired_names = {r["canonical"] for r in relations if r.get("retired")}
+    known = (set(canon_names) - retired_names) \
+        | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
+    alias_to_canon = {a["surface"]: a["canonical"] for a in rel.get("alias", []) if a.get("surface")}
+    set_members: dict[str, list[str]] = {}
+    for s in sets:
+        nm = s.get("name")
+        if not nm:
+            raise SystemExit("codegen: a [[set]] has no name")
+        members = s.get("members") or []
+        if not members:
+            raise SystemExit(f"codegen: set '{nm}' declares no members")
+        stale = sorted(m for m in members if m in retired_names)
+        if stale:
+            raise SystemExit(
+                f"codegen: set '{nm}' names retired relations: " + ", ".join(stale))
+        unknown = [m for m in members if m not in known]
+        if unknown:
+            raise SystemExit(
+                f"codegen: set '{nm}' names relations that are not in the manifest: "
+                + ", ".join(sorted(unknown)))
+        if nm in set_members:
+            raise SystemExit(f"codegen: set '{nm}' declared twice")
+        set_members[nm] = sorted(members)
+
     header = OUT_CORE / "include/laplace/core/relation_law.h"
     _write_text_if_changed(header, 
         """#pragma once
@@ -304,6 +330,9 @@ int laplace_relation_retired(const hash128_t* type_id, const char** out_successo
  * mask): "holo_member" is HAS_PART read backwards with meronymy/member. -1 when the surface
  * states none. Every emitter that resolves a surface ORs this bit into the claim's mask. */
 int laplace_relation_surface_qualifier(const char* surface);
+/* 0 with *out_ids and *out_count set to the declared [[set]]'s cached type_id slice;
+ * -1 when set_name is not declared in relation_types.toml. */
+int laplace_relation_set_ids(const char* set_name, const hash128_t** out_ids, size_t* out_count);
 
 
 #ifdef __cplusplus
@@ -345,6 +374,29 @@ int laplace_relation_surface_qualifier(const char* surface);
     for surf, idx, flip, q in alias_entries:
         lines.append(f'    {{ "{surf}", {idx}, {1 if flip else 0}, {q} }},')
     lines.append("};")
+    lines.append("")
+
+    set_canon_indices: list[int] = []
+    set_slices: list[tuple[str, int, int]] = []
+    for nm in sorted(set_members):
+        offset = len(set_canon_indices)
+        for m in set_members[nm]:
+            canon = name_to_idx[m] if m in name_to_idx else name_to_idx[alias_to_canon[m]]
+            set_canon_indices.append(canon)
+        set_slices.append((nm, offset, len(set_members[nm])))
+    lines.append(f"static const int16_t k_relation_set_member_idx[{max(len(set_canon_indices), 1)}] = {{")
+    if set_canon_indices:
+        lines.append("    " + ", ".join(str(idx) for idx in set_canon_indices))
+    else:
+        lines.append("    0")
+    lines.append("};")
+    lines.append(f"static hash128_t k_relation_set_ids_cache[{max(len(set_canon_indices), 1)}];")
+    lines.append("typedef struct { const char* name; uint16_t offset; uint16_t count; } rel_set_slice_t;")
+    lines.append(f"static const rel_set_slice_t k_relation_sets[{max(len(set_slices), 1)}] = {{")
+    for nm, offset, count in set_slices:
+        lines.append(f'    {{ "{nm}", {offset}u, {count}u }},')
+    lines.append("};")
+    lines.append(f"static const size_t k_relation_set_count = {len(set_slices)}u;")
     lines.append("")
 
     rel_count = len(canon_names)
@@ -476,6 +528,8 @@ static void relation_ids_ensure(void) {{
     if (ids_try_begin()) {{
         for (size_t i = 0; i < laplace_relation_table_count; ++i)
             type_id_from_canonical(laplace_relation_table[i].canonical, &k_relation_type_id_cache[i]);
+        for (size_t i = 0; i < {len(set_canon_indices)}u; ++i)
+            k_relation_set_ids_cache[i] = k_relation_type_id_cache[k_relation_set_member_idx[i]];
         for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b) k_relation_bucket[b] = -1;
         for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
             size_t b = (size_t)(k_relation_type_id_cache[i].lo & LAPLACE_REL_BUCKET_MASK);
@@ -636,6 +690,21 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     }}
     return 1;
 }}
+
+int laplace_relation_set_ids(const char* set_name, const hash128_t** out_ids, size_t* out_count) {{
+    if (!set_name || !out_ids || !out_count) return -1;
+    relation_ids_ensure();
+    for (size_t i = 0; i < k_relation_set_count; ++i) {{
+        if (strcmp(k_relation_sets[i].name, set_name) == 0) {{
+            *out_ids = &k_relation_set_ids_cache[k_relation_sets[i].offset];
+            *out_count = k_relation_sets[i].count;
+            return 0;
+        }}
+    }}
+    *out_ids = NULL;
+    *out_count = 0;
+    return -1;
+}}
 """
     (OUT_CORE / "src/generated/relation_law.c").parent.mkdir(parents=True, exist_ok=True)
     _write_text_if_changed(OUT_CORE / "src/generated/relation_law.c",
@@ -703,49 +772,6 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     fam_lines.append("END;")
     OUT_FAMILY_FRAG.parent.mkdir(parents=True, exist_ok=True)
     _write_text_if_changed(OUT_FAMILY_FRAG, "\n".join(fam_lines) + "\n")
-
-    # DECLARED SETS -> consensus.relation_set_ids(text), same foldability contract as
-    # relation_family_ids: every element is laplace.relation_type_id(<literal>), which is
-    # IMMUTABLE (a BLAKE3 of the name, no table access), so the array folds at plan time
-    # and the LIST partitions prune before execution.
-    #
-    # A set is NOT a family. Families are derived from parent/family_root chains, so their
-    # membership is whatever the taxonomy implies; a set is an explicit roster. Measured
-    # live 2026-08-16 on the running substrate, which is why relate_path could not simply
-    # reuse a family: its upward arm wants exactly {IS_A, IS_INSTANCE_OF} while the IS_A
-    # FAMILY holds 3 members, and its lateral arm wants 11 while the IS_SYNONYM_OF family
-    # holds only itself. Substituting either would silently change which edges a path may
-    # traverse — a correctness change wearing a performance change's clothes.
-    sets = rel.get("set", [])
-    # Aliases count as declared vocabulary: an [[alias]] surface resolves to a canonical
-    # relation, so naming one in a set is not drift. FOLLOWS reached this check as an
-    # alias and was rejected -- the validator was wrong, not the call site.
-    retired_names = {r["canonical"] for r in relations if r.get("retired")}
-    known = (set(canon_names) - retired_names) \
-        | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
-    set_members: dict[str, list[str]] = {}
-    for s in sets:
-        nm = s.get("name")
-        if not nm:
-            raise SystemExit("codegen: a [[set]] has no name")
-        members = s.get("members") or []
-        if not members:
-            raise SystemExit(f"codegen: set '{nm}' declares no members")
-        # FAIL, never emit an empty arm. An unknown name silently yields NULL from the
-        # CASE, and `type_id = ANY (NULL)` matches nothing — a traversal that quietly
-        # returns no rows instead of erroring. Typos must stop the build.
-        stale = sorted(m for m in members if m in retired_names)
-        if stale:
-            raise SystemExit(
-                f"codegen: set '{nm}' names retired relations: " + ", ".join(stale))
-        unknown = [m for m in members if m not in known]
-        if unknown:
-            raise SystemExit(
-                f"codegen: set '{nm}' names relations that are not in the manifest: "
-                + ", ".join(sorted(unknown)))
-        if nm in set_members:
-            raise SystemExit(f"codegen: set '{nm}' declared twice")
-        set_members[nm] = list(members)
 
     set_lines = [
         "-- GENERATED by scripts/codegen-attestation-law.py - do not edit.",
