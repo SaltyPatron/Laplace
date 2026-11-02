@@ -150,13 +150,19 @@ jobs:
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Operations
+          ref: 84c50ef7479adcd1b556dbb20a853b75e387eb15
+          path: .ci-dependencies/operations-source
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
+      - name: Select the verified Operations build contract
         run: |
           set -euo pipefail
-          source=/repos/src/Laplace-Operations
-          # File identities are pinned to Operations 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4.
-          # Read pinned Git blobs so local edits cannot alter the build inputs.
+          source="$GITHUB_WORKSPACE/.ci-dependencies/operations-source"
           bash scripts/ci/materialize-operations-contract.sh "$source" "$LAPLACE_CI_OPERATIONS_SOURCE"
-          echo "Operations build contract: 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4"
+          echo "Operations build contract: 84c50ef7479adcd1b556dbb20a853b75e387eb15"
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:

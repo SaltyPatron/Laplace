@@ -100,7 +100,12 @@ configure(engine_relative "${native_b}" "" "-DLAPLACE_RECIPE_ENGINE_SOURCE=a tre
 check(engine_relative 17)
 file(MAKE_DIRECTORY "${WORK}/relocated/cmake" "${WORK}/relocated/.ci-dependencies/Laplace-Operations/toolchain")
 file(COPY "${NATIVE_SELECTOR}" "${SELECTOR}" DESTINATION "${WORK}/relocated/cmake")
-file(COPY "${SOURCE}/../Laplace-Operations/toolchain/source-selection.cmake"
+if(DEFINED ENV{LAPLACE_OPERATIONS} AND NOT "$ENV{LAPLACE_OPERATIONS}" STREQUAL "")
+    set(operations "$ENV{LAPLACE_OPERATIONS}")
+else()
+    set(operations "${SOURCE}/../Laplace-Operations")
+endif()
+file(COPY "${operations}/toolchain/source-selection.cmake"
     DESTINATION "${WORK}/relocated/.ci-dependencies/Laplace-Operations/toolchain")
 configure(ci_layout "${native_a}" ""
     "-DNATIVE_SELECTOR=${WORK}/relocated/cmake/LaplaceNativeSource.cmake"
