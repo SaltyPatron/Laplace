@@ -105,6 +105,7 @@ jobs:
     env:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
       LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
@@ -317,6 +318,7 @@ jobs:
     env:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
       LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
@@ -428,6 +430,7 @@ jobs:
     env:
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
+      LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
       LAPLACE_POSTGRES_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-postgres
     steps:
