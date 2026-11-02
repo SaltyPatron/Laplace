@@ -98,4 +98,13 @@ configure(native_relative "${native_b}" "" "-DLAPLACE_NATIVE=a tree/Laplace-Nati
 check(native_relative 17)
 configure(engine_relative "${native_b}" "" "-DLAPLACE_RECIPE_ENGINE_SOURCE=a tree/Laplace-Engine")
 check(engine_relative 17)
+file(MAKE_DIRECTORY "${WORK}/relocated/cmake" "${WORK}/relocated/.ci-dependencies/Laplace-Operations/toolchain")
+file(COPY "${NATIVE_SELECTOR}" "${SELECTOR}" DESTINATION "${WORK}/relocated/cmake")
+file(COPY "${SOURCE}/../Laplace-Operations/toolchain/source-selection.cmake"
+    DESTINATION "${WORK}/relocated/.ci-dependencies/Laplace-Operations/toolchain")
+configure(ci_layout "${native_a}" ""
+    "-DNATIVE_SELECTOR=${WORK}/relocated/cmake/LaplaceNativeSource.cmake"
+    "-DSELECTOR=${WORK}/relocated/cmake/LaplaceRecipeEngine.cmake"
+    "-DLAPLACE_OPERATIONS=${WORK}/relocated/.ci-dependencies/Laplace-Operations")
+check(ci_layout 17)
 message(STATUS "Native/Engine selection: changed environment/sibling defaults, explicit and relative cache paths, cache removal, parent precedence, fallback and unchanged no-work build passed")
