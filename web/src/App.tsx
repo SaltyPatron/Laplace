@@ -1,8 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Link as RouterLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, Button, Input, LoadingText, NavTabs, Panel, TenantField } from '@ui';
 import { ChessSection } from './chess/ChessSection';
-import { HomeView } from './home/HomeView';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
@@ -37,33 +36,38 @@ const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView 
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
 
 const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
-  chat: loadChat, explore: loadExplore, data: loadData, chess: loadChess, operator: loadOperator,
+  chat: loadChat, library: loadExplore, data: loadData, chess: loadChess, operator: loadOperator,
 };
 
-/** Six tabs; each lists the route prefixes that keep it lit on a deep link. */
+/** Existing route addresses remain stable for saved references. */
 const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
-  { id: 'home', label: 'Home', path: '/', owns: [] },
+  { id: 'library', label: 'Knowledge', path: '/explore', owns: ['/explore', '/query', '/topic'] },
   { id: 'chat', label: 'Chat', path: '/chat', owns: ['/chat', '/forward-proof'] },
-  { id: 'explore', label: 'Explore', path: '/explore', owns: ['/explore', '/topic', '/proof', '/unicode', '/query'] },
   { id: 'data', label: 'Data', path: '/data', owns: ['/data'] },
   { id: 'chess', label: 'Chess', path: '/chess', owns: ['/chess', '/play', '/lab'] },
   { id: 'operator', label: 'Admin', path: '/operator', owns: ['/operator'] },
 ];
 function isActive(pathname: string, tab: (typeof TABS)[number]): boolean {
   if (tab.path === '/') return pathname === '/';
+  if (tab.id === 'library') return pathname === '/query' || pathname.startsWith('/topic') || pathname.startsWith('/explore');
   return tab.owns.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 /** Laplace discovery from anywhere: the text enters Browse's canonical decomposition. */
 function HeaderSearch() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [text, setText] = useState('');
   return <form role="search" className={styles.search} onSubmit={(event) => {
     event.preventDefault();
-    const query = text.trim();
-    if (query) navigate(`/explore?q=${encodeURIComponent(query)}`);
+    if (text.trim()) {
+      const current = ['/explore', '/query', '/topic'].some(prefix => location.pathname === prefix || location.pathname.startsWith(prefix + '/')) ? new URLSearchParams(location.search) : new URLSearchParams();
+      for (const key of ['selected', 'answer', 'offset', 'games_offset', 'detail', 'inspect', 'presentation']) current.delete(key);
+      current.set('q', text);
+      navigate(`/explore?${current}`);
+    }
   }}>
-    <Input aria-label="Search the substrate" value={text} placeholder="Search anything witnessed…" onChange={(event) => setText(event.target.value)} />
+    <Input aria-label="Search the substrate" value={text} placeholder="Search knowledge…" onChange={(event) => setText(event.target.value)} />
   </form>;
 }
 
@@ -112,7 +116,7 @@ function Shell() {
       <ViewErrorBoundary resetKey={JSON.stringify([viewScope, location.key])}>
         <Suspense fallback={<LoadingText>Loading workspace…</LoadingText>}>
         <Routes key={viewScope}>
-          <Route path="/" element={<HomeView onGoto={(tab) => navigate(`/${tab}`)} />} />
+          <Route path="/" element={<Navigate to="/explore" replace />} />
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<ExploreView page="query" />} />
           <Route path="/data" element={<DataView />} />

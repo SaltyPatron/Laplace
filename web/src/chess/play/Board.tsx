@@ -10,6 +10,7 @@ export const GLYPH: Record<string, string> = {
 };
 
 const FILES = 'abcdefgh';
+const PIECE_NAMES: Record<string, string> = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
 
 export interface MoveScore { uci: string; effMu: number; rated: boolean; }
 
@@ -154,13 +155,14 @@ export function Board({
           ) : null}
           <div
             className={styles.board}
-            role="grid"
+            role={readOnly ? 'table' : 'grid'}
+            aria-label={`Chess position. ${whiteToMove(fen) ? 'White' : 'Black'} to move.`}
             ref={boardRef}
             onContextMenu={(e) => e.preventDefault()}
             onPointerMove={(e) => { if (drag) onDragMove(e.clientX, e.clientY); }}
           >
-            {rowOrder.map((boardRow) =>
-              colOrder.map((f) => {
+            {rowOrder.map((boardRow) => <div key={boardRow} role="row" className={styles.boardRow}>
+              {colOrder.map((f) => {
                 const piece = board[boardRow]?.[f] ?? '';
                 const rank = 8 - boardRow;
                 const sq = sqName(f, boardRow);
@@ -177,6 +179,9 @@ export function Board({
                 return (
                   <div
                     key={sq}
+                    role={readOnly ? 'cell' : 'gridcell'}
+                    aria-label={`${sq}: ${piece ? `${piece === piece.toUpperCase() ? 'White' : 'Black'} ${PIECE_NAMES[piece.toLowerCase()] ?? piece}` : 'empty'}${inCheck ? ', in check' : ''}${mated ? ', checkmated' : ''}`}
+                    aria-selected={readOnly ? undefined : sel === sq}
                     className={cn(
                       styles.square,
                       dark ? styles.dark : styles.light,
@@ -207,9 +212,9 @@ export function Board({
                     {targets.has(sq) && <span className={styles.targetMu}>{formatSubstrateMoveDelta(targetMu.get(sq) ?? 1500)}</span>}
                   </div>
                 );
-              }),
-            )}
-            <svg className={styles.overlay} viewBox="0 0 100 100" preserveAspectRatio="none">
+              })}
+            </div>)}
+            <svg className={styles.overlay} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
               <defs>
                 <marker id="uarrowhead" markerWidth="4" markerHeight="4" refX="2.4" refY="2" orient="auto">
                   <path d="M0,0 L4,2 L0,4 Z" />

@@ -57,48 +57,13 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
     throughput_compared boolean      NOT NULL DEFAULT false,
     throughput_status  text          NOT NULL DEFAULT 'not-measured',
     evidence_persisted boolean      NOT NULL DEFAULT true,
-    error              text
+    error              text,
+    -- Native publishes containment evidence; it does not report a count of inserted
+    -- legacy attestation rows. Preserve that distinction in operational receipts.
+    attestations_measured boolean    NOT NULL DEFAULT true,
+    file_counters_measured boolean   NOT NULL DEFAULT true,
+    heartbeat_at       timestamptz   NOT NULL DEFAULT now()
 );
-
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS phase text NOT NULL DEFAULT 'extracting';
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS fold_drain_ms bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS writer_maintenance_ms bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS fold_span_ms bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS consensus_backend_ms bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS highway_mask_backend_ms bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS consensus_calls bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS highway_mask_calls bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS highway_mask_pairs bigint NOT NULL DEFAULT 0;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_rows bigint;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_elapsed_ms bigint;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_rows_per_s double precision;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_baseline_rows_per_s double precision;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_slowdown_ratio double precision;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_compared boolean NOT NULL DEFAULT false;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS throughput_status text NOT NULL DEFAULT 'not-measured';
-
--- Native publishes containment evidence; it does not report a count of inserted
--- legacy attestation rows. Preserve that distinction in operational receipts.
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS attestations_measured boolean NOT NULL DEFAULT true;
-ALTER TABLE ingest_run_journal
-    ADD COLUMN IF NOT EXISTS file_counters_measured boolean NOT NULL DEFAULT true;
 
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);
@@ -266,14 +231,3 @@ BEGIN
      WHERE b.source_name = p_source;
 END
 $$;
-
--- CREATE TABLE is IF NOT EXISTS, so the status CHECK is re-asserted on every
--- install; otherwise an installed table enforces the list it was created with.
-DO $$
-BEGIN
-    ALTER TABLE ingest_run_journal DROP CONSTRAINT IF EXISTS ingest_run_journal_status_check;
-    ALTER TABLE ingest_run_journal ADD CONSTRAINT ingest_run_journal_status_check
-        CHECK (status IN ('running','ok','failed','empty-noop','capped',
-                          'cancelled','skipped-complete',
-                          'already-present','already-complete','dependency-unset'));
-END $$;

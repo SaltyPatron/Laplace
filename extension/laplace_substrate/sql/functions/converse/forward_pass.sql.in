@@ -155,7 +155,9 @@ CREATE OR REPLACE FUNCTION converse.couple(p_x bytea, p_y bytea, p_lang bytea DE
                   sharing bigint, depth int)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH xk AS MATERIALIZED (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('IS_SENSE_OF') AS is_sense_of
+    ), xk AS MATERIALIZED (
         SELECT b.key FROM converse.bindings(ARRAY[p_x], p_lang) b WHERE b.rank <= 16
         UNION SELECT p_x
     ), yk AS MATERIALIZED (
@@ -182,13 +184,15 @@ BEGIN ATOMIC
         WITH RECURSIVE walk(root, side, node, depth) AS (
             SELECT xk.key, 'x', COALESCE(ss.object_id, xk.key), 0
             FROM xk
+            CROSS JOIN rel r
             LEFT JOIN laplace.v_consensus_unrefuted ss
-              ON ss.subject_id = xk.key AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+              ON ss.subject_id = xk.key AND ss.type_id = r.is_sense_of
             UNION ALL
             SELECT yk.key, 'y', COALESCE(ss.object_id, yk.key), 0
             FROM yk
+            CROSS JOIN rel r
             LEFT JOIN laplace.v_consensus_unrefuted ss
-              ON ss.subject_id = yk.key AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+              ON ss.subject_id = yk.key AND ss.type_id = r.is_sense_of
             UNION
             SELECT w.root, w.side, c.object_id, w.depth + 1
             FROM walk w
@@ -293,7 +297,7 @@ BEGIN ATOMIC
       ON cd.subject_id = d.target AND cd.type_id = d.type_id AND cd.object_id = d.key
     JOIN laplace.consensus cu
       ON cu.subject_id = p_term AND cu.type_id = d.type_id AND cu.object_id = d.key
-    ORDER BY (cd.rating - 2 * cd.rd) DESC, d.key, d.target;
+    ORDER BY consensus.eff_mu(cd.rating, cd.rd) DESC, d.key, d.target;
 END;
 
 -- converse.firmware(name): a governed personality firmware image (spec 39) with its

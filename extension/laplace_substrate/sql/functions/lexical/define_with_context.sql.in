@@ -3,7 +3,10 @@ CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_context bytea[], p_lim
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH picked AS MATERIALIZED (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('HAS_DEFINITION') AS has_def
+    ),
+    picked AS MATERIALIZED (
         SELECT u.object_id, u.eff_mu, u.witnesses, u.sense_rank
         FROM (
             SELECT g.object_id AS object_id,
@@ -11,13 +14,14 @@ BEGIN ATOMIC
                    g.witness_count AS witnesses,
                    sn.score AS sense_rank
             FROM lexical.senses(p_word, p_context) sn
+            CROSS JOIN rel r
             CROSS JOIN LATERAL (
                 VALUES (sn.sense_id),
                        (CASE WHEN sn.synset_id IS DISTINCT FROM sn.sense_id THEN sn.synset_id END)
             ) AS k(subj)
             JOIN laplace.consensus g
               ON g.subject_id = k.subj
-             AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
+             AND g.type_id = r.has_def
             WHERE k.subj IS NOT NULL
             UNION ALL
             SELECT g.object_id,
@@ -25,8 +29,9 @@ BEGIN ATOMIC
                    g.witness_count,
                    NULL::numeric
             FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
+            CROSS JOIN rel r
             JOIN laplace.consensus g ON g.subject_id = peer.id
-                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
+                            AND g.type_id = r.has_def
         ) u
         ORDER BY COALESCE(u.sense_rank, 0) + u.eff_mu DESC
         LIMIT p_limit

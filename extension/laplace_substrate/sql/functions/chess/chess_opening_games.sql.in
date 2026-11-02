@@ -48,10 +48,9 @@ WITH claim AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS line
     FROM laplace.attestations a
     WHERE a.object_id = laplace.word_id(p_opening)
-      AND a.type_id IN (
-          laplace.relation_type_id('Opening'),
-          laplace.relation_type_id('GAME_HAS_OPENING'),
-          laplace.relation_type_id('OPENING_NAME'))
+      AND a.type_id = ANY (array_append(
+          consensus.relation_family_ids('OPENING_NAME'),
+          laplace.relation_type_id('Opening')))
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 played AS MATERIALIZED (

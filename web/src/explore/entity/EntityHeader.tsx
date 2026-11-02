@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { WorldLink as RouterLink } from '../../world/WorldLink';
 import { Button, Muted } from '@ui';
 import type { ExploreEntityPreviewResponse } from '../types';
 import { PlayerCard } from './PlayerCard';

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { WorldLink as Link } from '../../world/WorldLink';
 import { ErrorText, LoadingText, Muted, Panel, Stack } from '@ui';
 import { chessGame, chessGamePlies } from './api';
 import { GameBoard } from './GameBoard';
@@ -13,8 +14,9 @@ import styles from './ChessDb.module.css';
  * Headers are source testimony. Movetext is reconstructed from the stored move trajectory,
  * so its SAN is not presented as a byte copy of the source PGN.
  */
-export function GamePage() {
-  const { idHex } = useParams();
+export function GamePage({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
+  const { idHex: routeId } = useParams();
+  const idHex = selectedId ?? routeId;
   const [game, setGame] = useState<ChessGameResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [plies, setPlies] = useState<ChessGamePliesResponse | null>(null);
@@ -44,7 +46,7 @@ export function GamePage() {
     <Stack gap={4}>
       <header className={styles.hero}>
         <nav className={styles.crumbs}>
-          <Link to="/chess">Players</Link> <span>/</span> <span>Game</span>
+          {!embedded && <><Link to="/chess">Players</Link> <span>/</span> <span>Game</span></>}
         </nav>
         <h2 className={styles.matchup}>
           <Side id={game.white_id} name={game.white} />

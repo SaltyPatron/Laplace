@@ -321,7 +321,7 @@ candidates AS MATERIALIZED (
   FROM laplace.entities e
   JOIN laplace.physicalities p ON p.entity_id=e.id
   WHERE p.type=1 AND p.trajectory IS NOT NULL
-    AND e.type_id IN (realize.canonical_id('Sentence'),realize.canonical_id('Document'))
+    AND e.type_id IN (laplace.entity_type_id('Sentence'),laplace.entity_type_id('Document'))
   ORDER BY e.id LIMIT {proof_roots}
 ),
 checked AS MATERIALIZED (

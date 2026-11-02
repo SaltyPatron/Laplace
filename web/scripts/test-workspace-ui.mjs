@@ -185,22 +185,21 @@ try {
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${base}/__workspace_test?view=query`);
-  await page.getByRole('textbox', { name: 'topic', exact: true }).fill(' King ');
-  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Run query', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Search knowledge', exact: true }).fill(' King ');
+  await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByText('Fixture witnessed result', { exact: true })).toBeVisible();
   assert.equal(bodies.at(-1).topic, ' King ');
-  const callsBeforeExpand = bodies.length;
-  await page.getByRole('button', { name: 'Expand Result', exact: true }).click();
-  await page.keyboard.press('Escape'); assert.equal(bodies.length, callsBeforeExpand);
+  assert.equal(bodies.at(-1).shape, 'describe');
   failQuery = true;
-  await page.getByRole('button', { name: 'Run query', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Fixture query unavailable');
-  await expect(page.getByText('Fixture witnessed result', { exact: true })).toBeVisible();
-  await page.getByRole('combobox', { name: 'shape', exact: true }).selectOption('path');
-  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeDisabled();
-  await page.getByRole('textbox', { name: 'second topic', exact: true }).fill('second');
-  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Refresh search', exact: true }).click();
+  await expect(page.getByText('Fixture query unavailable', { exact: false })).toBeVisible();
+  failQuery = false;
+  await page.getByText('Search criteria', { exact: true }).click();
+  await page.getByRole('textbox', { name: 'Second subject', exact: true }).fill('second');
+  await expect(page.getByRole('combobox', { name: 'shape', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Apply search criteria', exact: true }).click();
+  await expect.poll(() => bodies.filter(body => body.topic2 === 'second').map(body => body.shape)).toContain('path');
 
   billingPlansCalls = 0; billingCatalogCalls = 0;
   await page.goto(`${base}/__workspace_test?view=billing-auth-transition`);

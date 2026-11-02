@@ -3,13 +3,6 @@ SELECT realize.canonical_id(v.name), v.name
 FROM (VALUES
     ('substrate/atomic/none/v1'),
     ('substrate/entity/Architecture_Llama/v1'),
-    ('CO_OCCURS_WITH'),
-    ('HAS_TRUST_CLASS'),
-    ('IS_ALIAS_OF'),
-    ('IS_LOSSY_ENCODING_OF'),
-    ('IS_REPLACED_BY'),
-    ('NORMALIZES'),
-    ('OCCURS_IN_CONTEXT'),
     ('substrate/type_tier/T10_ScalarValued/v1'),
     ('substrate/type_tier/T11_Probationary/v1'),
     ('substrate/type_tier/T1_Mandate/v1'),

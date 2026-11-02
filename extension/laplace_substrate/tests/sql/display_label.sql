@@ -6,7 +6,7 @@ BEGIN;
 SET LOCAL search_path=public,laplace;
 CREATE TEMP TABLE native_display_words AS
 SELECT s,public.laplace_id(s) AS id,public.laplace_tier(s) AS tier,public.laplace_coord(s) AS coord
-FROM unnest(ARRAY['dog','cat','λ','中']) s;
+FROM unnest(ARRAY['dog','cat','λ','中','i77293']) s;
 INSERT INTO public.entity(id,tier,coord,hilbert)
 SELECT id,tier,coord,public.laplace_hilbert(s) FROM native_display_words WHERE tier>0 ON CONFLICT DO NOTHING;
 INSERT INTO public.physicality(entity,tier,hilbert,path)
@@ -40,6 +40,11 @@ BEGIN
  decode(dog::text,'hex'),decode(scalar::text,'hex'),decode(opaque::text,'hex'),decode(absent::text,'hex')]) WITH ORDINALITY d(id,label,tier,ordinal);
  IF labels IS DISTINCT FROM ARRAY['dog','[dog · λ · 中]','[[dog · λ · 中] · dog × 2]','dog','λ',opaque::text,absent::text] THEN
   RAISE EXCEPTION 'Native display lost selected identities, order, runs or Unicode: %',labels;
+ END IF;
+ -- A textual source identifier needs no semantic name assertion to render.
+ IF (SELECT label FROM structural.mesh_position(decode(public.laplace_id('i77293')::text,'hex'),0,0)
+     WHERE dir='self') IS DISTINCT FROM 'i77293' THEN
+  RAISE EXCEPTION 'Mesh omitted recorded text without a semantic name';
  END IF;
  shifted=array_fill(NULL::bytea,ARRAY[2],ARRAY[0]);
  shifted[0]=decode(dog::text,'hex'); shifted[1]=decode(scalar::text,'hex');
@@ -106,6 +111,9 @@ BEGIN
  realize.display_label_batch(ARRAY[person,laplace.word_id('dog'),person]) WITH ORDINALITY d(id,label,tier,ord);
  IF labels IS DISTINCT FROM ARRAY['Ada','dog','Ada'] THEN
   RAISE EXCEPTION 'Recorded human name lost in mixed Native display batch: %',labels;
+ END IF;
+ IF (SELECT label FROM structural.mesh_position(person,0,0) WHERE dir='self') IS DISTINCT FROM 'Ada' THEN
+  RAISE EXCEPTION 'Mesh lost a recorded semantic name during Native content realization';
  END IF;
 END $names$;
 DO $first_paths$

@@ -51,12 +51,21 @@ jobs:
       PGDATABASE: postgres
       PGPASSWORD: fixture-only-password
       LAPLACE_TEST_APP_DB: Host=127.0.0.1;Port=5432;Username=postgres;Password=fixture-only-password;Database=platform_owner_fixture
+      LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
       - name: Check out document packaging inputs
         uses: ./.github/actions/documentation
+      - name: Check out the declared source-selection contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Operations
+          ref: 84c50ef7479adcd1b556dbb20a853b75e387eb15
+          path: .ci-dependencies/Laplace-Operations
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.402'
@@ -144,7 +153,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 4cc4b8cd0a9afe1a8902790f812d5f84ecc8e10a
+          ref: d56fc6023cd51e64aa338d6a26e30eff3d985fbc
           path: .ci-dependencies/laplace-native
           persist-credentials: false
       - name: BLAKE3 1.8.3, as on the build host
@@ -272,7 +281,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 237eb04323d58a291827b236fcccea2d12bc4936
+          ref: 8d6ffe52f90e349582cad5c51d582381a91a9bcc
           path: .ci-dependencies/laplace-engine
           persist-credentials: false
 

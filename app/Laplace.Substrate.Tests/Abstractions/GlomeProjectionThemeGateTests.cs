@@ -109,7 +109,7 @@ public sealed class GlomeProjectionThemeGateTests
     }
 
     [Fact]
-    public void ExploreWorkbench_UsesViewportSpace_Disclosures_AndDistinctButtonStates()
+    public void ExploreWorkbench_UsesViewportSpace_GraphDisclosures_AndDistinctButtonStates()
     {
         var explore = Read("web", "src", "explore", "ExploreView.tsx");
         var exploreCss = Read("web", "src", "explore", "ExploreView.module.css");
@@ -119,8 +119,9 @@ public sealed class GlomeProjectionThemeGateTests
         var glomeCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var buttons = Read("web", "src", "ui", "primitives", "Button", "Button.module.css");
 
-        Assert.Matches(@"<details\b[^>]*\bclassName=\{styles\.navDisclosure\}[^>]*\bopen>", explore);
-        Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
+        Assert.Contains("<div className={styles.content}>", explore, StringComparison.Ordinal);
+        Assert.Contains("<Route index element={<BrowseHome />} />", explore, StringComparison.Ordinal);
+        Assert.DoesNotContain("navDisclosure", explore, StringComparison.Ordinal);
         Assert.Contains("<div className={styles.graphBody}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes", graphTab, StringComparison.Ordinal);

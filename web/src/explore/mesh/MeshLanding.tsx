@@ -1,72 +1,35 @@
 import { useEffect } from 'react';
-import { Muted } from '@ui';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { changeWorld } from '../../world/context';
 import { SearchBar } from '../components/SearchBar';
 import { useExploreStore } from '../store';
-import { ModalityMap } from './ModalityMap';
 import styles from './MeshView.module.css';
 
-/**
- * Hub types of the mesh ladder, a fixed descriptive list rather than a data read. Entry
- * into the web is through Browse at a concrete entity, from which MeshView drills.
- */
-const DIVISIONS: { name: string; tag: string; blurb: string }[] = [
-  { name: 'Word surface', tag: 'surface', blurb: 'The lemma you type. Every entry point into the mesh; it plays for its senses.' },
-  { name: 'WordNet sense', tag: 'sense', blurb: 'A single reading of a word. Binds a surface to one concept.' },
-  { name: 'ILI concept', tag: 'synset', blurb: 'The master hub — a synset addressed by its Interlingual Index. Where every language and source converge.' },
-  { name: 'FrameNet frame', tag: 'frame', blurb: 'A scene a concept evokes, with roles. The verb-side of meaning.' },
-  { name: 'VerbNet class', tag: 'class', blurb: 'A class of verbs sharing syntax and semantics.' },
-  { name: 'PropBank roleset', tag: 'roleset', blurb: 'A predicate with numbered arguments. The proposition skeleton.' },
-];
-
+/** Historical entry address for the shared collection's relation presentation. */
 export function MeshLanding() {
   const resetMeshTrail = useExploreStore((s) => s.resetMeshTrail);
-
+  const [params] = useSearchParams();
   useEffect(() => resetMeshTrail(), [resetMeshTrail]);
 
   return (
     <div className={styles.landing}>
       <header className={styles.landingHero}>
-        <h2 className={styles.landingTitle}>The mesh</h2>
+        <h2 className={styles.landingTitle}>Related structure</h2>
         <p className={styles.landingLede}>
-          Meaning here is factored, not flat: <strong>surface → lemma → sense → concept → frame /
-          class / roleset → roles</strong>. Enter at any node and drill — a concept is a hub whose
-          roster is its members; a word is a player whose teams are the hubs it plays for. Every
-          arrow is a witnessed, rated edge.
+          Search known content and select a subject to inspect its returned parent relations and members.
+          Selecting a related subject keeps the search collection and its criteria in view.
         </p>
         <div className={styles.landingSearch}>
           <SearchBar
-            placeholder="a word, sense, frame, player, or id hex…"
-            label="Choose an entity, then enter its mesh"
-            hint="Discovery uses the same canonical Browse result set; Mesh only changes the selected entity's presentation."
+            label="Choose an entity, then inspect its relations"
+            hint="Results use the shared knowledge search. Related structure changes the selected subject's presentation."
             destination="mesh"
           />
         </div>
       </header>
-
-      <div className={styles.divisions}>
-        {DIVISIONS.map((d) => (
-          <div key={d.tag} className={styles.division}>
-            <span className={styles.divisionName}>{d.name}</span>
-            <span className={styles.divisionTag}>{d.tag}</span>
-            <span className={styles.divisionBlurb}>{d.blurb}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className={styles.landingExamples}>
-        <Muted>Or start from a familiar concept:</Muted>
-        <div className={styles.exampleChips}>
-          {['whale', 'run', 'gravity', 'justice', 'cell'].map((w) => (
-            <Link key={w} className={styles.exampleChip}
-              to={`/explore?q=${encodeURIComponent(w)}&view=mesh`}>
-              {w}
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      <ModalityMap />
+      <Link to={`/explore?${changeWorld(params, { selected: null, answer: null, presentation: 'mesh' })}`}>
+        Return to the knowledge collection
+      </Link>
     </div>
   );
 }

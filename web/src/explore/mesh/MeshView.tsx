@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
-import { ErrorText, LoadingText, Muted } from '@ui';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { WorldLink as RouterLink } from '../../world/WorldLink';
+import { changeWorld, selectWorldEntity } from '../../world/context';
+import { Button, ErrorText, LoadingText, Muted } from '@ui';
 import { exploreMesh, explorePreview } from '../api';
 import { useExploreStore } from '../store';
 import { PlayerCard } from '../entity/PlayerCard';
@@ -15,14 +17,18 @@ import styles from './MeshView.module.css';
  * Every name re-centers the view on that entity; the breadcrumb is the drilled path. The
  * relation is a graph, so one entity can belong to many hubs.
  */
-export function MeshView() {
-  const { id } = useParams();
+export function MeshView({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
+  const { id: routeId } = useParams();
+  const id = selectedId ?? routeId;
   if (!id) return <MeshLanding />;
-  return <MeshDrill idHex={id} />;
+  return <MeshDrill idHex={id} embedded={embedded} />;
 }
 
-function MeshDrill({ idHex }: { idHex: string }) {
+function MeshDrill({ idHex, embedded }: { idHex: string; embedded: boolean }) {
   const nav = useNavigate();
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const recenter = (id: string) => nav(embedded ? selectWorldEntity(id, location, 'mesh') : `/explore/mesh/${id}`, { preventScrollReset: embedded });
   const { meshTrail, pushMeshCrumb } = useExploreStore();
   const [data, setData] = useState<MeshResponse | null>(null);
   const [preview, setPreview] = useState<ExploreEntityPreviewResponse | null>(null);
@@ -37,7 +43,7 @@ function MeshDrill({ idHex }: { idHex: string }) {
       .then((m) => {
         if (stale) return;
         setData(m);
-        pushMeshCrumb({ id: m.id, label: m.label });
+        pushMeshCrumb({ id: m.id, label: m.label || m.id });
       })
       .catch((e) => { if (!stale) setError(e instanceof Error ? e.message : String(e)); });
     // The entity's stat card comes from a separate preview read so the ladder never waits on it.
@@ -48,9 +54,9 @@ function MeshDrill({ idHex }: { idHex: string }) {
   }, [idHex, pushMeshCrumb]);
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${embedded ? styles.embedded : ''}`}>
       <nav className={styles.trail} aria-label="Mesh path">
-        <RouterLink to="/explore/mesh" className={styles.crumb}>Mesh</RouterLink>
+        {!embedded && <RouterLink to="/explore/mesh" className={styles.crumb}>Mesh</RouterLink>}
         {meshTrail.map((c, i) => (
           <span key={c.id} className={styles.crumbWrap}>
             <span className={styles.sep}>›</span>
@@ -66,41 +72,38 @@ function MeshDrill({ idHex }: { idHex: string }) {
         : (
           <div className={styles.ladder}>
             <Column
-              title="Belongs to"
-              hint="the hubs this node plays for — up the ladder"
+              title="Parent relations"
+              hint="Relations returned for this entity"
               links={data.belongs_to}
               side="up"
-              onPick={(l) => nav(`/explore/mesh/${l.id}`)}
-              empty="a root — nothing above it in the mesh"
+              onPick={(l) => recenter(l.id)}
+              empty="No parent relations were returned."
             />
 
             <div className={styles.node}>
               {data.hub_type && <span className={styles.hubType}>{data.hub_type.replace(/_/g, ' ')}</span>}
-              <span className={styles.nodeLabel}>{data.label}</span>
-              <PlayerCard preview={preview ?? {
-                id_hex: data.id, label: data.label, tier: null, type: data.hub_type ?? null,
-                exists: true, evidence_count: 0, preview_facts: [],
-              }} />
+              <span className={styles.nodeLabel}>{data.label || data.id}</span>
+              {preview ? <PlayerCard preview={preview} /> : <Muted>Standing preview has not been returned.</Muted>}
               <div className={styles.nodeLinks}>
                 <RouterLink to={`/explore/entity/${data.id}`} className={styles.openEntity}>
                   full entity →
                 </RouterLink>
-                <RouterLink
-                  to={`/explore/matchup?x=${encodeURIComponent(data.label)}`}
+                {embedded ? <Button variant="ghost" onClick={() => setParams(changeWorld(params, { presentation: 'comparison' }), { preventScrollReset: true })}>Compare →</Button> : <RouterLink
+                  to={`/explore/matchup?x=${encodeURIComponent(data.id)}`}
                   className={styles.openEntity}
                 >
                   head-to-head →
-                </RouterLink>
+                </RouterLink>}
               </div>
             </div>
 
             <Column
-              title="Roster"
-              hint="the members under this hub — down the ladder"
+              title="Members"
+              hint="Members returned by the relation read"
               links={data.roster}
               side="down"
-              onPick={(l) => nav(`/explore/mesh/${l.id}`)}
-              empty="a leaf — no members below it"
+              onPick={(l) => recenter(l.id)}
+              empty="No members were returned."
             />
           </div>
         )}
@@ -124,11 +127,11 @@ function Column({ title, hint, links, side, onPick, empty }: {
         <ul className={styles.links}>
           {links.map((l, i) => (
             <li key={`${l.id}-${i}`}>
-              <button type="button" className={styles.link} onClick={() => onPick(l)}>
+              <button type="button" data-entity-ref={l.id} className={styles.link} onClick={() => onPick(l)}>
                 <span className={styles.arrow}>{side === 'up' ? '↑' : '↓'}</span>
                 <span className={styles.linkBody}>
                   <span className={styles.rel}>{l.relation.replace(/_/g, ' ')}</span>
-                  <span className={styles.linkLabel}>{l.label}</span>
+                  <span className={styles.linkLabel}>{l.label || l.id}</span>
                 </span>
                 {l.hub_type && <span className={styles.linkHub}>{l.hub_type.replace(/_/g, ' ')}</span>}
               </button>

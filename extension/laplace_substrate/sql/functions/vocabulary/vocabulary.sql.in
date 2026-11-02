@@ -13,7 +13,4 @@ CREATE OR REPLACE FUNCTION laplace.vocabulary(p_vocabulary text)
     AS 'MODULE_PATHNAME', 'pg_laplace_vocabulary'
     LANGUAGE C STABLE STRICT PARALLEL SAFE ROWS 300;
 
-CREATE OR REPLACE FUNCTION laplace.vocabulary_code(p_vocabulary text, p_id bytea)
-    RETURNS integer
-    AS 'MODULE_PATHNAME', 'pg_laplace_vocabulary_code'
-    LANGUAGE C STABLE STRICT PARALLEL SAFE;
+DROP FUNCTION IF EXISTS laplace.vocabulary_code(text, bytea);

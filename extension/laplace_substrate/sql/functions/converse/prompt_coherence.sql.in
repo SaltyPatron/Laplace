@@ -31,14 +31,7 @@
 -- recorded dependency. The private native binding uses the same installed C
 -- symbol and descriptor; no server-image change or restart is required.
 DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
-
-CREATE OR REPLACE FUNCTION converse.prompt_coherence_native(p_prompt text)
-    RETURNS TABLE(ord int, tok bytea, synset_id bytea,
-                  coherence double precision, denote_mu numeric, peers bigint,
-                  rel_type_id bytea, rel_mass double precision,
-                  specificity double precision, total_mass double precision)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_coherence'
-    LANGUAGE C STABLE STRICT;
+DROP FUNCTION IF EXISTS converse.prompt_coherence_native(text);
 
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,

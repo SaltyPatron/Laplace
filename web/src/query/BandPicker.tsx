@@ -1,77 +1,16 @@
-import { Muted, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
+import { Checkbox, Muted } from '@ui';
 import type { RelationBand } from './types';
 import styles from './BandPicker.module.css';
 
-interface Props {
-  bands: RelationBand[];
-  selected: number[];
-  onChange: (next: number[]) => void;
-}
-
-/**
- * Salience-band selector. A band is the set of relation types sharing one
- * read-time salience rank; the selection constrains the read. Only bands holding
- * consensus rows are offered, with their live counts.
- */
+interface Props { bands: RelationBand[]; selected: number[]; onChange: (next: number[]) => void }
+/** Band selectors constrain compatible reads; empty selection leaves the band mask open. */
 export function BandPicker({ bands, selected, onChange }: Props) {
-  const toggle = (band: number) =>
-    onChange(selected.includes(band) ? selected.filter((b) => b !== band) : [...selected, band].sort((a, b) => a - b));
-
-  const populated = bands.filter((b) => b.consensus_rows > 0);
-  const total = populated.reduce((sum, b) => sum + b.consensus_rows, 0);
-  const covered = populated
-    .filter((b) => selected.includes(b.band))
-    .reduce((sum, b) => sum + b.consensus_rows, 0);
-
-  return (
-    <div className={styles.picker}>
-      {/* No heading: the host panel titles it. */}
-      <div className={styles.head}>
-        <Muted className={styles.summary}>
-          {selected.length === 0
-            ? `all bands · ${total.toLocaleString()} edges`
-            : `${covered.toLocaleString()} of ${total.toLocaleString()} edges`}
-        </Muted>
-        {selected.length > 0 && (
-          <button type="button" className={styles.clear} onClick={() => onChange([])}>
-            clear
-          </button>
-        )}
-      </div>
-
-      <div className={styles.grid}>
-        {populated.map((b) => {
-          const on = selected.includes(b.band);
-          return (
-            <Tooltip key={b.band}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={on}
-                  aria-label={`${b.name} band`}
-                  className={`${styles.band} ${on ? styles.on : ''}`}
-                  onClick={() => toggle(b.band)}
-                  style={{ '--band-weight': b.rank } as React.CSSProperties}
-                >
-                  <span className={styles.bandName}>{b.name.replace(/_/g, ' ')}</span>
-                  <span className={styles.bandCount}>{compact(b.consensus_rows)}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                band {b.band} · rank {b.rank.toFixed(2)} · {b.relation_types} relation
-                {b.relation_types === 1 ? '' : 's'} · {b.consensus_rows.toLocaleString()} consensus rows
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function compact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
+  const populated = bands.filter(band => band.consensus_rows > 0);
+  return <div className={styles.picker}>
+    <Muted>{selected.length ? `${selected.length} selected bands` : 'All bands; no band constraint'}</Muted>
+    <div className={styles.grid}>{populated.map(band => <Checkbox key={band.band} checked={selected.includes(band.band)}
+      label={`${band.name.replaceAll('_', ' ')} · ${band.consensus_rows.toLocaleString()} consensus rows`}
+      onChange={event => onChange(event.target.checked ? [...selected, band.band].sort((a, b) => a - b) : selected.filter(value => value !== band.band))} />)}</div>
+    {!!selected.length && <button type="button" className={styles.clear} onClick={() => onChange([])}>Clear band constraints</button>}
+  </div>;
 }

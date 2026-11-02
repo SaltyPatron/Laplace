@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
+import { changeWorld } from '../../world/context';
 import { useRouteText } from '../../layout/useRouteText';
 import { ErrorText, LoadingText, Muted, Panel } from '@ui';
 import { exploreNotFound } from '../api';
@@ -7,13 +8,11 @@ import { EntityLink } from '../components/EntityLink';
 import type { ExploreNotFoundResponse } from '../types';
 import styles from './NotFoundExplorer.module.css';
 
-// The explorer for a reference that resolves to a valid content id but was never
-// witnessed (exists=false). There is no entity page — but the word's geometry is
-// fully determined (HashComposer pins it on S³), so we navigate by that computed
-// anchor: nearest witnessed content by position (geodesic) and by shape
-// (Frechet), plus the deterministic decomposition, every piece a live link.
+/** Explicit identity/geometry calculation. Geometric neighbors and calculated
+ * constituent addresses do not establish admission or semantic relationships. */
 export function NotFoundExplorer() {
   const surface = useRouteText('/explore/notfound/:ref', 'ref');
+  const [params] = useSearchParams();
   const [data, setData] = useState<ExploreNotFoundResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -28,7 +27,7 @@ export function NotFoundExplorer() {
   }, [surface]);
 
   if (err) return <ErrorText>{err}</ErrorText>;
-  if (!data) return <LoadingText>Searching the substrate near “{surface}”…</LoadingText>;
+  if (!data) return <LoadingText>Calculating the input and reading geometric neighbors…</LoadingText>;
 
   const geodesic = data.neighbors.filter((n) => n.axis === 'geodesic');
   const shape = data.neighbors.filter((n) => n.axis === 'shape');
@@ -38,16 +37,18 @@ export function NotFoundExplorer() {
       <header className={styles.head}>
         <div className={styles.title}>
           <span className={styles.term}>{surface}</span>
-          <span className={styles.badge}>not witnessed</span>
+          <span className={styles.badge}>{data.exists ? 'known content · geometric calculation' : 'calculated identity · not reported present'}</span>
         </div>
         <Muted>
-          No source has asserted “{surface}” yet — but its position on the glome is
-          determined. Here is what the substrate holds nearest to it.
+          This operation calculates the input’s identity and geometry. A calculated
+          address does not establish admission, testimony, or a semantic relationship
+          to nearby content.
         </Muted>
+        <RouterLink to={`/explore?${changeWorld(params, { q: surface, selected: null, answer: null, offset: null })}`}>Search known content</RouterLink>
       </header>
 
       {data.suggestions.length > 0 ? (
-        <Panel title="Did you mean">
+        <Panel title="Similar spellings">
           <ul className={styles.list}>
             {data.suggestions.map((s) => (
               <li key={s.id_hex} className={styles.row}>
@@ -98,7 +99,7 @@ export function NotFoundExplorer() {
         )}
       </Panel>
 
-      <Panel title="Decomposition">
+      <Panel title="Calculated decomposition">
         <div className={styles.decomp}>
           {data.decomposition
             .filter((d) => d.tier <= 2 && d.label.length > 0)

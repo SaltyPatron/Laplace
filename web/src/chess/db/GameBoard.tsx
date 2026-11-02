@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { WorldLink as Link } from '../../world/WorldLink';
 import { Button, Muted, SegmentedControl } from '@ui';
 import { Board } from '../play/Board';
 import type { ChessGamePliesResponse, ChessPlyRow } from './types';

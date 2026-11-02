@@ -139,24 +139,30 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 4cc4b8cd0a9afe1a8902790f812d5f84ecc8e10a
+          ref: d56fc6023cd51e64aa338d6a26e30eff3d985fbc
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out the canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: e9482fe0fe53726a8e0b98553092e8b4be36cd61
+          ref: 8d6ffe52f90e349582cad5c51d582381a91a9bcc
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Operations
+          ref: 84c50ef7479adcd1b556dbb20a853b75e387eb15
+          path: .ci-dependencies/operations-source
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
+          persist-credentials: false
+      - name: Select the verified Operations build contract
         run: |
           set -euo pipefail
-          source=/repos/src/Laplace-Operations
-          # File identities are pinned to Operations 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4.
-          # Read pinned Git blobs so local edits cannot alter the build inputs.
+          source="$GITHUB_WORKSPACE/.ci-dependencies/operations-source"
           bash scripts/ci/materialize-operations-contract.sh "$source" "$LAPLACE_CI_OPERATIONS_SOURCE"
-          echo "Operations build contract: 04faaf9741c3c612b58b5c5b3c8246a11b0bdaf4"
+          echo "Operations build contract: 84c50ef7479adcd1b556dbb20a853b75e387eb15"
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:

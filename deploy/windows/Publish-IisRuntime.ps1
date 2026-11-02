@@ -20,12 +20,42 @@ $storageOperation=Enter-DesktopStorageOperation
 try {
 Add-Type -Path "$env:windir/System32/inetsrv/Microsoft.Web.Administration.dll"
 function Restart-PublishedIisPool {
-    $manager=[Microsoft.Web.Administration.ServerManager]::new()
+    $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+        $manager=[Microsoft.Web.Administration.ServerManager]::new()
+        try {
+            $pool=$manager.ApplicationPools[$c.pool]
+            if(-not $pool){throw "The declared IIS pool is missing: $($c.pool)"}
+            if($pool.State -eq 'Stopped'){$null=$pool.Start()}else{$null=$pool.Recycle()}
+            return
+        }finally{$manager.Dispose()}
+    }
+    $offline=Join-Path (Join-Path $c.directory 'web') 'app_offline.htm'
+    $origin=$c.origin.TrimEnd('/')
+    $token='laplace-restart-'+[Guid]::NewGuid().ToString('N')
+    $marker="<!doctype html><html><body>Application restarting. <!-- $token --></body></html>"
+    $markerStream=$null;$created=$false;$observed=$false
     try {
-        $pool=$manager.ApplicationPools[$c.pool]
-        if(-not $pool){throw "The declared IIS pool is missing: $($c.pool)"}
-        if($pool.State -eq 'Stopped'){$null=$pool.Start()}else{$null=$pool.Recycle()}
-    }finally{$manager.Dispose()}
+        $markerStream=[IO.File]::Open($offline,'CreateNew','Write','Read')
+        $created=$true
+        $bytes=[Text.Encoding]::UTF8.GetBytes($marker)
+        $markerStream.Write($bytes,0,$bytes.Length)
+        $markerStream.Flush($true)
+        $markerStream.Dispose()
+        $markerStream=$null
+        for($attempt=0;$attempt -lt 15;$attempt++){
+            $response=Invoke-WebRequest $origin -NoProxy -SkipHttpErrorCheck -TimeoutSec 10
+            if($response.Content.Contains($token)){$observed=$true;break}
+            Start-Sleep -Milliseconds 200
+        }
+        if(-not $observed){throw 'IIS did not serve the restart marker; the selected website has not confirmed the restart.'}
+    }finally{
+        if($markerStream){$markerStream.Dispose()}
+        if($created){
+            if([IO.File]::ReadAllText($offline) -cne $marker){throw 'The offline marker changed during restart; it was preserved for inspection.'}
+            Remove-Item -LiteralPath $offline -ErrorAction Stop
+        }
+    }
 }
 $operatorToken=if($env:LAPLACE_OPERATOR_TOKEN){$env:LAPLACE_OPERATOR_TOKEN}else{''}
 $apiKey=if($env:LAPLACE_API_KEY){$env:LAPLACE_API_KEY}else{''}

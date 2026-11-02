@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { WorldLink as Link } from '../../world/WorldLink';
 import { Button, ErrorText, LoadingText, Muted, Panel, Stack, Table, Td, Th } from '@ui';
 import { StatCard } from '../../explore/components/StatCard';
 import { chessGamePlies, chessPlayer, chessPlayerGames } from './api';
@@ -15,8 +16,9 @@ const PAGE = 25;
  * and games, each game and opponent linked to its own page. Every count is read from the
  * server as folded; the page derives none of them.
  */
-export function PlayerPage() {
-  const { idHex } = useParams();
+export function PlayerPage({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
+  const { idHex: routeId } = useParams();
+  const idHex = selectedId ?? routeId;
   const [params, setParams] = useSearchParams();
   const [player, setPlayer] = useState<ChessPlayerResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -24,7 +26,8 @@ export function PlayerPage() {
   const [gamesErr, setGamesErr] = useState<string | null>(null);
   const [latestPlies, setLatestPlies] = useState<ChessGamePliesResponse | null>(null);
   const [latestErr, setLatestErr] = useState<string | null>(null);
-  const rawOffset = Number(params.get('offset') ?? 0);
+  const pageParameter = embedded ? 'games_offset' : 'offset';
+  const rawOffset = Number(params.get(pageParameter) ?? 0);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0
     ? Math.floor(rawOffset / PAGE) * PAGE
     : 0;
@@ -73,7 +76,7 @@ export function PlayerPage() {
     <Stack gap={4}>
       <header className={styles.hero}>
         <nav className={styles.crumbs}>
-          <Link to="/chess">Players</Link> <span>/</span> <span>{player.name}</span>
+          {!embedded && <><Link to="/chess">Players</Link> <span>/</span> <span>{player.name}</span></>}
         </nav>
         <h2>{player.name}</h2>
         <Muted>
@@ -238,7 +241,7 @@ export function PlayerPage() {
                 onClick={() => {
                   const next = new URLSearchParams(params);
                   const value = Math.max(0, offset - PAGE);
-                  if (value) next.set('offset', String(value)); else next.delete('offset');
+                  if (value) next.set(pageParameter, String(value)); else next.delete(pageParameter);
                   setParams(next);
                 }}>‹ Newer</Button>
               <Muted>
@@ -247,7 +250,7 @@ export function PlayerPage() {
               <Button variant="ghost" disabled={offset + games.length >= player.overall.games}
                 onClick={() => {
                   const next = new URLSearchParams(params);
-                  next.set('offset', String(offset + PAGE));
+                  next.set(pageParameter, String(offset + PAGE));
                   setParams(next);
                 }}>Older ›</Button>
             </div>

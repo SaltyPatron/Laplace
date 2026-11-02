@@ -59,6 +59,9 @@
     font-size: 1.25rem;
   }
 
+  .header > div { min-width: 0; max-width: 100%; }
+  .header h2 { overflow-wrap: anywhere; }
+
   .meta {
     font-family: ui-monospace, monospace;
     font-size: var(--text-sm);

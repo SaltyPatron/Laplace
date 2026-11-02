@@ -238,19 +238,6 @@ internal static class Program
         {
             EnsureDatabase.For.PostgresqlDatabase(target, new LiteralSafeUpgradeLog());
             var engine = BuildEngine(target, filter);
-            if (IncludesApplication(filter) && engine.GetScriptsToExecute().Count == 0 && !HasAllAppTables(target))
-            {
-                var dir = LocateMigrationsDir();
-                var scriptPath = Path.Combine(dir, "20260611000000_app_billing.sql");
-                if (File.Exists(scriptPath))
-                {
-                    using var conn = new NpgsqlConnection(target);
-                    conn.Open();
-                    using var cmd = new NpgsqlCommand(File.ReadAllText(scriptPath), conn) { CommandTimeout = 0 };
-                    cmd.ExecuteNonQuery();
-                    applied.Add(new DbUp.Engine.SqlScript("20260611000000_app_billing.sql (consolidated)", string.Empty));
-                }
-            }
             var result = engine.PerformUpgrade();
             if (!result.Successful)
             {
@@ -259,8 +246,7 @@ internal static class Program
                 return 1;
             }
             applied.AddRange(result.Scripts);
-            // Consolidated scripts may already be journaled. Reconcile the
-            // Native substrate on every substrate upgrade, never on app-up.
+            // Reconcile the Native substrate on every substrate upgrade, never on app-up.
             if (filter("20260606000000_layer1_database.sql"))
             {
                 using var connection = new NpgsqlConnection(target);
@@ -283,7 +269,7 @@ internal static class Program
                     $"tier0={tier0Fingerprint} highway={highwayFingerprint}");
             }
             const string runtimeGrants = "20261015000000_substrate_runtime_grants.sql";
-            if (filter(runtimeGrants))
+            if (filter(runtimeGrants) && !result.Scripts.Any(s => string.Equals(s.Name, runtimeGrants, StringComparison.Ordinal)))
             {
                 using var connection = new NpgsqlConnection(target);
                 connection.Open();
@@ -443,14 +429,14 @@ internal static class Program
         return 0;
     }
 
-    // A script of the app schema: accounts, sessions, keys, billing, and the browser-ticket binding on them.
+    // A script of the app schema: accounts, sessions, keys, and billing.
     private static bool IsAppScript(string path)
     {
         var name = Path.GetFileName(path);
         var separator = name.IndexOf('_');
         if (separator < 0) return false;
         var scope = name[(separator + 1)..];
-        return scope.StartsWith("app_", StringComparison.Ordinal) || scope.StartsWith("browser_", StringComparison.Ordinal);
+        return scope.StartsWith("app_", StringComparison.Ordinal);
     }
 
     // Where the scripts go: the substrate database and, when LAPLACE_APP_DB names one, the application database.

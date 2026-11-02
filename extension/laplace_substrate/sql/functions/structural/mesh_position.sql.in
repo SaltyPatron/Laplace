@@ -73,10 +73,8 @@ BEGIN ATOMIC
         SELECT array_agg(DISTINCT id ORDER BY id) AS a
         FROM (SELECT id FROM raw UNION SELECT hub_id FROM raw WHERE hub_id IS NOT NULL) x
     ), labels AS MATERIALIZED (
-        SELECT i.id, i.txt FROM ids,
-          LATERAL ROWS FROM (
-            unnest(ids.a), unnest(realize.label_batch(ids.a))
-          ) i(id, txt)
+        SELECT d.id, d.label AS txt
+        FROM ids CROSS JOIN LATERAL realize.display_label_batch(ids.a) d
     )
     SELECT r.dir, r.id, n.txt, r.relation,
            COALESCE(r.hub_literal, h.txt), r.eff_mu, r.witnesses

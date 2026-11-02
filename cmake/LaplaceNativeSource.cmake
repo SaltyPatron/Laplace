@@ -1,14 +1,11 @@
 # An empty Native selection retains the monorepo's existing fallback behavior.
 # Do not persist an implicit environment/external default in the cache.
-if(NOT DEFINED LAPLACE_NATIVE OR LAPLACE_NATIVE STREQUAL "")
-    if(DEFINED ENV{LAPLACE_NATIVE} AND NOT "$ENV{LAPLACE_NATIVE}" STREQUAL "")
-        set(LAPLACE_NATIVE "$ENV{LAPLACE_NATIVE}")
-    else()
-        set(LAPLACE_NATIVE "${LAPLACE_EXTERNAL}/laplace-native")
-    endif()
+if(NOT DEFINED LAPLACE_OPERATIONS OR "${LAPLACE_OPERATIONS}" STREQUAL "")
+	if(DEFINED ENV{LAPLACE_OPERATIONS} AND NOT "$ENV{LAPLACE_OPERATIONS}" STREQUAL "")
+		set(LAPLACE_OPERATIONS "$ENV{LAPLACE_OPERATIONS}")
+	else()
+		get_filename_component(LAPLACE_OPERATIONS "${CMAKE_CURRENT_LIST_DIR}/../../Laplace-Operations" ABSOLUTE)
+	endif()
 endif()
-if(DEFINED CACHE{LAPLACE_NATIVE})
-    # Keep CMake's normalization of an explicitly supplied, untyped -D path.
-    set(LAPLACE_NATIVE "${LAPLACE_NATIVE}" CACHE PATH "Laplace-Native checkout: identity (lp_id_compose)")
-endif()
-file(TO_CMAKE_PATH "${LAPLACE_NATIVE}" LAPLACE_NATIVE)
+include("${LAPLACE_OPERATIONS}/toolchain/source-selection.cmake")
+laplace_resolve_source_path(LAPLACE_NATIVE "${LAPLACE_EXTERNAL}/laplace-native" "Laplace-Native checkout: identity (lp_id_compose)")
