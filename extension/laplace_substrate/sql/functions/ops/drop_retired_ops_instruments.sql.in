@@ -1,6 +1,0 @@
--- Drops the laplace.* copies of index_usage_report / index_usage_detail; the
--- ops.* functions are the live ones. Removing a file from the manifests does
--- not retract a CREATE an installed database already ran, so the drop is its
--- own module. IF EXISTS throughout; qualified laplace.* so it cannot touch ops.*.
-DROP FUNCTION IF EXISTS laplace.index_usage_report(bigint);
-DROP FUNCTION IF EXISTS laplace.index_usage_detail(text, integer);

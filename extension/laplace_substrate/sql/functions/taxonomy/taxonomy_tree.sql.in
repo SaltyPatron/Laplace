@@ -10,21 +10,23 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(
     RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    WITH root AS MATERIALIZED (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('IS_A') AS is_a
+    ), root AS MATERIALIZED (
         SELECT COALESCE(taxonomy.top_synset(p_id), p_id) AS id
     ), raw AS MATERIALIZED (
       SELECT 'self'::text AS dir, 0 AS ord, root.id, NULL::numeric AS eff_mu FROM root
       UNION ALL
       SELECT 'up', w.step, w.entity_id, w.eff_mu
-      FROM root, consensus.walk_strongest(
-          root.id, laplace.relation_type_id('IS_A'), p_depth) w
+      FROM root, rel r, consensus.walk_strongest(
+          root.id, r.is_a, p_depth) w
       UNION ALL
       (SELECT 'child',
             row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC)::int,
             c.subject_id,
             consensus.eff_mu_display(c.rating, c.rd)
-       FROM root JOIN laplace.consensus c
-         ON c.object_id = root.id AND c.type_id = laplace.relation_type_id('IS_A')
+       FROM root CROSS JOIN rel r JOIN laplace.consensus c
+         ON c.object_id = root.id AND c.type_id = r.is_a
        ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC
        LIMIT GREATEST(p_child_limit, 0))
     ), ids AS MATERIALIZED (

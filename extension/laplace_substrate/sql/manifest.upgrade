@@ -1,18 +1,13 @@
 schema/purpose_schemas.sql.in
-schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
 functions/planner/array_length_rows_support.sql.in
 functions/relation/relation_registry.sql.in
 functions/relation/entity_type_registry.sql.in
-schema/tables/attestation_witness_columns.sql.in
-schema/tables/attestation_qualifier_mask.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in
 schema/tables/ingest_completion.sql.in
 indexes/entities_type_btree.sql.in
-indexes/drop_entities_tier_btree.sql.in
-indexes/drop_entities_tier_type_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
@@ -41,7 +36,6 @@ probes/entities_stored_bitmap.sql.in
 probes/physicalities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
-probes/drop_content_descent_novel_ordinals.sql.in
 functions/glicko2/laplace_glicko2_result.sql.in
 functions/glicko2/laplace_glicko2_sfunc.sql.in
 functions/glicko2/laplace_glicko2_finalfunc.sql.in
@@ -63,7 +57,7 @@ indexes/consensus_subject_object_btree.sql.in
 indexes/consensus_subject_eff_mu_btree.sql.in
 indexes/consensus_subject_type_eff_mu_btree.sql.in
 indexes/consensus_object_type_btree.sql.in
-schema/tables/consensus_id.sql.in
+functions/identity/consensus_id.sql.in
 schema/tables/highway_mask_dirty.sql.in
 schema/apply_write_epoch.sql.in
 views/v_word_points.sql.in
@@ -111,6 +105,8 @@ functions/readback/render_text.sql.in
 functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
 functions/identity/relation_type_id.sql.in
+functions/identity/entity_type_id.sql.in
+functions/converse/word_id.sql.in
 generated/relation_set_ids.sql.in
 generated/relation_family_ids.sql.in
 functions/realize/realize_batch.sql.in
@@ -134,7 +130,6 @@ functions/consensus/consensus_out.sql.in
 functions/consensus/consensus_by_ids.sql.in
 functions/consensus/consensus_in.sql.in
 functions/consensus/classify_circuit.sql.in
-functions/consensus/drop_circuit_candidates.sql.in
 functions/consensus/circuit_pair_proposals.sql.in
 functions/consensus/walk_branches.sql.in
 functions/consensus/walk_strongest.sql.in
@@ -151,7 +146,6 @@ functions/inspect/attestation_unary_response_type.sql.in
 functions/chess/chess_moves.sql.in
 functions/relation/relation_in_family.sql.in
 functions/consensus/subjects_of_type.sql.in
-functions/identity/entity_type_id.sql.in
 functions/relation/relation_family_members.sql.in
 functions/identity/source_id.sql.in
 functions/ops/evidence_count.sql.in
@@ -179,8 +173,6 @@ functions/lexical/senses_bootstrap.sql.in
 functions/lexical/senses_with_context_bootstrap.sql.in
 functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
-functions/converse/word_id.sql.in
-functions/identity/witness_id.sql.in
 functions/identity/property_value_id.sql.in
 functions/identity/is_language.sql.in
 functions/readback/grammar_source_id.sql.in
@@ -250,7 +242,6 @@ functions/converse/structural_neighbors.sql.in
 functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
 functions/converse/correlate.sql.in
-functions/converse/drop_recompiled_prompt_programs.sql.in
 generated/qualifier_bits.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in
@@ -269,9 +260,6 @@ functions/structural/model_recipes.sql.in
 functions/converse/operation_frame_routes.sql.in
 functions/converse/compile_prompt.sql.in
 functions/lexical/word_case_variant_ids.sql.in
-functions/lexical/drop_retired_case_surface.sql.in
-functions/converse/drop_retired_english_router.sql.in
-functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
@@ -294,7 +282,6 @@ functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
 functions/ingest/physicalities_merge.sql.in
-functions/generation/drop_retired_content_lane.sql.in
 functions/generation/trajectory_plane.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
@@ -322,10 +309,6 @@ functions/generation/steer_candidates.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
-functions/ingest/drop_retired_ingest_lanes.sql.in
-functions/ingest/drop_apply_batch_merge_entities.sql.in
-functions/ingest/drop_apply_batch_merge_physicalities.sql.in
-functions/ingest/drop_apply_batch_merge_attestations.sql.in
 functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
@@ -449,8 +432,6 @@ views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/geometry/structural_cluster.sql.in
-functions/analysis/drop_retired_eff_mu.sql.in
-functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
@@ -481,11 +462,7 @@ functions/chess/chess_players_by_initial.sql.in
 functions/chess/chess_player_search_candidates.sql.in
 functions/chess/chess_head_to_head.sql.in
 functions/chess/repair_player_ratings.sql.in
-functions/chess/chess_game_plies.sql.in
 functions/chess/chess_line.sql.in
-functions/chess/drop_retired_chess_aggregates.sql.in
-functions/readback/drop_retired_constituent_edges.sql.in
-functions/ops/drop_retired_ops_instruments.sql.in
 functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in
 functions/chess/chess_opening_games.sql.in
@@ -500,7 +477,6 @@ functions/lexical/sense_audit.sql.in
 functions/converse/election_token_profile.sql.in
 functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in
-functions/mu/drop_retired_foundry_weight_knobs.sql.in
 views/v_entities_highway.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 

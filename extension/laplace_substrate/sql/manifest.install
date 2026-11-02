@@ -6,8 +6,6 @@ functions/relation/entity_type_registry.sql.in
 schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
-schema/tables/attestation_witness_columns.sql.in
-schema/tables/attestation_qualifier_mask.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in
@@ -42,7 +40,6 @@ probes/entities_stored_bitmap.sql.in
 probes/physicalities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
-probes/drop_content_descent_novel_ordinals.sql.in
 functions/glicko2/laplace_glicko2_result.sql.in
 functions/glicko2/laplace_glicko2_sfunc.sql.in
 functions/glicko2/laplace_glicko2_finalfunc.sql.in
@@ -65,7 +62,7 @@ indexes/consensus_subject_object_btree.sql.in
 indexes/consensus_subject_eff_mu_btree.sql.in
 indexes/consensus_subject_type_eff_mu_btree.sql.in
 indexes/consensus_object_type_btree.sql.in
-schema/tables/consensus_id.sql.in
+functions/identity/consensus_id.sql.in
 schema/tables/highway_mask_dirty.sql.in
 schema/apply_write_epoch.sql.in
 views/v_word_points.sql.in
@@ -113,6 +110,8 @@ functions/readback/render_text.sql.in
 functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
 functions/identity/relation_type_id.sql.in
+functions/identity/entity_type_id.sql.in
+functions/converse/word_id.sql.in
 generated/relation_set_ids.sql.in
 generated/relation_family_ids.sql.in
 functions/realize/realize_batch.sql.in
@@ -152,7 +151,6 @@ functions/inspect/attestation_unary_response_type.sql.in
 functions/chess/chess_moves.sql.in
 functions/relation/relation_in_family.sql.in
 functions/consensus/subjects_of_type.sql.in
-functions/identity/entity_type_id.sql.in
 functions/relation/relation_family_members.sql.in
 functions/identity/source_id.sql.in
 functions/ops/evidence_count.sql.in
@@ -180,7 +178,6 @@ functions/lexical/senses_bootstrap.sql.in
 functions/lexical/senses_with_context_bootstrap.sql.in
 functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
-functions/converse/word_id.sql.in
 functions/identity/witness_id.sql.in
 functions/identity/property_value_id.sql.in
 functions/identity/is_language.sql.in
@@ -270,7 +267,6 @@ functions/structural/model_recipes.sql.in
 functions/converse/operation_frame_routes.sql.in
 functions/converse/compile_prompt.sql.in
 functions/lexical/word_case_variant_ids.sql.in
-functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
@@ -320,9 +316,6 @@ functions/generation/steer_candidates.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
-functions/ingest/drop_apply_batch_merge_entities.sql.in
-functions/ingest/drop_apply_batch_merge_physicalities.sql.in
-functions/ingest/drop_apply_batch_merge_attestations.sql.in
 functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in

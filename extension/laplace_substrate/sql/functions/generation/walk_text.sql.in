@@ -36,7 +36,14 @@ BEGIN
     END IF;
 
     RETURN QUERY
-    WITH concepts AS MATERIALIZED (
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('CORRESPONDS_TO') AS corresponds_to,
+               laplace.relation_type_id('IS_SYNONYM_OF')  AS is_synonym_of,
+               laplace.relation_type_id('HAS_SENSE')      AS has_sense,
+               laplace.relation_type_id('IS_SENSE_OF')    AS is_sense_of,
+               laplace.relation_type_id('EVOKES_FRAME')   AS evokes_frame
+    ),
+    concepts AS MATERIALIZED (
         SELECT DISTINCT c AS concept_id
         FROM unnest(COALESCE(p_concepts, ARRAY[]::bytea[])) AS c
         WHERE c IS NOT NULL
@@ -65,7 +72,8 @@ BEGIN
         FROM concepts c
         JOIN laplace.v_consensus_unrefuted b ON b.subject_id = c.concept_id
         CROSS JOIN allowed a
-        WHERE b.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+        CROSS JOIN rel
+        WHERE b.type_id = rel.corresponds_to
           AND (p_bands IS NULL OR b.type_id = ANY(a.ids))
         UNION ALL
         SELECT c.concept_id, b.subject_id,
@@ -77,7 +85,8 @@ BEGIN
         FROM concepts c
         JOIN laplace.v_consensus_unrefuted b ON b.object_id = c.concept_id
         CROSS JOIN allowed a
-        WHERE b.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+        CROSS JOIN rel
+        WHERE b.type_id = rel.corresponds_to
           AND (p_bands IS NULL OR b.type_id = ANY(a.ids))
     ),
     roots AS MATERIALIZED (
@@ -98,7 +107,8 @@ BEGIN
         FROM roots r
         JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
         CROSS JOIN allowed a
-        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
+        CROSS JOIN rel
+        WHERE c.type_id = rel.is_synonym_of
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
         UNION ALL
         SELECT r.concept_id, r.root_id, c.subject_id,
@@ -110,7 +120,8 @@ BEGIN
         FROM roots r
         JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
         CROSS JOIN allowed a
-        WHERE c.type_id = laplace.relation_type_id('HAS_SENSE')
+        CROSS JOIN rel
+        WHERE c.type_id = rel.has_sense
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
         UNION ALL
         SELECT r.concept_id, r.root_id, hs.subject_id,
@@ -124,8 +135,9 @@ BEGIN
         JOIN laplace.v_consensus_unrefuted ss ON ss.object_id = r.root_id
         JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = ss.subject_id
         CROSS JOIN allowed a
-        WHERE ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
-          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        CROSS JOIN rel
+        WHERE ss.type_id = rel.is_sense_of
+          AND hs.type_id = rel.has_sense
           AND (p_bands IS NULL OR (ss.type_id = ANY(a.ids) AND hs.type_id = ANY(a.ids)))
 
         UNION ALL
@@ -141,7 +153,8 @@ BEGIN
           ON n.subject_id = c.subject_id
          AND n.type_id = ANY(consensus.relation_set_ids('NAME_EDGE'))
         CROSS JOIN allowed a
-        WHERE c.type_id = laplace.relation_type_id('EVOKES_FRAME')
+        CROSS JOIN rel
+        WHERE c.type_id = rel.evokes_frame
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
     ),
     path_candidates AS MATERIALIZED (

@@ -9,12 +9,16 @@ CREATE OR REPLACE FUNCTION generation.vocab_dominant_pos(p_vocab bytea[])
     RETURNS TABLE(word_id bytea, pos_id bytea)
     LANGUAGE sql STABLE PARALLEL RESTRICTED
 BEGIN ATOMIC
-    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    WITH rel AS MATERIALIZED (
+        SELECT laplace.relation_type_id('HAS_POS') AS has_pos
+    ),
+    v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     direct AS (
         SELECT DISTINCT ON (c.subject_id) c.subject_id AS wid, c.object_id AS pos
         FROM v
+        CROSS JOIN rel r
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = v.id
-            AND c.type_id = laplace.relation_type_id('HAS_POS')
+            AND c.type_id = r.has_pos
         WHERE c.object_id IS NOT NULL
         ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
     ),
@@ -26,8 +30,9 @@ BEGIN ATOMIC
     folded AS (
         SELECT DISTINCT ON (m.id) m.id AS wid, c.object_id AS pos
         FROM missing m
+        CROSS JOIN rel r
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = m.fid
-            AND c.type_id = laplace.relation_type_id('HAS_POS')
+            AND c.type_id = r.has_pos
         WHERE c.object_id IS NOT NULL AND m.fid IS NOT NULL AND m.fid <> m.id
         ORDER BY m.id, consensus.eff_mu(c.rating, c.rd) DESC, m.fid
     )

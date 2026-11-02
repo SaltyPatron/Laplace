@@ -1907,18 +1907,13 @@ SQL_QUERY("migration.canonical_substrate", "",
     "END IF; END LOOP; "
     "PERFORM public.laplace_fingerprint(); PERFORM public.laplace_highway_fingerprint(); "
     "PERFORM public.laplace_ensure_stage(); "
-    ""
-    "IF to_regprocedure('laplace.source_id(text)') IS NOT NULL THEN "
-    "EXECUTE $source$CREATE OR REPLACE FUNCTION laplace.source_id(p_name text) RETURNS bytea "
-    "LANGUAGE sql IMMUTABLE PARALLEL SAFE BEGIN ATOMIC "
-    "SELECT decode(public.laplace_id('substrate/source/' || p_name || '/v1')::text,'hex'); END;$source$; "
-    "END IF; END $canonical$;")
+    "END $canonical$;")
 SQL_QUERY("migration.canonical_substrate_status", "",
     "SELECT current_database(),extversion,public.laplace_fingerprint(),public.laplace_highway_fingerprint() "
     "FROM pg_extension WHERE extname='laplace'")
 SQL_QUERY("migration.reset_application_journal", "",
     "DO $$ BEGIN IF to_regclass('public.schemaversions') IS NOT NULL THEN "
-    "DELETE FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_(app_|browser_)'; END IF; END $$;")
+    "DELETE FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_app_'; END IF; END $$;")
 SQL_QUERY("migration.reset_journal", "", "DROP TABLE IF EXISTS public.schemaversions")
 
 /* Bootstrap metadata and explicitly confirmed database lifecycle commands. */
@@ -1935,7 +1930,7 @@ SQL_QUERY("migration.object_access", "",
 SQL_QUERY("migration.schema_owner", "text",
     "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname=$1")
 SQL_QUERY("migration.reset_application_schema", "",
-    "DROP SCHEMA IF EXISTS app CASCADE;\nDO $$\nBEGIN\n    IF to_regclass('public.schemaversions') IS NOT NULL THEN\n        DELETE FROM public.schemaversions\n        WHERE scriptname ~ '^[0-9]+_(app_|browser_)';\n    END IF;\nEND $$;")
+    "DROP SCHEMA IF EXISTS app CASCADE;\nDO $$\nBEGIN\n    IF to_regclass('public.schemaversions') IS NOT NULL THEN\n        DELETE FROM public.schemaversions\n        WHERE scriptname ~ '^[0-9]+_app_';\n    END IF;\nEND $$;")
 SQL_QUERY("migration.database_create", "",
     "CREATE DATABASE {database} {options}")
 SQL_QUERY("migration.database_revoke_public", "",

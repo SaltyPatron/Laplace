@@ -14,13 +14,17 @@ public sealed class ExtensionManifestSeparationTests
         var install = Read("extension", "laplace_substrate", "sql", "manifest.install");
         var upgrade = Read("extension", "laplace_substrate", "sql", "manifest.upgrade");
 
-        Assert.DoesNotContain("drop_retired_", install);
+        Assert.DoesNotContain("/drop_", install);
+        Assert.DoesNotContain("/drop_", upgrade);
+        Assert.DoesNotContain("attestation_witness_columns.sql.in", install);
+        Assert.DoesNotContain("attestation_witness_columns.sql.in", upgrade);
+        Assert.DoesNotContain("attestation_qualifier_mask.sql.in", install);
+        Assert.DoesNotContain("attestation_qualifier_mask.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/entities.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/physicalities.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/attestations.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/consensus.sql.in", upgrade);
         Assert.DoesNotContain("indexes/physicalities_entity_btree.sql.in", upgrade);
-        Assert.Contains("drop_retired_", upgrade);
     }
 
     [Fact]

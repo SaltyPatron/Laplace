@@ -10,7 +10,7 @@ SET search_path = laplace, public;
 SELECT t.name,
        count(*)                                   AS relations,
        sum(c.witness_count)                       AS games,
-       round(avg((c.rating - 2*c.rd) / 1e9), 1)   AS avg_eff_mu
+       round(avg(consensus.eff_mu(c.rating, c.rd) / 1e9), 1) AS avg_eff_mu
 FROM (VALUES ('SIMILAR_TO'), ('ATTENDS'), ('OV_RELATES'), ('COMPLETES_TO')) t(name)
 JOIN consensus c ON c.type_id = relation_type_id(t.name)
 GROUP BY t.name ORDER BY t.name;
@@ -20,34 +20,34 @@ SELECT realize.render(c.subject_id) AS a, realize.render(c.object_id) AS b,
        consensus.eff_mu_display(c.rating, c.rd) AS eff_mu, c.witness_count
 FROM consensus c
 WHERE c.type_id = relation_type_id('SIMILAR_TO') AND c.object_id IS NOT NULL
-ORDER BY (c.rating - 2*c.rd) DESC LIMIT 15;
+ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT 15;
 
 \echo '=== strongest ATTENDS testimony (attention affinity, rendered) ==='
 SELECT realize.render(c.subject_id) AS attender, realize.render(c.object_id) AS attended,
        consensus.eff_mu_display(c.rating, c.rd) AS eff_mu, c.witness_count
 FROM consensus c
 WHERE c.type_id = relation_type_id('ATTENDS') AND c.object_id IS NOT NULL
-ORDER BY (c.rating - 2*c.rd) DESC LIMIT 15;
+ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT 15;
 
 \echo '=== strongest COMPLETES_TO testimony (FFN completion, rendered) ==='
 SELECT realize.render(c.subject_id) AS token, realize.render(c.object_id) AS completes_to,
        consensus.eff_mu_display(c.rating, c.rd) AS eff_mu, c.witness_count
 FROM consensus c
 WHERE c.type_id = relation_type_id('COMPLETES_TO') AND c.object_id IS NOT NULL
-ORDER BY (c.rating - 2*c.rd) DESC LIMIT 15;
+ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT 15;
 
 \echo '=== walk probe: one-hop completions from the strongest COMPLETES_TO subject ==='
 WITH seed AS (
     SELECT c.subject_id FROM consensus c
     WHERE c.type_id = relation_type_id('COMPLETES_TO') AND c.object_id IS NOT NULL
-    ORDER BY (c.rating - 2*c.rd) DESC LIMIT 1)
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT 1)
 SELECT realize.render(s.subject_id) AS seed, realize.render(c.object_id) AS hop1,
        consensus.eff_mu_display(c.rating, c.rd) AS eff_mu
 FROM seed s
 JOIN consensus c ON c.subject_id = s.subject_id
                 AND c.type_id = relation_type_id('COMPLETES_TO')
                 AND c.object_id IS NOT NULL
-ORDER BY (c.rating - 2*c.rd) DESC LIMIT 10;
+ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT 10;
 
 \echo '=== fusion check: tokens carrying testimony in MORE than one behavioral arena ==='
 SELECT realize.render(c.subject_id) AS token, count(DISTINCT c.type_id) AS arenas,

@@ -70,7 +70,7 @@ BEGIN ATOMIC
     WITH path AS (
         SELECT ARRAY[
                    laplace.word_id('model-circuit'),
-                   laplace.word_id(lower(btrim(p_plane)))
+                   laplace.word_id(btrim(p_plane))
                ]::bytea[]
              || CASE WHEN p_layer IS NULL THEN ARRAY[]::bytea[]
                      ELSE ARRAY[
@@ -114,7 +114,7 @@ BEGIN ATOMIC
         SELECT ARRAY[
                    p_source,
                    laplace.word_id('model-circuit'),
-                   laplace.word_id(lower(btrim(p_plane)))
+                   laplace.word_id(btrim(p_plane))
                ]::bytea[]
              || CASE WHEN p_layer >= 0 THEN ARRAY[
                          laplace.word_id('layer'),

@@ -58,11 +58,4 @@ BEGIN ATOMIC
 END;
 
 -- Units a witness has completed at a layer, for resume audits and gates.
-CREATE OR REPLACE FUNCTION ops.units_completed(p_witness bytea, p_layer int)
-    RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT count(*)::bigint
-    FROM laplace.ingest_unit_completion c
-    WHERE c.witness_id = p_witness AND c.layer = p_layer;
-END;
+DROP FUNCTION IF EXISTS ops.units_completed(bytea, int);

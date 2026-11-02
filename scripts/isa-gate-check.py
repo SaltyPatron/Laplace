@@ -105,12 +105,12 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # `<> ALL` for `NOT IN` is exact here, not merely equivalent-looking: type_id is NOT NULL
 # on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
-    "g1_weight_literalism": 8,
+    "g1_weight_literalism": 0,
     # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
     # chess_game_plies body is now two DROP statements, so its 11 relation-name
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
-    "g3_sql_vocabulary_literalism": 173,
-    "g3_c_vocabulary_literalism": 17,
+    "g3_sql_vocabulary_literalism": 161,
+    "g3_c_vocabulary_literalism": 0,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
     # language-UNATTESTED and word_language() inferred at read time a fact the
@@ -133,8 +133,8 @@ CEILINGS = {
     # 389 -> 301: ConceptNet, Atomic, Tatoeba, Wiktionary, SemLink, and the shared
     # triple and bridge writers no longer spell manifest names. The file token is
     # the predicate.
-    "g3_csharp_vocabulary_literalism": 301,
-    "g8_band_literalism": 3,
+    "g3_csharp_vocabulary_literalism": 147,
+    "g8_band_literalism": 0,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
@@ -184,7 +184,7 @@ CEILINGS = {
     # left standing: a recorded exception that outlives its cause is just a hole.
     # Removing the obsolete attested_language DROP exposes its existing zero-caller
     # adapter in the measured baseline; no new function or ceiling increase.
-    "g4_dead_canonical": 14,
+    "g4_dead_canonical": 8,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
@@ -193,7 +193,7 @@ CEILINGS = {
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
     # 206 -> 205 (2026-08-20): the game_plies string body went with the projection.
-    "g12_string_sql_bodies": 2,
+    "g12_string_sql_bodies": 0,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the
@@ -208,7 +208,7 @@ CEILINGS = {
     # a sort key, each was fixed separately, and each fix left only a comment
     # behind — nothing stopped the next author from writing the fourth. A
     # comment is not enforcement.
-    "g13_string_op_on_surface": 1,
+    "g13_string_op_on_surface": 0,
     # G14 — case folding. Measured 2026-08-10, landing enumerated: 24 occurrences
     # across 9 sites, all pre-existing.
     #
@@ -232,7 +232,7 @@ CEILINGS = {
     #       that does nothing for a Japanese or Arabic pronoun — so anaphora
     #       resolution is a feature English speakers get and nobody else does.
     #       It is also on the elector path this session is measuring.
-    "g14_case_fold": 24,
+    "g14_case_fold": 22,
     # G15 — unqualified CREATE/DROP FUNCTION. Ceiling 0: measured 2026-08-10,
     # all 32 occurrences fixed in the same change that added this gate, so there
     # is no landing to grandfather.
@@ -261,7 +261,7 @@ CEILINGS = {
     # declares that engine/manifest/relation_types.toml does not, counted across
     # both files. HAS_TRUST_CLASS among them carries 8 LIVE attestation rows with
     # no bit, no rank, no relation_law.c entry and no family membership.
-    "g16_unmanifested_vocabulary": 16,
+    "g16_unmanifested_vocabulary": 0,
 }
 
 # The schema prefix is OPTIONAL AND ARBITRARY. It used to accept only
@@ -286,10 +286,10 @@ CTE_ALIAS = re.compile(
     r"(?:\([^)]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(",
     re.IGNORECASE,
 )
-# CREATE AGGREGATE ... SFUNC = foo / FINALFUNC = bar — real callers without '('.
+# CREATE AGGREGATE ... SFUNC = foo / FINALFUNC = bar and CREATE FUNCTION ... SUPPORT foo — real callers without '('.
 AGGREGATE_FUNC_REF = re.compile(
-    r"\b(?:SFUNC|FINALFUNC|MSFUNC|MINVFUNC|COMBINEFUNC|SERIALFUNC|DESERIALFUNC)\s*=\s*"
-    r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)\b",
+    r"\b(?:(?:SFUNC|FINALFUNC|MSFUNC|MINVFUNC|COMBINEFUNC|SERIALFUNC|DESERIALFUNC)\s*=\s*|SUPPORT\s+)"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*|@extschema@)\.)?([A-Za-z_][A-Za-z0-9_]*)\b",
     re.IGNORECASE,
 )
 
@@ -885,9 +885,15 @@ def scan_g4_dead_canonical() -> Counter[str]:
         corpus.append(
             (relative(path), strip_c_comments(path.read_text(encoding="utf-8", errors="replace")))
         )
+    for path in production_files(ROOT / "extension" / "laplace_substrate" / "tests" / "sql", (".sql",)):
+        corpus.append(
+            (relative(path), strip_sql_comments(path.read_text(encoding="utf-8", errors="replace")))
+        )
+    for path in production_files(ROOT / "scripts", (".py", ".sh", ".sql")):
+        corpus.append(
+            (relative(path), path.read_text(encoding="utf-8", errors="replace"))
+        )
     for path in production_files(ROOT / "app", (".cs",)):
-        if any(".Tests" in part for part in path.parts):
-            continue
         corpus.append(
             (relative(path), strip_c_comments(path.read_text(encoding="utf-8", errors="replace")))
         )

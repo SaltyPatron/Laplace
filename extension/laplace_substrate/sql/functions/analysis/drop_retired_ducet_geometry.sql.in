@@ -1,5 +1,0 @@
--- DUCET/UCA order is a Tier-0 ROM fact, not derived from PostgreSQL geometry,
--- so the rank-from-coordinate functions and their expression index are dropped.
-DROP INDEX IF EXISTS laplace.physicalities_ducet_rank_btree;
-DROP FUNCTION IF EXISTS ops.ducet_ordered(integer, integer);
-DROP FUNCTION IF EXISTS ops.ducet_rank(geometry);

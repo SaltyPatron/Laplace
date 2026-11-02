@@ -4,17 +4,6 @@
 -- run/file journal writes. A run is orphaned only when both are absent or
 -- stale; every reader and reconciler here uses that one predicate.
 
-ALTER TABLE @extschema@.ingest_run_journal
-    ADD COLUMN IF NOT EXISTS heartbeat_at timestamptz NOT NULL DEFAULT now();
-
--- A run that discovers files as it goes can start with files_total = 0. Once
--- terminal, files_done is a lower bound on the total, so a terminal row never
--- shows files_done > files_total.
-UPDATE @extschema@.ingest_run_journal
-   SET files_total = files_done
- WHERE status <> 'running'
-   AND files_total < files_done;
-
 CREATE OR REPLACE FUNCTION ops.ingest_run_live(
     p_run uuid,
     p_stale_after interval DEFAULT interval '90 seconds')
