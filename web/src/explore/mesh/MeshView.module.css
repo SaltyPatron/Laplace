@@ -4,6 +4,11 @@
     flex-direction: column;
     gap: var(--space-4);
   }
+  .embedded { container-type: inline-size; }
+  @container (max-width: 700px) {
+    .ladder { grid-template-columns: 1fr; }
+    .node { order: -1; }
+  }
 
   /* Breadcrumb trail */
   .trail {
@@ -13,10 +18,10 @@
     gap: var(--space-1);
     font-size: var(--text-sm);
   }
-  .crumbWrap { display: inline-flex; align-items: center; gap: var(--space-1); }
-  .crumb { color: var(--color-text-muted); text-decoration: none; }
+  .crumbWrap { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+  .crumb { color: var(--color-text-muted); text-decoration: none; overflow-wrap: anywhere; }
   .crumb:hover { color: var(--color-accent); }
-  .crumbCurrent { color: var(--color-text-primary); font-weight: 600; }
+  .crumbCurrent { color: var(--color-text-primary); font-weight: 600; overflow-wrap: anywhere; }
   .sep { color: var(--color-text-muted); }
 
   /* Three-column ladder: belongs_to | node | roster */
@@ -80,6 +85,7 @@
 
   /* Center node */
   .node {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -97,13 +103,15 @@
     font-weight: 650;
   }
   .nodeLabel {
+    max-width: 100%;
+    overflow-wrap: anywhere;
     font-size: clamp(1.3rem, 2.5vw, 1.7rem);
     font-weight: 700;
     color: var(--color-text-primary);
     text-align: center;
     letter-spacing: -0.01em;
   }
-  .nodeLinks { display: flex; gap: var(--space-3); }
+  .nodeLinks { display: flex; flex-wrap: wrap; gap: var(--space-3); }
   .openEntity { font-size: var(--text-sm); color: var(--color-accent); text-decoration: none; }
   .openEntity:hover { text-decoration: underline; }
 

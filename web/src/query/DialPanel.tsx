@@ -3,7 +3,9 @@ import { SHAPE_DIALS, type QueryDials } from './types';
 import styles from './DialPanel.module.css';
 
 interface Props {
-  shape: string;
+  shape?: string;
+  shapes?: string[];
+  idPrefix?: string;
   dials: QueryDials;
   onChange: (next: QueryDials) => void;
 }
@@ -30,8 +32,8 @@ const SPEC: Record<keyof QueryDials, DialSpec> = {
 };
 
 /** Renders only the dials the chosen shape consumes (`SHAPE_DIALS`). */
-export function DialPanel({ shape, dials, onChange }: Props) {
-  const keys = SHAPE_DIALS[shape] ?? [];
+export function DialPanel({ shape, shapes, idPrefix = 'dial', dials, onChange }: Props) {
+  const keys = [...new Set((shapes ?? (shape ? [shape] : [])).flatMap(value => SHAPE_DIALS[value] ?? []))];
   if (keys.length === 0) {
     return <p className={styles.none}>This shape takes no dials — it reads what is witnessed and stops.</p>;
   }
@@ -43,7 +45,7 @@ export function DialPanel({ shape, dials, onChange }: Props) {
     <div className={styles.panel}>
       {keys.map((key) => {
         const spec = SPEC[key];
-        const id = `dial-${key}`;
+        const id = `${idPrefix}-${key}`;
 
         if (key === 'directed' || key === 'use_geometry') {
           return (

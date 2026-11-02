@@ -17,7 +17,7 @@ export function StructureTab({
   onLoadContainers,
 }: {
   entity: ExploreEntityResponse;
-  preview: ExploreEntityPreviewResponse;
+  preview: ExploreEntityPreviewResponse | null;
   decomposeNodes: Awaited<ReturnType<typeof exploreDecompose>>['nodes'] | null;
   decomposeBusy: boolean;
   containersUnlocked: boolean;

@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useRouteText } from '../../layout/useRouteText';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { exploreLexicon } from '../../query/api';
 import type { ResponseField } from '../../query/types';
 import {
@@ -12,7 +11,7 @@ import {
   Panel,
   cn,
 } from '@ui';
-import { ApiError, PaymentRequiredError } from '../../api/client';
+import { PaymentRequiredError } from '../../api/client';
 import {
   exploreContainers,
   exploreDecompose,
@@ -22,10 +21,13 @@ import {
   exploreNeighbors,
   explorePeers,
   explorePreview,
-  exploreResolve,
 } from '../api';
 import { GatePrompt } from '../components/GatePrompt';
 import { RelationChip } from '../components/RelationChip';
+import { entityDestination } from '../components/entityDestination';
+import { changeWorld } from '../../world/context';
+import { WorldProjection } from '../../world/WorldLink';
+import { presentations } from '../../world/presentations';
 import { type GlomeNode } from '../glome/GlomeCanvas';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
@@ -64,15 +66,20 @@ const TAB_PREFETCH: Record<EntityTab, () => Promise<unknown>> = {
 
 const TAB_IDS: EntityTab[] = ['overview', 'graph', 'glome', 'structure', 'links', 'provenance', 'export'];
 
-export function EntityDetail() {
-  const { idHex = '' } = useParams();
+export function EntityDetail({ selectedId, selectedLabel, selectedType }: { selectedId?: string; selectedLabel?: string; selectedType?: string } = {}) {
+  const { idHex: routeId = '' } = useParams();
+  const idHex = selectedId ?? routeId;
   const nav = useNavigate();
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
   const { tenant, quoteId, setExploreSeedPrompt } = useAppStore();
   const exploreQuote = useExploreStore((s) => s.quoteId);
   const walkPath = useExploreStore((s) => s.walkPath);
   const setBreadcrumb = useExploreStore((s) => s.setBreadcrumb);
-  const [tab, setTab] = useState<EntityTab>('overview');
+  const tab: EntityTab = TAB_IDS.includes(params.get('detail') as EntityTab) ? params.get('detail') as EntityTab : 'overview';
+  const setTab = (value: EntityTab) => setParams(changeWorld(params, { detail: value === 'overview' ? null : value, inspect: '1' }), { preventScrollReset: true });
   const [preview, setPreview] = useState<ExploreEntityPreviewResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [entity, setEntity] = useState<ExploreEntityResponse | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [inspectReceipt, setInspectReceipt] = useState<BillingReceipt | null>(null);
@@ -96,14 +103,20 @@ export function EntityDetail() {
   const [lexiconError, setLexiconError] = useState<string | null>(null);
   const [lexiconGated, setLexiconGated] = useState(false);
   const [lexiconAttempt, setLexiconAttempt] = useState(0);
-  const [inspectOpen, setInspectOpen] = useState(false);
+  const inspectOpen = params.get('inspect') === '1' || params.has('detail');
 
   const quote = exploreQuote || quoteId;
   const walkHighlight = walkPath.map((n) => n.idHex);
+  const declaredType = selectedType ?? preview?.type ?? entity?.type;
+  const requestedPresentation = params.get('presentation');
+  const presentation = presentations.find(item => item.id === requestedPresentation)
+    ?? presentations.find(item => declaredType && item.types.includes(declaredType)) ?? presentations[0];
+  const availablePresentations = presentations.filter(item => !item.types.length || item.types.includes(declaredType ?? '') || item.id === presentation.id);
 
   useEffect(() => {
     let stale = false;
     setLexicon(null); setLexiconError(null); setLexiconGated(false);
+    if (presentation.id !== 'knowledge') return;
     exploreLexicon(idHex, undefined, { tenant, quoteId: quote })
       .then(value => { if (!stale) setLexicon(value); })
       .catch(failure => {
@@ -112,12 +125,13 @@ export function EntityDetail() {
         else setLexiconError(failure instanceof Error ? failure.message : String(failure));
       });
     return () => { stale = true; };
-  }, [idHex, tenant, quote, lexiconAttempt]);
+  }, [idHex, tenant, quote, lexiconAttempt, presentation.id]);
 
   useEffect(() => {
     setEntity(null);
     setUnlocked(false);
     setPreview(null);
+    setPreviewError(null);
     setInspectReceipt(null);
     setExportReceipt(null);
     setErr(null);
@@ -131,15 +145,23 @@ export function EntityDetail() {
     setDecomposeNodes(null);
     setDetailLoading(false);
     setNeedsGate(false);
-    setInspectOpen(false);
-    explorePreview(idHex).then((p) => {
-      setPreview(p);
-      setBreadcrumb({ entityLabel: p.label, entityId: p.id_hex });
-    }).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
-  }, [idHex, setBreadcrumb]);
+  }, [idHex, selectedId, setBreadcrumb]);
 
   useEffect(() => {
-    if (!inspectOpen || !preview || unlocked || detailLoading || needsGate || err) return;
+    if (preview || (selectedLabel && !inspectOpen)) return;
+    const controller = new AbortController();
+    explorePreview(idHex, { tenant, signal: controller.signal }).then(p => {
+      if (controller.signal.aborted) return;
+      setPreview(p);
+      setBreadcrumb({ entityLabel: p.label, entityId: p.id_hex });
+    }).catch(error => {
+      if (!controller.signal.aborted) setPreviewError(error instanceof Error ? error.message : String(error));
+    });
+    return () => controller.abort();
+  }, [idHex, selectedLabel, inspectOpen, preview, tenant, setBreadcrumb]);
+
+  useEffect(() => {
+    if (!inspectOpen || unlocked || detailLoading || needsGate || err) return;
     setDetailLoading(true);
     void exploreEntity(idHex, { tenant, quoteId: quote })
       .then((res) => {
@@ -155,7 +177,7 @@ export function EntityDetail() {
         setErr(e instanceof Error ? e.message : String(e));
       })
       .finally(() => setDetailLoading(false));
-  }, [inspectOpen, preview, unlocked, detailLoading, needsGate, err, idHex, tenant, quote]);
+  }, [inspectOpen, unlocked, detailLoading, needsGate, err, idHex, tenant, quote]);
 
   async function loadFull() {
     if (detailLoading) return;
@@ -264,8 +286,7 @@ export function EntityDetail() {
   }
 
   function askSubstrate() {
-    if (!preview) return;
-    setExploreSeedPrompt(`Tell me about "${preview.label}" in the substrate consensus graph.`);
+    setExploreSeedPrompt(`Tell me about "${preview?.label ?? selectedLabel ?? idHex}" in the substrate consensus graph.`);
     nav('/chat');
   }
 
@@ -289,15 +310,12 @@ export function EntityDetail() {
     return [];
   }, [neighbors, neighborsUnlocked, neighborMode]);
 
-  if (err && !preview) return <ErrorText>{err}</ErrorText>;
-  if (!preview) return <LoadingText>Loading entity…</LoadingText>;
-
   const show = entity;
   const fillTab = unlocked && (tab === 'graph' || tab === 'glome');
 
   return (
-    <div className={cn(styles.detail, fillTab && styles.detailFill)}>
-      <EntityHeader
+    <WorldProjection><div className={cn(styles.detail, fillTab && styles.detailFill)}>
+      {preview ? <EntityHeader
         preview={preview}
         copied={copied}
         unlocked={unlocked}
@@ -305,20 +323,30 @@ export function EntityDetail() {
         onCopyId={copyId}
         onExport={() => void downloadExport()}
         onAskSubstrate={askSubstrate}
-      />
+      /> : <header className={styles.header}><div><h2>{selectedLabel ?? idHex}</h2><Button variant="ghost" size="sm" onClick={copyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button></div><Button variant="ghost" onClick={askSubstrate}>Ask substrate</Button></header>}
 
-      {lexiconGated ? <GatePrompt serviceId="inspect" label="Read recorded meanings, usage and relationships." onReady={() => setLexiconAttempt(value => value + 1)} />
-        : <LexiconEntry key={idHex} field={lexicon} error={lexiconError} onRetry={() => setLexiconAttempt(value => value + 1)} />}
+      <NavTabs label="Subject presentations" tabs={availablePresentations.map(item => ({ id: item.id, label: item.label, active: item.id === presentation.id,
+        href: `${location.pathname}?${changeWorld(params, { presentation: item.id })}`,
+        onClick: () => setParams(changeWorld(params, { presentation: item.id === 'knowledge' ? 'knowledge' : item.id }), { preventScrollReset: true }) }))} />
+      {preview?.exists === false && <p role="status">This preview did not report the addressed content as present. The reference is retained; calculating an identity alone does not establish recorded knowledge.</p>}
+      {requestedPresentation && !presentations.some(item => item.id === requestedPresentation) && <ErrorText>The requested presentation “{requestedPresentation}” is unavailable. Its reference has been retained.</ErrorText>}
+      {presentation.render ? <Suspense fallback={<LoadingText>Reading subject presentation…</LoadingText>}>{presentation.render(idHex)}</Suspense>
+        : lexiconGated ? <GatePrompt serviceId="inspect" label="Read recorded meanings, usage and relationships." onReady={() => setLexiconAttempt(value => value + 1)} />
+          : <LexiconEntry key={idHex} field={lexicon} error={lexiconError} onRetry={() => setLexiconAttempt(value => value + 1)} />}
 
-      <details className={styles.inspector} open={inspectOpen} onToggle={event => setInspectOpen(event.currentTarget.open)}>
-        <summary>Inspect source records</summary>
+      <details className={styles.inspector} open={inspectOpen} onToggle={event => {
+        const open = event.currentTarget.open;
+        if (open !== inspectOpen) setParams(changeWorld(params, { inspect: open ? '1' : null, detail: open ? params.get('detail') : null }), { preventScrollReset: true });
+      }}>
+        <summary>Structure, standing and evidence</summary>
+        {previewError && <ErrorText>Entity metadata: {previewError}</ErrorText>}
 
       {inspectOpen && !unlocked ? (
         <>
           <Panel title="Preview">
             {detailLoading ? <LoadingText>Loading detail…</LoadingText> : null}
             <ul className={styles.previewFacts}>
-              {preview.preview_facts.map((f, i) => (
+              {preview?.preview_facts.map((f, i) => (
                 <li key={i}>
                   <RelationChip type={f.type} label={f.fact} mu={f.eff_mu} witnesses={f.witnesses} />
                 </li>
@@ -343,10 +371,12 @@ export function EntityDetail() {
       {inspectOpen && unlocked && show ? (
         <>
           <NavTabs
+            label="Entity inspection views"
             tabs={TAB_IDS.map((t) => ({
               id: t,
               label: t,
               active: tab === t,
+              href: `${location.pathname}?${changeWorld(params, { detail: t === 'overview' ? null : t, inspect: '1' })}`,
               onIntent: () => { void TAB_PREFETCH[t](); },
               onClick: () => setTab(t),
             }))}
@@ -362,7 +392,7 @@ export function EntityDetail() {
                 edgesOut={show.consensus_out}
                 edgesIn={show.consensus_in}
                 walkPath={walkPath}
-                onNodeClick={(id) => nav(`/explore/entity/${id}`)}
+                onNodeClick={(id) => nav(entityDestination(id, location), { preventScrollReset: true })}
               />
             ) : null}
             {tab === 'glome' ? (
@@ -413,43 +443,6 @@ export function EntityDetail() {
 
       {err ? <ErrorText>{err}</ErrorText> : null}
       </details>
-    </div>
+    </div></WorldProjection>
   );
-}
-
-export function ResolveRedirect() {
-  const ref = useRouteText('/explore/resolve/:ref', 'ref');
-  const nav = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const surface = ref;
-    setError(null);
-    exploreResolve(surface)
-      .then((r) =>
-        // A resolvable-but-unwitnessed reference (exists=false) has no entity
-        // page to show; route to the not-found explorer, which navigates by the
-        // computed geometric anchor instead of a dead id.
-        r.exists
-          ? nav(`/explore/entity/${r.id_hex}`, { replace: true })
-          : nav(`/explore/notfound/${encodeURIComponent(surface)}`, { replace: true }),
-      )
-      .catch((reason) => {
-        if (reason instanceof ApiError && reason.status === 404) {
-          nav(`/explore/notfound/${encodeURIComponent(surface)}`, { replace: true });
-          return;
-        }
-        setError(reason instanceof ApiError && reason.status === 503
-          ? 'Search is temporarily unavailable. Try this reference again in a moment.'
-          : reason instanceof Error ? reason.message : String(reason));
-      });
-  }, [ref, nav]);
-  if (error) {
-    return (
-      <div>
-        <ErrorText role="alert">{error}</ErrorText>
-        <Link to="/explore">Return to warehouse search</Link>
-      </div>
-    );
-  }
-  return <LoadingText>Resolving…</LoadingText>;
 }

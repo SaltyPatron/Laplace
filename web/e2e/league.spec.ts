@@ -40,6 +40,13 @@ test('Home preserves ordered Native claims and counted repeated parts', async ({
   for (const part of four.parts) await expect(row).toContainText(part.label!);
   await expect(page.locator(`[data-claim-id="${repeated.claim_id}"]`)).toContainText('hypernym × 2');
   await expect(row).toContainText('1 wit');
+  await row.getByText('Ordered assertion members', { exact: true }).click();
+  const members = row.getByRole('listitem');
+  await expect(members).toHaveCount(four.parts.length);
+  for (const [ordinal, part] of four.parts.entries()) {
+    await expect(members.nth(ordinal).getByRole('link')).toHaveAttribute('href', new RegExp(`selected=${part.id}`));
+  }
+  await expect(row.locator('code')).toHaveText(four.trajectory);
 });
 
 // Head-to-head: the tale of the tape from contrast() renders both cards.

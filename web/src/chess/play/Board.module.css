@@ -192,6 +192,10 @@
     text-shadow: 0 1px 3px rgba(255, 255, 255, 0.45);
   }
 
+  .boardRow {
+    display: contents;
+  }
+
   .square {
     display: flex;
     align-items: center;

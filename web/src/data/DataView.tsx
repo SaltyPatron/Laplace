@@ -52,7 +52,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
   ];
   return <div className={styles.page}>
     <header><h2>Data workspace</h2><p>Select files or author content, admit through the existing native text/code path, then open the returned records and bytes.</p>
-      <Link to="/explore/warehouse">Browse sources</Link>{' · '}<Link to="/operator?section=ingest">Ingestion runs</Link>{' · '}<Link to="/operator?section=ops">Installed operations</Link></header>
+      <Link to="/explore/sources">Browse sources</Link>{' · '}<Link to="/operator?section=ingest">Ingestion runs</Link>{' · '}<Link to="/operator?section=ops">Installed operations</Link></header>
     <div className={styles.inputs}>
       <Panel title="Select local files"><div className={styles.stack}>
         <Field label="Admission mode" help="Text accepts valid UTF-8 documents. Code / structured uses the server's registered grammar for each relative path extension; unsupported grammars are reported, not guessed.">

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { changeWorld } from '../../world/context';
 import { Button, LookupRow } from '@ui';
 import styles from './SearchBar.module.css';
 
@@ -26,6 +27,7 @@ export function SearchBar({
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
+  const [current] = useSearchParams();
 
   useEffect(() => {
     if (!shortcut) return;
@@ -41,10 +43,9 @@ export function SearchBar({
   }, [shortcut]);
 
   function submit() {
-    const ref = q.trim();
-    if (!ref) return;
-    const params = new URLSearchParams({ q: ref });
-    if (destination === 'mesh') params.set('view', 'mesh');
+    if (!q.trim()) return;
+    const params = changeWorld(current, { q, selected: null, answer: null, offset: null, games_offset: null,
+      presentation: destination === 'mesh' ? 'mesh' : null, detail: null, inspect: null });
     nav(`/explore?${params.toString()}`);
   }
 

@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useRef } from 'react';
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { decodeRouteText } from '../layout/useRouteText';
+import { changeWorld } from '../world/context';
 import { Breadcrumb } from './components/Breadcrumb';
 import { LoadingText } from '@ui';
 import { useExploreStore } from './store';
@@ -20,7 +21,6 @@ const loadLayer = () => import('./highway/LayerPage');
 const loadMatchup = () => import('./matchup/MatchupView');
 const loadMesh = () => import('./mesh/MeshView');
 const loadWalk = () => import('./walk/WalkPanel');
-const loadTopic = () => import('../topic/TopicView');
 const loadQuery = () => import('../query/QueryConsole');
 const loadProof = () => import('./proof/StorageProofView');
 const loadUnicode = () => import('./unicode/UnicodeGlomeView');
@@ -40,54 +40,46 @@ const LayerPage = lazy(() => loadLayer().then((m) => ({ default: m.LayerPage }))
 const MatchupView = lazy(() => loadMatchup().then((m) => ({ default: m.MatchupView })));
 const MeshView = lazy(() => loadMesh().then((m) => ({ default: m.MeshView })));
 const WalkPanel = lazy(() => loadWalk().then((m) => ({ default: m.WalkPanel })));
-const TopicView = lazy(() => loadTopic().then((m) => ({ default: m.TopicView })));
 const QueryConsole = lazy(() => loadQuery().then((m) => ({ default: m.QueryConsole })));
 const StorageProofView = lazy(() => loadProof().then((m) => ({ default: m.StorageProofView })));
 const UnicodeGlomeView = lazy(() => loadUnicode().then((m) => ({ default: m.UnicodeGlomeView })));
 const ArchitectureView = lazy(() => loadArchitecture().then((m) => ({ default: m.ArchitectureView })));
 
-const EXPLORE_PREFETCH: Record<string, () => Promise<unknown>> = {
-  '/explore': loadBrowse,
-  '/explore/highway': loadHighway,
-  '/explore/mesh': loadMesh,
-  '/explore/warehouse': loadWarehouse,
-  '/explore/matchup': loadMatchup,
-  '/explore/constellation': loadConstellation,
-  '/explore/walk': loadWalk,
-  '/explore/audit': loadAudit,
-  '/topic': loadTopic,
-  '/query': loadQuery,
-  '/proof': loadProof,
-  '/unicode': loadUnicode,
-  '/explore/architecture': loadArchitecture,
-};
-
-/** Explore's tools, grouped by what they do with the one admitted world. */
-const NAV_GROUPS: { title: string; items: readonly (readonly [string, string])[] }[] = [
-  { title: 'Find', items: [['Browse', '/explore'], ['Read a topic', '/topic'], ['Structured read', '/query'], ['Matchup', '/explore/matchup']] },
-  { title: 'Structure', items: [['Mesh', '/explore/mesh'], ['Highway', '/explore/highway'], ['Warehouse', '/explore/warehouse'], ['Constellation', '/explore/constellation'], ['Tier-0 glome', '/unicode']] },
-  { title: 'Execution', items: [['Architecture & operations', '/explore/architecture'], ['Walk', '/explore/walk'], ['Storage proof', '/proof'], ['Audit', '/explore/audit']] },
-];
-
-/** Pages that live at their own address but belong to Explore's layout. */
+/** Shared read layout for existing route addresses. */
 export type ExplorePage = 'topic' | 'query' | 'proof' | 'unicode';
+
+function TopicWorkspace() {
+  const { ref } = useParams();
+  const { search } = useLocation();
+  const value = ref ? decodeRouteText(ref) : null;
+  const params = changeWorld(new URLSearchParams(search), value ? { q: value, ...(/^[a-f0-9]{32}$/i.test(value) ? { selected: value } : {}) } : {});
+  return <Navigate to={`/explore${params.size ? '?' + params : ''}`} replace />;
+}
+
+function WarehouseWorkspace() {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  return ['source', 'sources', 'stage', 'layer', 'role'].some(key => params.has(key))
+    ? <Navigate to={`/explore/sources${search}`} replace /> : <BrowseHome />;
+}
 
 function ExploreBreadcrumb() {
   const { pathname } = useLocation();
   const crumb = useExploreStore((s) => s.breadcrumb);
-  const segments: { label: string; to?: string }[] = [{ label: 'Browse', to: '/explore' }];
+  const segments: { label: string; to?: string }[] = [{ label: 'Knowledge', to: '/explore' }];
+  if (pathname === '/explore/sources') segments.push({ label: 'Sources' });
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
   if (pathname.startsWith('/explore/architecture')) segments.push({ label: 'Architecture & operations' });
   if (stageMatch) {
     const stage = decodeRouteText(stageMatch[1]);
-    segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
+    segments.push({ label: 'Sources', to: '/explore/sources' });
     segments.push({ label: stage, to: `/explore/stage/${stageMatch[1]}` });
   }
   const sourceMatch = pathname.match(/\/explore\/source\/([^/]+)/);
   if (sourceMatch) {
     const source = decodeRouteText(sourceMatch[1]);
-    segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
+    segments.push({ label: 'Sources', to: '/explore/sources' });
     if (crumb.stage) segments.push({ label: crumb.stage, to: `/explore/stage/${encodeURIComponent(crumb.stage)}` });
     segments.push({ label: source, to: `/explore/source/${sourceMatch[1]}` });
   }
@@ -100,46 +92,15 @@ function ExploreBreadcrumb() {
 }
 
 export function ExploreView({ page }: { page?: ExplorePage }) {
-  const navigation = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const mobile = window.matchMedia('(max-width: 700px)');
-    const resize = () => { if (navigation.current) navigation.current.open = !mobile.matches; };
-    resize();
-    mobile.addEventListener('change', resize);
-    return () => mobile.removeEventListener('change', resize);
-  }, []);
   return (
     <div className={styles.layout}>
-      <aside className={styles.sidebar}>
-        <details ref={navigation} className={styles.navDisclosure} open>
-          <summary className={styles.navSummary}>Explore tools</summary>
-          <nav className={styles.nav} aria-label="Explore tools">
-            {NAV_GROUPS.map((group) => (
-              <div key={group.title} className={styles.navGroup}>
-                <span className={styles.navGroupTitle}>{group.title}</span>
-                {group.items.map(([label, to]) => (
-                  <NavLink
-                    key={to}
-                    className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
-                    to={to}
-                    onPointerEnter={() => { void EXPLORE_PREFETCH[to]?.(); }}
-                    onFocus={() => { void EXPLORE_PREFETCH[to]?.(); }}
-                    end={to === '/explore' || to === '/explore/warehouse'}
-                  >
-                    {label}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
-          </nav>
-        </details>
-      </aside>
       <div className={styles.content}>
         {!page && <ExploreBreadcrumb />}
-        <Suspense fallback={<LoadingText>Loading Explore tool…</LoadingText>}>
-        {page === 'topic' ? <TopicView /> : page === 'query' ? <QueryConsole /> : page === 'proof' ? <StorageProofView /> : page === 'unicode' ? <UnicodeGlomeView /> : <Routes>
+        <Suspense fallback={<LoadingText>Loading knowledge workspace…</LoadingText>}>
+        {page === 'topic' ? <TopicWorkspace /> : page === 'query' ? <QueryConsole /> : page === 'proof' ? <StorageProofView /> : page === 'unicode' ? <UnicodeGlomeView /> : <Routes>
           <Route index element={<BrowseHome />} />
-          <Route path="warehouse" element={<WarehouseHome />} />
+          <Route path="warehouse" element={<WarehouseWorkspace />} />
+          <Route path="sources" element={<WarehouseHome />} />
           <Route path="constellation" element={<ConstellationView />} />
           <Route path="stage/:stageId" element={<StageBrowse />} />
           <Route path="source/:sourceKey" element={<SourceBrowse />} />

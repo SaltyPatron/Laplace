@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { changeWorld } from '../../world/context';
 import { useRouteText } from '../../layout/useRouteText';
 import { LoadingText } from '@ui';
 
@@ -14,6 +15,7 @@ const ENTITY_HEX = /^[0-9a-f]{32}$/i;
 export function ResolveBrowseRedirect() {
   const ref = useRouteText('/explore/resolve/:ref', 'ref');
   const nav = useNavigate();
+  const { search } = useLocation();
 
   useEffect(() => {
     const surface = ref.trim();
@@ -22,12 +24,13 @@ export function ResolveBrowseRedirect() {
       return;
     }
     if (ENTITY_HEX.test(surface)) {
-      nav(`/explore/entity/${surface.toLowerCase()}`, { replace: true });
+      const params = new URLSearchParams(search);
+      nav(`/explore?${changeWorld(params, { q: params.get('q') || surface.toLowerCase(), selected: surface.toLowerCase(), answer: null })}`, { replace: true });
       return;
     }
-    const params = new URLSearchParams({ q: surface });
+    const params = changeWorld(new URLSearchParams(search), { q: ref, selected: null, answer: null, offset: null });
     nav(`/explore?${params.toString()}`, { replace: true });
-  }, [ref, nav]);
+  }, [ref, search, nav]);
 
   return <LoadingText>Opening Browse…</LoadingText>;
 }

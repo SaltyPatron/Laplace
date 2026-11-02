@@ -62,6 +62,27 @@
 
 .entityLink {
   font-weight: 700;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.criteria > summary { cursor: pointer; font-weight: 600; }
+.criteriaFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-3); margin: var(--space-3) 0; }
+.methodChoices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--space-2); border: 1px solid var(--color-border-default); padding: var(--space-3); margin-bottom: var(--space-3); }
+.methodChoices small { color: var(--color-text-muted); }
+.facets { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.readErrors { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); }
+.selected { background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-panel)); }
+.standing { display: block; margin-top: 0.4rem; color: var(--color-text-muted); }
+.receiptDetails > summary { font-size: var(--text-sm); color: var(--color-text-muted); cursor: pointer; }
+.claimTrajectory { max-width: 100%; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .hasSelection > header { display: none; } }
+@media (max-width: 700px) {
+  .resultsTable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .resultsTable tbody { display: block; }
+  .resultsTable tr { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--color-border-default); }
+  .resultsTable td { border: 0; min-width: 0; overflow-wrap: anywhere; }
+  .resultsTable td:first-child { grid-column: 1 / -1; }
+  .resultsTable td[data-label]::before { content: attr(data-label); display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
 }
 
 .empty {

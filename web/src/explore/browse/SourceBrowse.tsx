@@ -6,40 +6,46 @@ import { ResultWorkspace, type ResultColumn } from '../../ui/composites/ResultWo
 import { captureRows } from '../../ui/lib/resultRows';
 import { useAppStore } from '../../store';
 import { exploreCatalog, exploreSourceRoster } from '../api';
-import { StatCard } from '../components/StatCard';
 import { useExploreStore } from '../store';
+import { EntityLink } from '../components/EntityLink';
 import type { ExploreSourceRow, SourceRosterRow } from '../types';
 import styles from '../catalog/WarehouseHome.module.css';
 
 /** Catalog, selected source and sampled testimony have separate read scopes. */
-export function SourceBrowse() {
-  const sourceKey = useRouteText('/explore/source/:sourceKey', 'sourceKey');
+export function SourceBrowse({ selectedSource, selectedSourceId }: { selectedSource?: string; selectedSourceId?: string } = {}) {
+  const routeSource = useRouteText('/explore/source/:sourceKey', 'sourceKey');
+  const sourceKey = selectedSource ?? routeSource;
   const { tenant, quoteId, authUser } = useAppStore();
-  return <SourceWorkspace key={JSON.stringify([tenant, authUser?.id, sourceKey])} sourceKey={sourceKey} tenant={tenant} quoteId={quoteId} />;
+  const sourceId = selectedSourceId ?? (/^[0-9a-f]{32}$/i.test(routeSource) ? routeSource : undefined);
+  return <SourceWorkspace key={JSON.stringify([tenant, authUser?.id, sourceId, sourceKey])} sourceKey={sourceKey} sourceId={sourceId} tenant={tenant} quoteId={quoteId} />;
 }
-function SourceWorkspace({ sourceKey, tenant, quoteId }: { sourceKey: string; tenant: string; quoteId: string }) {
+function SourceWorkspace({ sourceKey, sourceId, tenant, quoteId }: { sourceKey: string; sourceId?: string; tenant: string; quoteId: string }) {
   const setBreadcrumb = useExploreStore((state) => state.setBreadcrumb);
   const catalog = useReadResource({
     key: JSON.stringify(['source-catalog', tenant, quoteId]),
     read: (signal) => exploreCatalog({ tenant, quoteId, signal }),
   });
-  const source = catalog.data?.sources.find((item) => item.key === sourceKey);
+  const matches = catalog.data?.sources.filter(item => sourceId ? item.id_hex === sourceId : item.key === sourceKey) ?? [];
+  const source = matches.length === 1 ? matches[0] : undefined;
   useEffect(() => {
-    setBreadcrumb({ stage: source?.stage ?? undefined, source: sourceKey });
-  }, [source?.stage, sourceKey, setBreadcrumb]);
+    setBreadcrumb({ stage: source?.stage ?? undefined, source: source?.key ?? sourceKey });
+  }, [source?.stage, source?.key, sourceKey, setBreadcrumb]);
   return <Stack gap={4}>
-    <Panel title={sourceKey || 'Source'} actions={<Button variant="ghost" onClick={() => void catalog.refresh()}>Refresh source</Button>}>
+    <Panel title={source?.key || sourceKey || 'Source'} actions={<Button variant="ghost" onClick={() => void catalog.refresh()}>Refresh source</Button>}>
       <ReadStatus label="Source catalog" resource={catalog} />
-      {catalog.data && !source && <><ErrorText>No source named “{sourceKey}” was returned by this catalog.</ErrorText><Link to="/explore/warehouse">Browse available sources</Link></>}
+      {catalog.data && !matches.length && <><ErrorText>No source matches “{sourceId ?? sourceKey}” in this catalogue.</ErrorText><Link to="/explore/sources">Browse available sources</Link></>}
+      {matches.length > 1 && <><p>Several source records have this name. Select the source identity:</p><ul>{matches.map(item => <li key={item.id_hex}><Link to={`/explore/source/${item.id_hex}`}>{item.key} · {item.id_hex}</Link></li>)}</ul></>}
       {source && <>
-        <Muted>Stage {source.stage ?? 'Not recorded'} · Layer {source.layer ?? 'Not recorded'}</Muted>
-        <div className={styles.statGrid}>
-          <StatCard label="Attestations" value={source.evidence?.toLocaleString() ?? 'Not measured'} />
-          <StatCard label="Content entities" value={source.content?.toLocaleString() ?? 'Not recorded'} />
-        </div>
+        {source.id_hex && <p><strong>Source ID</strong><br /><code>{source.id_hex}</code></p>}
+        <dl className={styles.sourceFacts}>
+          {source.stage && <div><dt>Stage</dt><dd>{source.stage}</dd></div>}
+          {source.layer && <div><dt>Layer</dt><dd>{source.layer}</dd></div>}
+          <div><dt>Attestations</dt><dd>{source.evidence?.toLocaleString() ?? 'Not measured'}</dd></div>
+          <div><dt>Content entities</dt><dd>{source.content?.toLocaleString() ?? 'Not recorded'}</dd></div>
+        </dl>
         {source.role && <Muted>{source.role}</Muted>}
         <p><Link to={`/operator?section=ingest&source=${encodeURIComponent(source.key)}`}>View ingestion receipts</Link>
-          {source.id_hex && <> · <Link to={`/explore/entity/${source.id_hex}`}>Inspect source entity</Link></>}</p>
+          {source.id_hex && <> · <EntityLink idHex={source.id_hex} label="Inspect source entity" /></>}</p>
       </>}
     </Panel>
     {source && <SourceRows key={JSON.stringify([source.id_hex, tenant, quoteId])} source={source} tenant={tenant} quoteId={quoteId} />}
@@ -56,16 +62,16 @@ function SourceRows({ source, tenant, quoteId }: { source: ExploreSourceRow; ten
     },
   });
   const columns: ResultColumn<SourceRosterRow>[] = [
-    { key: 'subject', label: 'Subject', render: (row) => row.subject_id ? <Link to={`/explore/entity/${row.subject_id}`}>{row.subject || row.subject_id}</Link> : row.subject },
+    { key: 'subject', label: 'Subject', render: (row) => row.subject_id ? <EntityLink idHex={row.subject_id} label={row.subject || row.subject_id} /> : row.subject },
     { key: 'relation', label: 'Relation' },
-    { key: 'object', label: 'Object', render: (row) => row.object_id ? <Link to={`/explore/entity/${row.object_id}`}>{row.object || row.object_id}</Link> : row.object },
+    { key: 'object', label: 'Object', render: (row) => row.object_id ? <EntityLink idHex={row.object_id} label={row.object || row.object_id} /> : row.object },
     { key: 'observations', label: 'Observations' },
   ];
-  return <Panel title="What this source asserts" expandable actions={<Button variant="ghost" disabled={!source.id_hex} onClick={() => void roster.refresh()}>Refresh assertions</Button>}>
+  return <Panel title="Assertions" expandable actions={<Button variant="ghost" disabled={!source.id_hex} onClick={() => void roster.refresh()}>Refresh assertions</Button>}>
     {!source.id_hex ? <Muted>No source ID was returned. The testimony read is unavailable.</Muted> : <>
       <label>Requested assertion sample <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[40, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
       <ReadStatus label="Source assertions" resource={roster} />
-      {roster.data && <ResultWorkspace scopeKey={JSON.stringify([tenant, source.id_hex])} label="Source assertions" snapshot={roster.data} columns={columns}
+      {roster.data && <ResultWorkspace compact scopeKey={JSON.stringify([tenant, source.id_hex])} label="Source assertions" snapshot={roster.data} columns={columns}
         rowLabel={(row, index) => `${row.subject} · ${row.relation} · ${row.object} (row ${index + 1})`}
         filterText={params.get('q') ?? ''} onFilterTextChange={(value) => {
           const next = new URLSearchParams(params); if (value) next.set('q', value); else next.delete('q'); setParams(next, { replace: true });

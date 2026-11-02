@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { WorldLink as RouterLink } from '../../world/WorldLink';
+import { changeWorld } from '../../world/context';
 import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel, useReadResource } from '@ui';
 import { exploreMatchup, exploreMatchupVerdict, exploreResponseField, exploreLexicon } from '../../query/api';
@@ -14,10 +16,12 @@ import styles from './MatchupView.module.css';
  * When the server attaches a `chess` record to a side, that side shows its witnessed game
  * record and peak source Elo from the folded game results.
  */
-export function MatchupView() {
-  const x = useRouteText('/explore/matchup/:x/:y', 'x');
-  const y = useRouteText('/explore/matchup/:x/:y', 'y');
-  const [params] = useSearchParams();
+export function MatchupView({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
+  const routeX = useRouteText('/explore/matchup/:x/:y', 'x');
+  const routeY = useRouteText('/explore/matchup/:x/:y', 'y');
+  const [params, setParams] = useSearchParams();
+  const x = selectedId ?? routeX;
+  const y = embedded ? params.get('other') ?? '' : routeY;
   const nav = useNavigate();
   const { tenant, quoteId } = useAppStore();
 
@@ -85,6 +89,10 @@ export function MatchupView() {
 
   const submit = () => {
     if (!xInput.trim() || !yInput.trim()) return;
+    if (embedded) {
+      setParams(changeWorld(params, { other: yInput.trim() }), { preventScrollReset: true });
+      return;
+    }
     nav(`/explore/matchup/${encodeURIComponent(xInput.trim())}/${encodeURIComponent(yInput.trim())}`);
   };
 
@@ -94,7 +102,7 @@ export function MatchupView() {
         className={styles.picker}
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
-        <Input aria-label="first entity" value={xInput} placeholder="dog" onChange={(e) => setXInput(e.target.value)} />
+        <Input aria-label="first entity" value={xInput} placeholder="dog" readOnly={embedded} onChange={(e) => setXInput(e.target.value)} />
         <span className={styles.vs}>vs</span>
         <Input aria-label="second entity" value={yInput} placeholder="cat" onChange={(e) => setYInput(e.target.value)} />
         <Button type="submit" disabled={!xInput.trim() || !yInput.trim()}>Compare</Button>
