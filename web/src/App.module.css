@@ -9,8 +9,8 @@
     flex-direction: column;
   }
 
-  /* Product workspaces are always above ambient decoration. The familiar is allowed
-     in exposed page gutters, never over inputs, buttons, tables, boards, or transcripts. */
+  /* Ambient familiar is pointer-events: none; keep shell content in normal flow
+     and layer the familiar above panels/cards while keeping modals and skip links higher. */
   .main {
     position: relative;
     z-index: 1;

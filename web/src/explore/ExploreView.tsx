@@ -64,10 +64,25 @@ function WarehouseWorkspace() {
 }
 
 function ExploreBreadcrumb() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const params = new URLSearchParams(search);
   const crumb = useExploreStore((s) => s.breadcrumb);
-  const segments: { label: string; to?: string }[] = [{ label: 'Knowledge', to: '/explore' }];
+  const searchHref = `/explore${params.get('q') ? `?q=${encodeURIComponent(params.get('q')!)}` : ''}`;
+  const segments: { label: string; to?: string }[] = [{ label: 'Knowledge', to: searchHref }];
   if (pathname === '/explore/sources') segments.push({ label: 'Sources' });
+  if (pathname === '/explore/highway') segments.push({ label: 'Highway' });
+  const highwayMatch = pathname.match(/\/explore\/highway\/([^/]+)/);
+  if (highwayMatch) {
+    segments.push({ label: 'Highway', to: '/explore/highway' });
+    segments.push({ label: decodeRouteText(highwayMatch[1]) });
+  }
+  if (pathname.startsWith('/explore/constellation')) segments.push({ label: 'Constellation' });
+  if (pathname.startsWith('/unicode')) segments.push({ label: 'Unicode Glome' });
+  if (pathname.startsWith('/proof')) segments.push({ label: 'Storage Proof' });
+  if (pathname.startsWith('/explore/walk')) segments.push({ label: 'Forward Trace' });
+  if (pathname === '/explore/mesh' || pathname.startsWith('/explore/mesh/')) segments.push({ label: 'Mesh', to: '/explore/mesh' });
+  if (pathname === '/explore/matchup' || pathname.startsWith('/explore/matchup/')) segments.push({ label: 'Matchup', to: '/explore/matchup' });
+  if (pathname.startsWith('/explore/audit')) segments.push({ label: 'Audit' });
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
   if (pathname.startsWith('/explore/architecture')) segments.push({ label: 'Architecture & operations' });
@@ -105,20 +120,64 @@ const EXPLORE_SECTIONS = [
   { id: 'architecture', label: 'Architecture', path: '/explore/architecture', load: loadArchitecture, match: (p: string) => p.startsWith('/explore/architecture') },
 ] as const;
 
+function sectionDestination(sectionId: (typeof EXPLORE_SECTIONS)[number]['id'], basePath: string, pathname: string, search: string, crumb: { entityLabel?: string; entityId?: string }): string {
+  const params = new URLSearchParams(search);
+  const entityMatch = pathname.match(/^\/explore\/(?:entity|mesh)\/([0-9a-f]{32})$/i);
+  const matchupMatch = pathname.match(/^\/explore\/matchup\/([^/]+)\/([^/]+)$/);
+  const activeEntityId = params.get('selected') ?? entityMatch?.[1] ?? null;
+  const activeSubject = (entityMatch && crumb.entityId === entityMatch[1] && crumb.entityLabel ? crumb.entityLabel : null)
+    ?? params.get('q')
+    ?? params.get('x')
+    ?? (matchupMatch ? decodeRouteText(matchupMatch[1]) : null)
+    ?? activeEntityId;
+  const secondSubject = params.get('other') ?? params.get('y') ?? (matchupMatch ? decodeRouteText(matchupMatch[2]) : null);
+
+  if (sectionId === 'search') {
+    const next = new URLSearchParams();
+    for (const [k, v] of params.entries()) {
+      if (!['x', 'y', 'source', 'sources', 'entity', 'diagram', 'operation', 'section', 'file', 'expected'].includes(k)) next.append(k, v);
+    }
+    if (!next.has('q') && activeSubject && !pathname.startsWith('/explore/architecture')) next.set('q', activeSubject);
+    if (!next.has('selected') && activeEntityId) next.set('selected', activeEntityId);
+    return next.size ? `/explore?${next}` : '/explore';
+  }
+  if (sectionId === 'proof') {
+    return activeSubject && !pathname.startsWith('/explore/architecture') ? `/proof?q=${encodeURIComponent(activeSubject)}` : '/proof';
+  }
+  if (sectionId === 'mesh') {
+    if (activeEntityId) return `/explore/mesh/${activeEntityId}`;
+    return params.get('q') && !pathname.startsWith('/explore/architecture') ? `/explore/mesh?q=${encodeURIComponent(params.get('q')!)}` : '/explore/mesh';
+  }
+  if (sectionId === 'matchup') {
+    if (activeSubject && secondSubject && !pathname.startsWith('/explore/architecture')) {
+      return `/explore/matchup/${encodeURIComponent(activeSubject)}/${encodeURIComponent(secondSubject)}`;
+    }
+    if (activeSubject && !pathname.startsWith('/explore/architecture')) {
+      return `/explore/matchup?x=${encodeURIComponent(activeSubject)}`;
+    }
+    return '/explore/matchup';
+  }
+  return basePath;
+}
+
 function ExploreSubnav() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
+  const crumb = useExploreStore((s) => s.breadcrumb);
   return (
     <NavTabs
       label="Knowledge sections"
-      tabs={EXPLORE_SECTIONS.map((section) => ({
-        id: section.id,
-        label: section.label,
-        href: section.path,
-        active: section.match(pathname),
-        onIntent: () => { void section.load(); },
-        onClick: () => navigate(section.path),
-      }))}
+      tabs={EXPLORE_SECTIONS.map((section) => {
+        const target = sectionDestination(section.id, section.path, pathname, search, crumb);
+        return {
+          id: section.id,
+          label: section.label,
+          href: target,
+          active: section.match(pathname),
+          onIntent: () => { void section.load(); },
+          onClick: () => navigate(target),
+        };
+      })}
     />
   );
 }
@@ -128,7 +187,7 @@ export function ExploreView({ page }: { page?: ExplorePage }) {
     <div className={styles.layout}>
       <div className={styles.content}>
         <ExploreSubnav />
-        {!page && <ExploreBreadcrumb />}
+        <ExploreBreadcrumb />
         <Suspense fallback={<LoadingText>Loading knowledge workspace…</LoadingText>}>
         {page === 'topic' ? <TopicWorkspace /> : page === 'query' ? <QueryConsole /> : page === 'proof' ? <StorageProofView /> : page === 'unicode' ? <UnicodeGlomeView /> : <Routes>
           <Route index element={<BrowseHome />} />

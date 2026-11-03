@@ -3,11 +3,10 @@ import { expect, test } from '@playwright/test';
 test.describe('ambient familiar', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('responds to explicit visit and swim signals without capturing or covering the workspace', async ({ page }) => {
+  test('responds to explicit visit and swim signals without capturing input or clipping behind panels', async ({ page }) => {
     await page.goto('/');
 
     const familiar = page.getByTestId('ambient-familiar');
-    const workspace = page.locator('#main-content');
     await expect(familiar).toBeVisible();
     await expect(familiar).toHaveCSS('pointer-events', 'none');
 
@@ -20,7 +19,7 @@ test.describe('ambient familiar', () => {
         workspace: Number.parseInt(getComputedStyle(workspaceNode).zIndex || '0', 10),
       };
     });
-    expect(stacking.workspace).toBeGreaterThan(stacking.familiar);
+    expect(stacking.familiar).toBeGreaterThan(stacking.workspace);
 
     await page.evaluate(() => {
       window.dispatchEvent(new CustomEvent('laplace:familiar', { detail: 'visit' }));

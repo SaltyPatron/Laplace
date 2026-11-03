@@ -2,9 +2,9 @@
   .layer {
     position: fixed;
     inset: 0;
-    /* Behind the workspace: ignoring pointer events is not enough, the familiar
-       must never visually cover composers, controls or cards. */
-    z-index: 0;
+    /* Above workspace panels so the sprite is never clipped behind opaque surfaces,
+       below tooltips (1000) and modals (1100), with pointer-events disabled. */
+    z-index: 900;
     overflow: hidden;
     pointer-events: none;
     contain: layout paint;

@@ -236,11 +236,15 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('rank'), 'confidence');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
   const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
+  await expect(inspectionViews.getByRole('link', { name: 'overview', exact: true })).not.toHaveAttribute('aria-current', 'page');
   await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
   await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
+  await expect(sections.getByRole('link', { name: 'Storage Proof', exact: true })).toHaveAttribute('href', '/proof?q=fixture');
+  await expect(sections.getByRole('link', { name: 'Mesh', exact: true })).toHaveAttribute('href', `/explore/mesh/${ids[1]}`);
   await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Full entity', exact: true })).toBeVisible();
   await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Prove storage', exact: true })).toBeVisible();
   await page.getByText('Structure, standing and evidence', { exact: true }).click();
+  await expect(inspectionViews.getByRole('link', { name: 'overview', exact: true })).toHaveAttribute('aria-current', 'page');
   await inspectionViews.getByRole('link', { name: 'structure', exact: true }).click();
   await page.reload();
   await expect(inspectionViews.getByRole('link', { name: 'structure', exact: true })).toHaveAttribute('aria-current', 'page');

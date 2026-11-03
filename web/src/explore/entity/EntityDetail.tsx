@@ -311,7 +311,7 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
   }, [neighbors, neighborsUnlocked, neighborMode]);
 
   const show = entity;
-  const fillTab = unlocked && (tab === 'graph' || tab === 'glome');
+  const fillTab = inspectOpen && unlocked && (tab === 'graph' || tab === 'glome');
 
   return (
     <WorldProjection><div className={cn(styles.detail, fillTab && styles.detailFill)}>
@@ -331,6 +331,7 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
       {preview?.exists === false && <p role="status">This preview did not report the addressed content as present. The reference is retained; calculating an identity alone does not establish recorded knowledge.</p>}
       {requestedPresentation && !presentations.some(item => item.id === requestedPresentation) && <ErrorText>The requested presentation “{requestedPresentation}” is unavailable. Its reference has been retained.</ErrorText>}
       {presentation.render ? <Suspense fallback={<LoadingText>Reading subject presentation…</LoadingText>}>{presentation.render(idHex)}</Suspense>
+        : fillTab ? null
         : lexiconGated ? <GatePrompt serviceId="inspect" label="Read recorded meanings, usage and relationships." onReady={() => setLexiconAttempt(value => value + 1)} />
           : <LexiconEntry key={idHex} field={lexicon} error={lexiconError} onRetry={() => setLexiconAttempt(value => value + 1)} />}
 
@@ -339,7 +340,7 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
         tabs={TAB_IDS.map((t) => ({
           id: t,
           label: t,
-          active: tab === t,
+          active: inspectOpen && tab === t,
           href: `${location.pathname}?${changeWorld(params, { detail: t === 'overview' ? null : t, inspect: '1' })}`,
           onIntent: () => { void TAB_PREFETCH[t](); },
           onClick: () => setTab(t),
