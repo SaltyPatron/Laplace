@@ -58,7 +58,7 @@ layer_label() {
 # The foundation batch and its order are declared once, in scripts/win/witness-manifest.json
 # (foundation.sources); each source's witness or decomposer, and its layer, come from
 # scripts/decomposer-gates.json through source-layer-complete.py.
-mapfile -t FOUNDATION < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["foundation"]["sources"]))' "$SCRIPTS/win/witness-manifest.json")
+mapfile -t FOUNDATION < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["foundation"]["sources"]))' "$SCRIPTS/win/witness-manifest.json" | tr -d '\r')
 [[ ${#FOUNDATION[@]} -gt 0 ]] || { echo "no foundation.sources in $SCRIPTS/win/witness-manifest.json" >&2; exit 2; }
 
 if [[ "$REQUIRED_LEXICAL" -eq 1 ]]; then

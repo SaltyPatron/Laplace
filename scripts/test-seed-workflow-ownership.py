@@ -209,24 +209,26 @@ class FoundationCompletion(unittest.TestCase):
 
     @staticmethod
     def completion(name):
-        """The ladder's own resolution: (completion key, diagnostic label). A recipe
-        source completes under its witness, a legacy decomposer under its source."""
+        """The ladder's own resolution: (native source name, legacy completion key, diagnostic label).
+        A recipe source completes under its Native receipt or witness, a legacy decomposer under its source."""
         line = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "source-layer-complete.py"), name],
             text=True, capture_output=True, check=True).stdout.strip()
         predicate, label = line.split("\t")
+        native = re.search(r"ops\.native_source_completed\('([^']+)'\)", predicate).group(1)
         witness = re.search(r"witness_id\('([^']+)', '([^']+)'\)", predicate)
         key = f"{witness.group(1)}@{witness.group(2)}" if witness else \
             re.search(r"source_id\('([^']+)'\)", predicate).group(1)
-        return key, label
+        return native, key, label
 
     SOURCES = {}
+    NATIVE_SOURCES = {}
     LABELS = {}
 
     @classmethod
     def setUpClass(cls):
         for name in cls.LADDER:
-            cls.SOURCES[name], cls.LABELS[name] = cls.completion(name)
+            cls.NATIVE_SOURCES[name], cls.SOURCES[name], cls.LABELS[name] = cls.completion(name)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="foundation-completion-")
@@ -251,6 +253,7 @@ class FoundationCompletion(unittest.TestCase):
             FOUNDATION_TEST_STATE=str(self.state),
             FOUNDATION_TEST_INGESTS=str(self.ingests),
             FOUNDATION_TEST_SOURCES=json.dumps(self.SOURCES),
+            FOUNDATION_TEST_NATIVE_SOURCES=json.dumps(self.NATIVE_SOURCES),
             FOUNDATION_TEST_OMIT="[]",
             FOUNDATION_TEST_INGEST_RC="0",
         )
@@ -260,12 +263,13 @@ from pathlib import Path
 query = sys.argv[-1]
 if "pg_database" in query:
     print("1")
-elif "ops.layer_completed" in query:
+elif "ops.native_source_completed" in query and "ops.layer_completed" in query:
+    native = re.search(r"ops\.native_source_completed\('([^']+)'\)", query).group(1)
     witness = re.search(r"laplace\.witness_id\('([^']+)', '([^']+)'\)", query)
     key = f"{witness.group(1)}@{witness.group(2)}" if witness else \
         re.search(r"laplace\.source_id\('([^']+)'\)", query).group(1)
     present = json.loads(Path(os.environ["FOUNDATION_TEST_STATE"]).read_text())
-    print("t" if key in present else "f")
+    print("t" if (native in present or key in present) else "f")
 elif "laplace.ingest_run_journal" in query:
     print("test journal: ingest returned without fabricating a completion marker")
 else:
@@ -283,20 +287,23 @@ if rc:
 state = Path(os.environ["FOUNDATION_TEST_STATE"])
 present = set(json.loads(state.read_text()))
 sources = json.loads(os.environ["FOUNDATION_TEST_SOURCES"])
+native_sources = json.loads(os.environ["FOUNDATION_TEST_NATIVE_SOURCES"])
 omitted = set(json.loads(os.environ["FOUNDATION_TEST_OMIT"]))
 for source in sys.argv[2:]:
     if source not in omitted:
-        present.add(sources[source])
+        present.add(native_sources[source] if source != "operational" else sources[source])
 state.write_text(json.dumps(sorted(present)))
 ''')
 
     def write_command(self, path, body):
-        path.write_text("#!" + sys.executable + "\n" + body, encoding="utf-8")
+        py = Path(sys.executable).as_posix()
+        path.write_text("#!" + py + "\n" + body, encoding="utf-8", newline="\n")
         path.chmod(0o700)
 
     def run_ladder(self, *, missing=(), omitted=(), args=(), ingest_rc=0):
         self.state.write_text(json.dumps([
-            source for key, source in self.SOURCES.items() if key not in missing
+            (self.NATIVE_SOURCES[key] if key != "operational" else source)
+            for key, source in self.SOURCES.items() if key not in missing
         ]), encoding="utf-8")
         self.env["FOUNDATION_TEST_OMIT"] = json.dumps(list(omitted))
         self.env["FOUNDATION_TEST_INGEST_RC"] = str(ingest_rc)
@@ -315,7 +322,8 @@ state.write_text(json.dumps(sorted(present)))
         self.assertEqual(self.calls(), [["framenet"]])
         self.assertIn("foundation complete: foundation-test", result.stdout)
         self.assertEqual(set(json.loads(self.state.read_text())),
-                         set(self.SOURCES.values()))
+                         {(self.NATIVE_SOURCES[k] if k != "operational" else v)
+                          for k, v in self.SOURCES.items()})
 
     def test_successful_ingest_without_markers_lists_every_remaining_source(self):
         result = self.run_ladder(
@@ -339,7 +347,7 @@ state.write_text(json.dumps(sorted(present)))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [["unicode", "iso639", "cili", "wordnet"]])
         self.assertEqual(set(json.loads(self.state.read_text())),
-                         {self.SOURCES[key] for key in
+                         {self.NATIVE_SOURCES[key] for key in
                           ("unicode", "iso639", "cili", "wordnet")})
         self.assertIn("foundation complete: foundation-test", result.stdout)
 

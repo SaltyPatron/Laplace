@@ -21,7 +21,8 @@ BEGIN
             SELECT FROM latest j
             JOIN public.witness w ON w.id::text = encode(j.source_id, 'hex')
             JOIN public.physicality p ON p.entity = w.id
-            WHERE NOT j.attestations_measured AND j.status = 'ok'
+            WHERE j.status = 'ok'
+              AND (NOT j.attestations_measured OR w.attestations IS NOT NULL)
               AND j.ended_at IS NOT NULL
               AND j.files_total > 0 AND j.files_done = j.files_total
         )

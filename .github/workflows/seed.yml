@@ -268,7 +268,7 @@ jobs:
               echo "::error::source eviction requires a complete source ingest" >&2
               exit 1
             }
-            src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
+            src_name=$(python3 -c 'import json,os; from scripts.ingest_catalog import canonical_source; key=canonical_source(os.environ["SOURCE_KEY"]); x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(key); print(x["decomposer"] if x else "")')
             [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY" >&2; exit 1; }
             scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
             export LAPLACE_INGEST_FORCE=1
@@ -288,7 +288,7 @@ jobs:
             local key="$1"
             scripts/verify-ingest-journal.sh --cli-key "$key"
             if [[ "$RUN_GATE" == 1 ]]; then
-              if python3 -c 'import json,sys; sources=json.load(open("scripts/decomposer-gates.json"))["sources"]; sys.exit(0 if sys.argv[1] in sources else 1)' "$key"; then
+              if python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; sources=json.load(open("scripts/decomposer-gates.json"))["sources"]; sys.exit(0 if canonical_source(sys.argv[1]) in sources else 1)' "$key"; then
                 python3 scripts/decomposer-gate-check.py \
                   --source "$key" --dbname "$PGDATABASE" \
                   --host "$PGHOST" --user "$PGUSER"
@@ -301,10 +301,12 @@ jobs:
           verify_idempotency() {
             local key="$1"
             local path="${2:-}"
-            if python3 scripts/ingest_catalog.py --format names | grep -Fxq -- "$key"; then
+            local canonical_key
+            canonical_key="$(python3 -c 'import sys; from scripts.ingest_catalog import canonical_source; print(canonical_source(sys.argv[1]))' "$key")"
+            if python3 scripts/ingest_catalog.py --format names | grep -Fxq -- "$canonical_key"; then
               native_snapshot() {
                 psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" \
-                  -v ON_ERROR_STOP=1 -v source="$key" \
+                  -v ON_ERROR_STOP=1 -v source="$canonical_key" \
                   -f scripts/native-ingest-idempotency.sql | sha256sum | cut -d ' ' -f 1
               }
               local before after
@@ -320,7 +322,7 @@ jobs:
               return
             fi
             local src_name
-            src_name=$(python3 -c 'import json,sys; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print("" if not e else (f"laplace.witness_id(%r, %r)" % tuple(e["witness"]) if e.get("witness") else f"laplace.source_id(%r)" % e["decomposer"]))' "$key")
+            src_name=$(python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(canonical_source(sys.argv[1])); print("" if not e else (f"laplace.witness_id(%r, %r)" % tuple(e["witness"]) if e.get("witness") else f"laplace.source_id(%r)" % e["decomposer"]))' "$key")
             local before after
             if [[ -n "$src_name" ]]; then
               before=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \

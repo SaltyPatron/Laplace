@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from ingest_catalog import journal_source
 
 ROOT = Path(__file__).resolve().parent.parent
 GATES = ROOT / "scripts" / "decomposer-gates.json"
@@ -38,15 +39,18 @@ def _manifest() -> dict:
 
 
 def resolve_source(hint: str) -> str:
-    """Resolve a CLI key/log path to the journal's declared decomposer source name."""
+    """Resolve a CLI key/log path to the journal's declared producer source name."""
     raw = Path(hint).name
     m = LOG_BASENAME_RE.match(raw)
     key = m.group("key") if m else hint
-    entry = _manifest().get(key)
-    if entry and entry.get("decomposer"):
-        return str(entry["decomposer"])
-    # Direct operator use may already name the journal source.
-    return key
+    try:
+        return journal_source(key)
+    except ValueError:
+        entry = _manifest().get(key)
+        if entry and entry.get("decomposer"):
+            return str(entry["decomposer"])
+        # Direct operator use may already name the journal source.
+        return key
 
 
 def _psql(sql: str, *, source: str | None = None) -> str:

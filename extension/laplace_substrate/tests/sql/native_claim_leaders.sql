@@ -68,11 +68,22 @@ BEGIN
   IF ops.native_source_completed('native-completion-fixture') THEN
     RAISE EXCEPTION 'missing Native receipt completed a source';
   END IF;
-  INSERT INTO laplace.ingest_run_journal(run_id,source_name,source_id,layer,status,ended_at,files_done,files_total,attestations_measured)
-  VALUES(receipt,'native-completion-fixture',published,0,'ok',clock_timestamp(),1,1,false);
-  IF NOT ops.native_source_completed('native-completion-fixture') THEN
-    RAISE EXCEPTION 'published Native witness and completed receipt were ignored';
+  INSERT INTO laplace.ingest_run_journal(run_id,source_name,source_id,layer,status,ended_at,files_done,files_total,attestations,attestations_measured)
+  VALUES(receipt,'native-completion-fixture',published,0,'ok',clock_timestamp(),1,1,7000,true);
+  IF ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'measured Native receipt without witness attestation count completed a source';
   END IF;
+  UPDATE public.witness SET attestations=7000 WHERE id=(SELECT id FROM leader_witness);
+  IF NOT ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'published Native witness and measured completed receipt were ignored';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET attestations_measured=false WHERE run_id=receipt;
+  UPDATE public.witness SET attestations=NULL WHERE id=(SELECT id FROM leader_witness);
+  IF NOT ops.native_source_completed('native-completion-fixture') THEN
+    RAISE EXCEPTION 'published Native witness and unmeasured completed receipt were ignored';
+  END IF;
+  UPDATE laplace.ingest_run_journal SET attestations_measured=true WHERE run_id=receipt;
+  UPDATE public.witness SET attestations=7000 WHERE id=(SELECT id FROM leader_witness);
   UPDATE laplace.ingest_run_journal SET source_id=(SELECT decode(id::text,'hex') FROM leader_claims WHERE name='four') WHERE run_id=receipt;
   IF ops.native_source_completed('native-completion-fixture') THEN
     RAISE EXCEPTION 'an unregistered claim was accepted as a published source witness';

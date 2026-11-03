@@ -49,4 +49,14 @@
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Persistent CI build roots retain $(BaseIntermediateOutputPath) across runs while
+       checkout preparation cleans gitignored workspace files such as web/openapi/openapi.json.
+       Invalidate $(_OpenApiDocumentsCache) when the generated document is absent so
+       GenerateOpenApiDocuments always restores web/openapi/openapi.json. -->
+  <Target Name="EnsureOpenApiDocumentPresent"
+          BeforeTargets="GenerateOpenApiDocuments"
+          Condition="'$(OpenApiGenerateDocuments)' != 'false' and !Exists('$(OpenApiDocumentsDirectory)\openapi.json') and Exists('$(_OpenApiDocumentsCache)')">
+    <Delete Files="$(_OpenApiDocumentsCache)" />
+  </Target>
+
 </Project>
