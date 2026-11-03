@@ -47,6 +47,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private DateTime _lastProgressUtc;
     private DateTime _lastHeartbeatUtc;
     private NpgsqlConnection? _livenessConn;
+    private readonly object _livenessConnGate = new();
     private readonly System.Collections.Concurrent.ConcurrentQueue<FileJournalEvent> _fileEvents = new();
     private readonly object _fileFlushGate = new();
     private CancellationTokenSource? _filePumpCts;
@@ -325,25 +326,29 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// <summary>
     /// Holds the per-run session advisory lock for the run's lifetime on a connection
     /// checked out of the ingest pool and not returned until the run ends, so idle pruning
-    /// cannot reclaim it. That connection counts against
-    /// PostgresResourcePlan.ObservabilityConnectionOwners together with the file-journal
-    /// pump and the run-journal writer. Failure to acquire is logged and the ingest
-    /// proceeds, but without the lock the run reads as orphaned once its heartbeat is stale.
+    /// cannot reclaim it. Subsequent journal and file-pump commands reuse that session under
+    /// <see cref="_livenessConnGate"/> so observability occupies at most one pooled slot at
+    /// a time (preserving a control slot on a two-connection pool). Failure to acquire is
+    /// logged and the ingest proceeds, but without the lock the run reads as orphaned once
+    /// its heartbeat is stale.
     /// </summary>
     private void AcquireLivenessLock()
     {
-        try
+        lock (_livenessConnGate)
         {
-            _livenessConn = _ds.OpenConnection();
-            using var cmd = NpgsqlCatalog.Command(_livenessConn, null, "journal.liveness_lock", RunLivenessLockClass, _runId.ToString());
-            cmd.ExecuteNonQuery();
-            AcquireMeasurementLane(_livenessConn);
-        }
-        catch (Exception ex)
-        {
-            LogFailure(ex, "INGEST_RUN_LIVENESS_LOCK_FAILED");
-            _livenessConn?.Dispose();
-            _livenessConn = null;
+            try
+            {
+                _livenessConn = _ds.OpenConnection();
+                using var cmd = NpgsqlCatalog.Command(_livenessConn, null, "journal.liveness_lock", RunLivenessLockClass, _runId.ToString());
+                cmd.ExecuteNonQuery();
+                AcquireMeasurementLane(_livenessConn);
+            }
+            catch (Exception ex)
+            {
+                LogFailure(ex, "INGEST_RUN_LIVENESS_LOCK_FAILED");
+                _livenessConn?.Dispose();
+                _livenessConn = null;
+            }
         }
     }
 
@@ -366,8 +371,25 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
     private void ReleaseLivenessLock()
     {
-        _livenessConn?.Dispose();   // session end releases the advisory lock
-        _livenessConn = null;
+        lock (_livenessConnGate)
+        {
+            _livenessConn?.Dispose();   // session end releases the advisory lock
+            _livenessConn = null;
+        }
+    }
+
+    private void WithJournalConnection(Action<NpgsqlConnection> action)
+    {
+        lock (_livenessConnGate)
+        {
+            if (_livenessConn is { FullState: System.Data.ConnectionState.Open } pinned)
+            {
+                action(pinned);
+                return;
+            }
+        }
+        using var conn = _ds.OpenConnection();
+        action(conn);
     }
 
     /// <summary>
@@ -503,38 +525,40 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     {
         try
         {
-            using var conn = _ds.OpenConnection();
-            using var cmd = NpgsqlCatalog.Command(conn, null, "journal.throughput_verdict", _runId);
-
-            using var reader = cmd.ExecuteReader();
-            if (!reader.Read())
+            WithJournalConnection(conn =>
             {
-                LogFailure(new InvalidOperationException("The ingest journal row is missing."),
-                    "INGEST_THROUGHPUT_READ_FAILED");
-                return;
-            }
+                using var cmd = NpgsqlCatalog.Command(conn, null, "journal.throughput_verdict", _runId);
 
-            string runStatus = reader.GetString(0);
-            if (runStatus == "running")
-                return; // The terminal UPDATE already emitted INGEST_RUN_JOURNAL_WRITE_FAILED.
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read())
+                {
+                    LogFailure(new InvalidOperationException("The ingest journal row is missing."),
+                        "INGEST_THROUGHPUT_READ_FAILED");
+                    return;
+                }
 
-            string verdict = reader.GetString(1);
-            bool compared = reader.GetBoolean(2);
-            string rows = reader.IsDBNull(3) ? "-" : reader.GetInt64(3).ToString();
-            string elapsedMs = reader.IsDBNull(4) ? "-" : reader.GetInt64(4).ToString();
-            string rate = reader.IsDBNull(5)
-                ? "-" : reader.GetDouble(5).ToString("0.0", CultureInfo.InvariantCulture);
-            string baseline = reader.IsDBNull(6)
-                ? "-" : reader.GetDouble(6).ToString("0.0", CultureInfo.InvariantCulture);
-            string slowdown = reader.IsDBNull(7)
-                ? "-" : reader.GetDouble(7).ToString("0.00", CultureInfo.InvariantCulture);
-            string receipt = $"source={sourceName} run={_runId} verdict={verdict} "
-                + $"compared={(compared ? 1 : 0)} rows={rows} elapsed_ms={elapsedMs} "
-                + $"rate_rows_s={rate} baseline_rows_s={baseline} slowdown={slowdown}";
+                string runStatus = reader.GetString(0);
+                if (runStatus == "running")
+                    return; // The terminal UPDATE already emitted INGEST_RUN_JOURNAL_WRITE_FAILED.
 
-            Console.WriteLine($"INGEST_THROUGHPUT {receipt}");
-            if (verdict is "slow")
-                Console.Error.WriteLine($"INGEST_THROUGHPUT_REJECTED {receipt}");
+                string verdict = reader.GetString(1);
+                bool compared = reader.GetBoolean(2);
+                string rows = reader.IsDBNull(3) ? "-" : reader.GetInt64(3).ToString();
+                string elapsedMs = reader.IsDBNull(4) ? "-" : reader.GetInt64(4).ToString();
+                string rate = reader.IsDBNull(5)
+                    ? "-" : reader.GetDouble(5).ToString("0.0", CultureInfo.InvariantCulture);
+                string baseline = reader.IsDBNull(6)
+                    ? "-" : reader.GetDouble(6).ToString("0.0", CultureInfo.InvariantCulture);
+                string slowdown = reader.IsDBNull(7)
+                    ? "-" : reader.GetDouble(7).ToString("0.00", CultureInfo.InvariantCulture);
+                string receipt = $"source={sourceName} run={_runId} verdict={verdict} "
+                    + $"compared={(compared ? 1 : 0)} rows={rows} elapsed_ms={elapsedMs} "
+                    + $"rate_rows_s={rate} baseline_rows_s={baseline} slowdown={slowdown}";
+
+                Console.WriteLine($"INGEST_THROUGHPUT {receipt}");
+                if (verdict is "slow")
+                    Console.Error.WriteLine($"INGEST_THROUGHPUT_REJECTED {receipt}");
+            });
         }
         catch (Exception ex)
         {
@@ -726,92 +750,94 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
             try
             {
-                using var conn = _ds.OpenConnection();
-                using var batch = new NpgsqlBatch(conn);
-                // The heartbeat rides the pump's batch, so a run with no file events
-                // still refreshes liveness without another connection owner.
-                if (heartbeatDue)
+                WithJournalConnection(conn =>
                 {
-                    var heartbeat = NpgsqlCatalog.Command(SqlCatalog.Get("journal.heartbeat"), parameters =>
+                    using var batch = new NpgsqlBatch(conn);
+                    // The heartbeat rides the pump's batch, so a run with no file events
+                    // still refreshes liveness without another connection owner.
+                    if (heartbeatDue)
                     {
-                        parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                    });
-                    batch.BatchCommands.Add(heartbeat);
-                }
+                        var heartbeat = NpgsqlCatalog.Command(SqlCatalog.Get("journal.heartbeat"), parameters =>
+                        {
+                            parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                        });
+                        batch.BatchCommands.Add(heartbeat);
+                    }
 
-                var started = events.Where(e => e.Kind == FileJournalEventKind.Started).ToArray();
-                if (started.Length > 0)
-                {
-                    var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_started"), parameters =>
+                    var started = events.Where(e => e.Kind == FileJournalEventKind.Started).ToArray();
+                    if (started.Length > 0)
                     {
-                        parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                        parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.Bytes).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.ModifiedAt).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                        parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    });
-                    batch.BatchCommands.Add(cmd);
-                }
+                        var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_started"), parameters =>
+                        {
+                            parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                            parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.Bytes).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.ModifiedAt).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                            parameters.Add(new NpgsqlParameter { Value = started.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                        });
+                        batch.BatchCommands.Add(cmd);
+                    }
 
-                // Counters are cumulative, so only the last progress event per file in
-                // this flush is sent.
-                var progress = events
-                    .Where(e => e.Kind == FileJournalEventKind.Progress)
-                    .GroupBy(e => e.FileLabel, StringComparer.Ordinal)
-                    .Select(g => g.Last())
-                    .ToArray();
-                if (progress.Length > 0)
-                {
-                    // UPDATE only: Started creates the row, and status = 'running' keeps a
-                    // late progress event from overwriting a composed or terminal row.
-                    var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_progress"), parameters =>
+                    // Counters are cumulative, so only the last progress event per file in
+                    // this flush is sent.
+                    var progress = events
+                        .Where(e => e.Kind == FileJournalEventKind.Progress)
+                        .GroupBy(e => e.FileLabel, StringComparer.Ordinal)
+                        .Select(g => g.Last())
+                        .ToArray();
+                    if (progress.Length > 0)
                     {
-                        parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                        parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Records).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Entities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Physicalities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Attestations).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    });
-                    batch.BatchCommands.Add(cmd);
-                }
+                        // UPDATE only: Started creates the row, and status = 'running' keeps a
+                        // late progress event from overwriting a composed or terminal row.
+                        var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_progress"), parameters =>
+                        {
+                            parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                            parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Records).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Entities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Physicalities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = progress.Select(e => e.Attestations).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                        });
+                        batch.BatchCommands.Add(cmd);
+                    }
 
-                var composed = events.Where(e => e.Kind == FileJournalEventKind.Composed).ToArray();
-                if (composed.Length > 0)
-                {
-                    var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_composed"), parameters =>
+                    var composed = events.Where(e => e.Kind == FileJournalEventKind.Composed).ToArray();
+                    if (composed.Length > 0)
                     {
-                        parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.FileId).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.ResumeFingerprint).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Records).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Entities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Physicalities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Attestations).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                        parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    });
-                    batch.BatchCommands.Add(cmd);
-                }
+                        var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_composed"), parameters =>
+                        {
+                            parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.FileId).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.ResumeFingerprint).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Records).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Entities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Physicalities).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.Attestations).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                            parameters.Add(new NpgsqlParameter { Value = composed.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                        });
+                        batch.BatchCommands.Add(cmd);
+                    }
 
-                var finished = events.Where(e => e.Kind == FileJournalEventKind.Finished).ToArray();
-                if (finished.Length > 0)
-                {
-                    var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_finished"), parameters =>
+                    var finished = events.Where(e => e.Kind == FileJournalEventKind.Finished).ToArray();
+                    if (finished.Length > 0)
                     {
-                        parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                        parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.Status!).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                        parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                        parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.Error).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
-                    });
-                    batch.BatchCommands.Add(cmd);
-                }
+                        var cmd = NpgsqlCatalog.Command(SqlCatalog.Get("journal.files_finished"), parameters =>
+                        {
+                            parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                            parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.FileLabel).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.SourceName).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.Status!).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                            parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.At).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                            parameters.Add(new NpgsqlParameter { Value = finished.Select(e => e.Error).ToArray(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text });
+                        });
+                        batch.BatchCommands.Add(cmd);
+                    }
 
-                batch.ExecuteNonQuery();
+                    batch.ExecuteNonQuery();
+                });
                 if (heartbeatDue) _lastHeartbeatUtc = now;
             }
             catch (Exception ex)
@@ -826,9 +852,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     {
         try
         {
-            using var conn = _ds.OpenConnection();
-            using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get(queryName), bind);
-            cmd.ExecuteNonQuery();
+            WithJournalConnection(conn =>
+            {
+                using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get(queryName), bind);
+                cmd.ExecuteNonQuery();
+            });
             return true;
         }
         catch (Exception ex)

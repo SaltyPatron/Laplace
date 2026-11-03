@@ -165,6 +165,89 @@ public sealed class ChessConcurrentLandingTests(LocalPgFixture pg)
         Assert.Contains("23505", files["chesscom/journal-fixture/2018/08"].Error);
     }
 
+    [Fact]
+    public async Task LabImportRun_DoesNotExhaustATwoConnectionPool()
+    {
+        var csb = new NpgsqlConnectionStringBuilder(pg.ConnectionString)
+        {
+            MaxPoolSize = 2,
+            MinPoolSize = 0,
+            Timeout = 3,
+            CommandTimeout = 30,
+            ApplicationName = "chess-lab-pool2-" + Guid.NewGuid().ToString("N"),
+        };
+        await using var host = await ChessLiveGameHost.CreateAsync(connString: csb.ConnectionString);
+        Assert.Equal(2, new NpgsqlConnectionStringBuilder(host.DataSource.ConnectionString).MaxPoolSize);
+
+        string suffix = Guid.NewGuid().ToString("N");
+        var run = await ChessLabIngestRun.StartAsync(
+            host.DataSource, NullLogger.Instance, "pool2-" + suffix[..8],
+            "chesscom/pool2-" + suffix, CancellationToken.None);
+        try
+        {
+            await using var ingestor = await ChessPgnIngestor.AttachAsync(host);
+            var profiles = new[]
+            {
+                new ChessPlayerProfile(
+                    Provider: "chesscom",
+                    ProviderId: "pool2_" + suffix,
+                    DisplayName: "Pool2 Player " + suffix[..8],
+                    RealName: "Pool2 Real " + suffix[..8],
+                    Biography: "Two-connection pool profile test",
+                    Title: "GM",
+                    Federation: "NOR",
+                    FideId: "1503014",
+                    AvatarUrl: null,
+                    Aliases: ["Pool2Alias_" + suffix[..8]],
+                    Links: [],
+                    Ratings: new Dictionary<string, int> { ["blitz"] = 2900 },
+                    Facts: new Dictionary<string, string> { ["status"] = "premium" }),
+                new ChessPlayerProfile(
+                    Provider: "fide",
+                    ProviderId: "1503014",
+                    DisplayName: "Carlsen, Magnus",
+                    RealName: "Carlsen, Magnus",
+                    Biography: null,
+                    Title: "GM",
+                    Federation: "NOR",
+                    FideId: "1503014",
+                    AvatarUrl: null,
+                    Aliases: [],
+                    Links: [],
+                    Ratings: new Dictionary<string, int> { ["standard"] = 2831 },
+                    Facts: new Dictionary<string, string>()),
+            };
+            var profileResult = await ingestor.IngestPlayerProfilesAsync(profiles);
+            Assert.Equal(2, profileResult.Profiles);
+            Assert.Equal(1, profileResult.Links);
+
+            string pgn = $"""
+                [Event "Pool2 landing {suffix}"]
+                [Site "Laplace fixture"]
+                [Date "2026.11.03"]
+                [Round "1"]
+                [White "pool2_{suffix}"]
+                [Black "Opponent_{suffix}"]
+                [Result "1-0"]
+
+                1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
+                """;
+            var gameResult = await run.IngestUnitAsync("2026/11", 1,
+                () => ingestor.IngestGamesAsync([pgn], "chess.com:pool2_" + suffix, requireCompleteSource: true));
+            Assert.Equal(1, gameResult.Parsed);
+            Assert.Equal(1, gameResult.Applied);
+            Assert.Equal(1, gameResult.Verified);
+
+            run.Complete();
+            Assert.Equal("ok", await RunStatusAsync(run.RunId));
+        }
+        catch (Exception ex)
+        {
+            run.Fail(ex);
+            throw;
+        }
+    }
+
     private async Task<string> RunStatusAsync(Guid runId)
     {
         await using var cmd = pg.DataSource.CreateCommand(

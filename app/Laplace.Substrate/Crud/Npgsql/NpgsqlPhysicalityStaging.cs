@@ -148,6 +148,15 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static readonly ConditionalWeakTable<NpgsqlDataSource, SemaphoreSlim> ApplyControlOwners = new();
 
+    internal static int ResolveWorkerConnectionLimit(NpgsqlDataSource dataSource)
+    {
+        int maximum = new NpgsqlConnectionStringBuilder(dataSource.ConnectionString).MaxPoolSize;
+        if (maximum <= 2) return 0;
+        //ApplyControlOwners admits up to maximum - 1 control owners; on a constrained
+        //pool, worker fan-out cannot exceed the remaining slots.
+        return Math.Min(ResolveCopyConnectionBudget(), Math.Max(1, maximum / 2));
+    }
+
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt,
         bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
         ApplyStagesCoreAsync(
