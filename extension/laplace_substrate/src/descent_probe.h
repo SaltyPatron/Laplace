@@ -41,10 +41,8 @@ int laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int 
  * codepoint rows are themselves written through it. */
 int laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count);
 
-/* Keyed forms carry the partition key parallel to the ids so each probe prunes
- * to one index descent per id: entities by tier (LIST; tier 2 also HASH(id)),
- * physicalities by hilbert_index (RANGE). Perfcache: off for stored-row
- * semantics, on for descent resolvability, never for physicalities. */
+/* Keyed compatibility forms validate the parallel metadata array and route
+ * directly by HASH(id), matching the canonical ID-partitioned layout. */
 int laplace_entities_stored_bitmap_keyed(ArrayType *ids_array, ArrayType *tiers_array,
                                          uint8_t *bm, int candidate_count);
 int laplace_tier_batch_existence_probe_keyed(ArrayType *ids_array, ArrayType *tiers_array,

@@ -111,7 +111,8 @@ internal static partial class IngestCommands
                     total, done, total, done, progress.File, "files", elapsed.Elapsed,
                     EntitiesInserted: entities, PhysicalitiesInserted: physicalities, AttestationsInserted: attestations);
                 journal.OnNativeProgress(lastProgress);
-                if (elapsed.Elapsed.TotalSeconds - printedAt >= 5 || progress.Event == "complete")
+                if (elapsed.Elapsed.TotalSeconds - printedAt >= 5
+                    || progress.Event is "inventory" or "source-trunk" or "source-publication" or "complete")
                 {
                     string reading = progress.File is null ? "" : $"; file={System.Text.Json.JsonSerializer.Serialize(progress.File)}; records={progress.Records:N0}";
                     string assertions = attestationsMeasured ? $", {attestations:N0} new attestations" : "";
