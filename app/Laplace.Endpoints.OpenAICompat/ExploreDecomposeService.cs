@@ -65,7 +65,7 @@ internal sealed class ExploreDecomposeService
         return new UnicodeCloudResponse(
             count,
             CodepointPerfcache.ReceiptHex,
-            "laplace.t0-unicode-cloud/f32xyz-two-lanes/v1",
+            "laplace.t0-unicode-cloud/f32xyz-two-lanes/v2",
             checked(count * 3 * sizeof(float) * 2));
     }
 
@@ -82,28 +82,26 @@ internal sealed class ExploreDecomposeService
             var records = CodepointPerfcache.Records;
             var payload = new byte[checked(records.Length * 3 * sizeof(float) * 2)];
             Span<float> values = MemoryMarshal.Cast<byte, float>(payload.AsSpan());
-            const ulong Mask53 = (1UL << 53) - 1, Mask42 = (1UL << 42) - 1, Mask22 = (1UL << 22) - 1;
+            const ulong Mask43 = (1UL << 43) - 1, Mask42 = (1UL << 42) - 1;
+            const double Scale43 = 2.0 / (1UL << 43), Scale42 = 2.0 / (1UL << 42);
             for (var i = 0; i < records.Length; i++)
             {
                 ref readonly var r = ref records[i];
-                double len = Math.Sqrt(r.CoordX*r.CoordX + r.CoordY*r.CoordY + r.CoordZ*r.CoordZ);
-                if (len <= double.Epsilon) len = 1;
                 int p = i * 3;
-                values[p] = (float)(r.CoordX / len);
-                values[p+1] = (float)(r.CoordY / len);
-                values[p+2] = (float)(r.CoordZ / len);
+                values[p] = (float)r.CoordX;
+                values[p+1] = (float)r.CoordY;
+                values[p+2] = (float)r.CoordZ;
 
-                ulong hi = r.Hash.Hi, lo = r.Hash.Lo;
-                double hx = ((lo & Mask53) / (double)Mask53) * 2 - 1;
-                ulong ybits = ((hi & Mask42) << 11) | ((lo >> 53) & 0x7ffUL);
-                double hy = ((ybits & Mask53) / (double)Mask53) * 2 - 1;
-                double hz = (((hi >> 42) & Mask22) / (double)Mask22) * 2 - 1;
-                double hlen = Math.Sqrt(hx*hx + hy*hy + hz*hz);
-                if (hlen <= double.Epsilon) hlen = 1;
+                // Canonical lp_id_to_xyz bit-packing: 128-bit little-endian BLAKE3 ID
+                // split into 43-bit X, 43-bit Y, and 42-bit Z mantissa slices.
+                ulong low64 = r.Hash.Hi, high64 = r.Hash.Lo;
+                ulong part0 = low64 & Mask43;
+                ulong part1 = ((low64 >> 43) | (high64 << 21)) & Mask43;
+                ulong part2 = (high64 >> 22) & Mask42;
                 int h = records.Length * 3 + p;
-                values[h] = (float)(hx / hlen);
-                values[h+1] = (float)(hy / hlen);
-                values[h+2] = (float)(hz / hlen);
+                values[h] = (float)(part0 * Scale43 - 1.0);
+                values[h+1] = (float)(part1 * Scale43 - 1.0);
+                values[h+2] = (float)(part2 * Scale42 - 1.0);
             }
 
             _unicodeCloudReceipt = receipt;

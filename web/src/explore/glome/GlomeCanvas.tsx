@@ -80,10 +80,71 @@ function metricColor(t: number, palette: GlomePalette): string {
     : lerpColor(palette.walk, palette.neighbor, (x - 0.5) * 2);
 }
 
-/** Packed: hash-XYZ on a display shell. M is paint, not an axis. */
+/**
+ * Unpack the IEEE-754 binary64 mantissa payload of a packed trajectory coordinate
+ * into [-1, 1] display space.
+ *
+ * Supports both canonical carrier formats:
+ * - Native `lp_id_to_xyz` / `lp_m_full` (`Laplace-Native/src/geometry.c`):
+ *   biased exponent 1021 (`0x3fd`, values in [0.25, 0.5)), where X holds 43 bits
+ *   (bits 0..42 of `lp_id`), Y holds 43 bits (bits 43..85), Z holds 42 bits
+ *   (bits 86..127), and M holds 51 bits of RLE run count (`lp_m_full`).
+ * - Engine Core `mantissa_pack` (`Laplace/engine/core/src/mantissa.c`):
+ *   biased exponent 1023 (`0x3ff`, values in (-2, -1] U [1, 2)), where sign +
+ *   52-bit mantissa holds 53 payload bits per coordinate (X: 53 hash bits, Y: 53
+ *   hash bits, Z: 22 hash bits in low bits + 31 flag bits).
+ */
+export function unpackMantissaCoord(
+  value: number,
+  axis: 'x' | 'y' | 'z' | 'm',
+): number {
+  if (!Number.isFinite(value)) return 0;
+  const buf = new ArrayBuffer(8);
+  const view = new DataView(buf);
+  view.setFloat64(0, value, false);
+  const raw = view.getBigUint64(0, false);
+  const exp = Number((raw >> 52n) & 0x7ffn);
+  const frac = raw & 0x000fffffffffffffn;
+
+  // Native lp_id_to_xyz / lp_m_full carrier: exponent 0x3fd (1021).
+  if (exp === 0x3fd) {
+    if (axis === 'x' || axis === 'y') {
+      const part43 = Number(frac & ((1n << 43n) - 1n));
+      return (part43 / 8796093022208) * 2 - 1; // 2^43
+    }
+    if (axis === 'z') {
+      const part42 = Number(frac & ((1n << 42n) - 1n));
+      return (part42 / 4398046511104) * 2 - 1; // 2^42
+    }
+    const run51 = Number(frac & ((1n << 51n) - 1n));
+    return (run51 / 2251799813685248) * 2 - 1; // 2^51
+  }
+
+  // Engine Core mantissa_pack carrier: exponent 0x3ff (1023), sign bit = bit 52.
+  if (exp === 0x3ff) {
+    const signBit = (raw >> 63n) & 1n;
+    const slot53 = (signBit << 52n) | frac;
+    if (axis === 'z') {
+      const hash22 = Number(slot53 & ((1n << 22n) - 1n));
+      return (hash22 / 4194304) * 2 - 1; // 2^22
+    }
+    return (Number(slot53) / 9007199254740992) * 2 - 1; // 2^53
+  }
+
+  // Already decoded into [-1, 1] display space.
+  return Math.max(-1, Math.min(1, value));
+}
+
+/**
+ * Packed: BLAKE3 entity ID bit-unpacked from the IEEE-754 mantissas of X, Y, Z.
+ * Each coordinate's mantissa slice is mapped linearly into [-SHELL, SHELL].
+ * M carries the RLE run length / ordinal metadata, not a spatial coordinate.
+ */
 export function packedDisplayPos(n: GlomeNode): [number, number, number] {
-  const len = Math.hypot(n.x, n.y, n.z) || 1;
-  return [(n.x / len) * SHELL, (n.y / len) * SHELL, (n.z / len) * SHELL];
+  const ux = unpackMantissaCoord(n.x, 'x');
+  const uy = unpackMantissaCoord(n.y, 'y');
+  const uz = unpackMantissaCoord(n.z, 'z');
+  return [ux * SHELL, uy * SHELL, uz * SHELL];
 }
 
 /**
@@ -105,9 +166,10 @@ export function carrierDisplayPos(n: GlomeNode): [number, number, number] {
  * Placement is a 3-D view of the PointZM point in the closed 4-ball, not a flat XYZ slice.
  *
  * The 4-D point is rotated through the X-M and Z-M planes so M shows in both screen
- * width and camera depth, then placed along the rotated XYZ direction at radius_origin
- * (the rotated point's own 4-norm when radius_origin is absent), so interior depth in
- * the ball stays visible.
+ * width and camera depth. When radius_origin differs from the 4-norm of (x, y, z, m),
+ * the 4-vector is scaled by radius4 / norm4 before projecting (xmX, y, zmZ), preserving
+ * true 4-D orthographic projection and centroid linearity while keeping interior depth
+ * in the ball visible.
  */
 export function placementBallPos(
   n: GlomeNode,
@@ -129,15 +191,15 @@ export function placementBallPos(
   const zmZ = z * cz - xmM * sz;
   const zmM = z * sz + xmM * cz;
 
-  const dirLen = Math.hypot(xmX, y, zmZ);
-  if (dirLen <= Number.EPSILON) return [0, 0, 0];
+  const norm4 = Math.hypot(xmX, y, zmZ, zmM);
+  if (norm4 <= Number.EPSILON) return [0, 0, 0];
 
-  const fallbackRadius = Math.min(1, Math.hypot(xmX, y, zmZ, zmM));
+  const fallbackRadius = Math.min(1, norm4);
   const radius4 = Number.isFinite(n.radius) && n.radius >= 0
     ? Math.min(1, n.radius)
     : fallbackRadius;
   const displayRadius = SHELL * radius4;
-  const scale = displayRadius / dirLen;
+  const scale = displayRadius / norm4;
   return [xmX * scale, y * scale, zmZ * scale];
 }
 
@@ -321,9 +383,9 @@ function GlomeScene({
             : colorBy === 'ordinal' && n.ordinal != null ? n.ordinal / maxOrdinal
               : null;
       color.set(
-        n.color
-          ?? (ordHit || highlightIds.has(n.id) ? palette.highlight
-            : metric != null ? metricColor(metric, palette)
+        ordHit || highlightIds.has(n.id) ? palette.highlight
+          : n.color
+            ?? (metric != null ? metricColor(metric, palette)
               : n.kind === 'walk' ? palette.walk
                 : n.kind === 'neighbor' ? palette.neighbor
                   : n.kind === 'constituent' ? palette.constituent
@@ -412,19 +474,19 @@ function GlomeScene({
         <Line
           points={edges}
           segments
-          color={palette.placementLine}
-          lineWidth={0.8}
+          color={palette.wireframe}
+          lineWidth={0.75}
           transparent
-          opacity={0.38}
+          opacity={0.32}
         />
       ) : null}
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
           color={projection === 'packed' || projection === 'carrier' ? palette.packedLine : palette.placementLine}
-          lineWidth={1}
+          lineWidth={1.65}
           transparent
-          opacity={0.6}
+          opacity={0.85}
         />
       ) : null}
       {labelled.map((i) => (
@@ -464,6 +526,9 @@ function GlomeScene({
             {hover.evidenceRows != null ? <span> · evidence {hover.evidenceRows.toLocaleString()}</span> : null}
             {projection === 'placement' && Number.isFinite(hover.radius)
               ? <span> · r {hover.radius.toFixed(3)}</span>
+              : null}
+            {projection === 'packed'
+              ? <span> · mxyz ({unpackMantissaCoord(hover.x, 'x').toFixed(3)}, {unpackMantissaCoord(hover.y, 'y').toFixed(3)}, {unpackMantissaCoord(hover.z, 'z').toFixed(3)})</span>
               : null}
             {projection === 'carrier' && hover.m != null && Number.isFinite(hover.m)
               ? <span> · Mmeta {hover.m.toFixed(3)}</span>
@@ -533,7 +598,12 @@ export function GlomeCanvas({
   const [staggerReady, setStaggerReady] = useState(staggerMs <= 0);
   const hasTier = nodes.some((n) => n.tier != null);
   const hasParents = nodes.some((n) => n.parentId != null);
+  const hasTrajectory = useMemo(
+    () => (trajectoryPoints ? trajectoryPoints.length > 1 : nodes.filter((n) => n.kind === 'constituent' && n.ordinal != null).length > 1),
+    [nodes, trajectoryPoints],
+  );
   const [colorBy, setColorBy] = useState<GlomeColorBy>(hasTier ? 'tier' : 'kind');
+  const [showTrajectory, setShowTrajectory] = useState(true);
   const [showEdges, setShowEdges] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [xmDegrees, setXmDegrees] = useState(35);
@@ -554,8 +624,7 @@ export function GlomeCanvas({
   }, [baseReady, staggerMs]);
   const webGlReady = baseReady && staggerReady;
 
-  // In a Merkle DAG the structure is each node's parent, so a known parent draws a
-  // composition edge; only a caller without parents gets the constituent curve.
+  // Parent-to-child composition spokes connect each child to its Merkle parent centroid.
   const edges = useMemo(() => {
     if (!hasParents || !showEdges) return [] as [number, number, number][];
     const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -568,20 +637,21 @@ export function GlomeCanvas({
     return out;
   }, [nodes, hasParents, showEdges, projection, xmAngle, zmAngle]);
 
+  // Sequential trajectory path (v_1 -> v_2 -> ... -> v_k) through the ordered constituents.
   const trajectory = useMemo(() => {
+    if (!showTrajectory) return [] as [number, number, number][];
     if (trajectoryPoints) return trajectoryPoints;
-    if (hasParents || !showEdges) return [] as [number, number, number][];
     return nodes
-      .filter((n) => n.kind === 'constituent')
+      .filter((n) => n.kind === 'constituent' && n.ordinal != null)
       .slice()
       .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
       .map((n) => project(n, projection, xmAngle, zmAngle));
-  }, [nodes, trajectoryPoints, hasParents, showEdges, projection, xmAngle, zmAngle]);
+  }, [nodes, trajectoryPoints, showTrajectory, projection, xmAngle, zmAngle]);
 
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
   const revision = useMemo(
-    () => `${projection}:${xmDegrees}:${zmDegrees}:${palette.background}:${palette.primary}:${nodes.length}:${highlightOrdinal}:${colorBy}:${showEdges}:${showLabels}:${nodes.map((n) => n.id).join(',')}`,
-    [nodes, projection, xmDegrees, zmDegrees, palette, highlightOrdinal, colorBy, showEdges, showLabels],
+    () => `${projection}:${xmDegrees}:${zmDegrees}:${palette.background}:${palette.primary}:${nodes.length}:${highlightOrdinal}:${colorBy}:${showTrajectory}:${showEdges}:${showLabels}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes, projection, xmDegrees, zmDegrees, palette, highlightOrdinal, colorBy, showTrajectory, showEdges, showLabels],
   );
 
   if (nodes.length === 0) {
@@ -600,7 +670,12 @@ export function GlomeCanvas({
             <option value="ordinal">ordinal</option>
           </select>
         </label>
-        <label><input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> {hasParents ? 'composition edges' : 'curve'}</label>
+        {hasTrajectory ? (
+          <label><input type="checkbox" checked={showTrajectory} onChange={(e) => setShowTrajectory(e.target.checked)} /> trajectory path</label>
+        ) : null}
+        {hasParents ? (
+          <label><input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> parent centroid links</label>
+        ) : null}
         <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} /> labels when zoomed</label>
         <span className={styles.viewHint}>Scroll zooms toward the cursor; points keep their screen size.</span>
       </div>

@@ -9,7 +9,7 @@ import type {
   StorageProofPackedVertexRow,
   StorageProofResponse,
 } from '../types';
-import { GlomeCanvas, type GlomeNode } from '../glome/GlomeCanvas';
+import { GlomeCanvas, ordinalColor, type GlomeNode } from '../glome/GlomeCanvas';
 import styles from './StorageProofView.module.css';
 
 const STORAGE_PROOF_SURFACE_VERSION = 'v5' as const;
@@ -49,7 +49,7 @@ function carrierCoordinate(value: number): number {
   return Number(slot) / Number(TWO_POW_53_MINUS_1) * 2 - 1;
 }
 
-function packedToCarrierNode(row: StorageProofPackedVertexRow): GlomeNode {
+function packedToCarrierNode(row: StorageProofPackedVertexRow, maxOrd: number): GlomeNode {
   return {
     id: `${row.child_id_hex}-carrier-${row.vertex}`,
     label: row.child_label || row.child_id_hex,
@@ -61,11 +61,14 @@ function packedToCarrierNode(row: StorageProofPackedVertexRow): GlomeNode {
     ordinal: row.logical_ordinal,
     runLength: row.run_length,
     kind: 'constituent',
+    color: ordinalColor(row.logical_ordinal, maxOrd),
   };
 }
 
 function realizedToGlomeNode(
   row: StorageProofNodeRow['realized_vertices'][number],
+  parentId?: string,
+  maxOrd = 1,
 ): GlomeNode {
   return {
     id: `${row.child_id_hex}-realized-${row.ordinal}`,
@@ -76,7 +79,9 @@ function realizedToGlomeNode(
     m: row.m,
     radius: row.radius,
     ordinal: row.ordinal,
+    parentId,
     kind: 'constituent',
+    color: ordinalColor(row.ordinal, maxOrd),
   };
 }
 
@@ -486,14 +491,21 @@ export function StorageProofView() {
     )),
     [proof, selectedOrdinal, byOrdinal],
   );
-  const carrierNodes = useMemo(
-    () => (selected?.packed_vertices ?? []).map(packedToCarrierNode),
-    [selected],
-  );
-  const realizedNodes = useMemo(
-    () => (selected?.realized_vertices ?? []).map(realizedToGlomeNode),
-    [selected],
-  );
+  const carrierNodes = useMemo(() => {
+    const rows = selected?.packed_vertices ?? [];
+    const maxOrd = rows.reduce((m, r) => Math.max(m, r.logical_ordinal), 1);
+    return rows.map((row) => packedToCarrierNode(row, maxOrd));
+  }, [selected]);
+  const realizedNodes = useMemo(() => {
+    if (!selected) return [];
+    const rows = selected.realized_vertices ?? [];
+    const maxOrd = rows.reduce((m, r) => Math.max(m, r.ordinal), 1);
+    const parentNode = nodeToGlomeNode(selected, true);
+    return [
+      parentNode,
+      ...rows.map((row) => realizedToGlomeNode(row, selected.id_hex, maxOrd)),
+    ];
+  }, [selected]);
 
   const selectedPackedRow = selected?.packed_vertices[selectedPacked] ?? null;
   const maxTier = proof ? Math.max(...proof.nodes.map((node) => node.tier), 0) : 0;

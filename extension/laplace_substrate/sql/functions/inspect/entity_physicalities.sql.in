@@ -85,13 +85,37 @@ BEGIN ATOMIC
     ),
     targets AS (
         SELECT b.i,
+               ((b.lo16::bigint - 32768) << 48) AS lo64,
+               CASE WHEN b.hi16 >= 65536 THEN NULL::bigint
+                    ELSE ((b.hi16::bigint - 32768) << 48)
+               END AS hi64,
                decode(lpad(to_hex(b.lo16), 4, '0') || repeat('00', 14), 'hex') AS lo,
                CASE WHEN b.hi16 >= 65536 THEN NULL::bytea
                     ELSE decode(lpad(to_hex(b.hi16), 4, '0') || repeat('00', 14), 'hex')
                END AS hi
         FROM bounds b
     ),
-    sampled AS (
+    native_sampled AS (
+        SELECT t.i,
+               public.blake3_send(e.id) AS entity_id,
+               1::smallint AS type,
+               ST_X(e.coord) AS x, ST_Y(e.coord) AS y,
+               ST_Z(e.coord) AS z, ST_M(e.coord) AS m,
+               public.laplace_radius_origin(e.coord) AS radius,
+               COALESCE(public.laplace_path_length(p.path)::integer, 0) AS n_constituents,
+               int8send(e.hilbert # '-9223372036854775808'::bigint) AS hilbert_index
+        FROM targets t
+        CROSS JOIN LATERAL (
+            SELECT e.id, e.coord, e.hilbert
+            FROM public.entity e
+            WHERE e.hilbert >= t.lo64
+              AND (t.hi64 IS NULL OR e.hilbert < t.hi64)
+            ORDER BY e.hilbert, e.id
+            LIMIT 1
+        ) e
+        LEFT JOIN public.physicality p ON p.entity = e.id
+    ),
+    legacy_sampled AS (
         SELECT t.i, p.entity_id, p.type,
                ST_X(p.coord) AS x, ST_Y(p.coord) AS y,
                ST_Z(p.coord) AS z, ST_M(p.coord) AS m,
@@ -107,6 +131,12 @@ BEGIN ATOMIC
             ORDER BY p.hilbert_index, p.id
             LIMIT 1
         ) p
+        WHERE NOT EXISTS (SELECT 1 FROM native_sampled n WHERE n.i = t.i)
+    ),
+    sampled AS (
+        SELECT * FROM native_sampled
+        UNION ALL
+        SELECT * FROM legacy_sampled
     ),
     distinct_entities AS (
         SELECT s.*,

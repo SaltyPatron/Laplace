@@ -28,8 +28,12 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.DoesNotContain("<meshBasicMaterial vertexColors", canvas, StringComparison.Ordinal);
         Assert.DoesNotContain("vertexColors: true", canvas, StringComparison.Ordinal);
         Assert.Contains("mesh.instanceColor.needsUpdate = true", canvas, StringComparison.Ordinal);
+        Assert.Contains("export function unpackMantissaCoord", canvas, StringComparison.Ordinal);
+        Assert.Contains("export function packedDisplayPos", canvas, StringComparison.Ordinal);
         Assert.Contains("export function carrierDisplayPos", canvas, StringComparison.Ordinal);
         Assert.Contains("Math.max(-1, Math.min(1, n.x)) * SHELL", canvas, StringComparison.Ordinal);
+        Assert.Contains("const scale = displayRadius / norm4;", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (hasParents || !showEdges) return []", canvas, StringComparison.Ordinal);
 
         Assert.DoesNotContain(
             "return [rotatedX * SHELL, y * SHELL, z * SHELL]",

@@ -83,6 +83,7 @@ export function GlomeTab({
   );
 
   const placementConstituents = useMemo((): GlomeNode[] => {
+    const parentId = placementPrimary[0]?.id;
     return realized.map((v) => ({
       id: `real-${v.ordinal}-${v.child_id_hex}`,
       label: v.child_label || identityLabel(v.child_id_hex),
@@ -92,9 +93,11 @@ export function GlomeTab({
       m: v.m,
       radius: v.radius,
       ordinal: v.ordinal,
+      parentId,
       kind: 'constituent' as const,
+      color: ordinalColor(v.ordinal, maxOrd),
     }));
-  }, [realized]);
+  }, [realized, placementPrimary, maxOrd]);
 
   const placementNodes = useMemo(() => {
     const extras = neighborMode === 'structural' && neighborsUnlocked ? glomeExtraNodes : [];
@@ -143,7 +146,7 @@ export function GlomeTab({
           <section className={styles.pane}>
             <header className={styles.paneHead}>
               <h3 className={styles.paneTitle}>Packed</h3>
-              <p className={styles.paneCaption}>Identity packed as XYZ · M / RLE paint</p>
+              <p className={styles.paneCaption}>BLAKE3 ID unpacked from XYZ mantissas (43/43/42 bits) · M = RLE</p>
             </header>
             {packedNodes.length === 0 ? (
               <div className={styles.emptyPane}>
@@ -156,7 +159,7 @@ export function GlomeTab({
                 highlightOrdinal={packedHighlightOrdinal}
                 onSelectOrdinal={setSelectedOrdinal}
                 fill
-                note="Hash-space trajectory on a display shell. Not S³ placement."
+                note="Mantissa-unpacked BLAKE3 hash trajectory (43/43/42-bit slices in [-1,1]³). Not S³ placement."
               />
             )}
           </section>
@@ -164,7 +167,7 @@ export function GlomeTab({
           <section className={styles.pane}>
             <header className={styles.paneHead}>
               <h3 className={styles.paneTitle}>Placement</h3>
-              <p className={styles.paneCaption}>Live centroid + realized path (entity_curve)</p>
+              <p className={styles.paneCaption}>4-D B⁴ centroid + sequential realized trajectory path</p>
             </header>
             {placementNodes.length === 0 ? (
               <div className={styles.emptyPane}>No physicality coord for this entity.</div>
@@ -177,7 +180,7 @@ export function GlomeTab({
                 onSelectOrdinal={setSelectedOrdinal}
                 fill
                 staggerMs={120}
-                note="Glome ball — radius is coherence. Ribbon = realized child coords."
+                note="4-D B⁴ projection — sequential trajectory path connects ordered constituents; spoke links connect to the parent centroid."
               />
             )}
           </section>
