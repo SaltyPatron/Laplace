@@ -50,6 +50,12 @@ export function EntityHeader({
             </RouterLink>
           </Button>
         ) : null}
+        <Button asChild variant="ghost" size="sm">
+          <RouterLink to={`/explore/entity/${preview.id_hex}`}>Full entity</RouterLink>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <RouterLink to={`/proof?q=${encodeURIComponent(preview.label)}`}>Prove storage</RouterLink>
+        </Button>
         <details className={styles.sourceEvidence} onToggle={event => setInspectionOpen(event.currentTarget.open)}>
           <summary>Inspect and export</summary>
           <Muted>Composition tier {preview.tier ?? '—'}</Muted>

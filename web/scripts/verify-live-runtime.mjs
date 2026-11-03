@@ -33,7 +33,7 @@ try {
     } else await route.continue();
   });
   for (const scenario of [
-    { name: 'entity', path: '/explore/entity/a929c9834b79516e7c85fa83e7dac137',
+    { name: 'entity', path: '/explore/entity/a929c9834b79516e7c85fa83e7dac137?inspect=1',
       requests: ['/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137/preview',
         '/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137'], heading: 'Argentina' },
     { name: 'matchup', path: '/explore/matchup/pancake/quark',
@@ -77,8 +77,15 @@ try {
       await Promise.all(reads);
       if (scenario.heading) {
         await expect(page.getByRole('heading', { name: scenario.heading, exact: true })).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Browse relations', exact: true })).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Salient facts', exact: true })).toBeVisible();
+        const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
+        for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
+          await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+        }
+        const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
+        await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
+        await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Meanings and usage', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Recorded relations', exact: true })).toBeVisible();
       }
       else {
         await expect(page.getByRole('textbox', { name: 'first entity', exact: true })).toHaveValue('pancake');

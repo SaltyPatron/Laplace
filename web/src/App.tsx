@@ -41,7 +41,7 @@ const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
 
 /** Existing route addresses remain stable for saved references. */
 const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
-  { id: 'library', label: 'Knowledge', path: '/explore', owns: ['/explore', '/query', '/topic'] },
+  { id: 'library', label: 'Knowledge', path: '/explore', owns: ['/explore', '/query', '/topic', '/proof', '/unicode'] },
   { id: 'chat', label: 'Chat', path: '/chat', owns: ['/chat', '/forward-proof'] },
   { id: 'data', label: 'Data', path: '/data', owns: ['/data'] },
   { id: 'chess', label: 'Chess', path: '/chess', owns: ['/chess', '/play', '/lab'] },
@@ -49,7 +49,6 @@ const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
 ];
 function isActive(pathname: string, tab: (typeof TABS)[number]): boolean {
   if (tab.path === '/') return pathname === '/';
-  if (tab.id === 'library') return pathname === '/query' || pathname.startsWith('/topic') || pathname.startsWith('/explore');
   return tab.owns.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 

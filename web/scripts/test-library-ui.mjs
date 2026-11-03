@@ -97,6 +97,11 @@ try {
   await expect(primary.getByRole('link', { name: 'Knowledge', exact: true })).toBeVisible();
   await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
   await expect(primary.getByRole('link', { name: 'Explore', exact: true })).toHaveCount(0);
+  const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
+  for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
+    await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+  }
+  await expect(sections.getByRole('link', { name: 'Sources', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('navigation', { name: 'Views and operations' })).toHaveCount(0);
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(4);
   await page.getByRole('group', { name: 'Stage', exact: true }).getByRole('checkbox', { name: 'language', exact: false }).click();
@@ -230,10 +235,15 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('presentation'), 'classification');
   assert.equal(new URL(page.url()).searchParams.get('rank'), 'confidence');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
+  const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
+  await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
+  await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
+  await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Full entity', exact: true })).toBeVisible();
+  await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Prove storage', exact: true })).toBeVisible();
   await page.getByText('Structure, standing and evidence', { exact: true }).click();
-  await page.getByRole('navigation', { name: 'Entity inspection views', exact: true }).getByRole('link', { name: 'structure', exact: true }).click();
+  await inspectionViews.getByRole('link', { name: 'structure', exact: true }).click();
   await page.reload();
-  await expect(page.getByRole('navigation', { name: 'Entity inspection views', exact: true }).getByRole('link', { name: 'structure', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(inspectionViews.getByRole('link', { name: 'structure', exact: true })).toHaveAttribute('aria-current', 'page');
   mark('Band and execution controls reach native query bodies; peer coordinates, classification pivots and inspection view survive reload');
 
   await page.goto(base + scopeAddress + `&selected=${ids[0]}&presentation=comparison&other=second`);

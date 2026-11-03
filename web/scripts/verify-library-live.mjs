@@ -37,9 +37,13 @@ try {
   await page.goto(base + '/');
   await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
+  const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
+  for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
+    await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+  }
   mark('Knowledge is the opening workspace; provenance is not primary navigation');
   const catalogueRead = page.waitForResponse(response => new URL(response.url()).pathname === '/v1/explore/catalog');
-  await page.goto(base + '/explore/sources');
+  await sections.getByRole('link', { name: 'Sources', exact: true }).click();
   const response = await catalogueRead;
   if (response.status() !== 200) throw new Error('Installed source catalogue returned HTTP ' + response.status());
   const catalogue = await response.json();

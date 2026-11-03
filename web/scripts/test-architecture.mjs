@@ -36,7 +36,7 @@ try {
   }
   await page.goto(`${base}/explore/architecture`);
   await expect(page.getByRole('heading', { name: 'Architecture & operations', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Architecture & operations', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Knowledge sections', exact: true }).getByRole('link', { name: 'Architecture', exact: true })).toHaveAttribute('aria-current', 'page');
   const diagram = page.getByRole('img', { name: 'Laplace — construction prerequisites and recurring operation lanes' });
   await expect(diagram).toBeVisible();
   await expect.poll(() => diagram.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
@@ -82,7 +82,7 @@ try {
   await page.getByRole('link', { name: 'Open whole lifecycle' }).click();
   await expect(page.getByRole('img')).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator('details').filter({ has: page.locator('summary', { hasText: 'Explore tools' }) })).not.toHaveAttribute('open');
+  await expect(page.getByRole('navigation', { name: 'Knowledge sections', exact: true })).toBeVisible();
   await page.getByLabel('Diagram scale').selectOption('100');
   await diagram.scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(artifacts, 'mobile.png'), fullPage: true });

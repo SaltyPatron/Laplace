@@ -26,7 +26,7 @@ import { GatePrompt } from '../components/GatePrompt';
 import { RelationChip } from '../components/RelationChip';
 import { entityDestination } from '../components/entityDestination';
 import { changeWorld } from '../../world/context';
-import { WorldProjection } from '../../world/WorldLink';
+import { WorldLink as RouterLink, WorldProjection } from '../../world/WorldLink';
 import { presentations } from '../../world/presentations';
 import { type GlomeNode } from '../glome/GlomeCanvas';
 import { useAppStore } from '../../store';
@@ -323,7 +323,7 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
         onCopyId={copyId}
         onExport={() => void downloadExport()}
         onAskSubstrate={askSubstrate}
-      /> : <header className={styles.header}><div><h2>{selectedLabel ?? idHex}</h2><Button variant="ghost" size="sm" onClick={copyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button></div><Button variant="ghost" onClick={askSubstrate}>Ask substrate</Button></header>}
+      /> : <header className={styles.header}><div><h2>{selectedLabel ?? idHex}</h2><Button variant="ghost" size="sm" onClick={copyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button></div><div className={styles.actions}><Button asChild variant="ghost" size="sm"><RouterLink to={`/explore/entity/${idHex}`}>Full entity</RouterLink></Button><Button asChild variant="ghost" size="sm"><RouterLink to={`/proof?q=${encodeURIComponent(selectedLabel ?? idHex)}`}>Prove storage</RouterLink></Button><Button variant="ghost" onClick={askSubstrate}>Ask substrate</Button></div></header>}
 
       <NavTabs label="Subject presentations" tabs={availablePresentations.map(item => ({ id: item.id, label: item.label, active: item.id === presentation.id,
         href: `${location.pathname}?${changeWorld(params, { presentation: item.id })}`,
@@ -333,6 +333,18 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
       {presentation.render ? <Suspense fallback={<LoadingText>Reading subject presentation…</LoadingText>}>{presentation.render(idHex)}</Suspense>
         : lexiconGated ? <GatePrompt serviceId="inspect" label="Read recorded meanings, usage and relationships." onReady={() => setLexiconAttempt(value => value + 1)} />
           : <LexiconEntry key={idHex} field={lexicon} error={lexiconError} onRetry={() => setLexiconAttempt(value => value + 1)} />}
+
+      {(preview || selectedLabel) && <NavTabs
+        label="Entity inspection views"
+        tabs={TAB_IDS.map((t) => ({
+          id: t,
+          label: t,
+          active: tab === t,
+          href: `${location.pathname}?${changeWorld(params, { detail: t === 'overview' ? null : t, inspect: '1' })}`,
+          onIntent: () => { void TAB_PREFETCH[t](); },
+          onClick: () => setTab(t),
+        }))}
+      />}
 
       <details className={styles.inspector} open={inspectOpen} onToggle={event => {
         const open = event.currentTarget.open;
@@ -370,18 +382,6 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
 
       {inspectOpen && unlocked && show ? (
         <>
-          <NavTabs
-            label="Entity inspection views"
-            tabs={TAB_IDS.map((t) => ({
-              id: t,
-              label: t,
-              active: tab === t,
-              href: `${location.pathname}?${changeWorld(params, { detail: t === 'overview' ? null : t, inspect: '1' })}`,
-              onIntent: () => { void TAB_PREFETCH[t](); },
-              onClick: () => setTab(t),
-            }))}
-          />
-
           <div className={fillTab ? styles.tabFill : undefined}>
             <Suspense fallback={<LoadingText>Loading entity workspace…</LoadingText>}>
             {tab === 'overview' ? <OverviewTab entity={show} /> : null}
