@@ -34,13 +34,15 @@ function isChessPlayer(type?: string | null) {
 }
 
 function displayRelation(type: string, entityType: string | null | undefined, direction: string) {
+  const cleaned = type.replaceAll('_', ' ').trim();
+  if (!cleaned) return 'value';
   // An outgoing PLAYED_BY cell from a chess player names its opponent as the object, so it
   // reads as "played against".
   if (direction === 'out' && isChessPlayer(entityType)
-      && type.replaceAll('_', ' ').trim().toLowerCase() === 'played by') {
+      && cleaned.toLowerCase() === 'played by') {
     return 'played against';
   }
-  return type.replaceAll('_', ' ').toLowerCase();
+  return cleaned.toLowerCase();
 }
 
 function ambiguousLabels(rows: ExploreConsensusRow[]) {

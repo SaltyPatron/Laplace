@@ -17,6 +17,6 @@ CREATE OR REPLACE FUNCTION structural.word_anchor(p_id bytea)
     ROWS 1
 BEGIN ATOMIC
     SELECT public.blake3_send(e.id),NULL::bytea,e.tier,e.coord,p.path,pg_catalog.int8send(e.hilbert)
-    FROM public.laplace_entities(ARRAY[encode(p_id,'hex')::public.blake3]) e
-    LEFT JOIN public.laplace_physicalities(ARRAY[encode(p_id,'hex')::public.blake3]) p ON p.entity=e.id;
+    FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(p_id)]) e
+    LEFT JOIN public.laplace_physicalities(ARRAY[public.blake3_from_bytea(p_id)]) p ON p.entity=e.id;
 END;

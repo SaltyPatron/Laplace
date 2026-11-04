@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH lang AS (
+    WITH lang AS MATERIALIZED (
         SELECT COALESCE(p_lang, converse.terms_language(ARRAY[p_word])) AS l
     ), keys AS (
         SELECT p_word AS key

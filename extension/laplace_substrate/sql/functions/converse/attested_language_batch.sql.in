@@ -26,10 +26,25 @@ CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, lang bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT DISTINCT ON (a.subject_id) a.subject_id, a.context_id
-    FROM laplace.attestations a
-    WHERE a.subject_id = ANY (p_ids)
-      AND laplace.is_language(a.context_id)
-    GROUP BY a.subject_id, a.context_id
-    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id;
+    WITH legacy AS (
+        SELECT DISTINCT ON (a.subject_id) a.subject_id AS id, a.context_id AS lang,
+               SUM(a.sum_score_fp1e9)::numeric AS weight
+        FROM laplace.attestations a
+        WHERE a.subject_id = ANY (p_ids)
+          AND laplace.is_language(a.context_id)
+        GROUP BY a.subject_id, a.context_id
+        ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
+    ), native AS (
+        SELECT DISTINCT ON (b.term) b.term AS id, b.language AS lang,
+               SUM(b.eff_mu)::numeric AS weight
+        FROM converse.binding_evidence(p_ids, NULL, false) b
+        WHERE b.language IS NOT NULL
+        GROUP BY b.term, b.language
+        ORDER BY b.term, SUM(b.eff_mu) DESC, b.language
+    ), combined AS (
+        SELECT * FROM legacy UNION ALL SELECT * FROM native
+    )
+    SELECT DISTINCT ON (c.id) c.id, c.lang
+    FROM combined c
+    ORDER BY c.id, c.weight DESC, c.lang;
 END;

@@ -144,6 +144,20 @@ resolved AS (
            fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SENSE_OF'
+
+    UNION ALL
+
+    /* Native 3-part and 2-part lexical bindings via converse.binding_evidence */
+    SELECT p.term,
+           be.key AS sense_id,
+           be.key AS synset_id,
+           'HAS_SENSE'::text AS via_relation,
+           be.eff_mu AS base_eff_mu,
+           COALESCE(be.witnesses, be.games, 1)::bigint AS witnesses,
+           round(be.eff_mu * 1e9)::bigint AS rating,
+           0::bigint AS rd
+    FROM peers p
+    CROSS JOIN LATERAL converse.binding_evidence(ARRAY[p.id], NULL, false) be
 ),
 -- An explicitly empty context lets an owning caller perform language election
 -- after receiving the complete candidate field. NULL retains automatic language

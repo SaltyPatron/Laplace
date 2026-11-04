@@ -8,7 +8,7 @@ BEGIN ATOMIC
         SELECT e.id,e.tier,e.coord,e.coord OPERATOR(public.<=>) p_anchor AS distance
         FROM public.entity e
         WHERE (p_tier IS NULL OR e.tier=p_tier)
-          AND e.id IS DISTINCT FROM encode(p_except,'hex')::public.blake3
+          AND e.id IS DISTINCT FROM public.blake3_from_bytea(p_except)
         ORDER BY e.coord OPERATOR(public.<=>) p_anchor
         FETCH FIRST (greatest(p_k,0)) ROWS WITH TIES
     )

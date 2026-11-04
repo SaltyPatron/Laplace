@@ -9,7 +9,7 @@ BEGIN ATOMIC
                laplace.relation_type_id('IS_SYNONYM_OF')  AS is_synonym_of,
                laplace.relation_type_id('HAS_LANGUAGE')   AS has_language
     ),
-    syn AS (
+    syn AS MATERIALIZED (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM lexical.senses(p_word) s
         -- Instance synsets (proper nouns) are excluded, but only on a STANDING
@@ -74,10 +74,58 @@ BEGIN ATOMIC
         FROM members m, peers px
         WHERE m.w <> ALL(px.arr)
         GROUP BY m.w
+    ),
+    legacy_out AS (
+        SELECT a.w AS member, hl.object_id AS lang, a.mu::bigint AS mu, a.witnesses, a.sense_mu
+        FROM agg a
+        CROSS JOIN rel r
+        LEFT JOIN laplace.consensus hl
+          ON hl.subject_id = a.w AND hl.type_id = r.has_language
+    ),
+    syn_b3 AS MATERIALIZED (
+        SELECT s.id, public.blake3_from_bytea(s.id) AS b3_id, s.sense_mu
+        FROM syn s
+    ),
+    carriers AS MATERIALIZED (
+        SELECT sb.b3_id AS syn_b3, sb.sense_mu,
+               h.entity, public.laplace_parts(h.path) AS parts
+        FROM syn_b3 sb
+        JOIN public.physicality h
+          ON h.path OPERATOR(public.@^) sb.b3_id
+         AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind', 'tuple')]
+        WHERE public.laplace_path_length(h.path) = 3
+    ),
+    filtered_carriers AS MATERIALIZED (
+        SELECT c.*
+        FROM carriers c
+        CROSS JOIN peers px
+        WHERE public.blake3_send(c.parts[1]) <> ALL(px.arr)
+    ),
+    cells AS MATERIALIZED (
+        SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
+        FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM filtered_carriers), NULL::bigint,
+            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[],
+            3::smallint, NULL::public.blake3[], 3::bigint) c
+    ),
+    native_out AS (
+        SELECT public.blake3_send(fc.parts[1]) AS member,
+               public.blake3_send(fc.parts[2]) AS lang,
+               max(COALESCE(round((c.rating - 2 * c.deviation) * 1e9), round(fc.sense_mu * 1e9)))::bigint AS mu,
+               sum(GREATEST(COALESCE(c.matches, 1), 1))::bigint AS witnesses,
+               max(fc.sense_mu) AS sense_mu
+        FROM filtered_carriers fc
+        LEFT JOIN cells c
+          ON ((c.parts[3] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
+              OR (c.parts[1] = fc.entity AND c.parts[3] IN (fc.parts[1], fc.parts[3])))
+         AND (c.rating - 2 * c.deviation) > 0
+        GROUP BY fc.parts[1], fc.parts[2]
+    ),
+    combined AS (
+        SELECT * FROM legacy_out
+        UNION ALL
+        SELECT * FROM native_out
     )
-    SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
-    FROM agg a
-    CROSS JOIN rel r
-    LEFT JOIN laplace.consensus hl
-      ON hl.subject_id = a.w AND hl.type_id = r.has_language;
+    SELECT c.member, c.lang, max(c.mu)::bigint, max(c.witnesses)::bigint, max(c.sense_mu)
+    FROM combined c
+    GROUP BY c.member, c.lang;
 END;

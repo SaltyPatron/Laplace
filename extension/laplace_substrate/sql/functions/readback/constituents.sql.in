@@ -3,8 +3,8 @@ CREATE OR REPLACE FUNCTION realize.constituents(p_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH native AS MATERIALIZED (
-        SELECT c.ordinal, decode(c.child::text,'hex') AS child_id, c.run_length, c.flags
-        FROM public.laplace_constituents(ARRAY[encode(p_id,'hex')::public.blake3]) c
+        SELECT c.ordinal, public.blake3_send(c.child) AS child_id, c.run_length, c.flags
+        FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea(p_id)]) c
     )
     SELECT * FROM native
     UNION ALL
@@ -13,7 +13,7 @@ BEGIN ATOMIC
         SELECT p.trajectory AS traj
         FROM laplace.physicalities p
         WHERE p.entity_id = p_id AND p.type = 1 AND p.trajectory IS NOT NULL
-          AND NOT EXISTS (SELECT FROM public.entity e WHERE e.id=encode(p_id,'hex')::public.blake3)
+          AND NOT EXISTS (SELECT FROM public.entity e WHERE e.id=public.blake3_from_bytea(p_id))
         ORDER BY p.id
         LIMIT 1
     ) t

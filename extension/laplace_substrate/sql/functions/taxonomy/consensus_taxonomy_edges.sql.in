@@ -18,5 +18,17 @@ BEGIN ATOMIC
     WHERE c.subject_id = p_subject
       AND c.type_id = ANY (p_types)
       AND c.object_id IS NOT NULL
-      AND c.object_id NOT IN (SELECT r.type_id FROM laplace.relation_registry() r);
+      AND c.object_id NOT IN (SELECT r.type_id FROM laplace.relation_registry() r)
+    UNION ALL
+    SELECT e.neighbour_id AS object_id,
+           COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) AS type_id,
+           e.rating, e.rd
+    FROM consensus.edges_raw(p_subject, 'out', NULL, 64, true, 'eff_mu') e
+    WHERE e.neighbour_id IS NOT NULL
+      AND COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (p_types)
+      AND NOT EXISTS (
+          SELECT 1 FROM laplace.v_consensus_unrefuted c2
+          WHERE c2.subject_id = p_subject AND c2.object_id = e.neighbour_id
+            AND c2.type_id = ANY (p_types)
+      );
 END;

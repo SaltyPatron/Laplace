@@ -50,9 +50,9 @@ BEGIN ATOMIC
         SELECT 'geodesic'::text AS axis,entity_id,tier,distance AS geodesic,NULL::float8 AS frechet FROM geo
         UNION ALL SELECT 'shape',entity_id,tier,NULL::float8,shape FROM shapes WHERE shape<=p_frechet_max
     ), labels AS MATERIALIZED (
-        SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT encode(entity_id,'hex')::public.blake3 FROM admitted ORDER BY 1))
+        SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT public.blake3_from_bytea(entity_id) FROM admitted ORDER BY 1))
     )
     SELECT a.axis,a.entity_id,coalesce(l.content,'Unrealized entity'),a.tier,a.geodesic,a.frechet
-    FROM admitted a LEFT JOIN labels l ON l.entity=encode(a.entity_id,'hex')::public.blake3
+    FROM admitted a LEFT JOIN labels l ON l.entity=public.blake3_from_bytea(a.entity_id)
     ORDER BY a.axis,a.geodesic,a.frechet,a.entity_id;
 END;

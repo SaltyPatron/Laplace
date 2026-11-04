@@ -235,7 +235,6 @@
       "extension/laplace_substrate/sql/functions/identity/is_language.sql.in::HAS_LANGUAGE_SCOPE": 1,
       "extension/laplace_substrate/sql/functions/lexical/define.sql.in::HAS_DEFINITION": 1,
       "extension/laplace_substrate/sql/functions/lexical/define_with_context.sql.in::HAS_DEFINITION": 1,
-      "extension/laplace_substrate/sql/functions/lexical/examples.sql.in::HAS_EXAMPLE": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::HAS_LANGUAGE": 1,
@@ -252,7 +251,6 @@
       "extension/laplace_substrate/sql/functions/link/concept_peers.sql.in::IS_SYNONYM_OF": 1,
       "extension/laplace_substrate/sql/functions/link/concept_ref.sql.in::HAS_SYNSET_KEY": 1,
       "extension/laplace_substrate/sql/functions/ops/modality_counts.sql.in::ATTENDS": 1,
-      "extension/laplace_substrate/sql/functions/realize/realize_defines.sql.in::HAS_DEFINITION": 1,
       "extension/laplace_substrate/sql/functions/realize/resolve_name.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/realize/resolve_name.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::CAUSES": 1,
@@ -296,7 +294,6 @@
       "extension/laplace_substrate/sql/inference/attention.sql.in::IS_SYNONYM_OF": 1,
       "extension/laplace_substrate/sql/inference/attention.sql.in::PRECEDES": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::HAS_DEFINITION": 1,
-      "extension/laplace_substrate/sql/inference/translate_to.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/inference/translations.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1
     },

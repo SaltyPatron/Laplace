@@ -239,7 +239,6 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
         n += bucket->count;
         pfree(bucket->heap);
     }
-    LAPLACE_CONSENSUS_ENRICH(rows,n,LaplaceNeighbor);
     qsort(rows, n, sizeof(*rows), neighbor_order);
     *count = n;
     hash_destroy(state.pairs);
@@ -264,6 +263,8 @@ pg_laplace_explore_web_neighbors(PG_FUNCTION_ARGS)
     InitMaterializedSRF(fcinfo, 0);
     rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     rows = laplace_consensus_neighbors(frontier, types, limit, include_default, false, false, &count, NULL);
+    if (rows != NULL && count > 0)
+        LAPLACE_CONSENSUS_ENRICH(rows, (size_t) count, LaplaceNeighbor);
     deconstruct_array(frontier, BYTEAOID, -1, false, TYPALIGN_INT,
                       &input, &input_nulls, &n_input);
     /* Preserve input ordinals and duplicate frontier entries at the SQL edge;

@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION converse.contrast(p_x bytea, p_y bytea, p_lang bytea 
     RETURNS TABLE(holder text, type text, fact text, mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH lang AS (
+    WITH lang AS MATERIALIZED (
         SELECT COALESCE(p_lang, converse.terms_language(ARRAY[p_x, p_y])) AS l
     ), pair AS (
         -- The strongest coupling through keys (senses), else each term's dominant key.

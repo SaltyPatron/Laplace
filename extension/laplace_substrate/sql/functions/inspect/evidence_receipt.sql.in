@@ -42,9 +42,9 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts(p_id,p_limit,p_inbound)),
 series AS MATERIALIZED (SELECT * FROM ops.claim_witness_series(ARRAY(SELECT claim FROM facts)))
-SELECT decode(f.claim::text,'hex'),decode(f.predicate::text,'hex'),decode(f.object::text,'hex'),f.type,f.fact,f.eff_mu,
- decode(a.trunk::text,'hex'),a.source_label,a.games,a.tokens,a.score,a.trust,
- decode(a.dependence_root::text,'hex'),a.position
+SELECT @extschema:laplace@.blake3_send(f.claim),@extschema:laplace@.blake3_send(f.predicate),@extschema:laplace@.blake3_send(f.object),f.type,f.fact,f.eff_mu,
+ @extschema:laplace@.blake3_send(a.trunk),a.source_label,a.games,a.tokens,a.score,a.trust,
+ @extschema:laplace@.blake3_send(a.dependence_root),a.position
 FROM facts f JOIN series a ON a.claim OPERATOR(@extschema:laplace@.=) f.claim
 ORDER BY f.eff_mu DESC,f.claim,a.trunk;
 END;
@@ -56,7 +56,7 @@ BEGIN ATOMIC
 WITH facts AS MATERIALIZED (SELECT * FROM ops.claim_facts(p_id,p_limit)), provenance AS MATERIALIZED (
  SELECT DISTINCT s.claim,s.trunk,s.source_label FROM ops.claim_witness_series(ARRAY(SELECT claim FROM facts)) s
 )
-SELECT decode(f.predicate::text,'hex'),decode(f.object::text,'hex'),f.type,f.fact,f.eff_mu,
+SELECT @extschema:laplace@.blake3_send(f.predicate),@extschema:laplace@.blake3_send(f.object),f.type,f.fact,f.eff_mu,
  count(p.trunk)::bigint,string_agg(p.source_label,', ' ORDER BY p.trunk)
 FROM facts f LEFT JOIN provenance p ON p.claim OPERATOR(@extschema:laplace@.=) f.claim
 GROUP BY f.claim,f.predicate,f.type,f.object,f.fact,f.eff_mu ORDER BY f.eff_mu DESC,f.claim;

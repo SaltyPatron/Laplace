@@ -51,6 +51,10 @@ BEGIN ATOMIC
               AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
               AND COALESCE(ss.object_id, hs.object_id) IS NOT NULL
               AND hs.rating IS NOT NULL
+            UNION
+            SELECT be.key AS anchor
+            FROM me, LATERAL converse.binding_evidence(me.ids, NULL, false) be
+            WHERE be.key IS NOT NULL
         ) a
     ),
     sense_anchors AS MATERIALIZED (
@@ -67,6 +71,20 @@ BEGIN ATOMIC
     -- strict prefix), replacing the per-anchor
     -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
+    carriers AS MATERIALIZED (
+        SELECT h.entity, public.laplace_parts(h.path) AS parts
+        FROM anchors a, LATERAL unnest(a.ids) x
+        JOIN public.physicality h
+          ON h.path OPERATOR(public.@^) public.blake3_from_bytea(x)
+         AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind', 'tuple')]
+        WHERE public.laplace_path_length(h.path) = 3
+    ),
+    cells AS MATERIALIZED (
+        SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
+        FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM carriers), NULL::bigint,
+            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[],
+            3::smallint, NULL::public.blake3[], 3::bigint) c
+    ),
     members AS (
         SELECT c.subject_id AS member,
                CASE WHEN c.type_id = r.form_of THEN 'form'::text ELSE 'synonym'::text END AS kind,
@@ -93,6 +111,14 @@ BEGIN ATOMIC
          AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
         WHERE c.object_id = ANY (a.ids)
           AND c.type_id = r.evokes_frame
+        UNION ALL
+        SELECT public.blake3_send(cr.parts[1]), 'sense'::text,
+               COALESCE(consensus.eff_mu_display(round(cl.rating * 1e9)::bigint, round(cl.deviation * 1e9)::bigint), 1087.071::numeric)
+        FROM carriers cr
+        LEFT JOIN cells cl
+          ON ((cl.parts[3] = cr.entity AND cl.parts[1] IN (cr.parts[1], cr.parts[3]))
+              OR (cl.parts[1] = cr.entity AND cl.parts[3] IN (cr.parts[1], cr.parts[3])))
+         AND (cl.rating - 2 * cl.deviation) > 0
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu

@@ -130,6 +130,15 @@ relation_salience(const hash128_t *type)
     return laplace_relation_lookup(type, &def) == 0 && def != NULL ? def->rank : 0.0;
 }
 
+static hash128_t
+canonical_relation_type(const hash128_t *type)
+{
+    const laplace_relation_def_t *def = NULL;
+    if (laplace_relation_lookup(type, &def) == 0 && def != NULL)
+        return def->type_id;
+    return *type;
+}
+
 /* Meeting specificity: how many consensus cells name the candidate as object,
  * counted up to a firmware cap. A hub is shared by many cells, a specific
  * meeting by few. Used only to order ties in coverage. */
@@ -282,11 +291,12 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
         for (int r = 0; r < n_edges; ++r)
         {
             const LaplaceNeighbor *e = &edges[r];
+            hash128_t ctype = canonical_relation_type(&e->type);
             NodeState *from, *to;
             uint32 owners, fresh;
             bool found;
-            if (hash_search(binding_types, &e->type, HASH_FIND, NULL) ||
-                hash_search(non_salient_types, &e->type, HASH_FIND, NULL))
+            if (hash_search(binding_types, &ctype, HASH_FIND, NULL) ||
+                hash_search(non_salient_types, &ctype, HASH_FIND, NULL))
                 continue;
             /* Low-rank relations (governed classification values) are filters,
              * not strands: traversing one would join everything that shares it. */
@@ -300,7 +310,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
             if (!found) { to->reached = 0; to->is_key = 0; }
             fresh = owners & ~(to->reached | to->is_key);
             if (fresh == 0) continue;
-            bool taxonomic = hash_search(upward_types, &e->type, HASH_FIND, NULL) != NULL;
+            bool taxonomic = hash_search(upward_types, &ctype, HASH_FIND, NULL) != NULL;
             bool ascending = taxonomic && e->outbound;
             bool descending = taxonomic && !e->outbound;
             uint32 admitted = 0;
@@ -371,10 +381,11 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
             for (int r = 0; r < n_edges; ++r)
             {
                 const LaplaceNeighbor *e = &edges[r];
+                hash128_t ctype = canonical_relation_type(&e->type);
                 NodeState *x, *y;
                 uint32 want;
-                if (hash_search(binding_types, &e->type, HASH_FIND, NULL) ||
-                    hash_search(non_salient_types, &e->type, HASH_FIND, NULL) ||
+                if (hash_search(binding_types, &ctype, HASH_FIND, NULL) ||
+                    hash_search(non_salient_types, &ctype, HASH_FIND, NULL) ||
                     relation_salience(&e->type) < min_salience)
                     continue;
                 x = hash_search(nodes, &e->frontier, HASH_FIND, NULL);
@@ -384,7 +395,7 @@ pg_laplace_forward_respond(PG_FUNCTION_ARGS)
                 if (want == 0) continue;
                 /* The step runs from y to x: its orientation is the edge's, reversed. */
                 bool step_outbound = !e->outbound;
-                bool taxonomic = hash_search(upward_types, &e->type, HASH_FIND, NULL) != NULL;
+                bool taxonomic = hash_search(upward_types, &ctype, HASH_FIND, NULL) != NULL;
                 bool ascending = taxonomic && step_outbound;
                 bool descending = taxonomic && !step_outbound;
                 double salience = relation_salience(&e->type);
@@ -637,10 +648,21 @@ pg_laplace_content_terms(PG_FUNCTION_ARGS)
     {
         bool spi_top = false;
         ArrayType *subjects = hash128_array_from_ids(ids, n_ids);
-        ArrayType *type_ids = laplace_declared_binding_types();
+        int n_bound = 0;
+        LaplaceNeighbor *bound;
         if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
             elog(ERROR, "content_terms: SPI connect failed");
-        laplace_consensus_candidates(subjects, NULL, type_ids, receive_term_evidence, &read, NULL);
+        laplace_consensus_candidates(subjects, NULL, NULL, receive_term_evidence, &read, NULL);
+        bound = laplace_consensus_neighbors(subjects, relation_set("KEY_BINDING"), 4,
+                                            false, true, true, &n_bound, NULL);
+        for (int r = 0; r < n_bound; ++r)
+        {
+            TermEvidence *entry;
+            if (!bound[r].outbound) continue;
+            if (!(laplace_walk_edge_weight(bound[r].rating, bound[r].rd) > 0.0)) continue;
+            entry = hash_search(read.evidence, &bound[r].frontier, HASH_FIND, NULL);
+            if (entry) entry->has_meaning = true;
+        }
         laplace_classification_scan(subjects, "upos", receive_term_upos, &read);
         laplace_spi_finish(spi_top);
     }

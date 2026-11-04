@@ -349,8 +349,9 @@ int laplace_relation_set_ids(const char* set_name, const hash128_t** out_ids, si
         "",
         "#include \"laplace/core/hash128.h\"",
         "#include \"laplace/core/content_witness_batch.h\"",
+        "#include \"laplace/core/text_identity.h\"",
         "",
-        "static const laplace_relation_def_t k_relations[] = {",
+        "static laplace_relation_def_t k_relations[] = {",
     ]
 
     for name in canon_names:
@@ -442,11 +443,30 @@ static hash128_t k_relation_type_id_cache[{len(canon_names)}];
 
 /* Reverse index: type_id -> table ordinal, O(1). The type_id is a full BLAKE3 digest, so its low
  * 64 bits are already a uniform hash; we bucket on (lo & mask) with linear probing. Built once in
- * relation_ids_ensure() under the same init guard as the id cache. -1 == empty slot. The .shx to
- * k_relations' .shp: index then read. */
-#define LAPLACE_REL_BUCKET_SIZE {bucket_size}u
-#define LAPLACE_REL_BUCKET_MASK {bucket_mask}u
-static int16_t k_relation_bucket[LAPLACE_REL_BUCKET_SIZE];
+ * relation_ids_ensure() under the same init guard as the id cache, and lazily augmented with
+ * Native text_id hashes in relation_text_ids_ensure() once the scalar floor is loaded.
+ * -1 == empty slot. */
+typedef struct {{
+    hash128_t key;
+    int16_t   idx;
+}} rel_id_slot_t;
+
+#define LAPLACE_REL_BUCKET_SIZE 4096u
+#define LAPLACE_REL_BUCKET_MASK 4095u
+static rel_id_slot_t k_relation_bucket[LAPLACE_REL_BUCKET_SIZE];
+
+static void rel_id_bucket_insert(const hash128_t* id, int16_t idx) {{
+    size_t b = (size_t)(id->lo & LAPLACE_REL_BUCKET_MASK);
+    for (size_t probes = 0; probes < LAPLACE_REL_BUCKET_SIZE; ++probes) {{
+        if (k_relation_bucket[b].idx < 0) {{
+            k_relation_bucket[b].key = *id;
+            k_relation_bucket[b].idx = idx;
+            return;
+        }}
+        if (hash128_equals(&k_relation_bucket[b].key, id)) return;
+        b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
+    }}
+}}
 
 /* String-keyed buckets for the surface->idx and canonical->idx lookups.
  * These were linear scans of the 23-alias + {len(canon_names)}-canonical tables run once
@@ -516,26 +536,40 @@ static volatile LONG g_relation_ids_state = 0;
 static int ids_try_begin(void) {{ return InterlockedCompareExchange(&g_relation_ids_state, 1, 0) == 0; }}
 static void ids_mark_ready(void) {{ InterlockedExchange(&g_relation_ids_state, 2); }}
 static int ids_ready(void) {{ return InterlockedCompareExchange(&g_relation_ids_state, 2, 2) == 2; }}
+static volatile LONG g_relation_text_ids_state = 0;
+static int text_ids_try_begin(void) {{ return InterlockedCompareExchange(&g_relation_text_ids_state, 1, 0) == 0; }}
+static void text_ids_mark_ready(void) {{ InterlockedExchange(&g_relation_text_ids_state, 2); }}
+static int text_ids_ready(void) {{ return InterlockedCompareExchange(&g_relation_text_ids_state, 2, 2) == 2; }}
 #else
 static volatile int g_relation_ids_state = 0;
 static int ids_try_begin(void) {{ int expected = 0; return __atomic_compare_exchange_n(&g_relation_ids_state, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE); }}
 static void ids_mark_ready(void) {{ __atomic_store_n(&g_relation_ids_state, 2, __ATOMIC_RELEASE); }}
 static int ids_ready(void) {{ return __atomic_load_n(&g_relation_ids_state, __ATOMIC_ACQUIRE) == 2; }}
+static volatile int g_relation_text_ids_state = 0;
+static int text_ids_try_begin(void) {{ int expected = 0; return __atomic_compare_exchange_n(&g_relation_text_ids_state, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE); }}
+static void text_ids_mark_ready(void) {{ __atomic_store_n(&g_relation_text_ids_state, 2, __ATOMIC_RELEASE); }}
+static int text_ids_ready(void) {{ return __atomic_load_n(&g_relation_text_ids_state, __ATOMIC_ACQUIRE) == 2; }}
 #endif
 
 static void relation_ids_ensure(void) {{
     if (ids_ready()) return;
     if (ids_try_begin()) {{
-        for (size_t i = 0; i < laplace_relation_table_count; ++i)
+        for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b) {{
+            hash128_zero(&k_relation_bucket[b].key);
+            k_relation_bucket[b].idx = -1;
+        }}
+        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
             type_id_from_canonical(laplace_relation_table[i].canonical, &k_relation_type_id_cache[i]);
+            k_relations[i].type_id = k_relation_type_id_cache[i];
+            rel_id_bucket_insert(&k_relation_type_id_cache[i], (int16_t)i);
+        }}
+        for (size_t i = 0; i < laplace_relation_alias_table_count; ++i) {{
+            hash128_t alias_id;
+            if (type_id_from_canonical(laplace_relation_alias_table[i].surface, &alias_id) == 0)
+                rel_id_bucket_insert(&alias_id, laplace_relation_alias_table[i].canon_idx);
+        }}
         for (size_t i = 0; i < {len(set_canon_indices)}u; ++i)
             k_relation_set_ids_cache[i] = k_relation_type_id_cache[k_relation_set_member_idx[i]];
-        for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b) k_relation_bucket[b] = -1;
-        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
-            size_t b = (size_t)(k_relation_type_id_cache[i].lo & LAPLACE_REL_BUCKET_MASK);
-            while (k_relation_bucket[b] >= 0) b = (b + 1) & LAPLACE_REL_BUCKET_MASK;
-            k_relation_bucket[b] = (int16_t)i;
-        }}
         for (size_t b = 0; b < LAPLACE_REL_SURFACE_BUCKET_SIZE; ++b)
             k_relation_surface_bucket[b].surface = NULL;
         for (size_t b = 0; b < LAPLACE_REL_BUCKET_SIZE; ++b)
@@ -556,6 +590,28 @@ static void relation_ids_ensure(void) {{
         ids_mark_ready();
     }} else {{
         while (!ids_ready()) {{ }}
+    }}
+}}
+
+static void relation_text_ids_ensure(void) {{
+    if (text_ids_ready()) return;
+    if (text_identity_scalar_floor() == NULL) return;
+    if (text_ids_try_begin()) {{
+        for (size_t i = 0; i < laplace_relation_table_count; ++i) {{
+            hash128_t text_id;
+            if (hash128_text(laplace_relation_table[i].canonical,
+                             strlen(laplace_relation_table[i].canonical), &text_id) == 0)
+                rel_id_bucket_insert(&text_id, (int16_t)i);
+        }}
+        for (size_t i = 0; i < laplace_relation_alias_table_count; ++i) {{
+            hash128_t text_id;
+            if (hash128_text(laplace_relation_alias_table[i].surface,
+                             strlen(laplace_relation_alias_table[i].surface), &text_id) == 0)
+                rel_id_bucket_insert(&text_id, laplace_relation_alias_table[i].canon_idx);
+        }}
+        text_ids_mark_ready();
+    }} else {{
+        while (!text_ids_ready()) {{ }}
     }}
 }}
 
@@ -614,11 +670,12 @@ int laplace_relation_resolve_surface(const char* surface, hash128_t* out_type_id
 int laplace_relation_lookup(const hash128_t* type_id, const laplace_relation_def_t** out_def) {{
     if (!type_id || !out_def) return -1;
     relation_ids_ensure();
+    relation_text_ids_ensure();
     size_t b = (size_t)(type_id->lo & LAPLACE_REL_BUCKET_MASK);
     for (size_t probes = 0; probes < LAPLACE_REL_BUCKET_SIZE; ++probes) {{
-        int16_t idx = k_relation_bucket[b];
+        int16_t idx = k_relation_bucket[b].idx;
         if (idx < 0) return -1;                 /* empty slot => not present */
-        if (hash128_equals(type_id, &k_relation_type_id_cache[idx])) {{
+        if (hash128_equals(type_id, &k_relation_bucket[b].key)) {{
             *out_def = &laplace_relation_table[idx];
             return 0;
         }}

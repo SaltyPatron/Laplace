@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_summary(p_x bytea, p_y bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH ids AS MATERIALIZED (
-        SELECT encode(p_x,'hex')::public.blake3 AS x, encode(p_y,'hex')::public.blake3 AS y
+        SELECT public.blake3_from_bytea(p_x) AS x, public.blake3_from_bytea(p_y) AS y
     ), direct AS MATERIALIZED (
         SELECT c.entity,c.path,c.rating,c.deviation,c.matches
         FROM ids k CROSS JOIN LATERAL public.laplace_claims_each(

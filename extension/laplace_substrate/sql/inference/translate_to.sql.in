@@ -7,10 +7,8 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH src_langs AS (
-        SELECT c.object_id AS id FROM laplace.consensus c
-        WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-          AND c.object_id IS NOT NULL
+    WITH src_langs AS MATERIALIZED (
+        SELECT c.lang AS id FROM converse.word_language_candidates_batch(ARRAY[p_word]) c
     ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
     agg AS MATERIALIZED (

@@ -2888,3 +2888,49 @@ qualifier = "side/black"
 surface = "a definition, one or more example sentences, or both"
 canonical = "HAS_DEFINITION"
 flip = false
+
+[[alias]]
+surface = "words in the synset"
+canonical = "HAS_SENSE"
+flip = true
+
+[[alias]]
+surface = "part of speech"
+canonical = "HAS_POS"
+flip = false
+
+[[alias]]
+surface = "lexicographer file"
+canonical = "HAS_LEX_CATEGORY"
+flip = false
+
+[[alias]]
+surface = "count of usages"
+canonical = "HAS_FREQUENCY"
+flip = false
+
+# WN-LMF (OEWN / OMW) literal field predicates emitted by wn-lmf.recipe.
+[[alias]]
+surface = "definition of the synset"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "standard definition of the synset in the ILI"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "example usage"
+canonical = "HAS_EXAMPLE"
+flip = false
+
+[[alias]]
+surface = "lexical sense"
+canonical = "HAS_SENSE"
+flip = false
+
+[[alias]]
+surface = "reference"
+canonical = "IS_SENSE_OF"
+flip = false

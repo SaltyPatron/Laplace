@@ -21,7 +21,7 @@ BEGIN ATOMIC
         SELECT u.id,u.ordinal,row_number() OVER (ORDER BY u.ordinal) AS native_ordinal
         FROM unnest(p_ids) WITH ORDINALITY u(id,ordinal) WHERE u.id IS NOT NULL
     ), requested AS MATERIALIZED (
-        SELECT ARRAY(SELECT encode(u.id,'hex')::public.blake3
+        SELECT ARRAY(SELECT public.blake3_from_bytea(u.id)
                      FROM inputs u ORDER BY u.native_ordinal) AS ids
     ), native AS MATERIALIZED (
         SELECT u.ordinal, 1::smallint AS type, ST_X(e.coord) AS x, ST_Y(e.coord) AS y,

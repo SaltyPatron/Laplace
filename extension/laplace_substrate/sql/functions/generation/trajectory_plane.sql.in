@@ -8,7 +8,7 @@ BEGIN ATOMIC
     SELECT c.gap, @extschema:laplace@.blake3_send(c.subject), @extschema:laplace@.blake3_send(c.object), c.occurrences
     FROM @extschema:laplace@.laplace_ordered_pair_counts(
         CASE WHEN p_vocab IS NULL THEN NULL ELSE
-            ARRAY(SELECT encode(v,'hex')::@extschema:laplace@.blake3 FROM unnest(p_vocab) v) END,
+            ARRAY(SELECT @extschema:laplace@.blake3_from_bytea(v) FROM unnest(p_vocab) v) END,
         p_lo,p_hi) c;
 END;
 

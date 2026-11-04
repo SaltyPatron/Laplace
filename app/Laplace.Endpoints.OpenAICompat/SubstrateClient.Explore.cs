@@ -224,8 +224,16 @@ internal sealed partial class SubstrateClient
             var rows = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
                 conn, anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm, anchor.TrajectoryWkt,
                 geodesicK, frechetK, frechetMax, Math.Max(DefaultCommandTimeoutSeconds, 20), ct);
-            var labels = await ReadDisplayLabelsAsync(
-                conn, rows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+            var missingIds = rows
+                .Where(r => string.IsNullOrWhiteSpace(r.Label)
+                         || LooksLikeEntityHex(r.Label)
+                         || IsGenericUnrealizedLabel(r.Label))
+                .Select(r => r.IdHex)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var labels = missingIds.Count > 0
+                ? await ReadDisplayLabelsAsync(conn, missingIds, ct)
+                : new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
             return [.. rows.Select(r => new ExploreAnchorNeighborRow(
                 r.Axis, r.IdHex, DisplayLabel(labels, r.IdHex, r.Label),
                 r.Tier, r.Geodesic, r.Frechet))];
@@ -368,11 +376,17 @@ internal sealed partial class SubstrateClient
 
             // KNN over the entity's own stored physicality coordinate.
             var structuralRows = await NpgsqlSubstrateReads.StructuralNeighborsAsync(conn, id, k, ct);
-            var structuralLabels = await ReadDisplayLabelsAsync(
-                conn,
-                structuralRows.Where(r => r.IdHex is not null)
-                    .Select(r => r.IdHex!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                ct);
+            var missingIds = structuralRows
+                .Where(r => r.IdHex is not null &&
+                    (string.IsNullOrWhiteSpace(r.Label)
+                     || LooksLikeEntityHex(r.Label)
+                     || IsGenericUnrealizedLabel(r.Label)))
+                .Select(r => r.IdHex!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var structuralLabels = missingIds.Count > 0
+                ? await ReadDisplayLabelsAsync(conn, missingIds, ct)
+                : new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
             var structural = structuralRows
                 .Select(r => new ExploreNeighborRow(
                     Neighbor: DisplayLabel(structuralLabels, r.IdHex, r.Label),
@@ -406,8 +420,16 @@ internal sealed partial class SubstrateClient
             if (await ReadLabelAsync(conn, id, ct) is null) return null;
 
             var memberRows = await NpgsqlSubstrateReads.ConceptMembersAsync(conn, id, limit, ct);
-            var labels = await ReadDisplayLabelsAsync(
-                conn, memberRows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+            var missingIds = memberRows
+                .Where(r => string.IsNullOrWhiteSpace(r.Label)
+                         || LooksLikeEntityHex(r.Label)
+                         || IsGenericUnrealizedLabel(r.Label))
+                .Select(r => r.IdHex)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var labels = missingIds.Count > 0
+                ? await ReadDisplayLabelsAsync(conn, missingIds, ct)
+                : new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
             var members = memberRows
                 .Select(r => new ExploreMemberRow(
                     r.IdHex, DisplayLabel(labels, r.IdHex, r.Label), r.Kind, r.EffMu, r.Witnesses))
@@ -849,8 +871,20 @@ internal sealed partial class SubstrateClient
             }
         }
 
-        var labels = await ReadDisplayLabelsAsync(
-            conn, rows.Select(r => r.EntityIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+        if (rows.Count == 0)
+            return rows;
+
+        var needsLabelLookup = rows
+            .Where(r => string.IsNullOrWhiteSpace(r.EntityLabel)
+                     || LooksLikeEntityHex(r.EntityLabel)
+                     || IsGenericUnrealizedLabel(r.EntityLabel))
+            .Select(r => r.EntityIdHex)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var labels = needsLabelLookup.Count > 0
+            ? await ReadDisplayLabelsAsync(conn, needsLabelLookup, ct)
+            : new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < rows.Count; i++)
         {
             var r = rows[i];

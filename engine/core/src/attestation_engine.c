@@ -408,7 +408,7 @@ static int attestation_token_relation(
     if (laplace_relation_retired(type_id, NULL)) return LAPLACE_REL_RETIRED;
     *symmetry = LAPLACE_REL_SYMMETRY_ASYMMETRIC;
     const laplace_relation_def_t* def = NULL;
-    if (laplace_relation_lookup(type_id, &def) == 0 && def)
+    if (rc == 0 && laplace_relation_lookup(type_id, &def) == 0 && def)
         *symmetry = def->symmetry;
     return 0;
 }

@@ -3,26 +3,68 @@ CREATE OR REPLACE FUNCTION lexical.examples(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    WITH picked AS MATERIALIZED (
-        SELECT g.object_id AS object_id,
+    WITH sn AS MATERIALIZED (
+        SELECT sense_id, synset_id, eff_mu FROM lexical.senses(p_word)
+    ),
+    edges AS MATERIALIZED (
+        SELECT g.neighbour_id AS object_id,
                consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
                g.witness_count AS witnesses,
-               sn.eff_mu AS sense_rank
-        FROM lexical.senses(p_word) sn
+               s.eff_mu AS sense_rank,
+               consensus.relation_canonical(g.type_id) AS rel_canon
+        FROM sn s
         CROSS JOIN LATERAL (
-            VALUES (sn.sense_id),
-                   (CASE WHEN sn.synset_id IS DISTINCT FROM sn.sense_id THEN sn.synset_id END)
+            VALUES (s.sense_id),
+                   (CASE WHEN s.synset_id IS DISTINCT FROM s.sense_id THEN s.synset_id END)
         ) AS k(subj)
-        JOIN laplace.consensus g
-          ON g.subject_id = k.subj
-         AND g.type_id = laplace.relation_type_id('HAS_EXAMPLE')
+        CROSS JOIN LATERAL consensus.edges_raw(k.subj, 'out', NULL, 32, true, 'eff_mu') g
         WHERE k.subj IS NOT NULL
-        ORDER BY sn.eff_mu + consensus.eff_mu_display(g.rating, g.rd) DESC
+          AND consensus.relation_canonical(g.type_id) IN ('HAS_EXAMPLE', 'HAS_DEFINITION')
+    ),
+    has_ex AS (
+        SELECT object_id, eff_mu, witnesses, sense_rank
+        FROM edges
+        WHERE rel_canon = 'HAS_EXAMPLE'
+    ),
+    def_candidates AS MATERIALIZED (
+        SELECT e.object_id, e.eff_mu, e.witnesses, e.sense_rank,
+               row_number() OVER (ORDER BY e.sense_rank + e.eff_mu DESC, e.object_id) AS drn
+        FROM edges e
+        WHERE e.rel_canon = 'HAS_DEFINITION'
+          AND NOT EXISTS (SELECT 1 FROM has_ex)
+    ),
+    def_texts AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(object_id ORDER BY drn)) AS txt
+        FROM def_candidates
+    ),
+    def_ex AS (
+        SELECT btrim(q.ex_part, ' "') AS example,
+               dc.eff_mu, dc.witnesses, dc.sense_rank
+        FROM def_candidates dc
+        CROSS JOIN def_texts dt
+        CROSS JOIN LATERAL regexp_split_to_table(dt.txt[dc.drn], ';\s*') AS q(ex_part)
+        WHERE q.ex_part LIKE '"%"'
+    ),
+    picked AS MATERIALIZED (
+        SELECT h.object_id, NULL::text AS direct_txt, h.eff_mu, h.witnesses, h.sense_rank
+        FROM has_ex h
+        UNION ALL
+        SELECT NULL::bytea AS object_id, d.example AS direct_txt, d.eff_mu, d.witnesses, d.sense_rank
+        FROM def_ex d
+    ),
+    numbered AS MATERIALIZED (
+        SELECT x.*, row_number() OVER (ORDER BY x.sense_rank + x.eff_mu DESC, COALESCE(x.direct_txt, encode(x.object_id, 'hex'))) AS rn
+        FROM picked x
+        ORDER BY x.sense_rank + x.eff_mu DESC, COALESCE(x.direct_txt, encode(x.object_id, 'hex'))
         LIMIT p_limit
-    ), numbered AS MATERIALIZED (
-      SELECT x.*, row_number() OVER (ORDER BY x.sense_rank+x.eff_mu DESC, x.object_id) AS rn FROM picked x
-    ), batch AS MATERIALIZED (
-      SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn)) AS txt FROM numbered
+    ),
+    batch AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn)) AS txt
+        FROM numbered
+        WHERE object_id IS NOT NULL
     )
-    SELECT b.txt[x.rn], x.eff_mu, x.witnesses FROM numbered x CROSS JOIN batch b ORDER BY x.rn;
+    SELECT COALESCE(x.direct_txt, b.txt[x.rn]), x.eff_mu, x.witnesses
+    FROM numbered x
+    LEFT JOIN batch b ON true
+    ORDER BY x.rn;
 END;

@@ -57,15 +57,15 @@ id_array(HTAB *ids)
 }
 
 /* Entities whose trajectories contain every member, from the trajectory
- * membership index. `capacity` does not bound the set, so `truncated` is
- * always false. */
+ * membership index. When `capacity` > 0, bounds the container scan and sets
+ * `truncated` if more containers exist. */
 static hash128_t *
 candidate_names(ArrayType *members, int capacity, int *count, bool *truncated)
 {
-    (void)capacity;
     *count = 0; *truncated = false;
     if (ArrayGetNItems(ARR_NDIM(members), ARR_DIMS(members)) == 0) return NULL;
-    return laplace_content_membership_entities(members, true, count);
+    return laplace_content_membership_entities_bounded(members, true,
+        capacity > 0 ? (uint64)capacity : 0, count, truncated);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_word_containers_containing_all);
@@ -232,16 +232,26 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     ArrayType *members = PG_ARGISNULL(0) ? NULL : PG_GETARG_ARRAYTYPE_P(0);
     hash128_t *names = members == NULL ? NULL : candidate_names(
         members, capacity, &count, &truncated);
+    bool has_exact = !PG_ARGISNULL(1);
+    hash128_t exact = {0};
+    if (has_exact) exact = datum_to_hash128(PG_GETARG_DATUM(1));
     HTAB *hits = id_table("browse selected names", sizeof(BrowseHit));
-    Datum *name_datums = palloc(Max(count, 1) * sizeof(Datum));
-    for (int i = 0; i < count; ++i) name_datums[i] = hash128_to_datum(&names[i]);
-    Datum args[] = {PointerGetDatum(construct_array(name_datums, count, BYTEAOID, -1, false, TYPALIGN_INT))};
+    Datum *name_datums = palloc(Max(count + (has_exact ? 1 : 0), 1) * sizeof(Datum));
+    int name_datum_count = count;
+    bool exact_in_names = false;
+    for (int i = 0; i < count; ++i) {
+        if (has_exact && memcmp(&names[i], &exact, sizeof(hash128_t)) == 0)
+            exact_in_names = true;
+        name_datums[i] = hash128_to_datum(&names[i]);
+    }
+    if (has_exact && !exact_in_names)
+        name_datums[name_datum_count++] = hash128_to_datum(&exact);
+    Datum args[] = {PointerGetDatum(construct_array(name_datums, name_datum_count, BYTEAOID, -1, false, TYPALIGN_INT))};
     SPIPlanPtr p = plan(&names_plan,
         laplace_sql_query_text("browse.names"),
         1, array_type);
     laplace_spi_stream(p, 1, array_type, args, NULL, browse_name, hits);
-    if (!PG_ARGISNULL(1)) {
-        hash128_t exact = datum_to_hash128(PG_GETARG_DATUM(1));
+    if (has_exact) {
         add_structural_hit(hits, &exact, BROWSE_MATCH_SURFACE);
     }
     /* Containers of all members are hits beside the named entities. An id

@@ -217,15 +217,11 @@ BEGIN
             edges AS MATERIALIZED (
                 -- parts and kin read forward (topic -> object); kinds reads backward,
                 -- because the kinds OF a topic are the subjects whose hypernym it is.
-                SELECT s.layer, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
-                FROM sel s
-                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
-                WHERE s.layer IN (1, 3) AND c.object_id IS NOT NULL
-                UNION ALL
-                SELECT s.layer, c.subject_id, consensus.eff_mu(c.rating, c.rd)
-                FROM sel s
-                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
-                WHERE s.layer = 2
+                SELECT s.layer, e.neighbour_id AS nid, consensus.eff_mu(e.rating, e.rd) AS m
+                FROM consensus.edges_raw(topic, 'both', NULL, 64, true, 'eff_mu') e
+                JOIN sel s ON s.type_id = COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id)
+                WHERE (s.layer IN (1, 3) AND e.direction = 'out')
+                   OR (s.layer = 2 AND e.direction = 'in')
             ),
             ranked AS MATERIALIZED (
                 SELECT layer, nid, m,
@@ -303,14 +299,10 @@ BEGIN
                   AND r.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (
-                SELECT s.band, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
-                FROM sel s
-                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
-                WHERE c.object_id IS NOT NULL
-                UNION ALL
-                SELECT s.band, c.subject_id, consensus.eff_mu(c.rating, c.rd)
-                FROM sel s
-                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
+                SELECT s.band, e.neighbour_id AS nid, consensus.eff_mu(e.rating, e.rd) AS m
+                FROM consensus.edges_raw(topic, 'both', NULL, 64, true, 'eff_mu') e
+                JOIN sel s ON s.type_id = COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id)
+                WHERE e.neighbour_id IS NOT NULL
             ),
             -- MATERIALIZED and TOTALLY ORDERED, both load-bearing. `ord` indexes the
             -- realize_batch array, and this CTE is read twice below; an unfenced CTE

@@ -28,4 +28,6 @@ void laplace_content_membership_read(ArrayType *members, bool require_all,
 /* Every distinct entity whose content trajectory matches, in byte order. */
 hash128_t *laplace_content_membership_entities(ArrayType *members, bool require_all,
                                               int *count);
+hash128_t *laplace_content_membership_entities_bounded(ArrayType *members, bool require_all,
+                                                      uint64 max_rows, int *count, bool *truncated);
 #endif

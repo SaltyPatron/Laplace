@@ -12,25 +12,25 @@ BEGIN
             IF p_source IS NULL THEN RETURN ops.attestation_count(); END IF;
             IF NOT EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
                           AND attname='attestations' AND NOT attisdropped) THEN RETURN NULL; END IF;
-            EXECUTE 'SELECT attestations FROM public.witness WHERE id=encode($1,''hex'')::public.blake3'
+            EXECUTE 'SELECT attestations FROM public.witness WHERE id=public.blake3_from_bytea($1)'
                 INTO measured USING p_source;
-            IF NOT EXISTS(SELECT FROM public.witness WHERE id=encode(p_source,'hex')::public.blake3) THEN RETURN 0; END IF;
+            IF NOT EXISTS(SELECT FROM public.witness WHERE id=public.blake3_from_bytea(p_source)) THEN RETURN 0; END IF;
             RETURN measured;
         END IF;
         -- Filter actual claim endpoints, then count claim/trunk pairs. Repeated
         -- observations and shared dependence roots do not change cardinality.
         WITH candidates AS MATERIALIZED (
             SELECT c.entity AS claim FROM public.laplace_claims(
-                ARRAY(SELECT encode(v,'hex')::public.blake3 FROM unnest(ARRAY[p_type,p_object]) v WHERE v IS NOT NULL),
+                ARRAY(SELECT public.blake3_from_bytea(v) FROM unnest(ARRAY[p_type,p_object]) v WHERE v IS NOT NULL),
                 NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
         ), parts AS MATERIALIZED (
             SELECT p.entity FROM public.laplace_claim_preview(ARRAY(SELECT claim FROM candidates)) p
-            WHERE (p_type IS NULL OR p.predicate=encode(p_type,'hex')::public.blake3)
-              AND (p_object IS NULL OR p.object=encode(p_object,'hex')::public.blake3)
+            WHERE (p_type IS NULL OR p.predicate=public.blake3_from_bytea(p_type))
+              AND (p_object IS NULL OR p.object=public.blake3_from_bytea(p_object))
         )
         SELECT count(*) INTO measured FROM (
             SELECT DISTINCT a.claim,a.trunk FROM public.laplace_attested(ARRAY(SELECT entity FROM parts),false) a
-            WHERE a.witness AND (p_source IS NULL OR a.trunk=encode(p_source,'hex')::public.blake3)
+            WHERE a.witness AND (p_source IS NULL OR a.trunk=public.blake3_from_bytea(p_source))
         ) assertions;
         RETURN measured;
     END IF;

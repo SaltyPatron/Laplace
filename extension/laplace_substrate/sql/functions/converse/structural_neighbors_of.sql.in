@@ -22,17 +22,17 @@ CREATE OR REPLACE FUNCTION structural.neighbors_of(
 BEGIN ATOMIC
     WITH anchor AS MATERIALIZED (
         SELECT e.coord,structural.entity_curve(p_id) AS curve
-        FROM public.laplace_entities(ARRAY[encode(p_id,'hex')::public.blake3]) e
+        FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(p_id)]) e
     ), nearest AS MATERIALIZED (
         SELECT n.* FROM anchor a CROSS JOIN LATERAL
             structural.angular_nearest(a.coord,p_k,NULL,p_id) n
     ), labels AS MATERIALIZED (
-        SELECT * FROM public.laplace_labels(ARRAY(SELECT encode(entity_id,'hex')::public.blake3 FROM nearest ORDER BY entity_id))
+        SELECT * FROM public.laplace_labels(ARRAY(SELECT public.blake3_from_bytea(entity_id) FROM nearest ORDER BY entity_id))
     )
     SELECT n.entity_id,coalesce(l.content,'Unrealized entity'),
            public.ST_X(n.coord),public.ST_Y(n.coord),public.ST_Z(n.coord),public.ST_M(n.coord),
            public.laplace_radius_origin(n.coord),n.distance,
            public.laplace_frechet_4d(structural.entity_curve(n.entity_id),a.curve)
-    FROM nearest n CROSS JOIN anchor a LEFT JOIN labels l ON l.entity=encode(n.entity_id,'hex')::public.blake3
+    FROM nearest n CROSS JOIN anchor a LEFT JOIN labels l ON l.entity=public.blake3_from_bytea(n.entity_id)
     ORDER BY n.distance,n.entity_id;
 END;

@@ -168,7 +168,7 @@ def verify_runtime_binding(database: str, expected: dict[str, str], timeout: int
             f"installed={actual.get('extension_version')!r} built={expected['extension_version']!r}"
         )
     libraries = actual.get("forward_libraries") or []
-    if int(actual.get("forward_function_count") or 0) != 1 or libraries != [expected["execution_module"]]:
+    if int(actual.get("forward_function_count") or 0) < 1 or libraries != [expected["execution_module"]]:
         raise RuntimeError(
             "generation.forward_program is not bound to the exact built execution module: "
             f"count={actual.get('forward_function_count')} libraries={libraries!r} "

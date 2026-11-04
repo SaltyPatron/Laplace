@@ -10,15 +10,15 @@ RETURNS TABLE(id bytea,label text,tier smallint)
 LANGUAGE sql STABLE STRICT PARALLEL SAFE SUPPORT @extschema@.array_length_rows_support
 BEGIN ATOMIC
 WITH requested AS MATERIALIZED (
- SELECT ARRAY(SELECT encode(id,'hex')::@extschema:laplace@.blake3
+ SELECT ARRAY(SELECT @extschema:laplace@.blake3_from_bytea(id)
              FROM unnest(p_ids) WITH ORDINALITY u(id,ordinal) WHERE id IS NOT NULL ORDER BY ordinal) AS ids
 ), labels AS MATERIALIZED (
  SELECT * FROM @extschema:laplace@.laplace_labels((SELECT ids FROM requested))
 ), entities AS MATERIALIZED (
  SELECT ordinal,tier FROM @extschema:laplace@.laplace_entities((SELECT ids FROM requested))
 ), unresolved AS MATERIALIZED (
- SELECT d.i,decode(d.entity::text,'hex') AS id,e.tier
- FROM labels d JOIN laplace.entities e ON e.id=decode(d.entity::text,'hex')
+ SELECT d.i,@extschema:laplace@.blake3_send(d.entity) AS id,e.tier
+ FROM labels d JOIN laplace.entities e ON e.id=@extschema:laplace@.blake3_send(d.entity)
  WHERE d.content=d.entity::text
 ), semantic AS MATERIALIZED (
  SELECT u.i,u.tier,s.label
@@ -26,7 +26,7 @@ WITH requested AS MATERIALIZED (
  CROSS JOIN LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY s(label,ordinal)
  JOIN (SELECT *,row_number() OVER(ORDER BY i) AS ordinal FROM unresolved) u USING(ordinal)
 )
-SELECT decode(d.entity::text,'hex'),coalesce(nullif(s.label,''),d.content),
+SELECT @extschema:laplace@.blake3_send(d.entity),coalesce(nullif(s.label,''),d.content),
  coalesce(e.tier,s.tier,CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
 FROM labels d LEFT JOIN entities e ON e.ordinal=d.i LEFT JOIN semantic s ON s.i=d.i ORDER BY d.i;
 END;

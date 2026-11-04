@@ -8,7 +8,7 @@ BEGIN ATOMIC
     -- Resolve it there instead of silently dropping it from the realized curve.
     -- A missing non-floor constituent makes the whole curve unresolved.
     WITH native_root AS MATERIALIZED (
-        SELECT * FROM public.laplace_entities(ARRAY[encode(p_entity,'hex')::public.blake3])
+        SELECT * FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(p_entity)])
         WHERE p_type=1
     ), native_parts AS MATERIALIZED (
         SELECT c.* FROM native_root r CROSS JOIN LATERAL

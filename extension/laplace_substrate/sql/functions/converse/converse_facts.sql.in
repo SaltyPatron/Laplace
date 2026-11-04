@@ -69,10 +69,12 @@ BEGIN
     -- is not reproducible.
     RETURN QUERY
     WITH best AS (
-        SELECT c.subject_id, c.object_id, c.type_id, c.rating, c.rd, c.witness_count
-        FROM laplace.consensus c
-        WHERE c.subject_id = p_syn AND c.type_id = ANY (t_def)
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+        SELECT p_syn AS subject_id, e.neighbour_id AS object_id,
+               COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) AS type_id,
+               e.rating, e.rd, e.witness_count
+        FROM consensus.edges_raw(p_syn, 'out', NULL, 64, true, 'eff_mu') e
+        WHERE COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (t_def)
+        ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
         LIMIT 1)
     SELECT 'definition'::text,
            initcap(v_lbl) || ' is ' || realize.render_text(b.object_id) || '.',
@@ -87,12 +89,10 @@ BEGIN
     -- hypernymy (class membership is HAS_PART {meronymy/member}), so a band pick would
     -- render membership through the "is a kind of" frame. Bands say how much a relation
     -- matters; families say what it MEANS, and only the IS_A family means hypernymy.
-    SELECT c.type_id INTO tax_type
-    FROM laplace.consensus c
-    WHERE c.subject_id = p_syn
-      -- Folded: IMMUTABLE and manifest-generated, so this prunes at plan time.
-      AND c.type_id = ANY (consensus.relation_family_ids('IS_A'))
-    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
+    SELECT COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) INTO tax_type
+    FROM consensus.edges_raw(p_syn, 'out', NULL, 64, true, 'eff_mu') e
+    WHERE COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (consensus.relation_family_ids('IS_A'))
+    ORDER BY consensus.eff_mu(e.rating, e.rd) DESC
     LIMIT 1;
     -- NO band fallback. Abstention is a real answer here. A concept with no witnessed
     -- hypernymy has no hypernym to report, and emitting a class id inside the "is a kind of" frame is
@@ -152,15 +152,15 @@ BEGIN
     -- realize.realize() ahead of LIMIT (#903; same pattern chat.sql.in band lens).
     RETURN QUERY
     WITH ranked AS MATERIALIZED (
-        SELECT c.object_id AS nid,
-               consensus.eff_mu(c.rating, c.rd) AS mu,
-               consensus.eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc,
+        SELECT e.neighbour_id AS nid,
+               consensus.eff_mu(e.rating, e.rd) AS mu,
+               consensus.eff_mu_display(e.rating, e.rd) AS mu_disp,
+               e.witness_count AS wc,
                row_number() OVER (
-                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
-        FROM laplace.consensus c
-        WHERE c.subject_id = p_syn AND c.type_id = ANY (t_part)
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+                   ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id) AS ix
+        FROM consensus.edges_raw(p_syn, 'out', NULL, 64, true, 'eff_mu') e
+        WHERE COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (t_part)
+        ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
         LIMIT p_part_limit
     ),
     lbl AS MATERIALIZED (
@@ -194,17 +194,16 @@ BEGIN
     -- realize.batch — label_is_content stays a last-resort guard on survivors (#903).
     RETURN QUERY
     WITH ranked AS MATERIALIZED (
-        SELECT c.object_id AS nid,
-               consensus.eff_mu(c.rating, c.rd) AS mu,
-               consensus.eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc,
+        SELECT e.neighbour_id AS nid,
+               consensus.eff_mu(e.rating, e.rd) AS mu,
+               consensus.eff_mu_display(e.rating, e.rd) AS mu_disp,
+               e.witness_count AS wc,
                row_number() OVER (
-                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
-        FROM laplace.consensus c
-        WHERE c.subject_id = p_syn
-          AND c.type_id = ANY (t_assoc)
-          AND c.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+                   ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id) AS ix
+        FROM consensus.edges_raw(p_syn, 'out', NULL, 64, true, 'eff_mu') e
+        WHERE COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (t_assoc)
+          AND COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) NOT IN (SELECT id FROM converse.non_kin_assoc_types())
+        ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
         LIMIT p_kin_limit
     ),
     lbl AS MATERIALIZED (

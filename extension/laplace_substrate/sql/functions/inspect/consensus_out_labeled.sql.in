@@ -23,8 +23,8 @@ BEGIN ATOMIC
     -- separately through lexical.senses. Flattening those subjects here erased the
     -- subject identity and manufactured duplicate-looking consensus rows.
     WITH native AS MATERIALIZED (
-        SELECT f.claim,decode(f.predicate::text,'hex') AS type_id,
-               decode(f.object::text,'hex') AS object_id,f.type,f.fact,f.eff_mu
+        SELECT f.claim,public.blake3_send(f.predicate) AS type_id,
+               public.blake3_send(f.object) AS object_id,f.type,f.fact,f.eff_mu
         FROM ops.claim_facts(p_id,p_limit) f
     ), native_provenance AS MATERIALIZED (
         SELECT a.claim,count(*) AS witnesses
@@ -35,7 +35,7 @@ BEGIN ATOMIC
         FROM laplace.v_consensus_resolved c
         WHERE c.subject_id = p_id
           AND c.object_id IS NOT NULL
-          AND NOT EXISTS(SELECT FROM public.entity e WHERE e.id=encode(p_id,'hex')::public.blake3)
+          AND NOT EXISTS(SELECT FROM public.entity e WHERE e.id=public.blake3_from_bytea(p_id))
         ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC, c.type_id, c.object_id
         LIMIT GREATEST(p_limit, 0)
     )

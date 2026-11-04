@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION converse.synonyms(p_word bytea, p_limit int DEFAULT 1
     RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    WITH src_lang AS (SELECT converse.word_language(p_word) AS id),
+    WITH src_lang AS MATERIALIZED (SELECT converse.word_language(p_word) AS id),
     agg AS (
         SELECT sm.member, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu

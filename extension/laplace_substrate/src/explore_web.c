@@ -36,10 +36,12 @@ typedef struct {
 	hash128_t	nbr;
 	hash128_t	type_id;
 	hash128_t	from;
+	hash128_t	claim;
 	int64		rating;
 	int64		rd;
 	int64		witnesses;
 	bool		outbound;
+	bool		native_claim;
 	double		strength;
 } EdgeCand;
 
@@ -92,16 +94,39 @@ emit_edge(const EdgeOut *e, void *context)
 /* explore_web elects a bounded vertex set. This operation returns every stored
  * binary consensus cell among those vertices (the induced subgraph), including
  * cross-links and cycles that the discovery edges alone do not carry. */
+typedef struct {
+	LaplaceConsensusRow *rows;
+	size_t count;
+	size_t cap;
+} InducedEdgeBuf;
+
 static void
-emit_induced_edge(const LaplaceConsensusRow *row, void *context)
+collect_induced_edge(const LaplaceConsensusRow *row, void *context)
 {
-	ReturnSetInfo *rsinfo = context;
-	Datum values[7];
-	bool nulls[7] = {false, false, false, false, false, false, false};
+	InducedEdgeBuf *buf = (InducedEdgeBuf *) context;
 
 	if (row->object_is_null ||
 		memcmp(&row->subject, &row->object, sizeof(hash128_t)) == 0)
 		return;
+
+	if (buf->count == buf->cap)
+	{
+		size_t next_cap = buf->cap == 0 ? 64 : buf->cap * 2;
+		if (next_cap > MaxAllocSize / sizeof(LaplaceConsensusRow))
+			ereport(ERROR, (errmsg("explore_induced_edges: result exceeds allocation capacity")));
+		buf->rows = buf->rows == NULL
+			? (LaplaceConsensusRow *) palloc(sizeof(LaplaceConsensusRow) * next_cap)
+			: (LaplaceConsensusRow *) repalloc(buf->rows, sizeof(LaplaceConsensusRow) * next_cap);
+		buf->cap = next_cap;
+	}
+	buf->rows[buf->count++] = *row;
+}
+
+static void
+emit_induced_edge(const LaplaceConsensusRow *row, ReturnSetInfo *rsinfo)
+{
+	Datum values[7];
+	bool nulls[7] = {false, false, false, false, false, false, false};
 
 	values[0] = hash128_to_datum(&row->subject);
 	values[1] = hash128_to_datum(&row->type);
@@ -289,10 +314,12 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 				cands[n_cands].nbr = nbr;
 				cands[n_cands].type_id = type_id;
 				cands[n_cands].from = cur;
+				cands[n_cands].claim = neighbors[r].claim;
 				cands[n_cands].rating = rating;
 				cands[n_cands].rd = rd;
 				cands[n_cands].witnesses = wit;
 				cands[n_cands].outbound = outbound;
+				cands[n_cands].native_claim = neighbors[r].native_claim;
 				cands[n_cands].strength = laplace_edge_strength(rating, rd);
 				n_cands++;
 			}
@@ -313,6 +340,7 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 			HTAB	   *picked;
 			HTAB	   *per_root;
 			HASHCTL		pctl;
+			int			n_elected = 0;
 
 			memset(&pctl, 0, sizeof(pctl));
 			pctl.keysize = 16;
@@ -328,7 +356,6 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 				SeenNode   *ne;
 				bool		quota_found;
 				bool		found;
-				EdgeOut		edge;
 
 				quota = (SeenNode *) hash_search(per_root, &cands[i].from,
 												 HASH_ENTER, &quota_found);
@@ -349,17 +376,30 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 				if (n_next < max_nodes)
 					next_frontier[n_next++] = cands[i].nbr;
 
-				edge.source = cands[i].outbound ? cands[i].from : cands[i].nbr;
-				edge.type_id = cands[i].type_id;
-				edge.object = cands[i].outbound ? cands[i].nbr : cands[i].from;
-				edge.hop = (int16) hop;
-				edge.rating = cands[i].rating;
-				edge.rd = cands[i].rd;
-				edge.witnesses = cands[i].witnesses;
-				visit(&edge, context);
+				if (n_elected != i)
+					cands[n_elected] = cands[i];
+				n_elected++;
 			}
 			hash_destroy(per_root);
 			hash_destroy(picked);
+
+			if (n_elected > 0)
+			{
+				LAPLACE_CONSENSUS_ENRICH(cands, (size_t) n_elected, EdgeCand);
+				for (int i = 0; i < n_elected; i++)
+				{
+					EdgeOut edge;
+
+					edge.source = cands[i].outbound ? cands[i].from : cands[i].nbr;
+					edge.type_id = cands[i].type_id;
+					edge.object = cands[i].outbound ? cands[i].nbr : cands[i].from;
+					edge.hop = (int16) hop;
+					edge.rating = cands[i].rating;
+					edge.rd = cands[i].rd;
+					edge.witnesses = cands[i].witnesses;
+					visit(&edge, context);
+				}
+			}
 		}
 
 		/* Swap frontiers. */
@@ -396,13 +436,23 @@ Datum
 pg_laplace_explore_induced_edges(PG_FUNCTION_ARGS)
 {
 	ArrayType *nodes;
+	InducedEdgeBuf buf = {NULL, 0, 0};
+	ReturnSetInfo *rsinfo;
 
 	InitMaterializedSRF(fcinfo, 0);
 	if (PG_ARGISNULL(0))
 		ereport(ERROR, (errmsg("explore_induced_edges: node set must not be NULL")));
 
+	rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	nodes = PG_GETARG_ARRAYTYPE_P(0);
-	laplace_consensus_scan(nodes, nodes, NULL, emit_induced_edge,
-						   fcinfo->resultinfo, NULL);
+	laplace_consensus_candidates(nodes, nodes, NULL, collect_induced_edge,
+								 &buf, NULL);
+	if (buf.count > 0)
+	{
+		LAPLACE_CONSENSUS_ENRICH(buf.rows, buf.count, LaplaceConsensusRow);
+		for (size_t i = 0; i < buf.count; i++)
+			emit_induced_edge(&buf.rows[i], rsinfo);
+		pfree(buf.rows);
+	}
 	return (Datum) 0;
 }

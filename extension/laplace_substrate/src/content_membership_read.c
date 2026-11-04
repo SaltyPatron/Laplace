@@ -382,12 +382,14 @@ compare_id(const void *left, const void *right)
 }
 
 hash128_t *
-laplace_content_membership_entities(ArrayType *members, bool require_all, int *count)
+laplace_content_membership_entities_bounded(ArrayType *members, bool require_all,
+                                           uint64 max_rows, int *count, bool *truncated)
 {
     HASHCTL ctl = {0};
     ctl.keysize = ctl.entrysize = sizeof(hash128_t);
     HTAB *ids = hash_create("containing identities", 256, &ctl, HASH_ELEM | HASH_BLOBS);
-    laplace_content_membership_read(members, require_all, collect_entity, ids);
+    bool complete = laplace_typed_membership_read(members, require_all, 1, max_rows, collect_entity, ids);
+    if (truncated != NULL) *truncated = !complete;
     long size = hash_get_num_entries(ids);
     if (size > INT_MAX || (Size)size > MaxAllocSize / sizeof(hash128_t))
         elog(ERROR, "content membership identities exceed allocation capacity");
@@ -399,6 +401,12 @@ laplace_content_membership_entities(ArrayType *members, bool require_all, int *c
     hash_destroy(ids);
     qsort(result, *count, sizeof(hash128_t), compare_id);
     return result;
+}
+
+hash128_t *
+laplace_content_membership_entities(ArrayType *members, bool require_all, int *count)
+{
+    return laplace_content_membership_entities_bounded(members, require_all, 0, count, NULL);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_containers_containing_all);
