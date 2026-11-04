@@ -297,7 +297,7 @@ public sealed class NativeRecipeExecution
                         || observation.FilesDone > observation.FilesTotal || observation.Entities < 0
                         || observation.Physicalities < 0 || observation.BytesDone < 0)
                         throw new InvalidDataException("Native progress contained invalid counters.");
-                    if (observation.Event is not ("inventory" or "file-start" or "file-known" or "file-composed" or "progress" or "complete" or "failed"))
+                    if (observation.Event is not ("inventory" or "file-start" or "file-known" or "file-composed" or "progress" or "source-trunk" or "source-publication" or "complete" or "failed"))
                         throw new InvalidDataException("Native progress contained an unknown event.");
                     progress(observation);
                 }
