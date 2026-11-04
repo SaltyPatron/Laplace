@@ -37,12 +37,16 @@ BEGIN ATOMIC
  ), cells AS MATERIALIZED (
   SELECT c.entity,public.laplace_parts(c.path) AS parts,c.rating,c.deviation,c.matches
   FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM lexical),NULL::bigint,
-   ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],
-   3::smallint,NULL::public.blake3[],3::bigint) c
+   ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[]) c
+  WHERE public.laplace_path_length(c.path) IN (2,3)
  ), binding_cells AS MATERIALIZED (
   SELECT DISTINCT c.* FROM lexical t JOIN cells c
-   ON (c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
-   OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))
+   ON (cardinality(c.parts)=3
+       AND ((c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+         OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))))
+   OR (cardinality(c.parts)=2
+       AND ((c.parts[2]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+         OR (c.parts[1]=t.entity AND c.parts[2] IN(t.word,t.parts[3]))))
  ), admitted AS MATERIALIZED (
   SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM binding_cells WHERE p_support),false) a
   WHERE a.witness GROUP BY a.claim
@@ -54,26 +58,19 @@ BEGIN ATOMIC
  ), native AS MATERIALIZED (
   SELECT DISTINCT ON(t.word,t.parts[3],t.entity)
    public.blake3_send(t.word) AS term,public.blake3_send(t.parts[3]) AS key,
-   public.blake3_send(t.entity) AS binding,public.blake3_send(coalesce(c.entity,t.entity)) AS claim,
+   public.blake3_send(t.entity) AS binding,public.blake3_send(c.entity) AS claim,
    public.blake3_send(t.parts[2]) AS language,
    coalesce(public.blake3_send(t.parts[2])=p_lang,false) AS in_lang,
-   coalesce((c.rating-2*c.deviation)::numeric,1087.071::numeric) AS eff_mu,
-   coalesce(c.witnesses,CASE WHEN p_support THEN 1::bigint END) AS witnesses,
-   coalesce(c.matches,1::bigint) AS games
-  FROM lexical t
-  LEFT JOIN (
-   SELECT bc.*, ad.witnesses
-   FROM binding_cells bc
-   JOIN admitted ad ON ad.claim=bc.entity
-  ) c ON (c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
-      OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))
-  WHERE c.entity IS NOT NULL
-     OR EXISTS (
-         SELECT 1 FROM public.physicality p
-         WHERE (p.path OPERATOR(public.@^) t.entity OR p.path OPERATOR(public.^@) t.entity)
-           AND p.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind','claim')]
-     )
-  ORDER BY t.word,t.parts[3],t.entity,c.rating-2*c.deviation DESC NULLS LAST,c.matches DESC NULLS LAST,c.entity
+   (c.rating-2*c.deviation)::numeric AS eff_mu,a.witnesses,c.matches AS games
+  FROM lexical t JOIN binding_cells c
+   ON (cardinality(c.parts)=3
+       AND ((c.parts[3]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+         OR (c.parts[1]=t.entity AND c.parts[3] IN(t.word,t.parts[3]))))
+   OR (cardinality(c.parts)=2
+       AND ((c.parts[2]=t.entity AND c.parts[1] IN(t.word,t.parts[3]))
+         OR (c.parts[1]=t.entity AND c.parts[2] IN(t.word,t.parts[3]))))
+  JOIN admitted a ON a.claim=c.entity
+  ORDER BY t.word,t.parts[3],t.entity,c.rating-2*c.deviation DESC,c.matches DESC,c.entity
  ), legacy_cells AS MATERIALIZED (
   SELECT c.id,c.subject_id AS term,c.object_id AS key,c.type_id,c.rating,c.rd,c.witness_count
   FROM laplace.v_consensus_unrefuted c WHERE c.subject_id=ANY(p_terms)
@@ -344,18 +341,23 @@ BEGIN ATOMIC
     ), cells AS MATERIALIZED (
         SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
         FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM filtered_carriers), NULL::bigint,
-            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[],
-            3::smallint, NULL::public.blake3[], 3::bigint) c
+            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[]) c
+        WHERE public.laplace_path_length(c.path) IN (2, 3)
     ), down_native AS (
         SELECT fc.key, public.blake3_send(fc.parts[1]) AS target,
                fc.up_rating, fc.up_rd, fc.up_witnesses,
-               COALESCE(round(c.rating * 1e9)::bigint, fc.up_rating) AS down_rating,
-               COALESCE(round(c.deviation * 1e9)::bigint, fc.up_rd) AS down_rd,
-               GREATEST(COALESCE(c.matches, 1), 1)::bigint AS down_witnesses
+               round(c.rating * 1e9)::bigint AS down_rating,
+               round(c.deviation * 1e9)::bigint AS down_rd,
+               GREATEST(c.matches, 1)::bigint AS down_witnesses
         FROM filtered_carriers fc
-        LEFT JOIN cells c
-          ON ((c.parts[3] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
-              OR (c.parts[1] = fc.entity AND c.parts[3] IN (fc.parts[1], fc.parts[3])))
+        JOIN cells c
+          ON ((cardinality(c.parts) = 3
+               AND ((c.parts[3] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
+                    OR (c.parts[1] = fc.entity AND c.parts[3] IN (fc.parts[1], fc.parts[3]))))
+              OR (cardinality(c.parts) = 2
+                  AND ((c.parts[2] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
+                       OR (c.parts[1] = fc.entity AND c.parts[2] IN (fc.parts[1], fc.parts[3])))))
+         AND c.matches > 0
          AND (c.rating - 2 * c.deviation) > 0
     ), combined AS (
         SELECT * FROM legacy_rows UNION ALL SELECT * FROM down_native
