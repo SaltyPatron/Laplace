@@ -331,20 +331,29 @@ phase_migrate() {
 phase_extensions() {
   need_pg
   say "extensions in $LAPLACE_DBNAME"
-  local ext avail installed
+  local ext avail installed module
   for ext in laplace laplace_geom laplace_substrate; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
     installed="$(sql -c "SELECT extversion FROM pg_extension WHERE extname = '$ext'")"
     [[ -n "$avail" ]] || fail "$ext is not available to $LAPLACE_DBNAME (extension_control_path)"
     if [[ -z "$installed" ]]; then installed="none yet: the migrations make it at $avail"
-    elif [[ "$installed" != "$avail" ]]; then
-      # Native ships a normal versioned upgrade chain in PostgreSQL's share
-      # directory. Only the monorepo extensions need the generated hash bridge.
-      if [[ "$ext" != laplace ]]; then
-        install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+    else
+      if [[ "$installed" != "$avail" ]]; then
+        # Native ships a normal versioned upgrade chain in PostgreSQL's share
+        # directory. Only the monorepo extensions need the generated hash bridge.
+        if [[ "$ext" != laplace ]]; then
+          install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+        fi
+        PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
+        installed="$installed -> $avail"
       fi
-      PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
-      installed="$installed -> $avail"
+      if [[ "$ext" == laplace ]]; then
+        module="$(sed -nE "s/^module_pathname[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$EXT_SHARE/extension/laplace.control" | head -1)"
+        [[ -n "$module" ]] || fail "laplace.control has no module_pathname"
+        PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql \
+          -c "CREATE OR REPLACE FUNCTION public.laplace_restore_function_bindings() RETURNS void LANGUAGE c AS '$module', 'laplace_restore_function_bindings'" \
+          -c "SELECT public.laplace_restore_function_bindings()" >/dev/null
+      fi
     fi
     echo "  $ext $installed"
   done
