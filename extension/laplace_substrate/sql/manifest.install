@@ -192,6 +192,8 @@ functions/converse/word_segment_resolved.sql.in
 functions/converse/label_is_content.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/text_root_placements.sql.in
+functions/structural/containers_of.sql.in
+functions/converse/forward_pass.sql.in
 functions/converse/attested_language_batch.sql.in
 functions/converse/attested_language.sql.in
 functions/converse/word_language.sql.in
@@ -220,11 +222,9 @@ functions/converse/converse_about.sql.in
 functions/converse/converse.sql.in
 functions/converse/steered_walk_raw.sql.in
 functions/variant/trajectory_unpacked_points.sql.in
-functions/structural/containers_of.sql.in
 functions/relation/relation_band_types.sql.in
 functions/corpus/separator_ids.sql.in
 functions/highway/laplace_highway_popcount.sql.in
-functions/converse/forward_pass.sql.in
 functions/converse/lexicon_texts.sql.in
 functions/structural/geometry_successors.sql.in
 functions/lexical/senses.sql.in
