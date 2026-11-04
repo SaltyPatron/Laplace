@@ -72,11 +72,23 @@ public sealed class FideCurrentMarkupTests
     }
 
     [Fact]
+    public void Profile_DetectsPoisonedBomOnlyMicroCacheResponse()
+    {
+        Assert.False(ChessGameFetcher.FideProfileContainsPlayerName("\uFEFF"));
+        Assert.True(ChessGameFetcher.FideProfileContainsPlayerName(
+            "<html><head><title>\uFEFF Carlsen, Magnus FIDE Profile</title></head><body></body></html>"));
+    }
+
+    [Fact]
     [Trait("Category", "RequiresNetwork")]
     [Trait("Tier", "live")]
     public async Task OfficialFideProfileRatingListSearchAndRosterAreUsable()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+
+        var carlsen = await ChessGameFetcher.FetchFideProfileAsync("1503014", timeout.Token);
+        Assert.Equal("1503014", carlsen.ProviderId);
+        Assert.Contains("Carlsen", carlsen.DisplayName, StringComparison.OrdinalIgnoreCase);
 
         var exact = await ChessGameFetcher.FetchFideProfileAsync("2016192", timeout.Token);
         Assert.Equal("2016192", exact.ProviderId);

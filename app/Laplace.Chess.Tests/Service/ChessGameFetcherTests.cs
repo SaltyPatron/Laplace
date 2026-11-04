@@ -119,9 +119,9 @@ public sealed class ChessGameFetcherTests
         const string profile = """
             {
               "@id":"https://api.chess.com/pub/player/magnuscarlsen",
-              "player_id":3889224, "username":"MagnusCarlsen", "name":"Magnus Carlsen",
+              "player_id":3889224, "username":"magnuscarlsen", "name":"Magnus Carlsen",
               "title":"GM", "avatar":"https://images.chesscomfiles.com/magnus.png",
-              "url":"https://www.chess.com/member/magnuscarlsen",
+              "url":"https://www.chess.com/member/MagnusCarlsen",
               "country":"https://api.chess.com/pub/country/NO",
               "twitch_url":"https://twitch.tv/maskenissen",
               "streaming_platforms":[{"type":"twitch","url":"https://twitch.tv/maskenissen"}]
@@ -133,6 +133,8 @@ public sealed class ChessGameFetcherTests
 
         var p = ChessGameFetcher.ParseChessComProfile(profile, stats, "MagnusCarlsen");
 
+        Assert.Equal("magnuscarlsen", p.ProviderId);
+        Assert.Equal("MagnusCarlsen", p.DisplayName);
         Assert.Equal("Magnus Carlsen", p.RealName);
         Assert.Equal("https://images.chesscomfiles.com/magnus.png", p.AvatarUrl);
         Assert.Equal("3889224", p.Facts["player_id"]);
@@ -207,6 +209,19 @@ public sealed class ChessGameFetcherTests
         Assert.Contains("max=1000", limited);
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, ""));
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, "0"));
+    }
+
+    [Fact]
+    public void ChessComUrls_UseCanonicalLowercaseUsernames()
+    {
+        Assert.Equal("https://api.chess.com/pub/player/magnuscarlsen",
+            ChessGameFetcher.ChessComPlayerUrl(" MagnusCarlsen "));
+        Assert.Equal("https://api.chess.com/pub/player/magnuscarlsen/stats",
+            ChessGameFetcher.ChessComStatsUrl("MagnusCarlsen"));
+        Assert.Equal("https://api.chess.com/pub/player/magnuscarlsen/games/archives",
+            ChessGameFetcher.ChessComArchivesUrl("MagnusCarlsen"));
+        Assert.Equal("https://api.chess.com/pub/player/anthony-hart/games/archives",
+            ChessGameFetcher.ChessComArchivesUrl("Anthony-Hart"));
     }
 
     [Fact]

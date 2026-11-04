@@ -103,7 +103,7 @@ public static class ChessGameFetcher
         int? concurrency = null)
     {
         ValidateLimit(max);
-        var archUrl = $"https://api.chess.com/pub/player/{Uri.EscapeDataString(user)}/games/archives";
+        var archUrl = ChessComArchivesUrl(user);
         log?.Invoke($"chess.com archives: {archUrl}");
         // Route the archive-index request through the same visible provider retry
         // channel as monthly PGNs. A throttle on the very first request must not look
@@ -410,9 +410,8 @@ public static class ChessGameFetcher
 
     public static async Task<ChessPlayerProfile> FetchChessComProfileAsync(string user, CancellationToken ct)
     {
-        string escaped = Uri.EscapeDataString(user);
-        string json = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}", ct);
-        string statsJson = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}/stats", ct);
+        string json = await GetStringWithRetryAsync(ChessComPlayerUrl(user), ct);
+        string statsJson = await GetStringWithRetryAsync(ChessComStatsUrl(user), ct);
         return ParseChessComProfile(json, statsJson, user);
     }
 
@@ -437,20 +436,33 @@ public static class ChessGameFetcher
                 ratings[label] = value;
 
         var links = new List<string>();
-        if (String(root, "url") is { } url) links.Add(url);
+        string? profileUrl = String(root, "url");
+        if (profileUrl is not null) links.Add(profileUrl);
         if (String(root, "country") is { } country) links.Add(country);
         if (String(root, "twitch_url") is { } twitch) links.Add(twitch);
         if (root.TryGetProperty("streaming_platforms", out var platforms)
             && platforms.ValueKind == JsonValueKind.Array)
             foreach (var platform in platforms.EnumerateArray())
                 if (String(platform, "url") is { } streamUrl) links.Add(streamUrl);
+        string displayName = ChessComMemberHandle(profileUrl) ?? username;
         return new ChessPlayerProfile(
-            "chesscom", username, username, realName, null,
+            "chesscom", username, displayName, realName, null,
             String(root, "title"), String(root, "country"), null,
-            String(root, "avatar"), PlayerAliases(username, realName),
+            String(root, "avatar"), PlayerAliases(username, displayName, realName),
             links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings,
             Facts(root, "player_id", "@id", "status", "location", "joined", "last_online",
                 "followers", "is_streamer", "twitch_url", "league", "verified"));
+    }
+
+    internal static string? ChessComMemberHandle(string? profileUrl)
+    {
+        if (string.IsNullOrWhiteSpace(profileUrl)
+            || !Uri.TryCreate(profileUrl, UriKind.Absolute, out var uri))
+            return null;
+        string[] parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 && parts[^2].Equals("member", StringComparison.OrdinalIgnoreCase)
+            ? Uri.UnescapeDataString(parts[^1])
+            : null;
     }
 
     public static async Task<ChessPlayerProfile> FetchFideProfileAsync(string fideId, CancellationToken ct)
@@ -459,8 +471,19 @@ public static class ChessGameFetcher
             throw new ArgumentException("FIDE identifier must contain 4 to 12 digits.", nameof(fideId));
         string url = $"https://ratings.fide.com/profile/{fideId}";
         string html = await GetStringWithRetryAsync(url, ct);
+        if (!FideProfileContainsPlayerName(html))
+        {
+            string freshHtml = await GetStringWithRetryAsync($"{url}?_={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}", ct);
+            if (FideProfileContainsPlayerName(freshHtml))
+                html = freshHtml;
+        }
         return ParseFideProfile(html, fideId, url);
     }
+
+    internal static bool FideProfileContainsPlayerName(string html)
+        => !string.IsNullOrWhiteSpace(html)
+           && (HtmlMatch(html, @"<title[^>]*>\s*\uFEFF?\s*(.*?)\s+FIDE Profile\s*</title>") is not null
+               || HtmlMatch(html, @"<h1[^>]*>\s*\uFEFF?\s*(.*?)\s*</h1>") is not null);
 
     internal static ChessPlayerProfile ParseFideProfile(string html, string fideId, string url)
     {
@@ -634,6 +657,18 @@ public static class ChessGameFetcher
                 nameof(configuredLimit));
         return limit;
     }
+
+    internal static string ChessComPlayerUrl(string user)
+        => $"https://api.chess.com/pub/player/{Uri.EscapeDataString(ChessComCanonicalUser(user))}";
+
+    internal static string ChessComStatsUrl(string user)
+        => $"{ChessComPlayerUrl(user)}/stats";
+
+    internal static string ChessComArchivesUrl(string user)
+        => $"{ChessComPlayerUrl(user)}/games/archives";
+
+    internal static string ChessComCanonicalUser(string user)
+        => user.Trim().ToLowerInvariant();
 
     internal static string LichessGamesUrl(string user, int? max)
     {

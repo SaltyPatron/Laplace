@@ -480,10 +480,8 @@ public static class ChessLabRunners
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
-        var profiles = new List<ChessPlayerProfile>
-        {
-            await ChessGameFetcher.FetchProfileAsync(user, site, ct),
-        };
+        var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);
+        var profiles = new List<ChessPlayerProfile> { online };
         if (fideId.Length > 0)
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
         lab.Publish(slot, ProfileTable(profiles));
@@ -503,7 +501,7 @@ public static class ChessLabRunners
                 // A web import is an ingest run like `laplace-mono ingest chess`: the same
                 // run/file journal rows and one terminal status (with its error) per job.
                 journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
-                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(user)}", ct);
+                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}", ct);
                 lab.Publish(slot, new ChessLabLogEvent("info",
                     $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
                 ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
@@ -513,7 +511,7 @@ public static class ChessLabRunners
                 lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
             }
 
-            string fileName = $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn";
+            string fileName = $"{ChessGameFetcher.Sanitize(online.ProviderId)}_{ChessGameFetcher.Sanitize(site)}.pgn";
             if (persistPgn)
             {
                 outPath = Path.Combine(LabDir, slot.Job.Id, fileName);
@@ -531,7 +529,7 @@ public static class ChessLabRunners
             int repairedWhileFetching = 0;
             int verifiedWhileFetching = 0;
             long verifiedPliesWhileFetching = 0;
-            int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
+            int games = await ChessGameFetcher.FetchAsync(online.ProviderId, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
                 ingest && site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
                     ? async (archive, batch, token) =>
@@ -587,7 +585,7 @@ public static class ChessLabRunners
                     schema = "laplace.chess-provider-recording/v1",
                     jobId = slot.Job.Id,
                     provider = site.Trim().ToLowerInvariant(),
-                    providerUser = user,
+                    providerUser = online.ProviderId,
                     sourcePgnBytes = pgnBytes,
                     sourcePgnSha256 = pgnSha256,
                     fetchedGames = games,
@@ -683,7 +681,7 @@ public static class ChessLabRunners
         // A profile import is an ingest run like every other Lab import: one ingest_run_journal
         // row and exactly one terminal ok|failed|cancelled status (with its error).
         var journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
-            $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(user)}/profile", ct);
+            $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}/profile", ct);
         lab.Publish(slot, new ChessLabLogEvent("info",
             $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
         ChessPgnIngestor.ProfileResult result;
