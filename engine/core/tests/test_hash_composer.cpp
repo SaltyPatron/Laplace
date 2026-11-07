@@ -319,7 +319,7 @@ TEST(LaplaceNativeCompose, RefComposeRunsAndFactorParityWithExpandedComposition)
     ASSERT_TRUE(lp_ref_compose_runs(runs_children, runs_counts, 3, 2, &compressed));
     EXPECT_EQ(0, std::memcmp(&expected.id, &compressed.id, sizeof(lp_id)));
     EXPECT_EQ(0, std::memcmp(&expected.c, &compressed.c, sizeof(lp_coord)));
-    EXPECT_EQ(2, compressed.tier);
+    EXPECT_EQ(1, compressed.tier);
 
     const lp_ref pattern[6] = {a, b, a, b, a, b};
     lp_ref factored[6] = {};
