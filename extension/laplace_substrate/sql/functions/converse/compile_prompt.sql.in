@@ -47,19 +47,44 @@ route_nodes AS MATERIALIZED (
     JOIN laplace.consensus n
      ON n.object_id = v.variant_id
      AND n.type_id = ANY (consensus.relation_set_ids('NAME_EDGE'))
+    UNION
+    SELECT v.word_id, e.neighbour_id AS node_id
+    FROM consensus.edges_raw_batch(
+        ARRAY(SELECT DISTINCT variant_id FROM variants),
+        'in', consensus.relation_set_ids('NAME_EDGE'), 16, false, 'edge_rank') e
+    JOIN variants v ON v.variant_id = e.subject_id
+    WHERE e.neighbour_id IS NOT NULL
 ),
 route_evidence AS MATERIALIZED (
-    SELECT v.word_id,
-           r.operation_id,
-           r.shape,
-           r.role,
-           max(consensus.eff_mu(c.rating, c.rd)) AS mu
-    FROM route_nodes v
-    JOIN laplace.consensus c
-      ON c.subject_id = v.node_id
-     AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
-    JOIN converse.operation_frame_routes() r ON r.frame_id = c.object_id
-    GROUP BY v.word_id, r.operation_id, r.shape, r.role
+    SELECT x.word_id,
+           x.operation_id,
+           x.shape,
+           x.role,
+           max(x.mu) AS mu
+    FROM (
+        SELECT v.word_id,
+               r.operation_id,
+               r.shape,
+               r.role,
+               consensus.eff_mu(c.rating, c.rd) AS mu
+        FROM route_nodes v
+        JOIN laplace.consensus c
+          ON c.subject_id = v.node_id
+         AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
+        JOIN converse.operation_frame_routes() r ON r.frame_id = c.object_id
+        UNION ALL
+        SELECT v.word_id,
+               r.operation_id,
+               r.shape,
+               r.role,
+               consensus.eff_mu(e.rating, e.rd) AS mu
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT node_id FROM route_nodes),
+            'out', consensus.relation_family_ids('EVOKES_FRAME'), 16, false, 'edge_rank') e
+        JOIN route_nodes v ON v.node_id = e.subject_id
+        JOIN converse.operation_frame_routes() r ON r.frame_id = e.neighbour_id
+    ) x
+    GROUP BY x.word_id, x.operation_id, x.shape, x.role
 ),
 programs AS MATERIALIZED (
     SELECT r.operation_id, r.shape, sum(r.mu) AS route_mu
@@ -88,6 +113,11 @@ lexicalized AS MATERIALIZED (
     FROM variants v
     JOIN laplace.consensus c ON c.subject_id = v.variant_id
     WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+    UNION
+    SELECT DISTINCT v.word_id
+    FROM variants v
+    JOIN converse.binding_evidence(ARRAY(SELECT DISTINCT variant_id FROM variants), NULL, false) be
+      ON be.term = v.variant_id
 ),
 plang AS MATERIALIZED (
     SELECT converse.prompt_language_top(p_prompt) AS id

@@ -17,13 +17,27 @@ CREATE OR REPLACE FUNCTION lexical.senses_batch(p_words bytea[])
 BEGIN ATOMIC
     WITH lang AS MATERIALIZED (
         SELECT converse.terms_language(p_words) AS id
+    ),
+    ranked AS MATERIALIZED (
+        SELECT e.term, e.binding AS sense_id, e.key AS synset_id, e.eff_mu, e.witnesses,
+               row_number() OVER (
+                   PARTITION BY e.term
+                   ORDER BY e.in_lang DESC, e.games DESC, e.eff_mu DESC, e.key, e.binding
+               )::int AS rank
+        FROM lang l, LATERAL converse.binding_evidence(p_words, l.id, false) e
+    ),
+    top_ranked AS MATERIALIZED (
+        SELECT * FROM ranked WHERE rank <= 64
+    ),
+    sense_of AS MATERIALIZED (
+        SELECT e.subject_id, e.neighbour_id
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT synset_id FROM top_ranked),
+            'out', ARRAY[laplace.relation_type_id('IS_SENSE_OF')], 1, false, 'eff_mu') e
     )
-    SELECT b.term, b.key, COALESCE(ss.object_id, b.key), b.eff_mu, b.witnesses
-    FROM lang l, LATERAL converse.bindings(p_words, l.id) b
-    LEFT JOIN laplace.v_consensus_unrefuted ss
-      ON ss.subject_id = b.key
-     AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
-    WHERE b.rank <= 64
+    SELECT b.term, b.sense_id, COALESCE(ss.neighbour_id, b.synset_id), b.eff_mu, b.witnesses
+    FROM top_ranked b
+    LEFT JOIN sense_of ss ON ss.subject_id = b.synset_id
     ORDER BY b.term, b.rank;
 END;
 

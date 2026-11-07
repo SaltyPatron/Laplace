@@ -178,6 +178,17 @@ try {
     }
     if($Operation -ne 'status' -and $Database -eq 'substrate'){
         $deployRoot=if($env:LAPLACE_DEPLOY){$env:LAPLACE_DEPLOY}else{Join-Path $env:LAPLACE_DATA_ROOT 'deploy'}
+        $deployShareDir=Join-Path $deployRoot 'share'
+        foreach($cacheSetting in @(
+            @{Name='laplace.tier0';File=(Join-Path $deployShareDir 'tier0.bin')},
+            @{Name='laplace.flags';File=(Join-Path $deployShareDir 'tier0.flags')},
+            @{Name='laplace.highway';File=(Join-Path $deployShareDir 'highway.bin')}
+        )){
+            if(Test-Path -LiteralPath $cacheSetting.File -PathType Leaf){
+                $normalizedPath=$cacheSetting.File.Replace('\','/').Replace("'","''")
+                $null=Query "ALTER DATABASE `"$selected`" SET $($cacheSetting.Name) = '$normalizedPath';" 'postgres'
+            }
+        }
         $deployExtDir=Join-Path $deployRoot 'share/extension'
         if(-not(Test-Path -LiteralPath $deployExtDir -PathType Container)){
             $deployExtDir=Join-Path $deployRoot 'pgsql-18/share/extension'

@@ -110,7 +110,7 @@ family_out AS (
     -- before planning, so the LIST partitions prune. See realize.resolve_name.
     WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
 ),
-resolved AS (
+resolved AS MATERIALIZED (
     /* word --HAS_SENSE--> sense [--IS_SENSE_OF--> synset] */
     SELECT fo.term,
            fo.target_id AS sense_id,
@@ -121,7 +121,8 @@ resolved AS (
                 ELSE fo.base_eff_mu END AS base_eff_mu,
            fo.witnesses + COALESCE(ss.witness_count, 0) AS witnesses,
            fo.rating,
-           fo.rd
+           fo.rd,
+           NULL::bytea AS language
     FROM family_out fo
     LEFT JOIN laplace.consensus ss
       ON ss.subject_id = fo.target_id
@@ -133,7 +134,8 @@ resolved AS (
 
     /* lemma --IS_SYNONYM_OF--> synset (WordNet co-membership) */
     SELECT fo.term, fo.target_id, fo.target_id, fo.via_relation,
-           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
+           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd,
+           NULL::bytea AS language
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SYNONYM_OF'
 
@@ -141,7 +143,8 @@ resolved AS (
 
     /* sense --IS_SENSE_OF--> synset (when caller passes a sense id directly) */
     SELECT fo.term, fo.term, fo.target_id, fo.via_relation,
-           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
+           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd,
+           NULL::bytea AS language
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SENSE_OF'
 
@@ -149,15 +152,17 @@ resolved AS (
 
     /* Native 3-part and 2-part lexical bindings via converse.binding_evidence */
     SELECT p.term,
-           be.key AS sense_id,
+           be.binding AS sense_id,
            be.key AS synset_id,
            'HAS_SENSE'::text AS via_relation,
            be.eff_mu AS base_eff_mu,
            COALESCE(be.witnesses, be.games, 1)::bigint AS witnesses,
            round(be.eff_mu * 1e9)::bigint AS rating,
-           0::bigint AS rd
+           0::bigint AS rd,
+           be.language
     FROM peers p
-    CROSS JOIN LATERAL converse.binding_evidence(ARRAY[p.id], NULL, false) be
+    JOIN converse.binding_evidence(ARRAY(SELECT DISTINCT id FROM peers), NULL, false) be
+      ON be.term = p.id
 ),
 -- An explicitly empty context lets an owning caller perform language election
 -- after receiving the complete candidate field. NULL retains automatic language
@@ -171,8 +176,9 @@ language_filter AS MATERIALIZED (
 -- "has an edge to the query language" does not discriminate.
 term_lang AS MATERIALIZED (
     SELECT al.id AS term, al.lang AS id
-    FROM converse.attested_language_batch(ARRAY(SELECT term FROM terms)) al
-    CROSS JOIN language_filter lf
+    FROM language_filter lf
+    CROSS JOIN LATERAL converse.attested_language_batch(
+        CASE WHEN lf.requested THEN ARRAY(SELECT term FROM terms) ELSE '{}'::bytea[] END) al
     WHERE lf.requested
 ),
 -- ONE probe for EVERY candidate synset of EVERY term, through the canonical body
@@ -231,6 +237,11 @@ cand_langs AS MATERIALIZED (
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
             AND lf.requested
             AND laplace.is_language(a.context_id)
+    UNION
+    SELECT DISTINCT r.synset_id AS id, r.language AS lang
+    FROM resolved r
+    CROSS JOIN language_filter lf
+    WHERE lf.requested AND r.language IS NOT NULL
 ),
 scoped AS (
     SELECT r.* FROM resolved r

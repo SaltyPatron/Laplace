@@ -1,20 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #include "postgres.h"
 
 #include "fmgr.h"
@@ -34,6 +17,7 @@
 #include "perfcache_native.h"
 
 static char *perfcache_path = NULL;
+static char *perfcache_profile = NULL;
 static char *highway_perfcache_path = NULL;
 static char *chess_position_perfcache_path = NULL;
 static char *vocabulary_perfcache_path = NULL;
@@ -44,9 +28,18 @@ laplace_substrate_perfcache_init(void)
 {
     DefineCustomStringVariable(
         "laplace_substrate.perfcache_path",
-        "Path to the T0 perfcache blob (laplace_t0_perfcache.bin).",
+        "Path to the T0 perfcache blob (tier0.bin or shard prefix).",
         "Empty disables perfcache-backed lookups; consumers fall back or error per their contract.",
         &perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.perfcache_profile",
+        "Tier-0 modular branch profile (ascii, utf, cjk, bmp, full, or + separated shards).",
+        "Empty selects the full Unicode floor (or LAPLACE_TIER0_PROFILE when set).",
+        &perfcache_profile,
         "",
         PGC_SIGHUP,
         0,
@@ -63,7 +56,7 @@ laplace_substrate_perfcache_init(void)
     DefineCustomStringVariable(
         "laplace_substrate.chess_position_perfcache_path",
         "Path to the chess compose-floor blob (laplace_chess_position_perfcache.bin).",
-        "Tier-1 piece×square vocab + catalog tier-2 positions (GH #822). "
+        "Tier-1 piecexsquare vocab + catalog tier-2 positions (GH #822). "
         "Empty disables chess floor lookups; compose falls back to t0 recomputation.",
         &chess_position_perfcache_path,
         "",
@@ -124,6 +117,14 @@ laplace_substrate_chess_position_perfcache_path(void)
     return chess_position_perfcache_path;
 }
 
+static int
+load_configured_t0_perfcache(void)
+{
+    if (perfcache_profile != NULL && perfcache_profile[0] != '\0')
+        return codepoint_table_load_branches(perfcache_path, perfcache_profile);
+    return codepoint_table_load_perfcache(perfcache_path);
+}
+
 bool
 laplace_perfcache_ready(void)
 {
@@ -134,13 +135,13 @@ laplace_perfcache_ready(void)
     if (perfcache_path == NULL || perfcache_path[0] == '\0')
         return false;
 
-    rc = codepoint_table_load_perfcache(perfcache_path);
+    rc = load_configured_t0_perfcache();
     if (rc != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR),
                  errmsg("laplace_substrate: failed to load perfcache \"%s\" (rc=%d)",
                         perfcache_path, rc),
-                 errdetail("rc -1: open/stat/mmap failure; -2: bad magic/version; "
+                 errdetail("rc -1: open/stat/mmap failure; -2: bad magic/version/profile; "
                            "-3: record count/size mismatch; -4: body CRC mismatch."),
                  errhint("Fix laplace_substrate.perfcache_path or redeploy the blob "
                          "(install-extensions.cmd stages it).")));
@@ -219,8 +220,6 @@ pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(laplace_chess_position_ready());
 }
 
-
-
 /* Builds the codepoint reverse index (id -> codepoint) by round-tripping one
  * codepoint and fails if the round trip does not hold. */
 static void
@@ -237,27 +236,16 @@ laplace_substrate_perfcache_prewarm(void)
 {
     int rc;
 
-    /* Only under shared_preload_libraries: the postmaster maps and validates
-     * each blob and builds the reverse index once, and forked backends inherit
-     * them copy-on-write. Otherwise each backend loads on first use. A load
-     * failure here warns so the cluster still starts; the first-use load
-     * raises the error with its detail. */
     if (!process_shared_preload_libraries_in_progress)
         return;
 #ifdef EXEC_BACKEND
-    /* Without fork (Windows) every backend is a new process that runs the
-     * preload again, so a prewarm here loads every blob in every backend,
-     * whether it ever uses one or not: 482 ms from backend start to the first
-     * query on HART-DESKTOP, 17 ms without it (2026-10-06), and every
-     * connection to every database on the server pays it. Only the postmaster
-     * prewarms; a backend loads on first use. */
     if (IsUnderPostmaster)
         return;
 #endif
 
     if (perfcache_path != NULL && perfcache_path[0] != '\0')
     {
-        rc = codepoint_table_load_perfcache(perfcache_path);
+        rc = load_configured_t0_perfcache();
         if (rc == 0)
         {
             rev_index_ensure();
@@ -313,8 +301,6 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
     return codepoint_table_lookup_id(&key, out_cp) == 0;
 }
 
-
-
 PG_FUNCTION_INFO_V1(pg_laplace_word_id);
 
 Datum
@@ -364,10 +350,6 @@ pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
     PG_RETURN_INT32((int32) cp);
 }
 
-
-
-
-
 PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
 
 Datum
@@ -388,16 +370,18 @@ pg_laplace_is_all_whitespace(PG_FUNCTION_ARGS)
         (const uint8_t *) VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t)) != 0);
 }
 
-/* The admitted Tier-0 window: the record count the T0 blob loader validates
- * against, so SQL reads the window from the native constant. */
+/* The admitted Tier-0 window: the record count of the active T0 branch floor
+ * when loaded, or the full Unicode scalar count otherwise. */
 PG_FUNCTION_INFO_V1(pg_laplace_atom_window);
 
 Datum
 pg_laplace_atom_window(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_INT64((int64) LAPLACE_PERFCACHE_RECORD_COUNT);
+    uint64_t count = LAPLACE_PERFCACHE_RECORD_COUNT;
+    if (codepoint_table_is_loaded())
+        (void)codepoint_table_records(NULL, &count);
+    PG_RETURN_INT64((int64) count);
 }
-
 
 PG_FUNCTION_INFO_V1(pg_laplace_perfcache_receipt);
 

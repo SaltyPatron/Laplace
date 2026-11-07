@@ -50,10 +50,15 @@ BEGIN ATOMIC
         JOIN candidates v ON v.word = t.id
         JOIN tally ON tally.lang_id = v.lang
         ORDER BY t.ord, tally.mass DESC, v.mu DESC, v.lang
+    ), fallback AS MATERIALIZED (
+        SELECT DISTINCT ON (v.word) v.word, v.lang AS language
+        FROM candidates v
+        ORDER BY v.word, v.mu DESC, v.lang
     )
     SELECT t.ord, t.word, t.id,
-           COALESCE(a.language, converse.word_language(t.id))
+           COALESCE(a.language, fb.language)
     FROM tokens t
     LEFT JOIN agreed a ON a.ord = t.ord
+    LEFT JOIN fallback fb ON fb.word = t.id
     ORDER BY t.ord;
 END;

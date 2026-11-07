@@ -19,8 +19,15 @@ typedef struct {
     uint32_t uca_order, pad;
 } codepoint_entry_t;
 #define LAPLACE_CODEPOINT_COUNT 1114112u
+#define LAPLACE_TIER0_BRANCH_ASCII 0x1u
+#define LAPLACE_TIER0_BRANCH_UTF   0x3u
+#define LAPLACE_TIER0_BRANCH_CJK   0x7u
+#define LAPLACE_TIER0_BRANCH_FULL  0xFu
 
 int codepoint_table_load_perfcache(const char* path);
+int codepoint_table_load_branches(const char* path, const char* profile);
+uint32_t codepoint_table_active_branches(void);
+uint32_t codepoint_table_branch_record_count(const char* profile);
 
 void codepoint_table_unload(void);
 
@@ -46,7 +53,6 @@ int codepoint_table_decompose(uint32_t cp, const uint32_t** out_seq, uint32_t* o
 
 int codepoint_table_compose(uint32_t first, uint32_t second, uint32_t* out_composed);
 
-
 int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
                                  double out_coord[4], hilbert128_t* out_hb);
 
@@ -66,18 +72,7 @@ size_t codepoint_table_id_index_bytes(void);
 int codepoint_table_presence_bitmap(const hash128_t* ids, size_t count,
                                     uint8_t* bitmap, size_t bitmap_bytes);
 
-
-
-
-
-
-
-
 int laplace_codepoint_is_whitespace(uint32_t cp);
-
-
-
-
 
 int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len);
 

@@ -19,5 +19,6 @@ BEGIN ATOMIC
     -- it must resolve true here even before/without its own laplace.entities row being written,
     -- so callers can't mistake "orphaned tier-0" for "genuinely missing".
     SELECT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = p_id)
+        OR EXISTS (SELECT 1 FROM public.laplace_present_ids(ARRAY[public.blake3_from_bytea(p_id)]) WHERE p_id IS NOT NULL)
         OR realize.codepoint_for_id(p_id) IS NOT NULL;
 END;

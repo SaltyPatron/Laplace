@@ -73,6 +73,49 @@ Datum pg_relation_metadata(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
+PG_FUNCTION_INFO_V1(pg_relation_surfaces);
+Datum pg_relation_surfaces(PG_FUNCTION_ARGS)
+{
+    InitMaterializedSRF(fcinfo,0);ReturnSetInfo *r=(ReturnSetInfo *)fcinfo->resultinfo;
+    if(PG_ARGISNULL(0))return (Datum)0;
+    Datum *ids;bool *nulls;int n;
+    deconstruct_array(PG_GETARG_ARRAYTYPE_P(0),BYTEAOID,-1,false,TYPALIGN_INT,&ids,&nulls,&n);
+    if(!n)return (Datum)0;
+    HTAB *lookup=metadata();
+    hash128_t *want=palloc(sizeof(hash128_t)*Max(n,1));
+    int n_want=0;
+    for(int i=0;i<n;i++){
+      if(nulls[i])continue;hash128_t id=datum_to_hash128(ids[i]);
+      RelationMetadata *entry=hash_search(lookup,&id,HASH_FIND,NULL);
+      hash128_t cid=entry?entry->canonical:id;
+      bool dup=false;
+      for(int j=0;j<n_want;j++)if(!memcmp(&want[j],&cid,sizeof(hash128_t))){dup=true;break;}
+      if(!dup)want[n_want++]=cid;
+    }
+    for(int w=0;w<n_want;w++){
+      bool emitted_canonical=false;
+      HASH_SEQ_STATUS seq;RelationMetadata *entry;
+      hash_seq_init(&seq,lookup);
+      while((entry=hash_seq_search(&seq))!=NULL){
+        if(memcmp(&entry->canonical,&want[w],sizeof(hash128_t)))continue;
+        if(!memcmp(&entry->surface,&want[w],sizeof(hash128_t)))emitted_canonical=true;
+        Datum values[]={hash128_to_datum(&entry->surface),hash128_to_datum(&entry->canonical),
+                        CStringGetTextDatum(entry->name),BoolGetDatum(entry->inverse),
+                        Int16GetDatum(entry->qualifier)};
+        bool missing[]={false,false,false,false,false};
+        tuplestore_putvalues(r->setResult,r->setDesc,values,missing);
+      }
+      if(!emitted_canonical){
+        Datum values[]={hash128_to_datum(&want[w]),hash128_to_datum(&want[w]),
+                        (Datum)0,BoolGetDatum(false),Int16GetDatum(-1)};
+        bool missing[]={false,false,true,false,false};
+        tuplestore_putvalues(r->setResult,r->setDesc,values,missing);
+      }
+    }
+    pfree(want);pfree(nulls);pfree(ids);
+    return (Datum)0;
+}
+
 /* Governed language tags are metadata. Resolve the selected surfaces together;
  * this neither asserts a new type nor deposits language testimony. */
 PG_FUNCTION_INFO_V1(pg_language_codes);

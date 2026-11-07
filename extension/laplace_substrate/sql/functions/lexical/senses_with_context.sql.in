@@ -84,14 +84,12 @@ BEGIN ATOMIC
     ),
     cand AS MATERIALIZED (
         -- A sense is the word's binding to a key (or sense -> synset via IS_SENSE_OF).
-        SELECT s.sense_id, COALESCE(ss.object_id, s.sense_id) AS synset_id,
-               s.rating, s.rd, s.witness_count AS w1,
-               COALESCE(ss.witness_count, 0)::bigint AS w2
-        FROM peers p
-        JOIN @extschema@.v_word_senses s ON s.word_id = p.wid
-        LEFT JOIN @extschema@.v_consensus_unrefuted ss
-          ON ss.subject_id = s.sense_id
-         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        SELECT s.sense_id, s.synset_id,
+               round(s.eff_mu * 1e9)::bigint AS rating,
+               0::bigint AS rd,
+               COALESCE(s.witnesses, 1)::bigint AS w1,
+               0::bigint AS w2
+        FROM lexical.senses_batch(ARRAY(SELECT wid FROM peers)) s
     ),
     candidate_nodes AS MATERIALIZED (
         SELECT c.synset_id AS sid, c.synset_id AS node_id FROM cand c
@@ -105,19 +103,19 @@ BEGIN ATOMIC
         SELECT laplace.relation_band_types(ARRAY[2, 4, 7]) AS types
     ),
     cand_edges AS MATERIALIZED (
-        SELECT c.subject_id, c.type_id, c.object_id,
-               consensus.eff_mu(c.rating, c.rd) AS w
-        FROM (SELECT DISTINCT node_id FROM candidate_nodes) n
-        JOIN @extschema@.consensus c ON c.subject_id = n.node_id
+        SELECT e.subject_id, e.type_id, e.neighbour_id AS object_id,
+               consensus.eff_mu(e.rating, e.rd) AS w
+        FROM consensus.edges_raw_batch(ARRAY(SELECT DISTINCT node_id FROM candidate_nodes), 'out', NULL, 64, true, 'eff_mu') e
+        WHERE e.neighbour_id IS NOT NULL
     ),
     ctx_syn_edges AS MATERIALIZED (
-        SELECT c.subject_id, c.type_id, c.object_id,
-               consensus.eff_mu(c.rating, c.rd) AS w
-        FROM ctx_syn s
-        CROSS JOIN band_2_4_7 b
-        JOIN @extschema@.consensus c
-          ON c.subject_id = s.sid
-         AND c.type_id = ANY (b.types || consensus.relation_family_ids('EVOKES_FRAME'))
+        SELECT e.subject_id, e.type_id, e.neighbour_id AS object_id,
+               consensus.eff_mu(e.rating, e.rd) AS w
+        FROM band_2_4_7 b
+        CROSS JOIN LATERAL consensus.edges_raw_batch(
+            ARRAY(SELECT sid FROM ctx_syn),
+            'out', b.types || consensus.relation_family_ids('EVOKES_FRAME'), 64, true, 'eff_mu') e
+        WHERE e.neighbour_id IS NOT NULL
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier realize.constituents include a context token.
@@ -207,10 +205,9 @@ BEGIN ATOMIC
     -- carries.
     lane_direct AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.object_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM ctx ct
-            JOIN @extschema@.consensus c ON c.subject_id = ct.id
-            WHERE c.object_id IN (SELECT synset_id FROM cand)
+            SELECT e.neighbour_id AS sid, consensus.eff_mu(e.rating, e.rd) AS w
+            FROM consensus.edges_raw_batch(ARRAY(SELECT id FROM ctx), 'out', NULL, 64, true, 'eff_mu') e
+            WHERE e.neighbour_id IN (SELECT synset_id FROM cand)
             UNION ALL
             SELECT ce.subject_id AS sid, ce.w
             FROM (SELECT DISTINCT synset_id FROM cand) cd

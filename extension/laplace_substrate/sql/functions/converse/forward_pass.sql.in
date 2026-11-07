@@ -23,13 +23,16 @@ BEGIN ATOMIC
  WITH roots AS MATERIALIZED (
   SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest(p_terms) u(id) WHERE id IS NOT NULL) AS ids
  ), carriers AS MATERIALIZED (
-  -- Both indexed Native keys are required before materializing a carrier.
-  -- A scalar word such as "a" must not fetch every text containing that scalar.
-  SELECT t.id AS word,h.entity,public.laplace_parts(h.path) AS parts
-  FROM roots r CROSS JOIN LATERAL unnest(r.ids) t(id) JOIN public.physicality h
-   ON h.path OPERATOR(public.^@) t.id
-   AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind','tuple')]
-  WHERE public.laplace_path_length(h.path)=3
+  SELECT h.parts[1] AS word, h.entity, h.parts
+  FROM roots r
+  CROSS JOIN LATERAL (
+   SELECT h.entity, public.laplace_parts(h.path) AS parts
+   FROM public.laplace_holders(r.ids, '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,
+        ARRAY[public.laplace_bank_bit('kind', 'tuple')], 1::smallint) h
+   WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple')
+     AND public.laplace_path_length(h.path) = 3
+  ) h
+  WHERE h.parts[1] = ANY(r.ids)
  ), languages AS MATERIALIZED (
   SELECT * FROM laplace.language_codes(ARRAY(SELECT DISTINCT public.blake3_send(parts[2]) FROM carriers))
  ), lexical AS MATERIALIZED (
@@ -51,11 +54,9 @@ BEGIN ATOMIC
   SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(ARRAY(SELECT entity FROM binding_cells WHERE p_support),false) a
   WHERE a.witness GROUP BY a.claim
   UNION ALL
-  -- The lexical read consumes the standing admitted during ingestion. Detailed
-  -- source counts are a separate requested measurement, never fabricated from
-  -- games or a registered-source total.
-  SELECT entity,NULL::bigint FROM binding_cells WHERE NOT p_support AND matches>0
- ), native AS MATERIALIZED (
+  -- The lexical read consumes the standing admitted during ingestion.
+  SELECT entity,GREATEST(matches,1)::bigint FROM binding_cells WHERE NOT p_support AND matches>0
+ ), native_tuple AS MATERIALIZED (
   SELECT DISTINCT ON(t.word,t.parts[3],t.entity)
    public.blake3_send(t.word) AS term,public.blake3_send(t.parts[3]) AS key,
    public.blake3_send(t.entity) AS binding,public.blake3_send(c.entity) AS claim,
@@ -71,6 +72,57 @@ BEGIN ATOMIC
          OR (c.parts[1]=t.entity AND c.parts[2] IN(t.word,t.parts[3]))))
   JOIN admitted a ON a.claim=c.entity
   ORDER BY t.word,t.parts[3],t.entity,c.rating-2*c.deviation DESC,c.matches DESC,c.entity
+ ), kb_surfaces AS MATERIALIZED (
+  SELECT public.blake3_from_bytea(s.surface_id) AS surface_b3, s.inverse
+  FROM consensus.relation_surfaces(consensus.relation_set_ids('KEY_BINDING')) s
+ ), direct_claims AS MATERIALIZED (
+  SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches, ks.inverse
+  FROM roots r
+  CROSS JOIN LATERAL public.laplace_claims_each(
+   r.ids, NULL::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[],
+   3::smallint, ARRAY(SELECT DISTINCT surface_b3 FROM kb_surfaces), 3::bigint) c
+  JOIN kb_surfaces ks ON public.laplace_middle_any(c.path, ARRAY[ks.surface_b3])
+  WHERE public.laplace_path_length(c.path) = 3
+    AND c.matches > 0
+    AND (c.rating - 2 * c.deviation) > 0
+ ), direct_oriented AS MATERIALIZED (
+  SELECT public.blake3_send(CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END) AS term,
+         public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END) AS key,
+         public.blake3_send(d.entity) AS claim,
+         (d.rating - 2 * d.deviation)::numeric AS eff_mu,
+         GREATEST(d.matches, 1)::bigint AS witnesses,
+         d.matches AS games
+  FROM direct_claims d
+  CROSS JOIN roots r
+  WHERE (CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END) = ANY(r.ids)
+    AND NOT EXISTS (
+        SELECT 1 FROM native_tuple nt
+        WHERE nt.term = public.blake3_send(CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END)
+          AND (nt.key = public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END)
+               OR nt.binding = public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END))
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM public.laplace_physicalities(ARRAY[CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END]) h
+        WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple')
+    )
+ ), direct_langs AS MATERIALIZED (
+  SELECT e.subject_id AS word, e.neighbour_id AS lang,
+         row_number() OVER (
+             PARTITION BY e.subject_id
+             ORDER BY (e.neighbour_id = p_lang) DESC, consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
+         ) AS rn
+  FROM consensus.edges_raw_batch(
+      ARRAY(SELECT DISTINCT term FROM direct_oriented),
+      'out', ARRAY[laplace.relation_type_id('HAS_LANGUAGE')], 8, true, 'edge_rank') e
+  WHERE EXISTS (SELECT 1 FROM direct_oriented)
+    AND e.neighbour_id IS NOT NULL
+ ), native_direct AS (
+  SELECT d.term, d.key, d.key AS binding, d.claim,
+         dl.lang AS language,
+         COALESCE(dl.lang = p_lang, false) AS in_lang,
+         d.eff_mu, d.witnesses, d.games
+  FROM direct_oriented d
+  LEFT JOIN direct_langs dl ON dl.word = d.term AND dl.rn = 1
  ), legacy_cells AS MATERIALIZED (
   SELECT c.id,c.subject_id AS term,c.object_id AS key,c.type_id,c.rating,c.rd,c.witness_count
   FROM laplace.v_consensus_unrefuted c WHERE c.subject_id=ANY(p_terms)
@@ -84,7 +136,7 @@ BEGIN ATOMIC
   FROM legacy_cells b LEFT JOIN laplace.attestations a
    ON a.subject_id=b.term AND a.type_id=b.type_id AND a.object_id=b.key
   GROUP BY b.term,b.key,b.id,b.rating,b.rd,b.witness_count
- ) SELECT * FROM native UNION ALL SELECT * FROM legacy;
+ ) SELECT * FROM native_tuple UNION ALL SELECT * FROM native_direct UNION ALL SELECT * FROM legacy;
 END;
 
 CREATE OR REPLACE FUNCTION converse.binding_evidence(p_terms bytea[],p_lang bytea DEFAULT NULL)
@@ -92,7 +144,142 @@ RETURNS TABLE(term bytea,key bytea,binding bytea,claim bytea,language bytea,
               in_lang boolean,eff_mu numeric,witnesses bigint,games bigint)
 LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
- SELECT * FROM converse.binding_evidence(p_terms,p_lang,true);
+ SELECT * FROM converse.binding_evidence(p_terms,p_lang,false);
+END;
+
+-- Inverse (key -> word) binding evidence across Native tuples, direct KEY_BINDING
+-- claims, and legacy consensus.
+CREATE OR REPLACE FUNCTION converse.key_binding_evidence(
+    p_keys bytea[], p_lang bytea DEFAULT NULL, p_support boolean DEFAULT false)
+RETURNS TABLE(key bytea, term bytea, binding bytea, claim bytea, language bytea,
+              in_lang boolean, eff_mu numeric, witnesses bigint, games bigint,
+              rating bigint, rd bigint)
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+ WITH roots AS MATERIALIZED (
+  SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest(p_keys) u(id) WHERE id IS NOT NULL) AS ids
+ ), carriers AS MATERIALIZED (
+  SELECT h.parts[3] AS key_b3, h.entity, h.parts
+  FROM roots r
+  CROSS JOIN LATERAL (
+   SELECT h.entity, public.laplace_parts(h.path) AS parts
+   FROM public.laplace_holders(r.ids, '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,
+        ARRAY[public.laplace_bank_bit('kind', 'tuple')], 2::smallint) h
+   WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple')
+     AND public.laplace_path_length(h.path) = 3
+  ) h
+  WHERE h.parts[3] = ANY(r.ids)
+ ), languages AS MATERIALIZED (
+  SELECT * FROM laplace.language_codes(ARRAY(SELECT DISTINCT public.blake3_send(parts[2]) FROM carriers))
+ ), lexical AS MATERIALIZED (
+  SELECT c.*
+  FROM carriers c
+  JOIN languages l ON l.id = public.blake3_send(c.parts[2])
+  WHERE p_lang IS NULL OR l.id = p_lang
+ ), cells AS MATERIALIZED (
+  SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
+  FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM lexical), NULL::bigint,
+   ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[]) c
+  WHERE public.laplace_path_length(c.path) IN (2, 3)
+    AND c.matches > 0
+ ), native_tuple AS MATERIALIZED (
+  SELECT DISTINCT ON (t.key_b3, t.parts[1], t.entity)
+   public.blake3_send(t.key_b3) AS key,
+   public.blake3_send(t.parts[1]) AS term,
+   public.blake3_send(t.entity) AS binding,
+   public.blake3_send(c.entity) AS claim,
+   public.blake3_send(t.parts[2]) AS language,
+   COALESCE(public.blake3_send(t.parts[2]) = p_lang, true) AS in_lang,
+   (c.rating - 2 * c.deviation)::numeric AS eff_mu,
+   GREATEST(c.matches, 1)::bigint AS witnesses,
+   c.matches AS games,
+   round(c.rating::numeric * 1e9)::bigint AS rating,
+   round(c.deviation::numeric * 1e9)::bigint AS rd
+  FROM lexical t
+  JOIN cells c
+    ON ((cardinality(c.parts) = 3
+         AND ((c.parts[3] = t.entity AND c.parts[1] IN (t.parts[1], t.parts[3]))
+              OR (c.parts[1] = t.entity AND c.parts[3] IN (t.parts[1], t.parts[3]))))
+        OR (cardinality(c.parts) = 2
+            AND ((c.parts[2] = t.entity AND c.parts[1] IN (t.parts[1], t.parts[3]))
+                 OR (c.parts[1] = t.entity AND c.parts[2] IN (t.parts[1], t.parts[3])))))
+  WHERE (c.rating - 2 * c.deviation) > 0
+  ORDER BY t.key_b3, t.parts[1], t.entity, c.rating - 2 * c.deviation DESC, c.matches DESC, c.entity
+ ), kb_surfaces AS MATERIALIZED (
+  SELECT public.blake3_from_bytea(s.surface_id) AS surface_b3, s.inverse
+  FROM consensus.relation_surfaces(consensus.relation_set_ids('KEY_BINDING')) s
+ ), direct_claims AS MATERIALIZED (
+  SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches, ks.inverse
+  FROM roots r
+  CROSS JOIN LATERAL public.laplace_claims_each(
+   r.ids, NULL::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[],
+   3::smallint, ARRAY(SELECT DISTINCT surface_b3 FROM kb_surfaces), 3::bigint) c
+  JOIN kb_surfaces ks ON public.laplace_middle_any(c.path, ARRAY[ks.surface_b3])
+  WHERE public.laplace_path_length(c.path) = 3
+    AND c.matches > 0
+    AND (c.rating - 2 * c.deviation) > 0
+ ), direct_oriented AS MATERIALIZED (
+  SELECT public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END) AS key,
+         public.blake3_send(CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END) AS term,
+         public.blake3_send(d.entity) AS claim,
+         (d.rating - 2 * d.deviation)::numeric AS eff_mu,
+         GREATEST(d.matches, 1)::bigint AS witnesses,
+         d.matches AS games,
+         round(d.rating::numeric * 1e9)::bigint AS rating,
+         round(d.deviation::numeric * 1e9)::bigint AS rd
+  FROM direct_claims d
+  CROSS JOIN roots r
+  WHERE (CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END) = ANY(r.ids)
+    AND NOT EXISTS (
+        SELECT 1 FROM native_tuple nt
+        WHERE (nt.key = public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END)
+               OR nt.binding = public.blake3_send(CASE WHEN d.inverse THEN d.parts[1] ELSE d.parts[3] END))
+          AND nt.term = public.blake3_send(CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM public.laplace_physicalities(ARRAY[CASE WHEN d.inverse THEN d.parts[3] ELSE d.parts[1] END]) h
+        WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple')
+    )
+ ), direct_langs AS MATERIALIZED (
+  SELECT e.subject_id AS word, e.neighbour_id AS lang,
+         row_number() OVER (
+             PARTITION BY e.subject_id
+             ORDER BY (e.neighbour_id = p_lang) DESC, consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
+         ) AS rn
+  FROM consensus.edges_raw_batch(
+      ARRAY(SELECT DISTINCT term FROM direct_oriented),
+      'out', ARRAY[laplace.relation_type_id('HAS_LANGUAGE')], 8, true, 'edge_rank') e
+  WHERE EXISTS (SELECT 1 FROM direct_oriented)
+    AND e.neighbour_id IS NOT NULL
+ ), native_direct AS (
+  SELECT d.key, d.term, d.key AS binding, d.claim,
+         dl.lang AS language,
+         COALESCE(dl.lang = p_lang, p_lang IS NULL) AS in_lang,
+         d.eff_mu, d.witnesses, d.games, d.rating, d.rd
+  FROM direct_oriented d
+  LEFT JOIN direct_langs dl ON dl.word = d.term AND dl.rn = 1
+  WHERE p_lang IS NULL OR dl.lang = p_lang
+ ), legacy_cells AS MATERIALIZED (
+  SELECT c.id, c.object_id AS key, c.subject_id AS term, c.type_id, c.rating, c.rd, c.witness_count
+  FROM laplace.v_consensus_unrefuted c
+  WHERE c.object_id = ANY(p_keys)
+    AND c.type_id = ANY(consensus.relation_set_ids('KEY_BINDING'))
+    AND c.subject_id IS NOT NULL
+ ), legacy AS (
+  SELECT b.key, b.term, b.key AS binding, b.id AS claim,
+         CASE WHEN COALESCE(bool_or(a.context_id = p_lang), false) THEN p_lang END AS language,
+         COALESCE(bool_or(p_lang IS NULL OR a.context_id = p_lang), false) AS in_lang,
+         consensus.eff_mu_display(b.rating, b.rd) AS eff_mu,
+         b.witness_count AS witnesses,
+         COALESCE(sum(a.observation_count), 0)::bigint AS games,
+         b.rating, b.rd
+  FROM legacy_cells b
+  LEFT JOIN laplace.attestations a
+    ON a.subject_id = b.term AND a.type_id = b.type_id AND a.object_id = b.key
+  GROUP BY b.key, b.term, b.id, b.rating, b.rd, b.witness_count
+  HAVING p_lang IS NULL OR COALESCE(bool_or(a.context_id = p_lang), false)
+ )
+ SELECT * FROM native_tuple UNION ALL SELECT * FROM native_direct UNION ALL SELECT * FROM legacy;
 END;
 
 -- K: one election over the same evidence used by lexical and comparison reads.
@@ -113,24 +300,31 @@ CREATE OR REPLACE FUNCTION converse.key_facts(p_keys bytea[], p_per_key int DEFA
                   witnesses bigint, rating bigint, rd bigint, volatility bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH expanded AS MATERIALIZED (
-        SELECT DISTINCT k.key AS root_key, u.subj_id
-        FROM (SELECT DISTINCT u AS key FROM unnest(p_keys) u WHERE u IS NOT NULL) k
-        LEFT JOIN laplace.v_consensus_unrefuted ss
-          ON ss.subject_id = k.key
-         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
-        CROSS JOIN LATERAL (
-            VALUES (k.key), (ss.object_id)
-        ) AS u(subj_id)
-        WHERE u.subj_id IS NOT NULL
+    WITH root_keys AS MATERIALIZED (
+        SELECT DISTINCT u AS key FROM unnest(p_keys) u WHERE u IS NOT NULL
+    ), sense_edges AS MATERIALIZED (
+        SELECT e.subject_id AS key, e.neighbour_id AS object_id
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT key FROM root_keys),
+            'out', ARRAY[laplace.relation_type_id('IS_SENSE_OF')], 8, false, 'eff_mu') e
+        WHERE e.neighbour_id IS NOT NULL
+    ), expanded AS MATERIALIZED (
+        SELECT k.key AS root_key, k.key AS subj_id FROM root_keys k
+        UNION
+        SELECT s.key AS root_key, s.object_id AS subj_id FROM sense_edges s
     ), non_salient AS MATERIALIZED (
         SELECT consensus.relation_canonical(id) AS cname
         FROM unnest(consensus.relation_set_ids('KEY_BINDING') || consensus.relation_set_ids('NON_SALIENT_STRUCTURAL')) AS u(id)
+    ), batch_edges AS MATERIALIZED (
+        SELECT *
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT subj_id FROM expanded),
+            'out', NULL, GREATEST(p_per_key * 2, 48), true, 'eff_mu')
     ), raw_edges AS (
         SELECT e.root_key AS key, c.type_id, c.neighbour_id AS object_id,
                c.rating, c.rd, 60000000::bigint AS volatility, c.witness_count
         FROM expanded e
-        CROSS JOIN LATERAL consensus.edges_raw(e.subj_id, 'out', NULL, GREATEST(p_per_key * 2, 48), true, 'eff_mu') c
+        JOIN batch_edges c ON c.subject_id = e.subj_id
         WHERE c.neighbour_id IS NOT NULL
           AND consensus.relation_canonical(c.type_id) IS NOT NULL
           AND consensus.relation_canonical(c.type_id) NOT IN (SELECT cname FROM non_salient WHERE cname IS NOT NULL)
@@ -170,7 +364,8 @@ CREATE OR REPLACE FUNCTION converse.couple(p_x bytea, p_y bytea, p_lang bytea DE
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH rel AS MATERIALIZED (
-        SELECT laplace.relation_type_id('IS_SENSE_OF') AS is_sense_of
+        SELECT laplace.relation_type_id('IS_SENSE_OF') AS is_sense_of,
+               consensus.relation_set_ids('PATH_UPWARD') AS path_upward
     ), xk AS MATERIALIZED (
         SELECT b.key FROM converse.bindings(ARRAY[p_x], p_lang) b WHERE b.rank <= 16
         UNION SELECT p_x
@@ -189,42 +384,37 @@ BEGIN ATOMIC
     ), shared_fact AS (
         SELECT xf.key AS x_key, yf.key AS y_key, 'fact'::text AS channel, xf.type_id AS relation,
                xf.object_id AS via,
-               (SELECT count(*) FROM (
-                   SELECT 1 FROM laplace.consensus c
-                   WHERE c.object_id = xf.object_id AND c.type_id = xf.type_id LIMIT 100000) n) AS sharing,
+               (SELECT count(*) FROM consensus.edges_raw(xf.object_id, 'in', ARRAY[xf.type_id], 256, true, 'eff_mu')) AS sharing,
                0 AS depth
         FROM xf JOIN yf ON yf.type_id = xf.type_id AND yf.object_id = xf.object_id
+    ), sense_init AS MATERIALIZED (
+        SELECT e.subject_id, e.neighbour_id
+        FROM rel r
+        CROSS JOIN LATERAL consensus.edges_raw_batch(
+            ARRAY(SELECT key FROM xk UNION SELECT key FROM yk),
+            'out', ARRAY[r.is_sense_of], 4, false, 'eff_mu') e
     ), up AS (
         WITH RECURSIVE walk(root, side, node, depth) AS (
-            SELECT xk.key, 'x', COALESCE(ss.object_id, xk.key), 0
+            SELECT xk.key, 'x', COALESCE(ss.neighbour_id, xk.key), 0
             FROM xk
-            CROSS JOIN rel r
-            LEFT JOIN laplace.v_consensus_unrefuted ss
-              ON ss.subject_id = xk.key AND ss.type_id = r.is_sense_of
+            LEFT JOIN sense_init ss ON ss.subject_id = xk.key
             UNION ALL
-            SELECT yk.key, 'y', COALESCE(ss.object_id, yk.key), 0
+            SELECT yk.key, 'y', COALESCE(ss.neighbour_id, yk.key), 0
             FROM yk
-            CROSS JOIN rel r
-            LEFT JOIN laplace.v_consensus_unrefuted ss
-              ON ss.subject_id = yk.key AND ss.type_id = r.is_sense_of
+            LEFT JOIN sense_init ss ON ss.subject_id = yk.key
             UNION
-            SELECT w.root, w.side, c.object_id, w.depth + 1
+            SELECT w.root, w.side, c.neighbour_id, w.depth + 1
             FROM walk w
-            JOIN laplace.v_consensus_unrefuted c
-              ON c.subject_id = w.node
-             AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
-            WHERE w.depth < 4 AND c.object_id IS NOT NULL
+            CROSS JOIN rel r
+            CROSS JOIN LATERAL consensus.edges_raw(w.node, 'out', r.path_upward, 16, false, 'eff_mu') c
+            WHERE w.depth < 4 AND c.neighbour_id IS NOT NULL
         )
         SELECT root, side, node, min(depth) AS depth FROM walk WHERE depth > 0
         GROUP BY root, side, node
     ), shared_ancestor AS (
         SELECT ux.root AS x_key, uy.root AS y_key, 'ancestor'::text AS channel,
                NULL::bytea AS relation, ux.node AS via,
-               (SELECT count(*) FROM (
-                   SELECT 1 FROM laplace.consensus c
-                   WHERE c.object_id = ux.node
-                     AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
-                   LIMIT 100000) n) AS sharing,
+               (SELECT count(*) FROM consensus.edges_raw(ux.node, 'in', (SELECT path_upward FROM rel), 256, true, 'eff_mu')) AS sharing,
                (ux.depth + uy.depth)::int AS depth
         FROM up ux JOIN up uy ON uy.node = ux.node AND uy.side = 'y'
         WHERE ux.side = 'x'
@@ -296,77 +486,27 @@ CREATE OR REPLACE FUNCTION converse.translate(p_term bytea, p_to bytea, p_from b
                   down_rating bigint, down_rd bigint, down_witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH kb AS (
-        SELECT consensus.relation_set_ids('KEY_BINDING') AS ids
-    ), up_legacy AS MATERIALIZED (
-        SELECT DISTINCT a.object_id AS key, a.type_id
-        FROM laplace.attestations a, kb
-        WHERE a.subject_id = p_term
-          AND a.type_id = ANY (kb.ids)
-          AND a.object_id IS NOT NULL
-          AND (p_from IS NULL OR a.context_id = p_from)
-    ), down_legacy AS MATERIALIZED (
-        SELECT DISTINCT up.key, a.subject_id AS target, a.type_id
-        FROM up_legacy up
-        JOIN laplace.attestations a
-          ON a.object_id = up.key AND a.type_id = up.type_id AND a.context_id = p_to
-        WHERE a.subject_id <> p_term
-    ), legacy_rows AS (
-        SELECT d.key, d.target, cu.rating AS up_rating, cu.rd AS up_rd, cu.witness_count AS up_witnesses,
-               cd.rating AS down_rating, cd.rd AS down_rd, cd.witness_count AS down_witnesses
-        FROM down_legacy d
-        JOIN laplace.consensus cd
-          ON cd.subject_id = d.target AND cd.type_id = d.type_id AND cd.object_id = d.key
-        JOIN laplace.consensus cu
-          ON cu.subject_id = p_term AND cu.type_id = d.type_id AND cu.object_id = d.key
-    ), up_native AS MATERIALIZED (
-        SELECT b.key, public.blake3_from_bytea(b.key) AS key_b3,
-               round(b.eff_mu * 1e9)::bigint AS up_rating, 0::bigint AS up_rd,
+    WITH up AS MATERIALIZED (
+        SELECT b.key,
+               round(b.eff_mu * 1e9)::bigint AS up_rating,
+               0::bigint AS up_rd,
                COALESCE(b.witnesses, b.games, 1)::bigint AS up_witnesses
         FROM converse.binding_evidence(ARRAY[p_term], p_from, false) b
         WHERE p_from IS NULL OR b.in_lang
-    ), carriers AS MATERIALIZED (
-        SELECT u.key, u.key_b3, u.up_rating, u.up_rd, u.up_witnesses,
-               h.entity, public.laplace_parts(h.path) AS parts
-        FROM up_native u
-        JOIN public.physicality h
-          ON h.path OPERATOR(public.@^) u.key_b3
-         AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind', 'tuple')]
-        WHERE public.laplace_path_length(h.path) = 3
-    ), filtered_carriers AS MATERIALIZED (
-        SELECT c.*
-        FROM carriers c
-        WHERE c.parts[2] = public.blake3_from_bytea(p_to)
-          AND public.blake3_send(c.parts[1]) <> p_term
-    ), cells AS MATERIALIZED (
-        SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
-        FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM filtered_carriers), NULL::bigint,
-            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[]) c
-        WHERE public.laplace_path_length(c.path) IN (2, 3)
-    ), down_native AS (
-        SELECT fc.key, public.blake3_send(fc.parts[1]) AS target,
-               fc.up_rating, fc.up_rd, fc.up_witnesses,
-               round(c.rating * 1e9)::bigint AS down_rating,
-               round(c.deviation * 1e9)::bigint AS down_rd,
-               GREATEST(c.matches, 1)::bigint AS down_witnesses
-        FROM filtered_carriers fc
-        JOIN cells c
-          ON ((cardinality(c.parts) = 3
-               AND ((c.parts[3] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
-                    OR (c.parts[1] = fc.entity AND c.parts[3] IN (fc.parts[1], fc.parts[3]))))
-              OR (cardinality(c.parts) = 2
-                  AND ((c.parts[2] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
-                       OR (c.parts[1] = fc.entity AND c.parts[2] IN (fc.parts[1], fc.parts[3])))))
-         AND c.matches > 0
-         AND (c.rating - 2 * c.deviation) > 0
-    ), combined AS (
-        SELECT * FROM legacy_rows UNION ALL SELECT * FROM down_native
+    ), down AS (
+        SELECT d.key, d.term AS target,
+               u.up_rating, u.up_rd, u.up_witnesses,
+               d.rating AS down_rating, d.rd AS down_rd, d.witnesses AS down_witnesses
+        FROM up u
+        JOIN converse.key_binding_evidence(ARRAY(SELECT DISTINCT key FROM up), p_to, false) d
+          ON d.key = u.key
+        WHERE d.term <> p_term
     )
-    SELECT DISTINCT ON (c.key, c.target)
-           c.key, c.target, c.up_rating, c.up_rd, c.up_witnesses,
-           c.down_rating, c.down_rd, c.down_witnesses
-    FROM combined c
-    ORDER BY c.key, c.target, consensus.eff_mu(c.down_rating, c.down_rd) DESC;
+    SELECT DISTINCT ON (d.key, d.target)
+           d.key, d.target, d.up_rating, d.up_rd, d.up_witnesses,
+           d.down_rating, d.down_rd, d.down_witnesses
+    FROM down d
+    ORDER BY d.key, d.target, consensus.eff_mu(d.down_rating, d.down_rd) DESC;
 END;
 
 -- converse.firmware(name): a governed personality firmware image (spec 39) with its

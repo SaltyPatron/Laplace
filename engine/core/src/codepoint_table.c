@@ -26,6 +26,7 @@ static const lp_tier0_record *current_floor(void) {
 
 int codepoint_table_load_perfcache(const char *path) {
     if (!path || !*path) return -1;
+    if (strchr(path, '@') != NULL) return codepoint_table_load_branches(path, NULL);
     size_t size = 0;
     const void *candidate = lp_map_file(path, 0, &size);
     if (!candidate) return -1;
@@ -41,6 +42,30 @@ int codepoint_table_load_perfcache(const char *path) {
     atomic_store_explicit(&explicitly_unloaded, 0, memory_order_release);
     atomic_store_explicit(&active_floor, canonical, memory_order_release);
     return 0;
+}
+
+int codepoint_table_load_branches(const char *path, const char *profile) {
+    if (!path || !*path) return -1;
+    uint32_t mask = profile && *profile ? lp_tier0_parse_branches(profile) : 0u;
+    if (profile && *profile && !mask) return -2;
+    const lp_tier0_record *floor = mask
+        ? lp_tier0_map_branches(path, mask)
+        : lp_tier0_map(path);
+    if (!floor) return -1;
+    if (lp_tier0_active_branches(floor) == LP_TIER0_BRANCH_ALL)
+        (void)text_identity_load_scalar_floor(path);
+    atomic_store_explicit(&explicitly_unloaded, 0, memory_order_release);
+    atomic_store_explicit(&active_floor, floor, memory_order_release);
+    return 0;
+}
+
+uint32_t codepoint_table_active_branches(void) {
+    return lp_tier0_active_branches(current_floor());
+}
+
+uint32_t codepoint_table_branch_record_count(const char *profile) {
+    uint32_t mask = lp_tier0_parse_branches(profile);
+    return lp_tier0_branch_record_count(mask);
 }
 
 void codepoint_table_unload(void) {
@@ -65,13 +90,19 @@ int codepoint_table_records(const codepoint_entry_t **records, uint64_t *count) 
     const lp_tier0_record *floor = current_floor();
     if (!floor) return -1;
     if (records) *records = (const codepoint_entry_t *)floor;
-    if (count) *count = LP_TIER0_COUNT;
+    if (count) *count = lp_tier0_record_count(floor);
     return 0;
 }
 
 int codepoint_table_resolve_atom(uint32_t scalar, hash128_t *id, double coord[4], hilbert128_t *hilbert) {
-    if (!current_floor()) return -1;
-    return text_identity_atom(scalar, id, coord, hilbert);
+    const lp_tier0_record *floor = current_floor();
+    if (!floor || !id || !coord || !hilbert || scalar >= LP_NCP) return -1;
+    if (!lp_tier0_at(floor, scalar)) return -1;
+    lp_ref atom = lp_ref_atom(floor, scalar);
+    memcpy(id, &atom.id, sizeof *id);
+    lp_coord_xyzm(&atom.c, coord);
+    hilbert4d_encode(coord, hilbert);
+    return 0;
 }
 
 int codepoint_table_lookup_id(const hash128_t *id, uint32_t *scalar) {

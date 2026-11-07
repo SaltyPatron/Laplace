@@ -84,6 +84,7 @@ set(LAPLACE_CORE_SOURCES
     src/media_decode_impl.c
     src/media_decode_vorbis.c
     src/glicko2.c
+    src/glicko2_fp.c
     src/sql_catalog.c
     src/score.c
     src/codepoint_table.c
@@ -96,12 +97,15 @@ set(LAPLACE_CORE_SOURCES
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c
+    src/intent_stage_partition.c
     src/staged_load.cpp
     src/physicality_descriptor.c
+    src/physicality_descriptor_graph.c
     src/physicality_descriptor_stage.c
     src/physicality_descriptor_read.c
     src/physicality_descriptor_provider.c
     src/physicality_descriptor_admission.cpp
+    src/physicality_descriptor_materialization.cpp
     src/ordered_composition.c
     src/absence_filter.c
     src/merkle_dedup.c
@@ -112,6 +116,8 @@ set(LAPLACE_CORE_SOURCES
     src/xml_stream.c
     src/fide_xml.c
     src/grammar_compose.cpp
+    src/grammar_compose_ast.cpp
+    src/grammar_compose_drain.cpp
     src/grammar_source_compose.c
     src/grammar_rows.c
     src/grammar_tags.c
@@ -134,6 +140,7 @@ set(LAPLACE_CORE_SOURCES
     src/generated/firmware_law.c
     src/highway_table.c
     src/attestation_engine.c
+    src/attestation_stage.c
     src/partition_route.c
 )
 set(LAPLACE_PERFCACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/perfcache")

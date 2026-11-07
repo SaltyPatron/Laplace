@@ -303,6 +303,12 @@ phase_database() {
     [[ "$q" == "$f" ]] || sql -d postgres -c "ALTER SYSTEM SET laplace_substrate.${g%%:*} = '$f'" >/dev/null
     echo "  laplace_substrate.${g%%:*} = $f"
   done
+  for g in tier0:tier0.bin flags:tier0.flags highway:highway.bin; do
+    f="$dir/${g#*:}"
+    [[ -s "$f" ]] || fail "laplace.${g%%:*}: missing installed cache $f"
+    sql -d postgres -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET laplace.${g%%:*} = '$f'" >/dev/null
+    echo "  laplace.${g%%:*} = $f"
+  done
   sql -d postgres -c "SELECT pg_reload_conf()" >/dev/null
 }
 

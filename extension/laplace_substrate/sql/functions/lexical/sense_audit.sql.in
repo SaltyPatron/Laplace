@@ -36,55 +36,86 @@ CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
                   language text, denote_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-WITH w AS (SELECT laplace.word_id(p_term) AS id),
-cand AS (
+WITH w AS MATERIALIZED (
+    SELECT laplace.word_id(p_term) AS id
+),
+cand AS MATERIALIZED (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
            row_number() OVER (ORDER BY s.eff_mu DESC, s.synset_id) AS rk
     FROM w CROSS JOIN LATERAL lexical.senses(w.id) s
 ),
-capped AS (SELECT * FROM cand WHERE rk <= p_limit),
+capped AS MATERIALIZED (
+    SELECT * FROM cand WHERE rk <= p_limit
+),
+capped_ids AS MATERIALIZED (
+    SELECT ARRAY(SELECT synset_id FROM capped) AS arr
+),
+bindings AS MATERIALIZED (
+    SELECT b.key AS synset_id,
+           b.language AS lang_id,
+           round(b.eff_mu * 1e9)::bigint AS mu
+    FROM w
+    CROSS JOIN capped_ids ci
+    CROSS JOIN LATERAL converse.binding_evidence(ARRAY[w.id], NULL, false) b
+    WHERE b.key = ANY(ci.arr)
+),
 -- The relation that admitted this candidate. A target reachable by several
 -- relations reports the strongest, which is the one that carried it.
-via AS (
-    SELECT c.object_id AS synset_id, c.type_id,
-           row_number() OVER (PARTITION BY c.object_id
-                              ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
-    FROM w CROSS JOIN laplace.consensus c
-    WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
+via AS MATERIALIZED (
+    SELECT x.synset_id, x.type_id,
+           row_number() OVER (PARTITION BY x.synset_id
+                              ORDER BY x.mu DESC, x.type_id) AS rk
+    FROM (
+        SELECT c.object_id AS synset_id, c.type_id,
+               consensus.eff_mu(c.rating, c.rd) AS mu
+        FROM w
+        CROSS JOIN capped_ids ci
+        JOIN laplace.consensus c ON c.subject_id = w.id AND c.object_id = ANY(ci.arr)
+        UNION ALL
+        SELECT b.synset_id, laplace.relation_type_id('HAS_SENSE') AS type_id,
+               b.mu
+        FROM bindings b
+    ) x
 ),
--- Language via converse.word_language() — the existing HAS_LANGUAGE surface — so this
--- diagnostic does not mint a new laplace.relation_type_id('HAS_LANGUAGE') literal
--- (W6 G3 shrink-only). Same strongest-language pick as the prior CTE.
-lang AS (
-    -- ONE set-based scan, not converse.word_language() per row. #787 fixed the same G3
-    -- violation by calling converse.word_language(synset_id) per candidate; that helper
-    -- is STRICT and carries a SET clause, so it cannot inline, and each call is
-    -- its own consensus scan, the per-row shape W15 documents as a defect.
-    -- Same G3 outcome, different cost.
-    SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
-           row_number() OVER (PARTITION BY c.subject_id
-                              ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
-    FROM laplace.consensus c
-    WHERE c.type_id = p_lang_rel
-      AND c.subject_id IN (SELECT synset_id FROM capped)
+lang AS MATERIALIZED (
+    SELECT x.synset_id, x.lang_id,
+           row_number() OVER (PARTITION BY x.synset_id
+                              ORDER BY x.mu DESC, x.lang_id) AS rk
+    FROM (
+        SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
+               consensus.eff_mu(c.rating, c.rd) AS mu
+        FROM capped_ids ci
+        JOIN laplace.consensus c ON c.type_id = p_lang_rel AND c.subject_id = ANY(ci.arr)
+        UNION ALL
+        SELECT b.synset_id, b.lang_id, b.mu
+        FROM bindings b
+        WHERE b.lang_id IS NOT NULL
+    ) x
 ),
-rows AS (
-    SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,
+facets AS MATERIALIZED (
+    SELECT f.entity_id, f.type_id
+    FROM capped_ids ci
+    CROSS JOIN LATERAL ops.entity_facets_batch(ci.arr) f
+),
+rows AS MATERIALIZED (
+    SELECT c.rk, c.synset_id, COALESCE(e.type_id, f.type_id) AS type_id,
+           v.type_id AS via_id, l.lang_id,
            c.eff_mu, c.witnesses
     FROM capped c
     LEFT JOIN laplace.entities e ON e.id = c.synset_id
+    LEFT JOIN facets f ON f.entity_id = c.synset_id
     LEFT JOIN via  v ON v.synset_id = c.synset_id AND v.rk = 1
     LEFT JOIN lang l ON l.synset_id = c.synset_id AND l.rk = 1
 ),
 -- ONE realize.render pass over every id this result needs, position-aligned.
-ids AS (
+ids AS MATERIALIZED (
     SELECT array_agg(x ORDER BY ord) AS arr
     FROM (SELECT r.rk * 4 - 3 AS ord, r.synset_id AS x FROM rows r
           UNION ALL SELECT r.rk * 4 - 2, r.type_id  FROM rows r
           UNION ALL SELECT r.rk * 4 - 1, r.via_id   FROM rows r
           UNION ALL SELECT r.rk * 4,     r.lang_id  FROM rows r) z
 ),
-lbl AS (SELECT realize.batch(arr, NULL) AS l FROM ids)
+lbl AS MATERIALIZED (SELECT realize.batch(arr, NULL) AS l FROM ids)
 SELECT lbl.l[r.rk * 4 - 3],
        lbl.l[r.rk * 4 - 2],
        lbl.l[r.rk * 4 - 1],

@@ -1,444 +1,8 @@
-#include "laplace/core/physicality_descriptor.h"
+#include "physicality_descriptor_internal.h"
 
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "laplace/core/mantissa.h"
-#include "laplace/core/trajectory.h"
-
-struct physicality_descriptor_plan {
-    physicality_descriptor_node_t* nodes;
-    hash128_t* children;
-    hash128_t* roots;
-    physicality_descriptor_reference_t* references;
-    size_t* slots;
-    hash128_t* trajectory_children;
-    size_t node_count, node_capacity;
-    size_t child_count, child_capacity;
-    size_t reference_count, reference_capacity;
-    size_t root_count, slot_count, scratch_capacity;
-    size_t bytes, peak_bytes, maximum_bytes;
-    const physicality_descriptor_cancel_t* cancellation;
-};
-
-static int plan_refusal(physicality_descriptor_plan_diagnostics_t* diagnostics,
-    physicality_descriptor_plan_allocation_t allocation,
-    physicality_descriptor_plan_refusal_t reason, size_t requested) {
-    if (diagnostics != NULL) {
-        diagnostics->allocation = allocation;
-        diagnostics->refusal = reason;
-        diagnostics->requested_bytes = requested;
-    }
-    return 0;
-}
-
-static void plan_snapshot(const physicality_descriptor_plan_t* plan,
-    size_t completed_inputs, physicality_descriptor_plan_diagnostics_t* diagnostics) {
-    if (diagnostics == NULL || plan == NULL) return;
-    diagnostics->completed_inputs = completed_inputs;
-    diagnostics->retained_bytes = plan->bytes;
-    diagnostics->peak_bytes = plan->peak_bytes;
-    diagnostics->node_count = plan->node_count;
-    diagnostics->node_capacity = plan->node_capacity;
-    diagnostics->child_count = plan->child_count;
-    diagnostics->child_capacity = plan->child_capacity;
-    diagnostics->reference_count = plan->reference_count;
-    diagnostics->reference_capacity = plan->reference_capacity;
-    diagnostics->root_count = plan->root_count;
-    diagnostics->slot_count = plan->slot_count;
-    diagnostics->scratch_capacity = plan->scratch_capacity;
-}
-
-static int checked_add(size_t* value, size_t addition) {
-    if (addition > SIZE_MAX - *value) return 0;
-    *value += addition;
-    return 1;
-}
-
-static int checked_array(size_t* bytes, size_t count, size_t width) {
-    if (count > SIZE_MAX / width) return 0;
-    return checked_add(bytes, count * width);
-}
-
-/* The same doubling law as graph growth, with no allocation. */
-static int capacity_bound(size_t required, size_t* out) {
-    size_t capacity = required == 0u ? 0u : 1u;
-    while (capacity < required) {
-        if (capacity > SIZE_MAX / 2u) return 0;
-        capacity *= 2u;
-    }
-    *out = capacity;
-    return 1;
-}
-
-physicality_descriptor_status_t physicality_descriptor_plan_payload_bound(
-    size_t forms, size_t stored_vertices, size_t maximum_vertices,
-    size_t* out_peak_bytes) {
-    size_t nodes = 0u, children = 0u, references = forms;
-    size_t node_capacity, child_capacity, slot_capacity, slots_required;
-    size_t node_bytes = 0u, child_bytes = 0u, slot_bytes = 0u;
-    size_t bytes = sizeof(physicality_descriptor_plan_t), widest = 17u, replacement;
-    if (out_peak_bytes == NULL || (forms == 0u && stored_vertices != 0u) ||
-        maximum_vertices > stored_vertices ||
-        (stored_vertices != 0u && maximum_vertices == 0u))
-        return PHYSICALITY_DESCRIPTOR_INVALID;
-    /* maximum_vertices must be capable of covering the total row shape.
-     * Division avoids overflowing forms * maximum_vertices. */
-    if (stored_vertices != 0u && (stored_vertices - 1u) / forms >= maximum_vertices)
-        return PHYSICALITY_DESCRIPTOR_INVALID;
-    if (maximum_vertices == SIZE_MAX || forms > SIZE_MAX / sizeof(physicality_descriptor_input_t))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    if (maximum_vertices + 1u > widest) widest = maximum_vertices + 1u;
-    /* Every optional scalar is present and every vertex takes the larger
-     * factor recipe. Realized/carrier references keep all occurrences. */
-    if (!checked_array(&nodes, forms, 14u) || !checked_array(&nodes, stored_vertices, 5u) ||
-        !checked_array(&children, forms, 95u) || !checked_array(&children, stored_vertices, 42u) ||
-        !checked_add(&references, stored_vertices) ||
-        !checked_array(&bytes, forms, sizeof(hash128_t)) ||
-        !checked_array(&bytes, references, sizeof(physicality_descriptor_reference_t)) ||
-        !checked_array(&bytes, widest, sizeof(hash128_t)) ||
-        !capacity_bound(nodes, &node_capacity) || !capacity_bound(children, &child_capacity) ||
-        nodes > SIZE_MAX / 2u)
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    slots_required = nodes == 0u ? 1u : nodes * 2u;
-    if (!capacity_bound(slots_required, &slot_capacity) ||
-        !checked_array(&node_bytes, node_capacity, sizeof(physicality_descriptor_node_t)) ||
-        !checked_array(&child_bytes, child_capacity, sizeof(hash128_t)) ||
-        !checked_array(&slot_bytes, slot_capacity, sizeof(size_t)) ||
-        !checked_add(&bytes, node_bytes) || !checked_add(&bytes, child_bytes) ||
-        !checked_add(&bytes, slot_bytes))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    replacement = node_bytes > child_bytes ? node_bytes : child_bytes;
-    if (slot_bytes > replacement) replacement = slot_bytes;
-    /* Empty plans never replace an array. Otherwise this retains the complete
-     * final capacities alongside the largest possible replacement request. */
-    if (nodes != 0u && !checked_add(&bytes, replacement))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    *out_peak_bytes = bytes;
-    return PHYSICALITY_DESCRIPTOR_OK;
-}
-
-/* Grow retained arrays under the same aggregate grant. Reserve old plus new
- * requested payload even when realloc grows in place; this conservative peak
- * is not allocator residency/RSS. Only unique descriptor structure asks for
- * node/edge growth; root/reference occurrence storage is never deduplicated. */
-static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
-    size_t used, size_t capacity, size_t required, size_t width,
-    physicality_descriptor_plan_diagnostics_t* diagnostics,
-    physicality_descriptor_plan_allocation_t allocation, void** replacement, size_t* replacement_capacity) {
-    size_t next = capacity == 0u ? 1u : capacity;
-    size_t allocated, previous_bytes;
-    void* memory;
-    if (required <= capacity) {
-        *replacement = previous;
-        *replacement_capacity = capacity;
-        return 1;
-    }
-    if (required > SIZE_MAX / width || capacity > SIZE_MAX / width ||
-        used > capacity || plan->bytes > plan->maximum_bytes)
-        return plan_refusal(diagnostics, allocation, PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
-    while (next < required) {
-        if (next > SIZE_MAX / 2u) { next = required; break; }
-        next *= 2u;
-    }
-    /* Geometric spare capacity is optional; a valid exact fit may use only
-     * the required rows, still charging old plus new during replacement. */
-    if (next > SIZE_MAX / width ||
-        next * width > plan->maximum_bytes - plan->bytes)
-        next = required;
-    allocated = next * width;
-    if (allocated > plan->maximum_bytes - plan->bytes)
-        return plan_refusal(diagnostics, allocation, PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED, allocated);
-    memory = realloc(previous, allocated);
-    if (memory == NULL)
-        return plan_refusal(diagnostics, allocation, PHYSICALITY_DESCRIPTOR_PLAN_ALLOCATOR_REFUSED, allocated);
-    /* Preserve calloc's complete zero tail, including unused old capacity. */
-    memset((uint8_t*)memory + used * width, 0, allocated - used * width);
-    if (plan->bytes + allocated > plan->peak_bytes)
-        plan->peak_bytes = plan->bytes + allocated;
-    previous_bytes = capacity * width;
-    plan->bytes += allocated - previous_bytes;
-    *replacement = memory;
-    *replacement_capacity = next;
-    return 1;
-}
-
-static size_t identity_slot(const hash128_t* id, size_t mask) {
-    /* Hash-table routing only. Canonical identities come from the ordinary
-     * native trajectory/composition owner below. */
-    uint64_t value = id->lo ^ id->hi;
-    value ^= value >> 33;
-    value *= UINT64_C(0xff51afd7ed558ccd);
-    value ^= value >> 33;
-    return (size_t)value & mask;
-}
-
-static int reserve_slots(physicality_descriptor_plan_t* plan, size_t nodes,
-    physicality_descriptor_plan_diagnostics_t* diagnostics) {
-    size_t next = plan->slot_count, bytes, peak;
-    size_t* slots;
-    if (nodes <= next / 2u) return 1;
-    if (nodes > SIZE_MAX / 2u)
-        return plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_SLOTS,
-            PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
-    while (next < nodes * 2u) {
-        if (next > SIZE_MAX / 2u)
-            return plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_SLOTS,
-                PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
-        next *= 2u;
-    }
-    if (next > SIZE_MAX / sizeof(*slots))
-        return plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_SLOTS,
-            PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
-    bytes = next * sizeof(*slots);
-    if (bytes > plan->maximum_bytes - plan->bytes)
-        return plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_SLOTS,
-            PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED, bytes);
-    slots = calloc(next, sizeof(*slots));
-    if (slots == NULL)
-        return plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_SLOTS,
-            PHYSICALITY_DESCRIPTOR_PLAN_ALLOCATOR_REFUSED, bytes);
-    for (size_t i = 0u; i < plan->node_count; ++i) {
-        if (physicality_descriptor_cancel_requested(plan->cancellation)) {
-            free(slots);
-            return -1;
-        }
-        size_t slot = identity_slot(&plan->nodes[i].id, next - 1u);
-        while (slots[slot] != 0u) slot = (slot + 1u) & (next - 1u);
-        slots[slot] = i + 1u;
-    }
-    peak = plan->bytes + bytes;
-    if (peak > plan->peak_bytes) plan->peak_bytes = peak;
-    free(plan->slots);
-    plan->bytes += bytes - plan->slot_count * sizeof(*slots);
-    plan->slots = slots;
-    plan->slot_count = next;
-    return 1;
-}
-
-static const hash128_t* basis_value(const physicality_descriptor_basis_t* basis, size_t index) {
-    return index < PHYSICALITY_DESCRIPTOR_TAG_COUNT ? &basis->tags[index] :
-        &basis->byte_numbers[index - PHYSICALITY_DESCRIPTOR_TAG_COUNT];
-}
-
-int physicality_descriptor_basis_is_valid(const physicality_descriptor_basis_t* basis) {
-    uint16_t slots[1024] = {0};
-    if (basis == NULL) return 0;
-    for (size_t i = 0; i < PHYSICALITY_DESCRIPTOR_TAG_COUNT + 256u; ++i) {
-        const hash128_t* id = basis_value(basis, i);
-        size_t slot = identity_slot(id, 1023u);
-        while (slots[slot] != 0u) {
-            if (hash128_equals(id, basis_value(basis, slots[slot] - 1u))) return 0;
-            slot = (slot + 1u) & 1023u;
-        }
-        slots[slot] = (uint16_t)(i + 1u);
-    }
-    return 1;
-}
-
-static physicality_descriptor_status_t compose(
-    physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const hash128_t* children,
-    size_t count, hash128_t* result) {
-    size_t slot;
-    if (physicality_descriptor_cancel_requested(plan->cancellation))
-        return PHYSICALITY_DESCRIPTOR_CANCELLED;
-    if (count < 2u || count > plan->scratch_capacity)
-        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    /* These are already the complete ordered child identities. The ordinary
-     * Merkle owner has exactly the identity of their unit-run trajectory;
-     * packing and decoding that temporary carrier adds no validation here.
-     * describe_one still validates every borrowed source manifest before any
-     * descriptor is built. One/zero-child collapse is outside this recipe. */
-    hash128_merkle(0, children, count, result);
-    slot = identity_slot(result, plan->slot_count - 1u);
-    while (plan->slots[slot] != 0u) {
-        const physicality_descriptor_node_t* node = &plan->nodes[plan->slots[slot] - 1u];
-        if (hash128_equals(&node->id, result)) {
-            if (node->child_count != count ||
-                memcmp(plan->children + node->first_child, children,
-                    count * sizeof(*children)) != 0)
-                return PHYSICALITY_DESCRIPTOR_IDENTITY_CONFLICT;
-            return PHYSICALITY_DESCRIPTOR_OK;
-        }
-        slot = (slot + 1u) & (plan->slot_count - 1u);
-    }
-    /* Exact reuse above needs no spare capacity. Growth cannot invalidate
-     * children/result: callers use stack fields or the fixed child/root
-     * arrays, never the growable node/child arrays. */
-    if (plan->node_count == SIZE_MAX || count > SIZE_MAX - plan->child_count) {
-        plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_GRAPH,
-            PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    }
-    void* replacement;
-    size_t capacity;
-    if (!reserve_array(plan, plan->nodes, plan->node_count, plan->node_capacity,
-            plan->node_count + 1u, sizeof(*plan->nodes), diagnostics,
-            PHYSICALITY_DESCRIPTOR_PLAN_NODES, &replacement, &capacity))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    plan->nodes = replacement;
-    plan->node_capacity = capacity;
-    if (!reserve_array(plan, plan->children, plan->child_count, plan->child_capacity,
-            plan->child_count + count, sizeof(*plan->children), diagnostics,
-            PHYSICALITY_DESCRIPTOR_PLAN_CHILDREN, &replacement, &capacity))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    plan->children = replacement;
-    plan->child_capacity = capacity;
-    const int slots_status = reserve_slots(plan, plan->node_count + 1u, diagnostics);
-    if (slots_status != 1)
-        return slots_status < 0 ? PHYSICALITY_DESCRIPTOR_CANCELLED : PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    slot = identity_slot(result, plan->slot_count - 1u);
-    while (plan->slots[slot] != 0u)
-        slot = (slot + 1u) & (plan->slot_count - 1u);
-    physicality_descriptor_node_t* node = &plan->nodes[plan->node_count];
-    node->id = *result;
-    node->first_child = plan->child_count;
-    node->child_count = count;
-    memcpy(plan->children + plan->child_count, children, count * sizeof(*children));
-    plan->child_count += count;
-    plan->slots[slot] = ++plan->node_count;
-    return PHYSICALITY_DESCRIPTOR_OK;
-}
-
-static physicality_descriptor_status_t bits(
-    physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const physicality_descriptor_basis_t* basis,
-    physicality_descriptor_tag_t tag, uint64_t value, size_t width, hash128_t* result) {
-    hash128_t children[9];
-    children[0] = basis->tags[tag];
-    for (size_t byte = 0; byte < width; ++byte)
-        children[byte + 1u] = basis->byte_numbers[(value >> (byte * 8u)) & 0xffu];
-    return compose(plan, diagnostics, children, width + 1u, result);
-}
-
-static physicality_descriptor_status_t binary64(
-    physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const physicality_descriptor_basis_t* basis,
-    double value, hash128_t* result) {
-    uint64_t word;
-    memcpy(&word, &value, sizeof(word));
-    return bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_BINARY64, word, 8u, result);
-}
-
-static physicality_descriptor_status_t reference(
-    physicality_descriptor_plan_t* plan, const hash128_t* entity,
-    size_t input, size_t vertex, physicality_descriptor_reference_kind_t kind) {
-    if (plan->reference_count == plan->reference_capacity)
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    physicality_descriptor_reference_t* value = &plan->references[plan->reference_count++];
-    value->entity_id = *entity;
-    value->input_index = input;
-    value->vertex_index = vertex;
-    value->kind = kind;
-    return PHYSICALITY_DESCRIPTOR_OK;
-}
-
-#define REQUIRE(expression) do { \
-    physicality_descriptor_status_t status_ = (expression); \
-    if (status_ != PHYSICALITY_DESCRIPTOR_OK) return status_; \
-} while (0)
-
-static physicality_descriptor_status_t describe_carrier(
-    physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const physicality_descriptor_basis_t* basis,
-    const double* vertex, size_t input_index, size_t vertex_index, hash128_t* result) {
-    mantissa_payload_t payload;
-    double restored[4];
-    hash128_t fields[5];
-    mantissa_unpack(vertex, &payload);
-    mantissa_pack(restored, &payload);
-    if (memcmp(restored, vertex, sizeof(restored)) != 0)
-        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    if ((payload.flags & LAPLACE_VFLAG_FACTOR) != 0u &&
-        (payload.flags & (LAPLACE_VFLAG_HAS_ATOM | LAPLACE_VFLAG_TESTIMONY)) == 0u) {
-        /* This vertex's id-sized payload contains float32 values, not an
-         * entity reference. Preserve its exact numeric representation. */
-        float values[6];
-        uint8_t count;
-        if (laplace_factor_unpack_vertex(vertex, values, &count) != 0)
-            return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-        fields[0] = basis->tags[PHYSICALITY_DESCRIPTOR_FACTOR];
-        for (size_t axis = 0; axis < 4u; ++axis)
-            REQUIRE(binary64(plan, diagnostics, basis, vertex[axis], &fields[axis + 1u]));
-    } else {
-        fields[0] = basis->tags[PHYSICALITY_DESCRIPTOR_CARRIER];
-        fields[1] = payload.entity_id;
-        REQUIRE(reference(plan, &payload.entity_id, input_index, vertex_index,
-            PHYSICALITY_DESCRIPTOR_CARRIER_ENTITY));
-        REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_U16, payload.ordinal, 2u, &fields[2]));
-        REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_U16, payload.run_length, 2u, &fields[3]));
-        REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_U64, payload.flags, 8u, &fields[4]));
-    }
-    return compose(plan, diagnostics, fields, 5u, result);
-}
-
-static physicality_descriptor_status_t describe_one(
-    physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const physicality_descriptor_basis_t* basis,
-    const physicality_descriptor_input_t* input, size_t input_index) {
-    hash128_t fields[9];
-    hash128_t coordinate[5];
-    hash128_t hilbert[17];
-    hash128_t optional[2];
-    if (input->type <= 0 || input->n_constituents < 0 ||
-        (input->trajectory_vertices != 0u && input->trajectory_xyzm == NULL) ||
-        (input->trajectory_vertices == 0u && input->n_constituents != 0) ||
-        (input->alignment_residual_is_null != 0 && input->alignment_residual_is_null != 1) ||
-        (input->source_dim_is_null != 0 && input->source_dim_is_null != 1) ||
-        (!input->source_dim_is_null && input->source_dim <= 0))
-        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    for (size_t axis = 0; axis < 4u; ++axis)
-        if (!isfinite(input->coord[axis])) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    if (!input->alignment_residual_is_null && !isfinite(input->alignment_residual))
-        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    if (laplace_physicality_manifest_validate(&input->entity_id, input->type,
-        input->trajectory_xyzm, input->trajectory_vertices, input->n_constituents) != 0)
-        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-
-    fields[0] = basis->tags[PHYSICALITY_DESCRIPTOR_SCHEMA];
-    fields[1] = input->entity_id;
-    REQUIRE(reference(plan, &input->entity_id, input_index, SIZE_MAX,
-        PHYSICALITY_DESCRIPTOR_REALIZED_ENTITY));
-    REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_I16, (uint16_t)input->type, 2u, &fields[2]));
-    coordinate[0] = basis->tags[PHYSICALITY_DESCRIPTOR_COORDINATE];
-    for (size_t axis = 0; axis < 4u; ++axis)
-        REQUIRE(binary64(plan, diagnostics, basis, input->coord[axis], &coordinate[axis + 1u]));
-    REQUIRE(compose(plan, diagnostics, coordinate, 5u, &fields[3]));
-    hilbert[0] = basis->tags[PHYSICALITY_DESCRIPTOR_HILBERT];
-    for (size_t byte = 0; byte < 16u; ++byte)
-        hilbert[byte + 1u] = basis->byte_numbers[input->hilbert_index.bytes[byte]];
-    REQUIRE(compose(plan, diagnostics, hilbert, 17u, &fields[4]));
-
-    plan->trajectory_children[0] = basis->tags[PHYSICALITY_DESCRIPTOR_TRAJECTORY];
-    if (input->trajectory_vertices == 0u) {
-        plan->trajectory_children[1] = basis->tags[PHYSICALITY_DESCRIPTOR_ABSENT];
-        REQUIRE(compose(plan, diagnostics, plan->trajectory_children, 2u, &fields[5]));
-    } else {
-        for (size_t vertex = 0; vertex < input->trajectory_vertices; ++vertex)
-            REQUIRE(describe_carrier(plan, diagnostics, basis, input->trajectory_xyzm + vertex * 4u,
-                input_index, vertex, &plan->trajectory_children[vertex + 1u]));
-        REQUIRE(compose(plan, diagnostics, plan->trajectory_children,
-            input->trajectory_vertices + 1u, &fields[5]));
-    }
-    REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_I32,
-        (uint32_t)input->n_constituents, 4u, &fields[6]));
-    optional[0] = basis->tags[PHYSICALITY_DESCRIPTOR_PRESENT];
-    fields[7] = basis->tags[PHYSICALITY_DESCRIPTOR_ABSENT];
-    if (!input->alignment_residual_is_null) {
-        REQUIRE(binary64(plan, diagnostics, basis, input->alignment_residual, &optional[1]));
-        REQUIRE(compose(plan, diagnostics, optional, 2u, &fields[7]));
-    }
-    fields[8] = basis->tags[PHYSICALITY_DESCRIPTOR_ABSENT];
-    if (!input->source_dim_is_null) {
-        REQUIRE(bits(plan, diagnostics, basis, PHYSICALITY_DESCRIPTOR_I32,
-            (uint32_t)input->source_dim, 4u, &optional[1]));
-        REQUIRE(compose(plan, diagnostics, optional, 2u, &fields[8]));
-    }
-    return compose(plan, diagnostics, fields, 9u, &plan->roots[input_index]);
-}
-
-/* Invocation-local reuse of the immediately preceding validated body. Compare
- * the complete active recipe, never the placement/entity id alone, structure
- * padding, trajectory pointer identity, or inactive nullable payload. A miss
- * takes the ordinary validator/composer; a hit preserves every reference
- * occurrence below. No heap cache or plan payload/capacity change is needed. */
 static physicality_descriptor_status_t same_body(
     const physicality_descriptor_input_t* a, const physicality_descriptor_input_t* b,
     const physicality_descriptor_cancel_t* cancellation, int* equal) {
@@ -483,12 +47,6 @@ static physicality_descriptor_status_t repeat_body_references(
     return PHYSICALITY_DESCRIPTOR_OK;
 }
 
-
-/* Optional invocation-local body reuse. The four-way routing key is only a
- * coarse hash of the placement/type/shape: alternate bodies deliberately share
- * a bucket and must pass same_body's complete active-recipe comparison. Stored
- * indices refer only to earlier validated borrowed inputs and retained reference
- * spans; roots, occurrence order and source-unit indices are never deduplicated. */
 typedef struct {
     size_t input_plus_one, reference_first, reference_count;
 } body_cache_entry_t;
@@ -508,10 +66,6 @@ static void body_cache_release(physicality_descriptor_plan_t* plan, body_cache_t
     cache->bytes = 0u;
 }
 
-/* Upper-bound every geometric growth that the next ordinary body could ask
- * for, including a complete replacement alongside all retained arrays. If this
- * proof does not fit, discard the optional cache BEFORE any allocation choice;
- * the existing exact-fit fallback and refusal contract then run unchanged. */
 static int body_cache_growth_fits(
     const physicality_descriptor_plan_t* plan, const body_cache_t* cache, size_t vertices) {
     size_t nodes = plan->node_count, children = plan->child_count;
@@ -546,15 +100,13 @@ static void body_cache_initialize(physicality_descriptor_plan_t* plan,
     size_t input_count, size_t vertices, size_t maximum_vertices, body_cache_t* cache) {
     size_t bound;
     memset(cache, 0, sizeof(*cache));
-    if (input_count < 3u) return; /* The existing adjacent path already covers two. */
+    if (input_count < 3u) return;
     cache->buckets = 1u;
     while (cache->buckets < BODY_CACHE_MAX_BUCKETS &&
         cache->buckets < input_count / BODY_CACHE_WAYS)
         cache->buckets *= 2u;
     cache->bytes = cache->buckets * BODY_CACHE_WAYS * sizeof(*cache->entries);
     cache->maximum_bytes = plan->maximum_bytes;
-    /* Keep the existing public no-reuse payload bound conservative as well as
-     * respecting the caller's grant. No new reservation is required by callers. */
     if (physicality_descriptor_plan_payload_bound(
             input_count, vertices, maximum_vertices, &bound) == PHYSICALITY_DESCRIPTOR_OK &&
         bound < cache->maximum_bytes)
@@ -563,7 +115,7 @@ static void body_cache_initialize(physicality_descriptor_plan_t* plan,
         cache->bytes > cache->maximum_bytes - plan->bytes)
         return;
     cache->entries = calloc(cache->buckets * BODY_CACHE_WAYS, sizeof(*cache->entries));
-    if (cache->entries == NULL) return; /* Optional allocation: ordinary path still works. */
+    if (cache->entries == NULL) return;
     plan->bytes += cache->bytes;
     if (plan->bytes > plan->peak_bytes) plan->peak_bytes = plan->bytes;
 }
@@ -645,8 +197,6 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
         if (width + 1u > widest) widest = width + 1u;
         if (width > maximum_vertices) maximum_vertices = width;
     }
-    /* Roots and reference occurrences retain their exact input multiplicity.
-     * Descriptor graph arrays grow only as distinct ordered nodes are found. */
     if (!checked_add(&references, vertices) ||
         !checked_array(&bytes, input_count, sizeof(hash128_t)) ||
         !checked_array(&bytes, references, sizeof(physicality_descriptor_reference_t)) ||
@@ -737,7 +287,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
                 if (cache.entries != NULL &&
                     !body_cache_growth_fits(plan, &cache, inputs[input].trajectory_vertices))
                     body_cache_release(plan, &cache);
-                status = describe_one(plan, diagnostics, basis, &inputs[input], input);
+                status = laplace_phys_desc_describe_one(plan, diagnostics, basis, &inputs[input], input);
                 if (status == PHYSICALITY_DESCRIPTOR_OK && cache.entries != NULL &&
                     cache_slot != SIZE_MAX) {
                     body_cache_entry_t* entry = &cache.entries[cache_slot];

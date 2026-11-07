@@ -11,10 +11,8 @@ BEGIN ATOMIC
     -- line item in the system (1,496,183 calls, 19.6 hours cumulative).
     SELECT realize.render_text(
         (SELECT g.neighbour_id
-         FROM consensus.edges_raw(p_id, 'out', NULL, 64, true, 'eff_mu') g
-         WHERE consensus.relation_canonical(g.type_id) = 'HAS_DEFINITION'
-         -- neighbour_id CLOSES the order: without it a tie is broken by plan order,
-         -- which is not reproducible. Matches Q_DEFINES in realize_batch.c.
+         FROM consensus.edges_raw(p_id, 'out', ARRAY[laplace.relation_type_id('HAS_DEFINITION')], 8, false, 'eff_mu') g
+         WHERE g.neighbour_id IS NOT NULL
          ORDER BY consensus.eff_mu(g.rating, g.rd) DESC, g.neighbour_id
          LIMIT 1), 24);
 END;

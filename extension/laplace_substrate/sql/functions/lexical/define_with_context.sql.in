@@ -6,37 +6,55 @@ BEGIN ATOMIC
     WITH rel AS MATERIALIZED (
         SELECT laplace.relation_type_id('HAS_DEFINITION') AS has_def
     ),
+    sn AS MATERIALIZED (
+        SELECT * FROM lexical.senses(p_word, p_context)
+    ),
+    sense_subjs AS MATERIALIZED (
+        SELECT sn.score AS sense_rank, k.subj
+        FROM sn
+        CROSS JOIN LATERAL (
+            VALUES (sn.sense_id),
+                   (CASE WHEN sn.synset_id IS DISTINCT FROM sn.sense_id THEN sn.synset_id END)
+        ) AS k(subj)
+        WHERE k.subj IS NOT NULL
+    ),
+    peer_subjs AS MATERIALIZED (
+        SELECT peer.id AS subj
+        FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
+        WHERE peer.id IS NOT NULL
+    ),
+    all_edges AS MATERIALIZED (
+        SELECT e.*
+        FROM rel r
+        CROSS JOIN LATERAL consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT subj FROM sense_subjs UNION SELECT DISTINCT subj FROM peer_subjs),
+            'out', ARRAY[r.has_def], p_limit, false, 'eff_mu') e
+        WHERE e.neighbour_id IS NOT NULL
+    ),
     picked AS MATERIALIZED (
-        SELECT u.object_id, u.eff_mu, u.witnesses, u.sense_rank
+        SELECT DISTINCT ON (u.object_id) u.object_id, u.eff_mu, u.witnesses, u.sense_rank
         FROM (
-            SELECT g.object_id AS object_id,
+            SELECT g.neighbour_id AS object_id,
                    consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
                    g.witness_count AS witnesses,
-                   sn.score AS sense_rank
-            FROM lexical.senses(p_word, p_context) sn
-            CROSS JOIN rel r
-            CROSS JOIN LATERAL (
-                VALUES (sn.sense_id),
-                       (CASE WHEN sn.synset_id IS DISTINCT FROM sn.sense_id THEN sn.synset_id END)
-            ) AS k(subj)
-            JOIN laplace.consensus g
-              ON g.subject_id = k.subj
-             AND g.type_id = r.has_def
-            WHERE k.subj IS NOT NULL
+                   s.sense_rank
+            FROM sense_subjs s
+            JOIN all_edges g ON g.subject_id = s.subj
             UNION ALL
-            SELECT g.object_id,
+            SELECT g.neighbour_id,
                    consensus.eff_mu_display(g.rating, g.rd),
                    g.witness_count,
                    NULL::numeric
-            FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
-            CROSS JOIN rel r
-            JOIN laplace.consensus g ON g.subject_id = peer.id
-                            AND g.type_id = r.has_def
+            FROM peer_subjs p
+            JOIN all_edges g ON g.subject_id = p.subj
         ) u
-        ORDER BY COALESCE(u.sense_rank, 0) + u.eff_mu DESC
+        ORDER BY u.object_id, COALESCE(u.sense_rank, 0) + u.eff_mu DESC
+    ), capped AS MATERIALIZED (
+        SELECT * FROM picked
+        ORDER BY COALESCE(sense_rank, 0) + eff_mu DESC, object_id
         LIMIT p_limit
     ), numbered AS MATERIALIZED (
-      SELECT d.*, row_number() OVER (ORDER BY COALESCE(d.sense_rank,0)+d.eff_mu DESC, d.object_id) AS rn FROM picked d
+      SELECT d.*, row_number() OVER (ORDER BY COALESCE(d.sense_rank,0)+d.eff_mu DESC, d.object_id) AS rn FROM capped d
     ), batch AS MATERIALIZED (
       SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn)) AS txt FROM numbered
     )

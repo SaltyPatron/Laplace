@@ -71,20 +71,6 @@ BEGIN ATOMIC
     -- strict prefix), replacing the per-anchor
     -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
-    carriers AS MATERIALIZED (
-        SELECT h.entity, public.laplace_parts(h.path) AS parts
-        FROM anchors a, LATERAL unnest(a.ids) x
-        JOIN public.physicality h
-          ON h.path OPERATOR(public.@^) public.blake3_from_bytea(x)
-         AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind', 'tuple')]
-        WHERE public.laplace_path_length(h.path) = 3
-    ),
-    cells AS MATERIALIZED (
-        SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
-        FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM carriers), NULL::bigint,
-            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[],
-            3::smallint, NULL::public.blake3[], 3::bigint) c
-    ),
     members AS (
         SELECT c.subject_id AS member,
                CASE WHEN c.type_id = r.form_of THEN 'form'::text ELSE 'synonym'::text END AS kind,
@@ -92,11 +78,6 @@ BEGIN ATOMIC
         FROM anchors a, rel r, laplace.v_consensus_unrefuted c
         WHERE c.object_id = ANY (a.ids)
           AND c.type_id IN (r.is_synonym_of, r.form_of)
-        UNION ALL
-        SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
-        FROM anchors a, laplace.v_consensus_unrefuted hs
-        WHERE hs.object_id = ANY (a.ids)
-          AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
         UNION ALL
         SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
         FROM sense_anchors sa, laplace.v_consensus_unrefuted hs
@@ -112,13 +93,8 @@ BEGIN ATOMIC
         WHERE c.object_id = ANY (a.ids)
           AND c.type_id = r.evokes_frame
         UNION ALL
-        SELECT public.blake3_send(cr.parts[1]), 'sense'::text,
-               COALESCE(consensus.eff_mu_display(round(cl.rating * 1e9)::bigint, round(cl.deviation * 1e9)::bigint), 1087.071::numeric)
-        FROM carriers cr
-        LEFT JOIN cells cl
-          ON ((cl.parts[3] = cr.entity AND cl.parts[1] IN (cr.parts[1], cr.parts[3]))
-              OR (cl.parts[1] = cr.entity AND cl.parts[3] IN (cr.parts[1], cr.parts[3])))
-         AND (cl.rating - 2 * cl.deviation) > 0
+        SELECT kb.term, 'sense'::text, kb.eff_mu
+        FROM anchors a, LATERAL converse.key_binding_evidence(a.ids, NULL, false) kb
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu
@@ -174,6 +150,10 @@ BEGIN ATOMIC
                                 || r.form_of
                                 || r.deriv_related)
           AND hs.rating IS NOT NULL
+        UNION
+        SELECT be.term AS word_id, be.key AS anchor_id, laplace.relation_type_id('HAS_SENSE') AS anchor_type
+        FROM converse.binding_evidence(COALESCE(p_word_ids, ARRAY[]::bytea[]), NULL, false) be
+        WHERE be.key IS NOT NULL
     ),
     all_anchors AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT anchor_id), ARRAY[]::bytea[]) AS ids
@@ -231,15 +211,23 @@ BEGIN ATOMIC
         FROM word_target_hubs
     ),
     hub_to_word AS MATERIALIZED (
-        SELECT hs2.object_id AS hub_id,
-               hs2.subject_id AS peer_id,
-               MAX(consensus.eff_mu_display(hs2.rating, hs2.rd)) AS mu
-        FROM all_hubs ah, rel r, laplace.v_consensus_unrefuted hs2
-        WHERE hs2.object_id = ANY (ah.ids)
-          AND hs2.type_id = ANY (consensus.relation_set_ids('KEY_BINDING')
-                                 || r.form_of)
-          AND hs2.rating IS NOT NULL
-        GROUP BY hs2.object_id, hs2.subject_id
+        SELECT x.hub_id, x.peer_id, MAX(x.mu) AS mu
+        FROM (
+            SELECT hs2.object_id AS hub_id,
+                   hs2.subject_id AS peer_id,
+                   consensus.eff_mu_display(hs2.rating, hs2.rd) AS mu
+            FROM all_hubs ah, rel r, laplace.v_consensus_unrefuted hs2
+            WHERE hs2.object_id = ANY (ah.ids)
+              AND hs2.type_id = ANY (consensus.relation_set_ids('KEY_BINDING')
+                                     || r.form_of)
+              AND hs2.rating IS NOT NULL
+            UNION ALL
+            SELECT kb.key AS hub_id,
+                   kb.term AS peer_id,
+                   kb.eff_mu AS mu
+            FROM all_hubs ah, LATERAL converse.key_binding_evidence(ah.ids, NULL, false) kb
+        ) x
+        GROUP BY x.hub_id, x.peer_id
     ),
     candidates AS (
         SELECT wth.word_id, htw.peer_id, htw.mu::float8 AS strength

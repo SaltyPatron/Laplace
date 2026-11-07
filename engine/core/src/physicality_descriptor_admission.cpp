@@ -1,16 +1,4 @@
-#include "physicality_descriptor_provider.h"
-
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstring>
-#include <limits>
-#include <memory>
-#include <memory_resource>
-#include <new>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
+#include "physicality_descriptor_admission_internal.h"
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
@@ -19,142 +7,7 @@
 #include "laplace/core/math4d.h"
 #include "laplace/core/trajectory.h"
 
-namespace {
-
-struct Status { physicality_descriptor_status_t value; };
-struct AllocationRefusal final : std::bad_alloc {
-    uint32_t kind;
-    size_t requested, retained, peak, limit;
-    AllocationRefusal(uint32_t reason, size_t request, size_t current,
-        size_t high_water, size_t ceiling)
-        : kind(reason), requested(request), retained(current),
-          peak(high_water), limit(ceiling) {}
-};
-
-class Memory final : public std::pmr::memory_resource {
-public:
-    explicit Memory(size_t limit) : limit_(limit) {}
-    size_t used() const { return used_; }
-    size_t peak() const { return peak_; }
-    size_t remaining() const { return limit_ - used_; }
-    void claim(size_t bytes) {
-        if (bytes > remaining())
-            throw AllocationRefusal(PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT,
-                bytes, used_, peak_, limit_);
-        used_ += bytes;
-        peak_ = std::max(peak_, used_);
-    }
-    void release(size_t bytes) { used_ -= bytes; }
-private:
-    void* do_allocate(size_t bytes, size_t alignment) override {
-        claim(bytes);
-        try { return ::operator new(bytes, std::align_val_t(alignment)); }
-        catch (const std::bad_alloc&) {
-            release(bytes);
-            throw AllocationRefusal(PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_ALLOCATOR,
-                bytes, used_, peak_, limit_);
-        }
-    }
-    void do_deallocate(void* pointer, size_t bytes, size_t alignment) override {
-        ::operator delete(pointer, std::align_val_t(alignment));
-        release(bytes);
-    }
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
-        return this == &other;
-    }
-    size_t limit_;
-    size_t used_ = 0;
-    size_t peak_ = 0;
-};
-
-struct IdHash {
-    size_t operator()(const hash128_t& id) const noexcept {
-        uint64_t x = id.lo ^ id.hi;
-        x ^= x >> 33;
-        x *= UINT64_C(0xff51afd7ed558ccd);
-        return static_cast<size_t>(x ^ (x >> 33));
-    }
-};
-struct IdEqual {
-    bool operator()(const hash128_t& a, const hash128_t& b) const noexcept {
-        return hash128_equals(&a, &b) != 0;
-    }
-};
-template<class T> using IdMap = std::pmr::unordered_map<hash128_t,T,IdHash,IdEqual>;
-using IdSet = std::pmr::unordered_set<hash128_t,IdHash,IdEqual>;
-
-template<class T, void (*Destroy)(T*)> struct External {
-    T* value = nullptr;
-    Memory* memory;
-    size_t bytes = 0;
-    explicit External(Memory& owner) : memory(&owner) {}
-    void account(size_t retained, size_t peak) {
-        if (peak < retained) throw std::bad_alloc();
-        memory->claim(peak);
-        memory->release(peak - retained);
-        bytes = retained;
-    }
-    ~External() { Destroy(value); memory->release(bytes); }
-};
-
-struct Geometry {
-    hash128_t id{};
-    std::array<double,4> coord{};
-    hilbert128_t hilbert{};
-};
-
-Geometry geometry(const tier_node_view_t& node) {
-    Geometry value;
-    value.id = node.id;
-    std::copy_n(node.coord, 4, value.coord.data());
-    value.hilbert = node.hilbert;
-    return value;
-}
-
-struct Selected {
-    Geometry physicality;
-    size_t body_index = SIZE_MAX; // SIZE_MAX means an actual native atomic basis.
-    bool byte_basis = false;
-    bool terminal_body_verified = false;
-};
-
-struct OutputNode {
-    Geometry geometry;
-    size_t first_child;
-    size_t child_count;
-    int16_t type;
-};
-
-struct View {
-    hash128_t id{};
-    uint32_t state = PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE;
-    size_t missing_first = 0;
-    size_t missing_count = 0;
-};
-
-void require(bool condition, physicality_descriptor_status_t status = PHYSICALITY_DESCRIPTOR_INVALID_BODY) {
-    if (!condition) throw Status{status};
-}
-
-} // namespace
-
-struct physicality_descriptor_materialization {
-    Memory memory;
-    std::pmr::vector<hash128_t> pending;
-    std::pmr::vector<hash128_t> missing;
-    std::pmr::vector<physicality_descriptor_admitted_form_t> forms;
-    std::pmr::vector<physicality_descriptor_form_observation_t> observations;
-    intent_stage_t* stage = nullptr;
-    size_t stage_bytes = 0;
-    explicit physicality_descriptor_materialization(size_t ceiling)
-        : memory(ceiling - sizeof(*this)), pending(&memory), missing(&memory), forms(&memory),
-          observations(&memory) {}
-    ~physicality_descriptor_materialization() { intent_stage_free(stage); }
-};
-
-namespace {
-
-physicality_descriptor_status_t materialize(
+physicality_descriptor_status_t laplace_phys_desc_materialize_impl(
     physicality_descriptor_materialization& result,
     const physicality_descriptor_capture_t* source,
     const physicality_descriptor_vocabulary_t& vocabulary,
@@ -185,19 +38,11 @@ physicality_descriptor_status_t materialize(
         phase(PHYSICALITY_MATERIALIZATION_COMPLETE);
         return PHYSICALITY_DESCRIPTOR_OK;
     }
-    // source_trust is retained in the ABI for transport compatibility only.
-    // Physical-form provenance is structural {entity, descriptor, source, unit, time}
-    // and must not validate, rank, deduplicate, or otherwise depend on trust/standing.
-    /* Fixed native basis verification scratch is admitted before entering the
-     * allocation-free owner, and released before ordinary frontier work. */
     constexpr size_t byte_basis_scratch = sizeof(laplace_byte_atoms_t) + LAPLACE_BYTE_ATOM_COUNT * 64u;
     memory.claim(byte_basis_scratch);
     require(laplace_byte_atoms_validate(&vocabulary.byte_basis) == 0, PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
     memory.release(byte_basis_scratch);
 
-    // Only copied, complete serialized output crosses this lifetime boundary.
-    // Provider captures, the authenticated plan and lookup maps have no users
-    // once forms and observations are complete. Their historical peak remains.
     std::pmr::vector<OutputNode> output(&memory);
     std::pmr::vector<hash128_t> output_children(&memory);
     size_t before_retirement = 0;
@@ -211,13 +56,8 @@ physicality_descriptor_status_t materialize(
         if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
             diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE;
             diagnostics->maximum_bytes = memory.remaining();
-            // This legacy capture boundary publishes no failed object.
-            // Its discarded allocation counts are unavailable, not zero work.
         }
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
-        /* Every decoded current row is appended below without winner filtering.
-         * The combined plan authenticates all of them before provider indexing;
-         * an independent preliminary plan would repeat the same validation. */
         current.account(physicality_descriptor_capture_bytes(current.value),
             physicality_descriptor_capture_peak_bytes(current.value));
     }
@@ -232,13 +72,8 @@ physicality_descriptor_status_t materialize(
         if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
             diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE;
             diagnostics->maximum_bytes = memory.remaining();
-            // This legacy capture boundary publishes no failed object.
-            // Its discarded allocation counts are unavailable, not zero work.
         }
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
-        /* Full validation has completed, including bodies excluded from provider
-         * selection. Keep decoded rows/trajectories and the original peak, but
-         * retire this unused plan before the next native allocation. */
         physicality_descriptor_capture_release_plan(admitted.value);
         admitted.account(physicality_descriptor_capture_bytes(admitted.value),
             physicality_descriptor_capture_peak_bytes(admitted.value));
@@ -255,11 +90,6 @@ physicality_descriptor_status_t materialize(
         require(current_inputs[i].type == 1);
         inputs.push_back(current_inputs[i]);
     }
-    /* The ordinary writer supplies its original stages in transport order.
-     * Capture above authenticates every typed body; only Content can provide
-     * a constituent's selected geometry. Match the writer's first-placement
-     * rule before combining these providers with the complete raw source.
-     * Alternate bodies remain in original and retain their own D/HAS rows. */
     IdSet admitted_winners(&memory);
     for (size_t i = 0; i < admitted_count; ++i) {
         checkpoint();
@@ -396,8 +226,6 @@ physicality_descriptor_status_t materialize(
             std::copy_n(coord, 4, child_coordinates.data() + child * 4u);
         }
         Geometry value;
-        /* The descriptor is a typed document record. This storage floor is
-         * independent of recursive graph depth and does not enter identity. */
         size_t workspace_bytes;
         require(math4d_centroid_workspace_size(count, &workspace_bytes) == 0,
             PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
@@ -484,10 +312,6 @@ physicality_descriptor_status_t materialize(
     for (size_t input_index = 0; input_index < original_count; ++input_index) {
         checkpoint();
         if (views.find(descriptors[input_index]) != views.end()) continue;
-        /* The finite recipe records every selected body reachable from this
-         * source form. A grandchild replacement must change the view receipt;
-         * an unrelated batch neighbor must not. Cycles terminate on exact
-         * body identity, never by an arbitrary recursion depth. */
         reachable.clear();
         reached_descriptors.clear();
         missing_for_view.clear();
@@ -514,16 +338,12 @@ physicality_descriptor_status_t materialize(
                 const size_t selected_index = chosen->second.body_index;
                 if (selected_index != SIZE_MAX) {
                     terminal_body = false;
-                    // Scope membership is positive-length reachability, even
-                    // when this exact selected body has no outgoing body edge.
                     if (reached_descriptors.insert(descriptors[selected_index]).second &&
                         !chosen->second.terminal_body_verified)
                         reachable.push_back(selected_index);
                 }
             }
             if (terminal_body) {
-                // An original form can share an entity with a different
-                // selected provider body. Only memoize the exact winner.
                 const auto winner = selected.find(inputs[body_index].entity_id);
                 if (winner != selected.end() && winner->second.body_index != SIZE_MAX &&
                     hash128_equals(&descriptors[winner->second.body_index], &descriptors[body_index]))
@@ -533,7 +353,7 @@ physicality_descriptor_status_t materialize(
         if (!missing_for_view.empty()) {
             sorted_missing.assign(missing_for_view.begin(), missing_for_view.end());
             std::sort(sorted_missing.begin(), sorted_missing.end(), [&](const hash128_t& a, const hash128_t& b) {
-            checkpoint();
+                checkpoint();
                 return hash128_compare(&a, &b) < 0;
             });
             View view;
@@ -601,7 +421,7 @@ physicality_descriptor_status_t materialize(
     }
 
     before_retirement = memory.used();
-    } // No borrowed plan/capture/map pointers cross into serialization.
+    }
     if (diagnostics != nullptr) {
         diagnostics->released_before_serialization_bytes = before_retirement - memory.used();
         diagnostics->serialization_entry_bytes = memory.used();
@@ -640,9 +460,6 @@ physicality_descriptor_status_t materialize(
                 static_cast<uint32_t>(stored_vertices), static_cast<int32_t>(node.child_count),
                 1, 0.0, 1, 0, generated_at) == 0);
     }
-    /* Physical-form provenance is returned through the structural observation
-     * stream. Generated descriptor stages deliberately contain no attestations:
-     * geometry must not manufacture semantic testimony or consensus standing. */
     result.stage_bytes = intent_stage_memory_bytes(stage.get());
     const size_t stage_peak = intent_stage_memory_peak_bytes(stage.get());
     memory.claim(stage_peak);
@@ -651,160 +468,4 @@ physicality_descriptor_status_t materialize(
     checkpoint();
     phase(PHYSICALITY_MATERIALIZATION_COMPLETE);
     return PHYSICALITY_DESCRIPTOR_OK;
-}
-
-} // namespace
-
-extern "C" physicality_descriptor_status_t physicality_descriptor_materialize(
-    const physicality_descriptor_capture_t* captured_source,
-    const physicality_descriptor_vocabulary_t* vocabulary,
-    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
-    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
-    const hash128_t* explicitly_missing_ids, size_t missing_count,
-    const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    int64_t observed_at_unix_us, size_t maximum_bytes,
-    physicality_descriptor_materialization_t** out_materialization) {
-    return physicality_descriptor_materialize_cancelable(captured_source, vocabulary,
-        current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
-        explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
-        observed_at_unix_us, maximum_bytes, nullptr, out_materialization);
-}
-
-extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
-    const physicality_descriptor_capture_t* captured_source,
-    const physicality_descriptor_vocabulary_t* vocabulary,
-    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
-    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
-    const hash128_t* explicitly_missing_ids, size_t missing_count,
-    const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    int64_t observed_at_unix_us, size_t maximum_bytes,
-    const physicality_descriptor_cancel_t* cancellation,
-    physicality_descriptor_materialization_t** out_materialization) {
-    return physicality_descriptor_materialize_diagnosed_cancelable(captured_source, vocabulary,
-        current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
-        explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
-        observed_at_unix_us, maximum_bytes, cancellation, nullptr, out_materialization);
-}
-
-extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_diagnosed_cancelable(
-    const physicality_descriptor_capture_t* captured_source,
-    const physicality_descriptor_vocabulary_t* vocabulary,
-    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
-    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
-    const hash128_t* explicitly_missing_ids, size_t missing_count,
-    const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    int64_t observed_at_unix_us, size_t maximum_bytes,
-    const physicality_descriptor_cancel_t* cancellation,
-    physicality_descriptor_materialization_diagnostics_t* diagnostics,
-    physicality_descriptor_materialization_t** out_materialization) {
-    if (diagnostics != nullptr) {
-        *diagnostics = {};
-        diagnostics->materialization_grant_bytes = maximum_bytes;
-    }
-    const auto finish = [&](physicality_descriptor_status_t status) {
-        if (diagnostics != nullptr) {
-            diagnostics->status = status;
-            if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED &&
-                diagnostics->refusal_kind == PHYSICALITY_MATERIALIZATION_REFUSAL_NONE)
-                diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_SIZE_OR_UNREPORTED;
-        }
-        return status;
-    };
-    if (out_materialization == nullptr) return finish(PHYSICALITY_DESCRIPTOR_INVALID);
-    *out_materialization = nullptr;
-    if (physicality_descriptor_cancel_requested(cancellation)) return finish(PHYSICALITY_DESCRIPTOR_CANCELLED);
-    if (captured_source == nullptr || vocabulary == nullptr ||
-        (current_stage_count != 0 && current_content_stages == nullptr) ||
-        (admitted_stage_count != 0 && admitted_content_stages == nullptr) ||
-        (missing_count != 0 && explicitly_missing_ids == nullptr) ||
-        (observation_source_count != 0 && observation_sources == nullptr))
-        return finish(PHYSICALITY_DESCRIPTOR_INVALID);
-    if (maximum_bytes < sizeof(physicality_descriptor_materialization)) {
-        if (diagnostics != nullptr) {
-            diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT;
-            diagnostics->maximum_bytes = maximum_bytes;
-            diagnostics->requested_bytes = sizeof(physicality_descriptor_materialization);
-        }
-        return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
-    }
-    hash128_t current_floor;
-    if (codepoint_table_copy_receipt(&current_floor) != 0)
-        return finish(PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
-    if (!hash128_equals(&current_floor, &vocabulary->floor_receipt)) return finish(PHYSICALITY_DESCRIPTOR_INVALID);
-    if (!codepoint_table_id_index_ready()) return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
-    try {
-        auto result = std::make_unique<physicality_descriptor_materialization>(maximum_bytes);
-        const auto status = materialize(*result, captured_source, *vocabulary,
-            current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
-            explicitly_missing_ids, missing_count,
-            observation_sources, observation_source_count, observed_at_unix_us, cancellation, diagnostics);
-        if (diagnostics != nullptr) {
-            // materialize's local vectors and provider owners have unwound.
-            // Match the returned object's retained payload, excluding its header.
-            diagnostics->maximum_bytes = result->memory.used() + result->memory.remaining();
-            diagnostics->retained_bytes = result->memory.used();
-            diagnostics->peak_bytes = result->memory.peak();
-        }
-        *out_materialization = result.release();
-        return finish(status);
-    } catch (const AllocationRefusal& refusal) {
-        if (diagnostics != nullptr) {
-            diagnostics->refusal_kind = refusal.kind;
-            diagnostics->maximum_bytes = refusal.limit;
-            diagnostics->retained_bytes = refusal.retained;
-            diagnostics->peak_bytes = refusal.peak;
-            diagnostics->requested_bytes = refusal.requested;
-        }
-        return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
-    } catch (const Status& status) { return finish(status.value); }
-      catch (const std::bad_alloc&) { return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED); }
-}
-
-extern "C" void physicality_descriptor_materialization_free(physicality_descriptor_materialization_t* value) {
-    delete value;
-}
-
-extern "C" const hash128_t* physicality_descriptor_materialization_pending(
-    const physicality_descriptor_materialization_t* value, size_t* count) {
-    if (count != nullptr) *count = value == nullptr ? 0u : value->pending.size();
-    return value == nullptr ? nullptr : value->pending.data();
-}
-
-extern "C" const physicality_descriptor_admitted_form_t* physicality_descriptor_materialization_forms(
-    const physicality_descriptor_materialization_t* value, size_t* count) {
-    if (count != nullptr) *count = value == nullptr ? 0u : value->forms.size();
-    return value == nullptr ? nullptr : value->forms.data();
-}
-
-extern "C" const physicality_descriptor_form_observation_t* physicality_descriptor_materialization_observations(
-    const physicality_descriptor_materialization_t* value, size_t* count) {
-    if (count == nullptr) return nullptr;
-    *count = value == nullptr ? 0u : value->observations.size();
-    return value == nullptr || value->observations.empty() ? nullptr : value->observations.data();
-}
-
-extern "C" const hash128_t* physicality_descriptor_materialization_missing(
-    const physicality_descriptor_materialization_t* value, size_t* count) {
-    if (count != nullptr) *count = value == nullptr ? 0u : value->missing.size();
-    return value == nullptr ? nullptr : value->missing.data();
-}
-
-extern "C" intent_stage_t* physicality_descriptor_materialization_take_stage(
-    physicality_descriptor_materialization_t* value) {
-    if (value == nullptr) return nullptr;
-    intent_stage_t* stage = value->stage;
-    value->stage = nullptr;
-    value->memory.release(value->stage_bytes);
-    value->stage_bytes = 0;
-    return stage;
-}
-
-extern "C" size_t physicality_descriptor_materialization_bytes(
-    const physicality_descriptor_materialization_t* value) {
-    return value == nullptr ? 0u : sizeof(*value) + value->memory.used();
-}
-
-extern "C" size_t physicality_descriptor_materialization_peak_bytes(
-    const physicality_descriptor_materialization_t* value) {
-    return value == nullptr ? 0u : sizeof(*value) + value->memory.peak();
 }

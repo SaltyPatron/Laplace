@@ -354,6 +354,7 @@ int laplace_relation_set_ids(const char* set_name, const hash128_t** out_ids, si
         "static laplace_relation_def_t k_relations[] = {",
     ]
 
+    rel_entries = []
     for name in canon_names:
         r = next(x for x in relations if x["canonical"] == name)
         sym = "LAPLACE_REL_SYMMETRY_SYMMETRIC" if r["symmetry"] == "symmetric" else "LAPLACE_REL_SYMMETRY_ASYMMETRIC"
@@ -365,9 +366,11 @@ int laplace_relation_set_ids(const char* set_name, const hash128_t** out_ids, si
         rank_val = ranks.get(rank_key, 0.09)
         succ_idx = ("-2" if retired[name] == TRAJECTORY_FACT else str(name_to_idx[retired[name]])) \
             if name in retired else "-1"
-        lines.append(
-            f'    {{ "{name}", {{0}}, {rank_val}, {sym}, {parent_idx}, {fr_idx}, 0, {succ_idx} }},'
+        rel_entries.append(
+            f'{{ "{name}", {{0}}, {rank_val}, {sym}, {parent_idx}, {fr_idx}, 0, {succ_idx} }},'
         )
+    for i in range(0, len(rel_entries), 2):
+        lines.append("    " + " ".join(rel_entries[i:i + 2]))
 
     lines.append("};")
     lines.append("")
@@ -1282,8 +1285,9 @@ def emit_language_law(path: Path) -> None:
     lines = ['#include "laplace/core/language_law.h"', "", "#include <stdlib.h>", "#include <string.h>", "",
              "typedef struct { const char* tag; const char* canon; } language_row_t;", "",
              "static const language_row_t k_languages[] = {"]
-    for tag, canon in rows:
-        lines.append(f'    {{ "{tag}", "{canon}" }},')
+    for i in range(0, len(rows), 18):
+        chunk = rows[i:i + 18]
+        lines.append("    " + " ".join(f'{{"{tag}", "{canon}"}},' for tag, canon in chunk))
     lines += ["};", "",
               "static int row_cmp(const void* key, const void* row) {",
               "    return strcmp((const char*)key, ((const language_row_t*)row)->tag);",

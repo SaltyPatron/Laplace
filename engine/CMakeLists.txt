@@ -22,6 +22,7 @@ if(WIN32)
     # The managed interop consumes the public C ABI from all three libraries.
     # A fresh build must export it without relying on an old cache option.
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/EHsc>")
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-Wall;-Wextra>")
     # The engine uses standard C functions (getenv/fopen/strncpy); MSVC CRT
     # deprecations are silenced as in extension/.

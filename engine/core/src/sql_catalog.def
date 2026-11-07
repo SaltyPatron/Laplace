@@ -1,9 +1,17 @@
 /* Query key, positional PostgreSQL parameter types, statement text.
  * This is the sole statement owner for migrated native and app query paths. */
 SQL_QUERY("prompt.coherence_edges_forward", "bytea[]",
-    "SELECT c.subject_id,c.object_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.subject_id=ANY($1)")
+    "SELECT c.subject_id,c.object_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.subject_id=ANY($1) "
+    "UNION ALL "
+    "SELECT e.subject_id,e.neighbour_id,e.type_id,e.rating,e.rd "
+    "FROM consensus.edges_raw_batch($1::bytea[],'out',NULL,128,true,'edge_rank') e "
+    "WHERE e.neighbour_id IS NOT NULL AND e.type_id IS NOT NULL")
 SQL_QUERY("prompt.coherence_edges_reverse", "bytea[]",
-    "SELECT c.object_id,c.subject_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.object_id=ANY($1)")
+    "SELECT c.object_id,c.subject_id,c.type_id,c.rating,c.rd FROM laplace.consensus c WHERE c.object_id=ANY($1) "
+    "UNION ALL "
+    "SELECT e.subject_id,e.neighbour_id,e.type_id,e.rating,e.rd "
+    "FROM consensus.edges_raw_batch($1::bytea[],'in',NULL,128,true,'edge_rank') e "
+    "WHERE e.neighbour_id IS NOT NULL AND e.type_id IS NOT NULL")
 SQL_QUERY("prompt.coherence_candidates", "text",
     "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
     "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
@@ -28,7 +36,15 @@ SQL_QUERY("prompt.coherence_relation_mass", "bytea[],bytea[],bytea[]",
     "WHERE c.object_id = ANY($1) AND c.type_id = ANY($2) "
     "  AND c.object_id IS NOT NULL "
     "  AND c.subject_id <> c.object_id "
-    "  AND c.type_id = ANY($3)")
+    "  AND c.type_id = ANY($3) "
+    "UNION ALL "
+    "SELECT e.subject_id, e.type_id, e.rating, e.rd "
+    "FROM consensus.edges_raw_batch($1::bytea[], 'out', $2, 64, true, 'edge_rank') e "
+    "WHERE e.type_id IS NOT NULL "
+    "UNION ALL "
+    "SELECT e.subject_id, e.type_id, e.rating, e.rd "
+    "FROM consensus.edges_raw_batch($1::bytea[], 'in', $3, 64, true, 'edge_rank') e "
+    "WHERE e.type_id = ANY($2) AND e.neighbour_id <> e.subject_id")
 SQL_QUERY("prompt.language_edges", "bytea[]",
     "SELECT c.object_id,c.rating,c.rd FROM laplace.consensus c "
     "WHERE c.subject_id=ANY($1) "
@@ -913,13 +929,19 @@ SQL_QUERY("consensus.delete_locked_empty_cells", "bytea[],bytea[],bytea",
 /* Every name of an entity is one relation, HAS_NAME; which name a claim states
  * (primary, alias, ...) is its qualifier. Candidates in the requested language first. */
 SQL_QUERY("realize.name_candidates", "bytea[],bytea",
+    "SELECT x.subject_id,x.object_id,x.lp,x.mu FROM ("
     "SELECT nm.subject_id,nm.object_id,(lang.object_id IS NOT NULL) AS lp,"
     "consensus.eff_mu(nm.rating,nm.rd) AS mu "
     "FROM laplace.v_consensus_unrefuted nm "
     "LEFT JOIN laplace.consensus lang ON lang.subject_id=nm.object_id "
     "AND lang.type_id=laplace.relation_type_id('HAS_LANGUAGE') AND lang.object_id=$2 "
     "WHERE nm.subject_id=ANY($1) AND nm.type_id=laplace.relation_type_id('HAS_NAME') "
-    "ORDER BY nm.subject_id,lp DESC,mu DESC,nm.object_id")
+    "UNION ALL "
+    "SELECT e.subject_id,e.neighbour_id,($2 IS NOT NULL AND converse.word_language(e.neighbour_id)=$2) AS lp,"
+    "consensus.eff_mu(e.rating,e.rd) AS mu "
+    "FROM consensus.edges_raw_batch($1::bytea[],'out',ARRAY[laplace.relation_type_id('HAS_NAME')],32,false,'eff_mu') e "
+    "WHERE e.neighbour_id IS NOT NULL"
+    ") x ORDER BY x.subject_id,x.lp DESC,x.mu DESC,x.object_id")
 /* Staged evidence equals installed evidence (legacy bootstrap reconciliation): every
  * staged row is stored with the same witness fields and qualifiers, its cell's
  * consensus folds exactly that evidence, and the staged sources hold no other row
@@ -999,9 +1021,19 @@ SQL_QUERY("lexical.sense_audit", "text,int4",
 SQL_QUERY("converse.prompt_language", "text",
     "SELECT realize.realize(lang_id) AS language, mass FROM converse.prompt_language($1)")
 SQL_QUERY("taxonomy.bubble_up_rendered", "bytea,int4",
-    "SELECT b.sense_id, realize.render(b.sense_id), b.synset_id, realize.render(b.synset_id), "
-    "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses "
-    "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b")
+    "WITH bub AS MATERIALIZED (\n"
+    "    SELECT b.*, row_number() OVER () AS ord\n"
+    "    FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b\n"
+    "),\n"
+    "rendered AS (\n"
+    "    SELECT realize.render_batch(array_agg(bub.sense_id ORDER BY bub.ord)) AS senses,\n"
+    "           realize.render_batch(array_agg(bub.synset_id ORDER BY bub.ord)) AS synsets\n"
+    "    FROM bub\n"
+    ")\n"
+    "SELECT bub.sense_id, rendered.senses[bub.ord], bub.synset_id, rendered.synsets[bub.ord],\n"
+    "       bub.via_relation, bub.score, bub.base_eff_mu, bub.domain_hits, bub.witnesses\n"
+    "FROM bub, rendered\n"
+    "ORDER BY bub.ord")
 
 SQL_QUERY("structural.mesh_position", "bytea,int4,int4",
     "SELECT dir, encode(id, 'hex'), label, relation, hub_type, eff_mu, witnesses\nFROM structural.mesh_position($1, $2, $3)")
@@ -1996,7 +2028,7 @@ SQL_QUERY("readback.constituent_edges", "bytea[],int4",
     "SELECT parent_id,child_id,run_length FROM realize.constituents_closure($1,$2) ORDER BY parent_id,ordinal")
 
 SQL_QUERY("query.declared_paths_step", "int4[],bytea[],bytea[],int4",
-    "WITH wanted AS MATERIALIZED (\n SELECT w.slot,public.blake3_from_bytea(w.node) AS node,\n public.blake3_from_bytea(w.relation) AS relation,w.ordinal\n FROM unnest($1::int4[],$2::bytea[],$3::bytea[]) WITH ORDINALITY AS w(slot,node,relation,ordinal)\n), candidates AS MATERIALIZED (\n SELECT * FROM public.laplace_claims_each(ARRAY(SELECT node FROM wanted ORDER BY ordinal),NULL::bigint,\n ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],1::smallint,ARRAY(SELECT DISTINCT relation FROM wanted),3::bigint)\n), selected AS MATERIALIZED (\n SELECT w.slot,w.relation,c.entity,c.rating,c.deviation,c.matches\n FROM candidates c JOIN wanted w ON w.ordinal=c.i\n WHERE public.laplace_path_length(c.path)=3 AND public.laplace_middle_any(c.path,ARRAY[w.relation])\n ORDER BY w.slot,c.rating-2*c.deviation DESC,c.entity LIMIT $4\n), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity))\n), provenance AS MATERIALIZED (\n SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(\n ARRAY(SELECT DISTINCT entity FROM selected ORDER BY entity),false) a WHERE a.witness GROUP BY a.claim\n) SELECT s.slot,public.blake3_send(s.entity),public.blake3_send(v.object),v.type_label,v.fact,\n (s.rating-2*s.deviation)::numeric,coalesce(p.witnesses,s.matches,0)::bigint\n FROM selected s JOIN preview v ON v.entity=s.entity AND v.predicate=s.relation\n LEFT JOIN provenance p ON p.claim=s.entity ORDER BY s.slot,s.rating-2*s.deviation DESC,s.entity")
+    "WITH wanted AS MATERIALIZED (\n SELECT w.slot,public.blake3_from_bytea(w.node) AS node,\n w.relation AS rel_bytea,public.blake3_from_bytea(w.relation) AS relation,w.ordinal\n FROM unnest($1::int4[],$2::bytea[],$3::bytea[]) WITH ORDINALITY AS w(slot,node,relation,ordinal)\n), surfaces AS MATERIALIZED (\n SELECT w.ordinal,public.blake3_from_bytea(s.surface_id) AS surface_b3,\n public.blake3_from_bytea(s.canonical_id) AS canonical_b3,s.inverse\n FROM wanted w CROSS JOIN LATERAL consensus.relation_surfaces(ARRAY[w.rel_bytea]) s\n), candidates AS MATERIALIZED (\n SELECT * FROM public.laplace_claims_each(ARRAY(SELECT node FROM wanted ORDER BY ordinal),NULL::bigint,\n ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n (CASE WHEN EXISTS (SELECT 1 FROM surfaces WHERE inverse) THEN 3 ELSE 1 END)::smallint,\n ARRAY(SELECT DISTINCT surface_b3 FROM surfaces),3::bigint)\n), selected AS MATERIALIZED (\n SELECT DISTINCT ON (w.slot,c.entity) w.slot,w.relation,sf.surface_b3,sf.inverse,\n (public.laplace_parts(c.path))[1] AS subj,(public.laplace_parts(c.path))[3] AS obj,\n c.entity,c.rating,c.deviation,c.matches\n FROM candidates c JOIN wanted w ON w.ordinal=c.i\n JOIN surfaces sf ON sf.ordinal=w.ordinal AND public.laplace_middle_any(c.path,ARRAY[sf.surface_b3])\n WHERE public.laplace_path_length(c.path)=3\n   AND ((NOT sf.inverse AND public.laplace_path_starts(c.path,w.node))\n        OR (sf.inverse AND public.laplace_path_ends(c.path,w.node)))\n ORDER BY w.slot,c.entity,c.rating-2*c.deviation DESC\n), capped AS MATERIALIZED (\n SELECT * FROM selected ORDER BY slot,rating-2*deviation DESC,entity LIMIT $4\n), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT DISTINCT entity FROM capped ORDER BY entity))\n) SELECT s.slot,public.blake3_send(s.entity),\n public.blake3_send(CASE WHEN s.inverse THEN s.subj ELSE s.obj END),\n v.type_label,v.fact,\n (s.rating-2*s.deviation)::numeric,greatest(s.matches,1)::bigint\n FROM capped s JOIN preview v ON v.entity=s.entity AND v.predicate=s.surface_b3\n ORDER BY s.slot,s.rating-2*s.deviation DESC,s.entity")
 
 SQL_QUERY("native.membership_any", "bytea[],bytea[],int8",
     "WITH keys AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($1::bytea[]) u(id) WHERE id IS NOT NULL) AS ids), required AS MATERIALIZED (SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL) AS ids)\nSELECT public.blake3_send(p.entity),p.path FROM keys k CROSS JOIN required r\nCROSS JOIN LATERAL public.laplace_holders(k.ids,r.ids) p\nORDER BY p.entity LIMIT CASE WHEN $3=0 THEN NULL ELSE $3+1 END")
@@ -2007,27 +2039,44 @@ SQL_QUERY("native.membership_all", "bytea[],bytea[],int8",
 /* Shared Native GIN/standing acquisition precedes exact endpoint projection.
  * Never plan endpoint joins over the complete partition estate. */
 SQL_QUERY("native.consensus_cells", "bytea[],bytea[],bytea[],bool",
-    "WITH keys AS MATERIALIZED (\n"
+    "WITH surfaces AS MATERIALIZED (\n"
+    " SELECT s.surface_id,public.blake3_from_bytea(s.surface_id) AS surface_b3,s.canonical_id,s.inverse\n"
+    " FROM consensus.relation_surfaces($3::bytea[]) s\n"
+    "), keys AS MATERIALIZED (\n"
     " SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id)\n"
     " FROM unnest(coalesce($1::bytea[],$2::bytea[])) u(id) WHERE id IS NOT NULL ORDER BY 1) AS ids,\n"
-    " CASE WHEN $3 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($3::bytea[]) u(id) WHERE id IS NOT NULL) END AS types,\n"
-    " CASE WHEN $1 IS NOT NULL AND $2 IS NOT NULL THEN ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL) ELSE NULL::public.blake3[] END AS opp\n"
+    " CASE WHEN $3 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3) END AS types,\n"
+    " CASE WHEN $1 IS NOT NULL AND $2 IS NOT NULL AND NOT ($3 IS NULL OR EXISTS (SELECT 1 FROM surfaces WHERE inverse))\n"
+    "      THEN ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL)\n"
+    "      ELSE NULL::public.blake3[] END AS opp,\n"
+    " ($3 IS NULL OR EXISTS (SELECT 1 FROM surfaces WHERE inverse)) AS has_inverse\n"
     "), selected AS MATERIALIZED (\n"
     " SELECT DISTINCT ON(c.entity) c.entity,public.laplace_parts(c.path) AS ids,c.rating,c.deviation,c.volatility,c.matches\n"
     " FROM keys k CROSS JOIN LATERAL public.laplace_claims_each(\n"
     " k.ids,NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
-    " (CASE WHEN $1 IS NOT NULL THEN 1 ELSE 2 END)::smallint,k.types,3::bigint,k.opp) c\n"
+    " (CASE WHEN k.has_inverse THEN 3 WHEN $1 IS NOT NULL THEN 1 ELSE 2 END)::smallint,k.types,3::bigint,k.opp) c\n"
     " ORDER BY c.entity\n"
-    "), provenance AS MATERIALIZED (\n"
-    " SELECT a.claim,count(*) AS witnesses FROM public.laplace_attested(\n"
-    " CASE WHEN $4 THEN ARRAY(SELECT entity FROM selected ORDER BY entity) ELSE '{}'::public.blake3[] END,false) a WHERE a.witness GROUP BY a.claim\n"
-    ") SELECT public.blake3_send(s.ids[1]),public.blake3_send(s.ids[2]),public.blake3_send(s.ids[3]),\n"
-    " round(s.rating::numeric*1e9)::bigint,round(s.deviation::numeric*1e9)::bigint,\n"
-    " round(s.volatility::numeric*1e9)::bigint,coalesce(p.witnesses,s.matches,0)::bigint,public.blake3_send(s.entity)\n"
-    " FROM selected s CROSS JOIN keys k LEFT JOIN provenance p ON p.claim=s.entity\n"
+    "), claim_meta AS MATERIALIZED (\n"
+    " SELECT m.surface_id,m.canonical_id,m.inverse\n"
+    " FROM consensus.relation_metadata(ARRAY(SELECT DISTINCT public.blake3_send(s.ids[2]) FROM selected s WHERE cardinality(s.ids)=3)) m\n"
+    "), oriented AS MATERIALIZED (\n"
+    " SELECT s.entity,\n"
+    " CASE WHEN coalesce(m.inverse,false) THEN public.blake3_send(s.ids[3]) ELSE public.blake3_send(s.ids[1]) END AS subj_id,\n"
+    " coalesce(m.canonical_id,public.blake3_send(s.ids[2])) AS type_id,\n"
+    " CASE WHEN coalesce(m.inverse,false) THEN public.blake3_send(s.ids[1]) ELSE public.blake3_send(s.ids[3]) END AS obj_id,\n"
+    " round(s.rating::numeric*1e9)::bigint AS rating,\n"
+    " round(s.deviation::numeric*1e9)::bigint AS rd,\n"
+    " round(s.volatility::numeric*1e9)::bigint AS volatility,\n"
+    " greatest(s.matches,1)::bigint AS witnesses,\n"
+    " s.rating-2*s.deviation AS standing\n"
+    " FROM selected s LEFT JOIN claim_meta m ON m.surface_id=public.blake3_send(s.ids[2])\n"
     " WHERE cardinality(s.ids)=3\n"
-    " AND ($3 IS NULL OR s.ids[2]=ANY(k.types))\n"
-    " ORDER BY s.rating-2*s.deviation DESC,s.entity")
+    ") SELECT o.subj_id,o.type_id,o.obj_id,o.rating,o.rd,o.volatility,o.witnesses,public.blake3_send(o.entity)\n"
+    " FROM oriented o\n"
+    " WHERE ($1 IS NULL OR o.subj_id=ANY($1))\n"
+    " AND ($2 IS NULL OR o.obj_id=ANY($2))\n"
+    " AND ($3 IS NULL OR o.type_id=ANY($3) OR o.type_id IN (SELECT canonical_id FROM surfaces))\n"
+    " ORDER BY o.standing DESC,o.entity")
 
 /* Predicateless Native value claims, qualified by their canonical value bank.
  * Raw source spellings are retained without inferring a classification. */

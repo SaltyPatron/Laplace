@@ -6,20 +6,27 @@ BEGIN ATOMIC
     WITH sn AS MATERIALIZED (
         SELECT sense_id, synset_id, eff_mu FROM lexical.senses(p_word)
     ),
-    edges AS MATERIALIZED (
-        SELECT g.neighbour_id AS object_id,
-               consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
-               g.witness_count AS witnesses,
-               s.eff_mu AS sense_rank,
-               consensus.relation_canonical(g.type_id) AS rel_canon
+    sense_subjs AS MATERIALIZED (
+        SELECT s.eff_mu AS sense_rank, k.subj
         FROM sn s
         CROSS JOIN LATERAL (
             VALUES (s.sense_id),
                    (CASE WHEN s.synset_id IS DISTINCT FROM s.sense_id THEN s.synset_id END)
         ) AS k(subj)
-        CROSS JOIN LATERAL consensus.edges_raw(k.subj, 'out', NULL, 32, true, 'eff_mu') g
         WHERE k.subj IS NOT NULL
-          AND consensus.relation_canonical(g.type_id) IN ('HAS_EXAMPLE', 'HAS_DEFINITION')
+    ),
+    edges AS MATERIALIZED (
+        SELECT g.neighbour_id AS object_id,
+               consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
+               g.witness_count AS witnesses,
+               s.sense_rank,
+               consensus.relation_canonical(g.type_id) AS rel_canon
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT subj FROM sense_subjs),
+            'out', ARRAY[laplace.relation_type_id('HAS_EXAMPLE'), laplace.relation_type_id('HAS_DEFINITION')],
+            32, true, 'eff_mu') g
+        JOIN sense_subjs s ON s.subj = g.subject_id
+        WHERE consensus.relation_canonical(g.type_id) IN ('HAS_EXAMPLE', 'HAS_DEFINITION')
     ),
     has_ex AS (
         SELECT object_id, eff_mu, witnesses, sense_rank

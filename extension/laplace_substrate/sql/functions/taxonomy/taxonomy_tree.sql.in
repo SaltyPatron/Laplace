@@ -22,13 +22,26 @@ BEGIN ATOMIC
           root.id, r.is_a, p_depth) w
       UNION ALL
       (SELECT 'child',
-            row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC)::int,
-            c.subject_id,
-            consensus.eff_mu_display(c.rating, c.rd)
-       FROM root CROSS JOIN rel r JOIN laplace.consensus c
-         ON c.object_id = root.id AND c.type_id = r.is_a
-       ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC
-       LIMIT GREATEST(p_child_limit, 0))
+            row_number() OVER (ORDER BY ch.mu DESC, ch.subject_id)::int,
+            ch.subject_id,
+            ch.mu
+       FROM (
+         SELECT DISTINCT ON (x.subject_id)
+                x.subject_id, x.mu
+         FROM (
+           SELECT c.subject_id, consensus.eff_mu_display(c.rating, c.rd) AS mu
+           FROM root CROSS JOIN rel r JOIN laplace.consensus c
+             ON c.object_id = root.id AND c.type_id = r.is_a
+           UNION ALL
+           SELECT e.neighbour_id AS subject_id, consensus.eff_mu_display(e.rating, e.rd) AS mu
+           FROM root CROSS JOIN rel r
+           CROSS JOIN LATERAL consensus.edges_raw(root.id, 'in', ARRAY[r.is_a], GREATEST(COALESCE(p_child_limit, 32), 0), true, 'eff_mu') e
+           WHERE e.neighbour_id IS NOT NULL
+         ) x
+         ORDER BY x.subject_id, x.mu DESC
+       ) ch
+       ORDER BY ch.mu DESC, ch.subject_id
+       LIMIT GREATEST(COALESCE(p_child_limit, 32), 0))
     ), ids AS MATERIALIZED (
       SELECT array_agg(DISTINCT id ORDER BY id) AS a FROM raw
     ), labels AS MATERIALIZED (

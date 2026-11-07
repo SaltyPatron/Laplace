@@ -156,6 +156,19 @@ BEGIN
         CROSS JOIN rel
         WHERE c.type_id = rel.evokes_frame
           AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
+        UNION ALL
+        SELECT r.concept_id, r.root_id, kb.term,
+               'IS_SYNONYM_OF'::text,
+               kb.eff_mu,
+               kb.rd::numeric / 1000000000::numeric,
+               kb.witnesses,
+               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM roots r
+        JOIN converse.key_binding_evidence(ARRAY(SELECT DISTINCT root_id FROM roots), p_lang, false) kb
+          ON kb.key = r.root_id
+        CROSS JOIN allowed a
+        CROSS JOIN rel
+        WHERE p_bands IS NULL OR rel.is_synonym_of = ANY(a.ids)
     ),
     path_candidates AS MATERIALIZED (
         SELECT l.concept_id,

@@ -8,15 +8,14 @@ BEGIN ATOMIC
     WITH subj(id) AS MATERIALIZED (
         SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS MATERIALIZED (
-        SELECT cc.subject_id, cc.rating, cc.rd, cc.witness_count
-        FROM subj s CROSS JOIN LATERAL (
-            SELECT e.neighbour_id AS subject_id, e.rating, e.rd, e.witness_count
-            FROM consensus.edges_raw(s.id, 'in', NULL, GREATEST(p_limit * 4, 64), true, 'eff_mu') e
-            WHERE e.neighbour_id IS NOT NULL
-              AND (e.type_id = p_type
-                   OR laplace.relation_type_id(consensus.relation_canonical(e.type_id)) = p_type)
-            ORDER BY consensus.eff_mu(e.rating, e.rd) DESC LIMIT p_limit
-        ) cc
+        SELECT e.neighbour_id AS subject_id, e.rating, e.rd, e.witness_count
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT id FROM subj),
+            'in', CASE WHEN p_type IS NULL THEN NULL ELSE ARRAY[p_type] END,
+            GREATEST(p_limit * 4, 64), true, 'eff_mu') e
+        WHERE e.neighbour_id IS NOT NULL
+          AND (e.type_id = p_type
+               OR laplace.relation_type_id(consensus.relation_canonical(e.type_id)) = p_type)
     ), ranked AS MATERIALIZED (
         -- rank + LIMIT on ids BEFORE labeling (was: scalar realize per row over
         -- the num_senses x p_limit pool, labeling more rows than returned).

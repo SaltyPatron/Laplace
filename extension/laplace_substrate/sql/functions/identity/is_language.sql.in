@@ -16,4 +16,6 @@ CREATE OR REPLACE FUNCTION laplace.is_language(p_id bytea)
         OR EXISTS (
                SELECT 1 FROM laplace.entities e
                WHERE e.id = p_id
-                 AND e.type_id = laplace.entity_type_id('Language'));
+                 AND e.type_id = laplace.entity_type_id('Language'))
+        OR EXISTS (
+               SELECT 1 FROM laplace.language_codes(ARRAY[p_id]));

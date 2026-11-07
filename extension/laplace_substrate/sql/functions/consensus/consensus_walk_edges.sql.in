@@ -23,8 +23,9 @@ BEGIN ATOMIC
         SELECT e.neighbour_id AS object_id,
                COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) AS type_id,
                e.rating, e.rd, e.witness_count
-        FROM consensus.edges_raw(p_subject, 'out', NULL, GREATEST(p_limit * 2, 64), true, 'eff_mu') e
+        FROM consensus.edges_raw(p_subject, 'out', CASE WHEN p_type IS NULL THEN NULL ELSE ARRAY[p_type] END, GREATEST(p_limit * 2, 64), true, 'eff_mu') e
         WHERE e.neighbour_id IS NOT NULL
+          AND e.type_id IS NOT NULL
           AND (p_type IS NULL
                OR e.type_id = p_type
                OR laplace.relation_type_id(consensus.relation_canonical(e.type_id)) = p_type)

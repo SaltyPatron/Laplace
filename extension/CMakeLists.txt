@@ -13,6 +13,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/LaplaceWindowsExports.cmake")
 if(WIN32 AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.20)
     project(laplace_extensions VERSION 0.1.0 LANGUAGES C CXX)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/EHsc>")
 
     get_filename_component(LAPLACE_SQLPP "${CMAKE_C_COMPILER}" ABSOLUTE)
     set(LAPLACE_SQLPP_FLAGS -E -traditional-cpp -w -Upixel -Ubool)

@@ -13,7 +13,7 @@ BEGIN ATOMIC
         SELECT p.trajectory AS traj
         FROM laplace.physicalities p
         WHERE p.entity_id = p_id AND p.type = 1 AND p.trajectory IS NOT NULL
-          AND NOT EXISTS (SELECT FROM public.entity e WHERE e.id=public.blake3_from_bytea(p_id))
+          AND NOT EXISTS (SELECT 1 FROM native)
         ORDER BY p.id
         LIMIT 1
     ) t

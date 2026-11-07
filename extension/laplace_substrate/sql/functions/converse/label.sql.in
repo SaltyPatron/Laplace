@@ -15,7 +15,7 @@ WITH requested AS MATERIALIZED (
 ), labels AS MATERIALIZED (
  SELECT * FROM @extschema:laplace@.laplace_labels((SELECT ids FROM requested))
 ), entities AS MATERIALIZED (
- SELECT ordinal,tier FROM @extschema:laplace@.laplace_entities((SELECT ids FROM requested))
+ SELECT ordinal,tier,mask FROM @extschema:laplace@.laplace_entities((SELECT ids FROM requested))
 ), unresolved AS MATERIALIZED (
  SELECT d.i,@extschema:laplace@.blake3_send(d.entity) AS id,e.tier
  FROM labels d JOIN laplace.entities e ON e.id=@extschema:laplace@.blake3_send(d.entity)
@@ -27,6 +27,13 @@ WITH requested AS MATERIALIZED (
  JOIN (SELECT *,row_number() OVER(ORDER BY i) AS ordinal FROM unresolved) u USING(ordinal)
 )
 SELECT @extschema:laplace@.blake3_send(d.entity),coalesce(nullif(s.label,''),d.content),
- coalesce(e.tier,s.tier,CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END)
+ coalesce(
+   CASE
+     WHEN e.mask IS NOT NULL AND bit_count(e.mask) > 0 THEN coalesce(e.tier,s.tier)
+     WHEN d.content <> d.entity::text THEN GREATEST(e.tier,s.tier,@extschema:laplace@.laplace_tier(d.content))
+     ELSE GREATEST(e.tier,s.tier)
+   END,
+   CASE WHEN @extschema:laplace@.laplace_codepoint(d.entity) IS NOT NULL THEN 0::smallint END
+ )
 FROM labels d LEFT JOIN entities e ON e.ordinal=d.i LEFT JOIN semantic s ON s.i=d.i ORDER BY d.i;
 END;

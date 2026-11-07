@@ -9,6 +9,9 @@ BEGIN ATOMIC
     WITH src_langs AS (
         SELECT c.object_id AS id FROM laplace.consensus c
         WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
+        UNION
+        SELECT b.language AS id FROM converse.binding_evidence(ARRAY[p_word], NULL, false) b
+        WHERE b.language IS NOT NULL
     ),
     agg AS (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,

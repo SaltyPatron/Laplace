@@ -33,7 +33,6 @@ TEST(LaplaceCoreCodepointTable, CoordOnUnitGlome) {
     EXPECT_NEAR(r2, 1.0, 1e-9);
 }
 
-
 TEST(LaplaceCoreCodepointTable, CoordinatesAreTheNativeFixedPointValues) {
     for (uint32_t cp : {0u, 0x20u, 0x41u, 0x61u, 0x0301u, 0x4e2du, 0x1f600u, 0x10ffffu}) {
         const auto *entry = codepoint_table_lookup(cp); ASSERT_NE(entry, nullptr);
@@ -80,10 +79,6 @@ TEST(LaplaceCoreCodepointTable, UcdPropertyCensusRejectsAllOtherOrTruncatedTable
         if (wb == LAPLACE_WB_REGIONAL_INDICATOR) ++regional_indicator;
     }
 
-    // These are deliberately broad Unicode-17 sanity floors, not exact release
-    // counts. They fail the historically dangerous grouped/truncated parse where
-    // almost everything silently becomes Other while tolerating legitimate future
-    // additions to the selected stable UCD release.
     EXPECT_GE(aletter, 30000u);
     EXPECT_GE(extend, 2000u);
     EXPECT_GT(hebrew, 0u);
@@ -153,6 +148,45 @@ TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndSurrogateCodepoints
         for (int axis = 0; axis < 4; ++axis)
             EXPECT_EQ(coord[axis], (double)record->mantissa[axis] / 9007199254740992.0);
     }
+}
+
+TEST(LaplaceCoreCodepointTable, ModularBranchesAsciiUtfCjkAndFull) {
+    EXPECT_EQ(codepoint_table_branch_record_count("ascii"), 128u);
+    EXPECT_EQ(codepoint_table_branch_record_count("utf"), 22240u);
+    EXPECT_EQ(codepoint_table_branch_record_count("cjk"), 138160u);
+    EXPECT_EQ(codepoint_table_branch_record_count("full"), 1114112u);
+
+    const codepoint_entry_t full_a = *codepoint_table_lookup(0x41u);
+    const codepoint_entry_t full_e_acute = *codepoint_table_lookup(0x00E9u);
+    const codepoint_entry_t full_zhong = *codepoint_table_lookup(0x4E2Du);
+
+    ASSERT_EQ(codepoint_table_load_branches(LAPLACE_PERFCACHE_PATH_FOR_TESTS, "ascii"), 0);
+    EXPECT_EQ(codepoint_table_active_branches(), LAPLACE_TIER0_BRANCH_ASCII);
+    const codepoint_entry_t* records = nullptr;
+    uint64_t count = 0;
+    ASSERT_EQ(codepoint_table_records(&records, &count), 0);
+    EXPECT_EQ(count, 128u);
+    ASSERT_NE(codepoint_table_lookup(0x41u), nullptr);
+    EXPECT_EQ(std::memcmp(codepoint_table_lookup(0x41u), &full_a, sizeof(full_a)), 0);
+    EXPECT_EQ(codepoint_table_lookup(0x00E9u), nullptr);
+    EXPECT_EQ(codepoint_table_lookup(0x4E2Du), nullptr);
+
+    ASSERT_EQ(codepoint_table_load_branches(LAPLACE_PERFCACHE_PATH_FOR_TESTS, "cjk"), 0);
+    EXPECT_EQ(codepoint_table_active_branches(), LAPLACE_TIER0_BRANCH_CJK);
+    ASSERT_EQ(codepoint_table_records(&records, &count), 0);
+    EXPECT_EQ(count, 138160u);
+    ASSERT_NE(codepoint_table_lookup(0x41u), nullptr);
+    ASSERT_NE(codepoint_table_lookup(0x00E9u), nullptr);
+    ASSERT_NE(codepoint_table_lookup(0x4E2Du), nullptr);
+    EXPECT_EQ(std::memcmp(codepoint_table_lookup(0x00E9u), &full_e_acute, sizeof(full_e_acute)), 0);
+    EXPECT_EQ(std::memcmp(codepoint_table_lookup(0x4E2Du), &full_zhong, sizeof(full_zhong)), 0);
+    EXPECT_EQ(codepoint_table_lookup(0x10FFFFu), nullptr);
+
+    ASSERT_EQ(codepoint_table_load_perfcache(LAPLACE_PERFCACHE_PATH_FOR_TESTS), 0);
+    EXPECT_EQ(codepoint_table_active_branches(), LAPLACE_TIER0_BRANCH_FULL);
+    ASSERT_EQ(codepoint_table_records(&records, &count), 0);
+    EXPECT_EQ(count, 1114112u);
+    EXPECT_NE(codepoint_table_lookup(0x10FFFFu), nullptr);
 }
 
 TEST(LaplaceCoreCodepointTable, RejectsLegacyBandedPerfcacheFormat) {

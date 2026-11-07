@@ -3,129 +3,37 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    WITH rel AS MATERIALIZED (
-        SELECT laplace.relation_type_id('IS_INSTANCE_OF') AS is_instance_of,
-               laplace.relation_type_id('IS_SENSE_OF')    AS is_sense_of,
-               laplace.relation_type_id('IS_SYNONYM_OF')  AS is_synonym_of,
-               laplace.relation_type_id('HAS_LANGUAGE')   AS has_language
+    WITH raw_senses AS MATERIALIZED (
+        SELECT * FROM lexical.senses(p_word)
+    ),
+    inst_edges AS MATERIALIZED (
+        SELECT DISTINCT e.subject_id
+        FROM consensus.edges_raw_batch(
+            ARRAY(SELECT DISTINCT synset_id FROM raw_senses),
+            'out', ARRAY[laplace.relation_type_id('IS_INSTANCE_OF')], 1, false, 'eff_mu') e
     ),
     syn AS MATERIALIZED (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
-        FROM lexical.senses(p_word) s
-        -- Instance synsets (proper nouns) are excluded, but only on a STANDING
-        -- instance edge. Bare row presence also excluded synsets whose
-        -- IS_INSTANCE_OF was witnessed and REFUTED -- the fold said "not an
-        -- instance" and the filter read that as "is an instance". consensus has no
-        -- outcome column; refutation is a non-positive consensus.eff_mu, the same test the
-        -- walk uses to dead-end an edge. An absent edge still excludes nothing.
+        FROM raw_senses s
         WHERE NOT EXISTS (
-            SELECT 1 FROM laplace.consensus i, rel r
-            WHERE i.subject_id = s.synset_id
-              AND i.type_id = r.is_instance_of
-              AND consensus.eff_mu(i.rating, i.rd) > 0)
+            SELECT 1 FROM inst_edges ie WHERE ie.subject_id = s.synset_id
+        )
         GROUP BY s.synset_id
     ),
-    members AS (
-        -- The key's members: every word a source binds to it (word HAS_SENSE key, or
-        -- word HAS_SENSE sense IS_SENSE_OF synset).
-        SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
-        FROM syn
-        JOIN laplace.consensus hs
-          ON hs.object_id = syn.id
-         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
-        UNION ALL
-        SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
-        FROM syn
-        CROSS JOIN rel r
-        JOIN laplace.consensus ss
-          ON ss.object_id = syn.id
-         AND ss.type_id = r.is_sense_of
-        JOIN laplace.consensus hs
-          ON hs.object_id = ss.subject_id
-         AND hs.type_id = ANY (consensus.relation_set_ids('KEY_BINDING'))
-        UNION ALL
-        -- OMW and other resources without a source sense key may still make a direct
-        -- lexical membership assertion. Keep that distinct source shape readable.
-        SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM laplace.consensus c JOIN syn ON c.subject_id = syn.id CROSS JOIN rel r
-        WHERE c.type_id = r.is_synonym_of AND c.object_id IS NOT NULL
-        UNION ALL
-        SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM laplace.consensus c JOIN syn ON c.object_id = syn.id CROSS JOIN rel r
-        WHERE c.type_id = r.is_synonym_of
-    ),
-    -- MATERIALIZED is load-bearing: it forces lexical.lexical_peers(a ~75ms native-KNN
-    -- call) to run ONCE per synset_members call. The bare
-    -- `<> ALL(lexical.lexical_peers(p_word))` filter form was pushed into the members
-    -- index scans and re-executed PER ROW (STABLE fns are never constant-folded;
-    -- a plain one-row subselect gets pulled up and re-pushed identically):
-    -- measured 65.3s of converse.translate_to('water')'s 68.6s (2026-07-05, 14.9M
-    -- laplace.physicalities). `= ANY` callers (senses) are immune only because an
-    -- indexed ANY becomes the index condition itself, which forces one-shot
-    -- evaluation of the array.
     peers AS MATERIALIZED (
         SELECT lexical.lexical_peers(p_word) AS arr
     ),
-    agg AS (
-        SELECT m.w,
-               max(consensus.eff_mu(m.rating, m.rd)) AS mu,
-               sum(m.witness_count)::bigint AS witnesses,
-               max(m.sense_mu) AS sense_mu
-        FROM members m, peers px
-        WHERE m.w <> ALL(px.arr)
-        GROUP BY m.w
-    ),
-    legacy_out AS (
-        SELECT a.w AS member, hl.object_id AS lang, a.mu::bigint AS mu, a.witnesses, a.sense_mu
-        FROM agg a
-        CROSS JOIN rel r
-        LEFT JOIN laplace.consensus hl
-          ON hl.subject_id = a.w AND hl.type_id = r.has_language
-    ),
-    syn_b3 AS MATERIALIZED (
-        SELECT s.id, public.blake3_from_bytea(s.id) AS b3_id, s.sense_mu
+    kb AS MATERIALIZED (
+        SELECT d.term AS member, d.language AS lang,
+               consensus.eff_mu(d.rating, d.rd) AS mu,
+               d.witnesses, s.sense_mu
         FROM syn s
-    ),
-    carriers AS MATERIALIZED (
-        SELECT sb.b3_id AS syn_b3, sb.sense_mu,
-               h.entity, public.laplace_parts(h.path) AS parts
-        FROM syn_b3 sb
-        JOIN public.physicality h
-          ON h.path OPERATOR(public.@^) sb.b3_id
-         AND h.mask OPERATOR(public.?&) ARRAY[public.laplace_bank_bit('kind', 'tuple')]
-        WHERE public.laplace_path_length(h.path) = 3
-    ),
-    filtered_carriers AS MATERIALIZED (
-        SELECT c.*
-        FROM carriers c
+        JOIN converse.key_binding_evidence(ARRAY(SELECT id FROM syn), NULL, false) d
+          ON d.key = s.id
         CROSS JOIN peers px
-        WHERE public.blake3_send(c.parts[1]) <> ALL(px.arr)
-    ),
-    cells AS MATERIALIZED (
-        SELECT c.entity, public.laplace_parts(c.path) AS parts, c.rating, c.deviation, c.matches
-        FROM public.laplace_claims_each(ARRAY(SELECT DISTINCT entity FROM filtered_carriers), NULL::bigint,
-            ARRAY[public.laplace_bank_bit('kind', 'claim')], '{}'::public.blake3[],
-            3::smallint, NULL::public.blake3[], 3::bigint) c
-    ),
-    native_out AS (
-        SELECT public.blake3_send(fc.parts[1]) AS member,
-               public.blake3_send(fc.parts[2]) AS lang,
-               max(COALESCE(round((c.rating - 2 * c.deviation) * 1e9), round(fc.sense_mu * 1e9)))::bigint AS mu,
-               sum(GREATEST(COALESCE(c.matches, 1), 1))::bigint AS witnesses,
-               max(fc.sense_mu) AS sense_mu
-        FROM filtered_carriers fc
-        LEFT JOIN cells c
-          ON ((c.parts[3] = fc.entity AND c.parts[1] IN (fc.parts[1], fc.parts[3]))
-              OR (c.parts[1] = fc.entity AND c.parts[3] IN (fc.parts[1], fc.parts[3])))
-         AND (c.rating - 2 * c.deviation) > 0
-        GROUP BY fc.parts[1], fc.parts[2]
-    ),
-    combined AS (
-        SELECT * FROM legacy_out
-        UNION ALL
-        SELECT * FROM native_out
+        WHERE d.term <> ALL(px.arr)
     )
-    SELECT c.member, c.lang, max(c.mu)::bigint, max(c.witnesses)::bigint, max(c.sense_mu)
-    FROM combined c
-    GROUP BY c.member, c.lang;
+    SELECT kb.member, kb.lang, max(kb.mu)::bigint, max(kb.witnesses)::bigint, max(kb.sense_mu)
+    FROM kb
+    GROUP BY kb.member, kb.lang;
 END;
