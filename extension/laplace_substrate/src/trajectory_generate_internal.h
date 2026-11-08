@@ -178,6 +178,7 @@ HTAB *laplace_tg_geometry_summaries(const LaplacePromptIntent *intent,
 int laplace_tg_geometry_summary_compare(const GeometrySummary *a,
                                         const GeometrySummary *b);
 bool laplace_tg_geometry_summary_present(const GeometrySummary *summary);
+int32 laplace_tg_candidate_grounded(const Candidate *candidate);
 void laplace_tg_order_leading_by_sharing(Candidate *candidates, int count);
 int laplace_tg_candidate_compare(const void *left, const void *right);
 

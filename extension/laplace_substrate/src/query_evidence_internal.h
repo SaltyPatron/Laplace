@@ -270,6 +270,7 @@ void laplace_qe_bind_channel_observations(ArrayType *operands,
                                           MemoryContext work);
 
 /* query_evidence_state.c / query_evidence.c */
+void laplace_qe_state_ensure_expanded(const LaplaceQueryState *state);
 void laplace_qe_state_record_incident(LaplaceQueryState *state,
                                       const LaplaceConsensusRow *row,
                                       bool reverse);

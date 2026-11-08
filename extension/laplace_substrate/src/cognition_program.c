@@ -90,24 +90,35 @@ semantic_origin_add(LaplaceCognitionProgram *program, const hash128_t *id,
     entry->origins = bms_add_member(entry->origins, origin);
 }
 
+static bool
+semantic_channel_traversable(const LaplaceQueryChannel *channel)
+{
+    const laplace_relation_def_t *def = NULL;
+
+    /* A channel anchored by a geometry or physicality neighbor is fingerprinted
+     * but never propagates semantic ancestry: proximity/containment is not testimony. */
+    if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY ||
+        channel->operand_role == LAPLACE_QUERY_OPERAND_PHYSICALITY)
+        return false;
+
+    if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0))
+        return false;
+    if (laplace_prompt_contract_relation(&channel->relation))
+        return false;
+    if (channel->outbound)
+        return true;
+    return laplace_relation_lookup(&channel->relation, &def) == 0 &&
+           def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC;
+}
+
 static void
 record_semantic_channel(LaplaceCognitionProgram *program,
                         const LaplaceQueryChannel *channel)
 {
     SemanticOriginEntry *anchor;
     SemanticOriginEntry *candidate;
-    const laplace_relation_def_t *def = NULL;
 
-    /* A channel anchored by a geometry neighbor is fingerprinted but never
-     * propagates semantic ancestry: proximity is not testimony. */
-    if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY)
-        return;
-
-    if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
-        !(channel->outbound ||
-          (laplace_relation_lookup(&channel->relation, &def) == 0 &&
-           def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC)) ||
-        laplace_prompt_contract_relation(&channel->relation))
+    if (!semantic_channel_traversable(channel))
         return;
 
     anchor = semantic_origin_get(program, &channel->anchor, false);
@@ -219,6 +230,7 @@ receive_observed_upos(const LaplaceClassificationRow *row, void *context)
 
 static Bitmapset *
 program_observed_content_origins(const LaplacePromptInput *input,
+                                 const LaplacePromptIntent *intent,
                                  const Datum *context_values,
                                  const Datum *node_values,
                                  int prompt_origin_count,
@@ -228,16 +240,28 @@ program_observed_content_origins(const LaplacePromptInput *input,
     const uint32 *text_len = tier_tree_text_len_array(input->tree);
     size_t text_bytes = 0;
     const uint8 *text = tier_tree_text(input->tree, &text_bytes);
-    hash128_t *forms;
-    int form_count = 0;
-    Bitmapset *required = NULL;
+    hash128_t *forms = palloc(sizeof(hash128_t) * Max(prompt_origin_count, 1));
+    int form_count = 0, member = -1;
+    Bitmapset *required = NULL, *coupled_origins = NULL;
     HASHCTL ctl = {0};
     HTAB *best;
-    int member = -1;
 
-    forms = palloc(sizeof(hash128_t) * Max(prompt_origin_count, 1));
     while ((member = bms_next_member(eligible, member)) >= 0)
         forms[form_count++] = datum_to_hash128(context_values[member]);
+    if (intent && intent->bindings)
+    {
+        HASH_SEQ_STATUS seq;
+        LaplacePromptIntentBinding *binding;
+        hash_seq_init(&seq, intent->bindings);
+        while ((binding = hash_seq_search(&seq)) != NULL)
+        {
+            bool is_surface = hash128_eq(&binding->id, &input->root);
+            for (int k = 0; !is_surface && k < form_count; ++k)
+                if (hash128_eq(&binding->id, &forms[k])) is_surface = true;
+            if (!is_surface)
+                coupled_origins = bms_add_members(coupled_origins, binding->origins);
+        }
+    }
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(ObservedUpos);
     ctl.hcxt = CurrentMemoryContext;
@@ -264,8 +288,11 @@ program_observed_content_origins(const LaplacePromptInput *input,
         upos = hash_search(best, &form, HASH_FIND, NULL);
         if (upos && !laplace_upos_is_content(&upos->upos))
             continue;
+        if (!upos && !bms_is_empty(coupled_origins) && !bms_is_member(member, coupled_origins))
+            continue;
         required = bms_add_member(required, member);
     }
+    bms_free(coupled_origins);
     hash_destroy(best);
     pfree(forms);
     return required;
@@ -310,20 +337,33 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         ereport(ERROR,
                 (errmsg("cognition program: prompt occurrence projections disagree")));
 
-    /* Eligible obligations are the occurrences at tier >= 2 in the canonical
-     * observation tree. */
-    for (int i = 0; i < prompt_origin_count; ++i)
+    /* Eligible obligations are non-whitespace word-segment occurrences in the
+     * canonical observation tree (replacing legacy tiers[node] >= 2 fixed-role
+     * check: under Pure Merkle DAG Height Law, 1-codepoint words have tier = 0
+     * and multi-codepoint words have tier >= 1). */
     {
-        int32 node;
-        if (node_nulls[i] || context_nulls[i])
-            ereport(ERROR,
-                    (errmsg("cognition program: prompt occurrence projections contain NULL")));
-        node = DatumGetInt32(node_values[i]);
-        if (node < 0 || (size_t) node >= tree_nodes)
-            ereport(ERROR,
-                    (errmsg("cognition program: prompt node index is outside canonical tree")));
-        if (tiers[node] >= 2)
+        const uint32 *text_off = tier_tree_text_off_array(input->tree);
+        const uint32 *text_len = tier_tree_text_len_array(input->tree);
+        size_t text_bytes = 0;
+        const uint8 *text = tier_tree_text(input->tree, &text_bytes);
+        (void) tiers;
+        for (int i = 0; i < prompt_origin_count; ++i)
+        {
+            int32 node;
+            if (node_nulls[i] || context_nulls[i])
+                ereport(ERROR,
+                        (errmsg("cognition program: prompt occurrence projections contain NULL")));
+            node = DatumGetInt32(node_values[i]);
+            if (node < 0 || (size_t) node >= tree_nodes)
+                ereport(ERROR,
+                        (errmsg("cognition program: prompt node index is outside canonical tree")));
+            if (text && text_off && text_len &&
+                (size_t) text_off[node] + text_len[node] <= text_bytes &&
+                text_len[node] > 0 &&
+                laplace_text_is_all_whitespace(text + text_off[node], text_len[node]))
+                continue;
             eligible = bms_add_member(eligible, i);
+        }
     }
 
     /* With no declared operation, obligations narrow to content occurrences:
@@ -332,7 +372,7 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         content_required = program_content_origins(intent, prompt_origin_count);
     if (operation_count == 0 && !content_required && eligible)
         content_required = program_observed_content_origins(
-            input, context_values, node_values, prompt_origin_count, eligible);
+            input, intent, context_values, node_values, prompt_origin_count, eligible);
 
     /* Declared operations add their operand occurrences as obligations. */
     for (int i = 0; i < operation_count; ++i)
@@ -586,18 +626,15 @@ const Bitmapset *
 laplace_cognition_program_semantic_origins(const LaplaceCognitionProgram *program,
                                            const hash128_t *id)
 {
-    SemanticOriginEntry *entry;
-    if (!program || !id || !program->semantic_origins)
-        return NULL;
-    entry = hash_search(program->semantic_origins, id, HASH_FIND, NULL);
+    if (!program || !id || !program->semantic_origins) return NULL;
+    SemanticOriginEntry *entry = hash_search(program->semantic_origins, id, HASH_FIND, NULL);
     return entry ? entry->origins : NULL;
 }
 
 Bitmapset *
 laplace_cognition_program_remaining(const LaplaceCognitionProgram *program)
 {
-    if (!program || !program->required)
-        return NULL;
+    if (!program || !program->required) return NULL;
     return bms_difference(program->required, program->satisfied);
 }
 
@@ -605,14 +642,10 @@ void
 laplace_cognition_program_receipt(const LaplaceCognitionProgram *program,
                                   LaplaceCognitionProgramReceipt *receipt)
 {
-    int64 required;
-    int64 satisfied;
-
-    if (!receipt)
-        return;
+    int64 required, satisfied;
+    if (!receipt) return;
     MemSet(receipt, 0, sizeof(*receipt));
-    if (!program)
-        return;
+    if (!program) return;
     /* Occurrence obligations and declared input-identity obligations are
      * counted separately and summed. */
     required = (int64) bms_num_members(program->required) +
@@ -653,10 +686,8 @@ laplace_cognition_disposition_name(LaplaceCognitionDisposition disposition)
 void
 laplace_cognition_program_destroy(LaplaceCognitionProgram **program)
 {
-    MemoryContext owner;
-    if (!program || !*program)
-        return;
-    owner = (*program)->owner;
+    if (!program || !*program) return;
+    MemoryContext owner = (*program)->owner;
     *program = NULL;
     MemoryContextDelete(owner);
 }

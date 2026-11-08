@@ -31,6 +31,8 @@ typedef struct ClosureParent
     int           n;
     int           cap;
     bool          rendering;
+    bool          tuple;
+    bool          scalar;
 } ClosureParent;
 
 static void
@@ -103,16 +105,24 @@ receive_closure_edge(TupleTableSlot *row, void *opaque)
 {
     ClosureRead *read = opaque;
     bytea *parent = spi_slot_bytea(row, 1), *child = spi_slot_bytea(row, 2);
-    bool isnull, found;
+    bool isnull, flags_null = false, found;
     Datum count = slot_getattr(row, 3, &isnull);
+    Datum flags_d = slot_getattr(row, 4, &flags_null);
+    int64 flags = flags_null ? 0 : DatumGetInt64(flags_d);
+    uint32_t child_cp;
     if (!parent || !child || VARSIZE_ANY_EXHDR(parent) != 16 ||
         VARSIZE_ANY_EXHDR(child) != 16 || isnull || DatumGetInt32(count) <= 0)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("render_text: malformed constituent edge")));
     ClosureParent *entry = hash_search(read->parents, VARDATA_ANY(parent), HASH_ENTER, &found);
     if (!found) {
-        entry->kids = NULL; entry->n = entry->cap = 0; entry->rendering = false;
+        entry->kids = NULL; entry->n = entry->cap = 0;
+        entry->rendering = false; entry->tuple = false; entry->scalar = true;
     }
+    if (((flags >> 30) & 7) == 3)
+        entry->tuple = true;
+    if (!laplace_perfcache_codepoint_for_id((const uint8 *) VARDATA_ANY(child), &child_cp))
+        entry->scalar = false;
     MemoryContext previous = MemoryContextSwitchTo(read->owner);
     closure_parent_push(entry, copy_bytea_datum(PointerGetDatum(child)), DatumGetInt32(count));
     MemoryContextSwitchTo(previous);
@@ -140,7 +150,7 @@ typedef struct {
     ClosureParent *parent;
     int child, depth, start;
     int32 run;
-    bool entered;
+    bool entered, silent;
 } RenderFrame;
 
 static void
@@ -165,7 +175,7 @@ repeat_render_tail(StringInfo output, int start, int32 run)
 }
 
 static const char *
-render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, int *length)
+render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, bool as_bytes, int *length)
 {
     bytea *bytes = DatumGetByteaPP(id);
     if (VARSIZE_ANY_EXHDR(bytes) != 16)
@@ -187,8 +197,10 @@ render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, int *length)
             frame->start = output.len;
             uint32_t codepoint;
             if (laplace_perfcache_codepoint_for_id((const uint8 *)frame->id, &codepoint)) {
-                append_codepoint_utf8(&output, codepoint);
-                repeat_render_tail(&output, frame->start, frame->run);
+                if (!frame->silent) {
+                    append_codepoint_utf8(&output, codepoint);
+                    repeat_render_tail(&output, frame->start, frame->run);
+                }
                 used--; continue;
             }
             frame->parent = hash_search(closure, frame->id, HASH_FIND, NULL);
@@ -200,7 +212,8 @@ render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, int *length)
             frame->parent->rendering = true;
         }
         if (frame->child == frame->parent->n) {
-            repeat_render_tail(&output, frame->start, frame->run);
+            if (!frame->silent)
+                repeat_render_tail(&output, frame->start, frame->run);
             frame->parent->rendering = false; used--; continue;
         }
         ClosureChild child = frame->parent->kids[frame->child++];
@@ -218,6 +231,8 @@ render_root(HTAB *closure, HTAB *memo, Datum id, int max_depth, int *length)
         memset(next, 0, sizeof(*next));
         memcpy(next->id, VARDATA_ANY(DatumGetByteaPP(child.child)), 16);
         next->depth = depth + 1; next->run = child.run;
+        next->silent = frame->silent ||
+            (!as_bytes && frame->parent->tuple && !frame->parent->scalar && frame->child > 1);
     }
     for (Size i = 0; i < used; i++)
         if (stack[i].entered) stack[i].parent->rendering = false;
@@ -381,7 +396,7 @@ render_batch(FunctionCallInfo fcinfo, bool as_bytes)
             continue;
         }
         int rendered_length;
-        rendered = render_root(closure, memo, elems[i], max_depth, &rendered_length);
+        rendered = render_root(closure, memo, elems[i], max_depth, as_bytes, &rendered_length);
         if (rendered == NULL || rendered_length == 0
             || (!as_bytes && memchr(rendered, 0, rendered_length) != NULL))
             out_nulls[i] = true;

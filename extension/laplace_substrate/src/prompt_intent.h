@@ -233,7 +233,12 @@ laplace_prompt_binding_channel(const LaplaceQueryChannel *channel)
     for (size_t i = 0; i < sizeof(families) / sizeof(families[0]); ++i)
     {
         laplace_relation_in_family(&channel->relation, families[i], &member);
-        if (member) return true;
+        if (member)
+        {
+            if ((i == 1 || i == 3) && !channel->outbound)
+                return false;
+            return true;
+        }
     }
     /* Only the governed root correspondence operation names an equivalent
      * concept. Its argument-role descendants preserve a different type. */
@@ -290,12 +295,15 @@ laplace_prompt_structural_key(const hash128_t *source, const hash128_t *target,
  * testimony. */
 static inline int
 laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
-                                   LaplaceTrajectoryScope *trajectory_scope)
+                                   LaplaceTrajectoryScope *trajectory_scope,
+                                   int fanout)
 {
     MemoryContext previous = MemoryContextSwitchTo(intent->owner);
     int continuation_count = 0;
     LaplaceContinuation *continuations = laplace_trajectory_continuations_scoped(
         intent->input->context, false, trajectory_scope, &continuation_count);
+    if (fanout > 0 && continuation_count > fanout)
+        continuation_count = fanout;
     if (continuation_count <= 0)
     {
         if (continuations) pfree(continuations);
@@ -448,7 +456,7 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         result.structural = laplace_trajectory_structural_candidates(
             trajectory_scope, sources, structural_mask, &result.structural_count);
         pfree(sources);
-        (void) laplace_prompt_merge_continuations(&result, trajectory_scope);
+        (void) laplace_prompt_merge_continuations(&result, trajectory_scope, fanout);
 
         /* fanout is a per-source/per-plane envelope. Five structural crossing
          * planes respond per active source, plus one ordered-continuation plane
@@ -470,37 +478,27 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         {
             HTAB *pending = laplace_prompt_binding_table(
                 "prompt physicality pending bindings", owner);
+            ArrayBuildState *frontier = NULL;
             for (int i = 0; i < result.structural_count; ++i)
             {
                 const LaplaceStructuralCandidate *crossing = &result.structural[i];
+                if (crossing->relation_mask == LAPLACE_STRUCTURAL_CONTINUATION)
+                    continue;
+                if (hash_search(result.bindings, &crossing->id, HASH_FIND, NULL))
+                    continue;
                 LaplacePromptIntentBinding *source =
                     hash_search(result.bindings, &crossing->source, HASH_FIND, NULL);
                 if (!source || !source->origins) continue;
                 bool found;
                 LaplacePromptIntentBinding *target =
                     hash_search(pending, &crossing->id, HASH_ENTER, &found);
-                if (!found) target->origins = NULL;
-                target->origins = bms_add_members(target->origins, source->origins);
-            }
-
-            HASH_SEQ_STATUS sequence;
-            LaplacePromptIntentBinding *entry;
-            ArrayBuildState *frontier = NULL;
-            hash_seq_init(&sequence, pending);
-            while ((entry = hash_seq_search(&sequence)) != NULL)
-            {
-                bool found;
-                LaplacePromptIntentBinding *target =
-                    hash_search(result.bindings, &entry->id, HASH_ENTER, &found);
                 if (!found)
                 {
                     target->origins = NULL;
-                    Datum id = hash128_to_datum(&entry->id);
+                    Datum id = hash128_to_datum(&crossing->id);
                     frontier = accumArrayResult(frontier, id, false, BYTEAOID, owner);
                     pfree(DatumGetPointer(id));
                 }
-                target->origins = bms_add_members(target->origins, entry->origins);
-                bms_free(entry->origins);
             }
             hash_destroy(pending);
             if (frontier)

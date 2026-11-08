@@ -239,6 +239,17 @@ laplace_tg_couple_and_orient(
             ArrayGetNItems(ARR_NDIM(coupled_intent_out->structural_frontier),
                            ARR_DIMS(coupled_intent_out->structural_frontier)) > 0)
         {
+            for (int i = 0; i < coupled_intent_out->structural_count; ++i)
+            {
+                const LaplaceStructuralCandidate *crossing =
+                    &coupled_intent_out->structural[i];
+                if (crossing->relation_mask == LAPLACE_STRUCTURAL_CONTINUATION)
+                    continue;
+                laplace_tg_origin_add_occurrences(
+                    origins, &crossing->id,
+                    laplace_prompt_intent_origins(coupled_intent_out, &crossing->source),
+                    walk_context);
+            }
             ArrayBuildState *structural_new = NULL;
             ArrayIterator structural_iterator =
                 array_create_iterator(coupled_intent_out->structural_frontier, 0, NULL);
@@ -250,8 +261,6 @@ laplace_tg_couple_and_orient(
                 hash128_t id = datum_to_hash128(structural_value);
                 bool found;
                 hash_search(route_seen, &id, HASH_ENTER, &found);
-                laplace_tg_origin_add_occurrences(origins, &id,
-                    laplace_prompt_intent_origins(coupled_intent_out, &id), walk_context);
                 if (!found)
                     structural_new = accumArrayResult(
                         structural_new, structural_value, false, BYTEAOID, walk_context);
@@ -423,7 +432,7 @@ laplace_tg_couple_and_orient(
             root_origin->occurrences = bms_add_member(root_origin->occurrences, i);
         int initial_channel_count = 0;
         const LaplaceQueryChannel *initial_channels =
-            laplace_query_state_channels(query_state, &initial_channel_count);
+            laplace_query_state_channels_unbound(query_state, &initial_channel_count);
         cognition = laplace_cognition_program_create(
             input, context_length, initial_channels, initial_channel_count, intent);
         if (intent && intent->ambiguous)

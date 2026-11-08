@@ -16,6 +16,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "spi_common.h"
+#include "walk_score.h"
 #include "relation_symmetry.h"
 #include "spi_nested.h"
 #include "spi_stream.h"

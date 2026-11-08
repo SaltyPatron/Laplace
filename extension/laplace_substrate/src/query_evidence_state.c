@@ -305,8 +305,8 @@ query_state_append_operands(LaplaceQueryState *state, ArrayType *selected,
     }
 }
 
-static void
-query_state_ensure_expanded(const LaplaceQueryState *state)
+void
+laplace_qe_state_ensure_expanded(const LaplaceQueryState *state)
 {
     LaplaceQueryState *mutable_state;
     MemoryContext previous;
@@ -398,7 +398,7 @@ laplace_query_state_extend_batch_role(LaplaceQueryState *state, ArrayType *selec
 
     previous = MemoryContextSwitchTo(state->owner);
     if (stats != NULL)
-        query_state_ensure_expanded(state);
+        laplace_qe_state_ensure_expanded(state);
     prior_count = state->operand_count;
     query_state_append_operands(state, selected, selected_count, operand_role);
     state->operand_count += selected_count;
@@ -442,6 +442,7 @@ laplace_query_state_extend(LaplaceQueryState *state, Datum selected,
 int
 laplace_query_state_channel_count(const LaplaceQueryState *state)
 {
+    laplace_qe_state_ensure_expanded(state);
     return state ? state->channel_count : 0;
 }
 
@@ -450,7 +451,7 @@ laplace_query_state_channels_unbound(const LaplaceQueryState *state, int *count)
 {
     if (!count)
         ereport(ERROR, (errmsg("query evidence: channel count output is required")));
-    query_state_ensure_expanded(state);
+    laplace_qe_state_ensure_expanded(state);
     *count = state ? state->channel_count : 0;
     return state ? state->channels : NULL;
 }
@@ -460,7 +461,7 @@ laplace_query_state_channels(const LaplaceQueryState *state, int *count)
 {
     if (!count)
         ereport(ERROR, (errmsg("query evidence: channel count output is required")));
-    query_state_ensure_expanded(state);
+    laplace_qe_state_ensure_expanded(state);
     if (state && state->bound_channel_count < state->channel_count)
     {
         LaplaceQueryState *mutable_state = (LaplaceQueryState *) state;
@@ -490,7 +491,7 @@ query_state_distinct_ids(const LaplaceQueryState *state, bool relations)
     HTAB *seen;
     ArrayBuildState *values = NULL;
 
-    query_state_ensure_expanded(state);
+    laplace_qe_state_ensure_expanded(state);
     MemSet(&ctl, 0, sizeof(ctl));
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(hash128_t);

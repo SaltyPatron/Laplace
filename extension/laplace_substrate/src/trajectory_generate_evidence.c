@@ -480,6 +480,7 @@ laplace_tg_evidence_summaries_from_channels(const LaplaceQueryChannel *channels,
     return summaries;
 }
 
+/* Exact candidate adjudication: proposal top-K cannot hide them */
 HTAB *
 laplace_tg_evidence_summaries(const LaplaceQueryState *state, bool projection_only,
                               HTAB *origins, const Bitmapset *required,

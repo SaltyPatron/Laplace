@@ -31,6 +31,7 @@ typedef struct ScopedTrajectory
     bytea *wkb;
     trajectory_ordinal_index_t *ordinal_index;
     MemoryContextCallback cleanup;
+    bool structural;
 } ScopedTrajectory;
 
 typedef struct ScopedPosition
@@ -67,6 +68,9 @@ typedef struct SuccessorState
     size_t stride;
     LaplaceTrajectoryScope *scope;
     ScopedTrajectory *trajectory;
+    Datum physicality;
+    Datum entity;
+    Datum geometry;
     size_t input_stride;
     HTAB *input_positions;
 } SuccessorState;

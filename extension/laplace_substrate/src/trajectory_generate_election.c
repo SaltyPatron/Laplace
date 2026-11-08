@@ -253,17 +253,25 @@ typedef struct SharingEntry
     int64 count;
 } SharingEntry;
 
+static bool
+summary_grounded(const EvidenceSummary *s)
+{
+    return s->has_positive &&
+           (s->positive_required_occurrences > 0 ||
+            s->positive_covered_occurrences > 0);
+}
+
 static const LaplaceQueryChannel *
 candidate_support(const Candidate *candidate)
 {
-    if (candidate->query_traversal.has_positive) return &candidate->query_traversal.positive;
-    if (candidate->query.has_positive) return &candidate->query.positive;
-    if (candidate->projection.has_positive) return &candidate->projection.positive;
+    if (summary_grounded(&candidate->query_traversal)) return &candidate->query_traversal.positive;
+    if (summary_grounded(&candidate->query)) return &candidate->query.positive;
+    if (summary_grounded(&candidate->projection)) return &candidate->projection.positive;
     return NULL;
 }
 
-static int32
-candidate_grounded(const Candidate *candidate)
+int32
+laplace_tg_candidate_grounded(const Candidate *candidate)
 {
     return Max(candidate->projection.positive_required_occurrences,
                Max(candidate->query_traversal.positive_required_occurrences,
@@ -306,10 +314,10 @@ void
 laplace_tg_order_leading_by_sharing(Candidate *candidates, int count)
 {
     int group = 0;
-    if (count < 2)
+    if (count < 2 || laplace_tg_candidate_grounded(&candidates[0]) <= 0)
         return;
     while (group < count && group < SHARING_WINDOW &&
-           candidate_grounded(&candidates[group]) == candidate_grounded(&candidates[0]))
+           laplace_tg_candidate_grounded(&candidates[group]) == laplace_tg_candidate_grounded(&candidates[0]))
         ++group;
     if (group < 2)
         return;
@@ -386,14 +394,28 @@ laplace_tg_candidate_compare(const void *left, const void *right)
 
     cmp = laplace_tg_positive_summary_compare(&a->projection, &b->projection);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
-    cmp = laplace_tg_positive_summary_compare(&a->query_traversal, &b->query_traversal);
-    if (cmp != 0) return cmp > 0 ? -1 : 1;
-    cmp = laplace_tg_positive_summary_compare(&a->query, &b->query);
-    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    if (summary_grounded(&a->query_traversal) || summary_grounded(&b->query_traversal))
+    {
+        if (summary_grounded(&a->query_traversal) != summary_grounded(&b->query_traversal))
+            return summary_grounded(&a->query_traversal) ? -1 : 1;
+        cmp = laplace_tg_positive_summary_compare(&a->query_traversal, &b->query_traversal);
+        if (cmp != 0) return cmp > 0 ? -1 : 1;
+    }
+    if (summary_grounded(&a->query) || summary_grounded(&b->query))
+    {
+        if (summary_grounded(&a->query) != summary_grounded(&b->query))
+            return summary_grounded(&a->query) ? -1 : 1;
+        cmp = laplace_tg_positive_summary_compare(&a->query, &b->query);
+        if (cmp != 0) return cmp > 0 ? -1 : 1;
+    }
     if (a->stride != b->stride)
         return a->stride > b->stride ? -1 : 1;
     if (a->sequence_occurrences != b->sequence_occurrences)
         return a->sequence_occurrences > b->sequence_occurrences ? -1 : 1;
+    cmp = laplace_tg_positive_summary_compare(&a->query_traversal, &b->query_traversal);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = laplace_tg_positive_summary_compare(&a->query, &b->query);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = laplace_tg_opposition_summary_compare(&a->query, &b->query);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = laplace_tg_opposition_summary_compare(&a->query_traversal, &b->query_traversal);

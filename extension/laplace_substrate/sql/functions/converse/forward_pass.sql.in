@@ -323,7 +323,7 @@ BEGIN
         SELECT 1
         FROM public.laplace_holders(
             ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest(p_keys) u(id) WHERE id IS NOT NULL),
-            '{}'::public.blake3[], false, -1::smallint, 1::bigint, 2::smallint,
+            '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,
             ARRAY[public.laplace_bank_bit('kind', 'tuple')], 2::smallint) h
         WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple')
           AND public.laplace_path_length(h.path) = 3

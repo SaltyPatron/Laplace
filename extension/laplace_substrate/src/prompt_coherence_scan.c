@@ -157,7 +157,10 @@ pc_receive_edge(TupleTableSlot *row, void *opaque)
     /* Effective mu (rating - 2*rd) weighted by the relation's manifest rank. */
     eff = (double) laplace_effective_mu_fp(rating, rd);
     rank = (laplace_relation_lookup((const hash128_t *) VARDATA_ANY(tid), &def) == 0
-            && def != NULL) ? def->rank : 0.0;
+            && def != NULL && def->rank >= laplace_firmware_default()->salience_floor)
+               ? def->rank : 0.0;
+    if (rank <= 0.0)
+        return;
 
     /* Total mass counts every cell incident to the candidate: outgoing
      * from the forward scan, incoming from the reverse. A cell between

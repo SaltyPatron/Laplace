@@ -540,7 +540,7 @@ SQL_QUERY("chess.syzygy_carriers", "bytea[]",
     "ORDER BY p.entity_id")
 
 SQL_QUERY("readback.constituent_edges", "bytea[],int4",
-    "SELECT parent_id,child_id,run_length FROM realize.constituents_closure($1,$2) ORDER BY parent_id,ordinal")
+    "SELECT parent_id,child_id,run_length,flags FROM realize.constituents_closure($1,$2) ORDER BY parent_id,ordinal")
 
 SQL_QUERY("query.declared_paths_step", "int4[],bytea[],bytea[],int4",
     "WITH wanted AS MATERIALIZED (\n SELECT w.slot,public.blake3_from_bytea(w.node) AS node,\n w.relation AS rel_bytea,public.blake3_from_bytea(w.relation) AS relation,w.ordinal\n FROM unnest($1::int4[],$2::bytea[],$3::bytea[]) WITH ORDINALITY AS w(slot,node,relation,ordinal)\n), surfaces AS MATERIALIZED (\n SELECT w.ordinal,public.blake3_from_bytea(s.surface_id) AS surface_b3,\n public.blake3_from_bytea(s.canonical_id) AS canonical_b3,s.inverse\n FROM wanted w CROSS JOIN LATERAL consensus.relation_surfaces(ARRAY[w.rel_bytea]) s\n), candidates AS MATERIALIZED (\n SELECT * FROM public.laplace_claims_each(ARRAY(SELECT node FROM wanted ORDER BY ordinal),NULL::bigint,\n ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n (CASE WHEN EXISTS (SELECT 1 FROM surfaces WHERE inverse) THEN 3 ELSE 1 END)::smallint,\n ARRAY(SELECT DISTINCT surface_b3 FROM surfaces),3::bigint)\n), selected AS MATERIALIZED (\n SELECT DISTINCT ON (w.slot,c.entity) w.slot,w.relation,sf.surface_b3,sf.inverse,\n (public.laplace_parts(c.path))[1] AS subj,(public.laplace_parts(c.path))[3] AS obj,\n c.entity,c.rating,c.deviation,c.matches\n FROM candidates c JOIN wanted w ON w.ordinal=c.i\n JOIN surfaces sf ON sf.ordinal=w.ordinal AND public.laplace_middle_any(c.path,ARRAY[sf.surface_b3])\n WHERE public.laplace_path_length(c.path)=3\n   AND ((NOT sf.inverse AND public.laplace_path_starts(c.path,w.node))\n        OR (sf.inverse AND public.laplace_path_ends(c.path,w.node)))\n ORDER BY w.slot,c.entity,c.rating-2*c.deviation DESC\n), capped AS MATERIALIZED (\n SELECT * FROM selected ORDER BY slot,rating-2*deviation DESC,entity LIMIT $4\n), preview AS MATERIALIZED (\n SELECT * FROM public.laplace_claim_preview(ARRAY(SELECT DISTINCT entity FROM capped ORDER BY entity))\n) SELECT s.slot,public.blake3_send(s.entity),\n public.blake3_send(CASE WHEN s.inverse THEN s.subj ELSE s.obj END),\n v.type_label,v.fact,\n (s.rating-2*s.deviation)::numeric,greatest(s.matches,1)::bigint\n FROM capped s JOIN preview v ON v.entity=s.entity AND v.predicate=s.surface_b3\n ORDER BY s.slot,s.rating-2*s.deviation DESC,s.entity")
@@ -572,7 +572,7 @@ SQL_QUERY("native.consensus_cells", "bytea[],bytea[],bytea[],bool",
     "), selected AS MATERIALIZED (\n"
     " SELECT DISTINCT ON(c.entity) c.entity,public.laplace_parts(c.path) AS ids,c.rating,c.deviation,c.volatility,c.matches\n"
     " FROM keys k CROSS JOIN LATERAL public.laplace_claims_each(\n"
-    " k.ids,CASE WHEN $4 THEN 64::bigint ELSE NULL::bigint END,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
+    " k.ids,NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
     " (CASE WHEN k.has_inverse THEN 3 WHEN $1 IS NOT NULL THEN 1 ELSE 2 END)::smallint,k.types,3::bigint,k.opp) c\n"
     " ORDER BY c.entity\n"
     "), claim_meta AS MATERIALIZED (\n"

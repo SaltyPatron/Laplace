@@ -59,7 +59,8 @@ scope_keep_trajectory(Datum physicality, Datum entity, Datum geometry, LaplaceTr
 static void
 scope_retain_trajectory(Datum physicality, Datum entity, Datum geometry, void *context)
 {
-    scope_keep_trajectory(physicality, entity, geometry, context);
+    ScopedTrajectory *entry = scope_keep_trajectory(physicality, entity, geometry, context);
+    entry->structural = true;
 }
 
 static void
@@ -189,6 +190,9 @@ record_successor(void *context, size_t ordinal, size_t stride,
     if (stride == 0 || successor == NULL) return 0;
     if (state->input_stride) stride = state->input_stride;
     if (stride == 0 || stride < state->stride) return 0;
+    if (state->scope && !state->trajectory && state->input_positions)
+        state->trajectory = scope_keep_trajectory(
+            state->physicality, state->entity, state->geometry, state->scope);
     if (state->scope && state->trajectory)
     {
         LaplaceTrajectoryScope *scope = state->scope;
@@ -261,14 +265,17 @@ static void
 bind_input_trajectory(Datum physicality, Datum entity, Datum geometry, void *context)
 {
     MembershipMatcher *match = context;
-    ScopedTrajectory *entry = scope_keep_trajectory(physicality, entity, geometry,
-                                                   match->state->scope);
-    match->state->trajectory = entry;
+    match->state->trajectory = NULL;
+    match->state->physicality = physicality;
+    match->state->entity = entity;
+    match->state->geometry = geometry;
+    bytea *wkb = DatumGetByteaP(OidFunctionCall1(match->state->scope->as_binary, geometry));
     uint32 npoints;
-    const unsigned char *points = laplace_trajectory_wkb_points(entry->wkb, &npoints);
+    const unsigned char *points = laplace_trajectory_wkb_points(wkb, &npoints);
     if (trajectory_match_suffixes(match->matcher, points, npoints,
                                   record_successor, match->state) != 0)
         elog(ERROR, "trajectory input: invalid packed trajectory");
+    pfree(wkb);
 }
 
 void
@@ -291,9 +298,21 @@ laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
     const uint8_t *tiers = tier_tree_tier_array(input->tree);
     for (size_t i = 0; i < tier_tree_node_count(input->tree); ++i)
         if (tiers[i] > max_tier) max_tier = tiers[i];
+    int min_tier = 0;
+    size_t segment_count = 0;
+    const uint32_t *segments = tier_tree_word_segments(input->tree, &segment_count);
+    if (segments && segment_count > 0)
+    {
+        uint8 word_tier = 0;
+        for (size_t i = 0; i < segment_count; ++i)
+            if (segments[i] < tier_tree_node_count(input->tree) &&
+                tiers[segments[i]] > word_tier)
+                word_tier = tiers[segments[i]];
+        min_tier = word_tier;
+    }
     ArrayType *previous_cut = NULL;
     scope->position_count = 0;
-    for (int tier = max_tier; tier >= 0; --tier)
+    for (int tier = max_tier; tier >= min_tier; --tier)
     {
         ArrayType *cut = laplace_prompt_input_cut(input, (uint8) tier);
         if (previous_cut && VARSIZE(cut) == VARSIZE(previous_cut) &&

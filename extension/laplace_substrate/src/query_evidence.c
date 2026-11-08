@@ -553,6 +553,8 @@ query_state_candidate_evidence_impl(const LaplaceQueryState *state,
         return NULL;
     }
 
+    if (stats == NULL)
+        laplace_qe_state_ensure_expanded(state);
     if (state->expanded_operand_count == state->operand_count &&
         !state->incident_overflow && stats == NULL)
     {

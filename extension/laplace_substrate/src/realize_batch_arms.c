@@ -58,12 +58,19 @@ static const char *Q_SYNSET_LEMMA =
     "ORDER BY cand.entity_id, cand.lp DESC, cand.mu DESC, COALESCE(w.tier, 32767) ASC, cand.word_id";
 
 static const char *Q_TRANSLATION =
-    "SELECT e.subject_id, e.neighbour_id AS object_id,"
-    "       ($2 IS NOT NULL AND converse.word_language(e.neighbour_id) = $2) AS lp,"
-    "       consensus.eff_mu(e.rating, e.rd) AS mu "
-    "FROM consensus.edges_raw_batch($1::bytea[], 'out', ARRAY[laplace.relation_type_id('IS_TRANSLATION_OF')], 16, false, 'eff_mu') e "
-    "WHERE e.neighbour_id IS NOT NULL "
-    "ORDER BY e.subject_id, ($2 IS NOT NULL AND converse.word_language(e.neighbour_id) = $2) DESC, consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id";
+    "WITH edges AS MATERIALIZED ("
+    "  SELECT e.subject_id, e.neighbour_id AS object_id, consensus.eff_mu(e.rating, e.rd) AS mu "
+    "  FROM consensus.edges_raw_batch($1::bytea[], 'out', ARRAY[laplace.relation_type_id('IS_TRANSLATION_OF')], 16, false, 'eff_mu') e "
+    "  WHERE e.neighbour_id IS NOT NULL"
+    "), langs AS MATERIALIZED ("
+    "  SELECT DISTINCT ON (v.word) v.word, v.lang "
+    "  FROM converse.word_language_candidates_batch("
+    "    CASE WHEN $2 IS NOT NULL THEN ARRAY(SELECT DISTINCT object_id FROM edges) ELSE '{}'::bytea[] END"
+    "  ) v ORDER BY v.word, v.mu DESC, v.lang"
+    ") "
+    "SELECT e.subject_id, e.object_id, ($2 IS NOT NULL AND l.lang = $2) AS lp, e.mu "
+    "FROM edges e LEFT JOIN langs l ON l.word = e.object_id "
+    "ORDER BY e.subject_id, ($2 IS NOT NULL AND l.lang = $2) DESC, e.mu DESC, e.object_id";
 
 static const char *Q_DEFINES =
     "SELECT e.subject_id, e.neighbour_id AS object_id,"

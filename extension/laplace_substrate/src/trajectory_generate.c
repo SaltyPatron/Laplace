@@ -16,33 +16,20 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
                               ArrayType *discourse)
 {
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
-    ArrayType *context_array;
-    ArrayType *frontier_array = NULL;
-    ArrayType *relation_types = NULL;
-    ArrayType *output_relations = NULL;
+    ArrayType *context_array, *frontier_array = NULL, *relation_types = NULL, *output_relations = NULL;
     int32 steps, max_stride, top_k, fanout;
     float8 spread;
     uint64 rng;
-    Datum *context_values;
-    bool *context_nulls;
-    int context_count;
-    Datum *context;
-    int context_length = 0;
-    int context_capacity;
+    Datum *context_values, *context;
+    bool *context_nulls, exhausted = false, explicit_observation_scope = false;
+    int context_count, context_length = 0, context_capacity;
+    int next_origin = 0, coupling_hops = 0, routing_hops = 0;
     MemoryContext walk_context, step_context, old;
     LaplaceTrajectoryScope *trajectory_scope = NULL;
-    LaplaceQueryState *query_state = NULL;
-    LaplaceQueryState *output_state = NULL;
+    LaplaceQueryState *query_state = NULL, *output_state = NULL;
     LaplaceCognitionProgram *cognition = NULL;
     LaplacePromptIntent coupled_intent = {0};
-    HTAB *route_seen;
-    HTAB *geometry_routed;
-    HTAB *origins;
-    int next_origin = 0;
-    int coupling_hops = 0;
-    int routing_hops = 0;
-    bool exhausted = false;
-    bool explicit_observation_scope = false;
+    HTAB *route_seen, *geometry_routed, *origins;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("forward execution: context must not be NULL")));
@@ -232,6 +219,8 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
             while ((nomination = hash_seq_search(&sequence)) != NULL)
             {
                 if (!nomination->summary.has_positive ||
+                    (nomination->summary.positive_covered_occurrences <= 0 &&
+                     nomination->summary.positive_required_occurrences <= 0) ||
                     hash_search(route_seen, &nomination->id, HASH_FIND, NULL))
                     continue;
                 laplace_tg_candidate_add(&candidates, &candidate_count, &candidate_capacity,
@@ -465,19 +454,27 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         bool route_for_meeting = false;
         if (open_turn && output_count > 0 && !bms_is_empty(obligations))
         {
+            static const uint8 space_b3[16] = {
+                0x00, 0x26, 0x3c, 0xa9, 0xf5, 0x7f, 0x71, 0x77,
+                0xf4, 0x95, 0xe3, 0x71, 0x1f, 0x8c, 0xdd, 0x59};
+            const Candidate *first_output = NULL;
             int need = bms_num_members(obligations), best = 0;
             for (int i = 0; i < candidate_count; ++i)
             {
                 if (!laplace_tg_candidate_can_output(&candidates[i], intent))
                     continue;
+                if (!first_output) first_output = &candidates[i];
                 best = Max(best, candidates[i].query.positive_required_occurrences);
                 best = Max(best, candidates[i].query_traversal.positive_required_occurrences);
                 best = Max(best, candidates[i].projection.positive_required_occurrences);
             }
-            route_for_meeting = best < need;
+            route_for_meeting = best < need &&
+                !(first_output && first_output->stride > 0 &&
+                  memcmp(&first_output->id, space_b3, sizeof(hash128_t)) == 0);
         }
         const bool routing_budget =
-            input && !(semantic_hop_limit >= 0 && routing_hops >= semantic_hop_limit);
+            input && !(semantic_hop_limit >= 0 && routing_hops >= semantic_hop_limit) &&
+            !(open_turn && output_count == 0);
         if (output_count == 0 && !routing_budget)
         {
             exhausted = true;
@@ -486,6 +483,7 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         if (output_count == 0 || (route_for_meeting && routing_budget))
         {
             ArrayBuildState *new_routed = NULL;
+            int routed_count = 0, route_limit = Max(fanout, top_k);
             ++routing_hops;
             if (cognition)
                 laplace_cognition_program_note_route(cognition);
@@ -510,9 +508,16 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
                     pfree(carried);
                 carried = keep ? DatumGetArrayTypeP(makeArrayResult(keep, walk_context)) : NULL;
             }
-            for (int i = 0; i < candidate_count; ++i)
+            for (int i = 0; i < candidate_count && (route_limit <= 0 || routed_count < route_limit); ++i)
             {
                 bool already_routed;
+                if (candidates[i].query.positive_covered_occurrences <= 0 &&
+                    candidates[i].query.positive_required_occurrences <= 0 &&
+                    candidates[i].query_traversal.positive_covered_occurrences <= 0 &&
+                    candidates[i].query_traversal.positive_required_occurrences <= 0 &&
+                    !candidates[i].projection.has_positive &&
+                    !laplace_tg_geometry_summary_present(&candidates[i].geometry))
+                    continue;
                 hash_search(route_seen, &candidates[i].id, HASH_ENTER, &already_routed);
                 if (laplace_tg_geometry_summary_present(&candidates[i].geometry))
                     hash_search(geometry_routed, &candidates[i].id, HASH_ENTER, NULL);
@@ -521,6 +526,7 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
                     Datum id = hash128_to_datum(&candidates[i].id);
                     new_routed = accumArrayResult(new_routed, id, false, BYTEAOID, walk_context);
                     pfree(DatumGetPointer(id));
+                    ++routed_count;
                 }
             }
             if (new_routed)
@@ -542,6 +548,17 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         if (open_turn)
             laplace_tg_order_leading_by_sharing(candidates, candidate_count);
         int limit = Min(candidate_count, top_k);
+        if (open_turn && limit > 1)
+        {
+            int32 top_g = laplace_tg_candidate_grounded(&candidates[0]);
+            int filtered = 1;
+            while (filtered < limit &&
+                   laplace_tg_candidate_grounded(&candidates[filtered]) == top_g &&
+                   candidates[filtered].stride == candidates[0].stride &&
+                   (top_g > 0 || candidates[filtered].sequence_occurrences * 2 >= candidates[0].sequence_occurrences))
+                ++filtered;
+            limit = filtered;
+        }
         if (spread == 0.0)
             pick = 0;
         else

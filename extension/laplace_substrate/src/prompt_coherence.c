@@ -476,6 +476,8 @@ emit_winners:
                  * one and loses to an agreeing one. */
                 double o_share    = o->total_mass    > 0.0 ? o->coherence    / o->total_mass    : 0.0;
                 double best_share = best->total_mass > 0.0 ? best->coherence / best->total_mass : 0.0;
+                if (o->coherence == best->coherence)
+                    o_share = best_share;
 
                 if (o_share > best_share
                     || (o_share == best_share && o->rel_mass > best->rel_mass)

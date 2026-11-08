@@ -100,6 +100,37 @@ int trajectory_build_rle(const hash128_t* constituents,
     return trajectory_build_flagged_rle(constituents, NULL, n, out_xyzm, out_vertex_count);
 }
 
+static inline void trajectory_unpack_vertex(const double vertex[4], mantissa_payload_t* out) {
+    uint64_t bx, by, bz;
+    memcpy(&bx, &vertex[0], sizeof(bx));
+    memcpy(&by, &vertex[1], sizeof(by));
+    memcpy(&bz, &vertex[2], sizeof(bz));
+    if (((bx >> 52) & 0x7FFULL) == 1021ULL &&
+        ((by >> 52) & 0x7FFULL) == 1021ULL &&
+        ((bz >> 52) & 0x7FFULL) == 1021ULL) {
+        const uint64_t mask43 = (1ULL << 43) - 1ULL;
+        const uint64_t mask42 = (1ULL << 42) - 1ULL;
+        unsigned __int128 v = (unsigned __int128)(bx & mask43)
+                            | ((unsigned __int128)(by & mask43) << 43)
+                            | ((unsigned __int128)(bz & mask42) << 86);
+        uint8_t b[16];
+        for (int i = 0; i < 16; ++i) {
+            b[i] = (uint8_t)(v & 0xFFu);
+            v >>= 8;
+        }
+        memcpy(&out->entity_id, b, sizeof(out->entity_id));
+        double m = vertex[3];
+        uint64_t mbits = (m >= 1.0 && m < (double)(1ULL << 53)) ? (uint64_t)m : 1ULL;
+        uint32_t run = (uint32_t)(mbits & ((1ULL << 30) - 1ULL));
+        if (run == 0u) run = 1u;
+        out->ordinal = 0u;
+        out->run_length = run > 0xFFFFu ? 0xFFFFu : (uint16_t)run;
+        out->flags = 0ULL;
+        return;
+    }
+    mantissa_unpack(vertex, out);
+}
+
 int trajectory_constituent_count(const double* trajectory_xyzm,
                                  size_t n_points,
                                  size_t* out_count) {
@@ -107,7 +138,7 @@ int trajectory_constituent_count(const double* trajectory_xyzm,
     size_t expanded = 0;
     for (size_t i = 0; i < n_points; ++i) {
         mantissa_payload_t p;
-        mantissa_unpack(&trajectory_xyzm[i * 4], &p);
+        trajectory_unpack_vertex(&trajectory_xyzm[i * 4], &p);
         size_t run = p.run_length ? p.run_length : 1;
         if (run > SIZE_MAX - expanded) return -1;
         expanded += run;
@@ -177,7 +208,7 @@ int trajectory_visit_vertices(const double* trajectory_xyzm, size_t n_points,
     size_t ordinal = 1;
     for (size_t i = 0; i < n_points; ++i) {
         mantissa_payload_t p;
-        mantissa_unpack(&trajectory_xyzm[i * 4], &p);
+        trajectory_unpack_vertex(&trajectory_xyzm[i * 4], &p);
         const size_t run = p.run_length ? p.run_length : 1;
         if (run - 1 > SIZE_MAX - ordinal) return -1;
         if (visitor(context, ordinal, &p.entity_id, run, p.flags) != 0) return -1;
@@ -255,12 +286,12 @@ int trajectory_equivalent(const double* left_xyzm,
            || ri < right_points || right_remaining > 0) {
         if (left_remaining == 0) {
             if (li >= left_points) return 0;
-            mantissa_unpack(&left_xyzm[li++ * 4], &left);
+            trajectory_unpack_vertex(&left_xyzm[li++ * 4], &left);
             left_remaining = left.run_length ? left.run_length : 1;
         }
         if (right_remaining == 0) {
             if (ri >= right_points) return 0;
-            mantissa_unpack(&right_xyzm[ri++ * 4], &right);
+            trajectory_unpack_vertex(&right_xyzm[ri++ * 4], &right);
             right_remaining = right.run_length ? right.run_length : 1;
         }
         if (left.entity_id.hi != right.entity_id.hi
@@ -330,7 +361,7 @@ static int trajectory_match(trajectory_suffix_matcher_t* matcher,
         double vertex[4];
         mantissa_payload_t payload;
         memcpy(vertex, bytes + i * sizeof(vertex), sizeof(vertex));
-        mantissa_unpack(vertex, &payload);
+        trajectory_unpack_vertex(vertex, &payload);
         size_t run = payload.run_length ? payload.run_length : 1;
         if (run > SIZE_MAX - total) return -1;
         total += run;
@@ -346,7 +377,7 @@ static int trajectory_match(trajectory_suffix_matcher_t* matcher,
         double vertex[4];
         mantissa_payload_t payload;
         memcpy(vertex, bytes + v * sizeof(vertex), sizeof(vertex));
-        mantissa_unpack(vertex, &payload);
+        trajectory_unpack_vertex(vertex, &payload);
         size_t run = payload.run_length ? payload.run_length : 1;
         for (size_t r = 0; r < run; ++r) {
             if (matched == matcher->count) matched = matcher->prefix[matched - 1];
@@ -403,7 +434,7 @@ trajectory_ordinal_index_t* trajectory_ordinal_index_create(
         double vertex[4];
         mantissa_payload_t payload;
         memcpy(vertex, index->packed + i * sizeof(vertex), sizeof(vertex));
-        mantissa_unpack(vertex, &payload);
+        trajectory_unpack_vertex(vertex, &payload);
         size_t run = payload.run_length ? payload.run_length : 1;
         if (run > SIZE_MAX - total) { free(index); return NULL; }
         index->ends[i] = total += run;
@@ -428,7 +459,7 @@ int trajectory_ordinal_index_read(const trajectory_ordinal_index_t* index,
     double vertex[4];
     mantissa_payload_t payload;
     memcpy(vertex, index->packed + low * sizeof(vertex), sizeof(vertex));
-    mantissa_unpack(vertex, &payload);
+    trajectory_unpack_vertex(vertex, &payload);
     *entity_id = payload.entity_id;
     if (flags) *flags = payload.flags;
     return 0;

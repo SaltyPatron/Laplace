@@ -2934,3 +2934,424 @@ flip = false
 surface = "reference"
 canonical = "IS_SENSE_OF"
 flip = false
+
+[[alias]]
+surface = "synset containing lemma"
+canonical = "HAS_SENSE"
+flip = false
+
+[[alias]]
+surface = "number of times the sense is tagged"
+canonical = "HAS_SENSE_FREQUENCY"
+flip = false
+
+[[alias]]
+surface = "number of senses of lemma that are ranked according to their frequency of occurrence in semantic concordance texts"
+canonical = "HAS_SENSE_FREQUENCY"
+flip = false
+
+[[alias]]
+surface = "generic verb sentence frames for words in the synset"
+canonical = "HAS_VERB_FRAME"
+flip = false
+
+[[alias]]
+surface = "base form"
+canonical = "IS_LEMMA_OF"
+flip = true
+
+[[alias]]
+surface = "other form"
+canonical = "FORM_OF"
+flip = true
+
+[[alias]]
+surface = "syntactic behaviour"
+canonical = "HAS_VALENCE_PATTERN"
+flip = false
+
+[[alias]]
+surface = "is lexicalized"
+canonical = "IS_LEXICALIZED"
+flip = false
+
+[[alias]]
+surface = "skos:definition"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "English definition"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "sense description"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "description"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "come with definitions"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "example sentence"
+canonical = "HAS_EXAMPLE"
+flip = false
+
+[[alias]]
+surface = "usage example"
+canonical = "HAS_EXAMPLE"
+flip = false
+
+[[alias]]
+surface = "frame element"
+canonical = "HAS_FRAME_ELEMENT"
+flip = false
+
+[[alias]]
+surface = "lexical unit"
+canonical = "EVOKES_FRAME"
+flip = true
+
+[[alias]]
+surface = "incorporate"
+canonical = "INCORPORATES"
+flip = false
+
+[[alias]]
+surface = "Requires"
+canonical = "REQUIRES"
+flip = false
+
+[[alias]]
+surface = "Excludes"
+canonical = "EXCLUDES"
+flip = false
+
+[[alias]]
+surface = "subtype"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "sense"
+canonical = "HAS_SENSE"
+flip = false
+
+[[alias]]
+surface = "word sense"
+canonical = "HAS_SENSE"
+flip = false
+
+[[alias]]
+surface = "synonym"
+canonical = "IS_SYNONYM_OF"
+flip = false
+
+[[alias]]
+surface = "more specific term"
+canonical = "IS_A"
+flip = true
+
+[[alias]]
+surface = "particular manner of this action"
+canonical = "MANNER_OF"
+flip = true
+
+[[alias]]
+surface = "has instance"
+canonical = "IS_INSTANCE_OF"
+flip = true
+
+[[alias]]
+surface = "being part of something"
+canonical = "HAS_PART"
+flip = true
+
+[[alias]]
+surface = "having a part"
+canonical = "HAS_PART"
+flip = false
+
+[[alias]]
+surface = "derived word"
+canonical = "DERIVATIONALLY_RELATED"
+flip = false
+
+[[alias]]
+surface = "related word"
+canonical = "RELATED_TO"
+flip = false
+
+[[alias]]
+surface = "coordinate term"
+canonical = "IS_COORDINATE_TERM_WITH"
+flip = false
+
+[[alias]]
+surface = "translation"
+canonical = "IS_TRANSLATION_OF"
+flip = false
+
+[[alias]]
+surface = "etymology section"
+canonical = "HAS_ETYMOLOGY"
+flip = false
+
+[[alias]]
+surface = "CapableOf"
+canonical = "CAPABLE_OF"
+flip = false
+
+[[alias]]
+surface = "AtLocation"
+canonical = "AT_LOCATION"
+flip = false
+
+[[alias]]
+surface = "Desires"
+canonical = "DESIRES"
+flip = false
+
+[[alias]]
+surface = "NotDesires"
+canonical = "DESIRES"
+flip = false
+
+[[alias]]
+surface = "HasProperty"
+canonical = "HAS_PROPERTY"
+flip = false
+
+[[alias]]
+surface = "ObjectUse"
+canonical = "OBJECT_USE"
+flip = false
+
+[[alias]]
+surface = "UsedFor"
+canonical = "USED_FOR"
+flip = false
+
+[[alias]]
+surface = "HinderedBy"
+canonical = "OBSTRUCTED_BY"
+flip = false
+
+[[alias]]
+surface = "HasSubEvent"
+canonical = "HAS_SUBEVENT"
+flip = false
+
+[[alias]]
+surface = "HasPrerequisite"
+canonical = "HAS_PREREQUISITE"
+flip = false
+
+[[alias]]
+surface = "Causes"
+canonical = "CAUSES"
+flip = false
+
+[[alias]]
+surface = "CausesDesire"
+canonical = "CAUSES_DESIRE"
+flip = false
+
+[[alias]]
+surface = "MotivatedByGoal"
+canonical = "MOTIVATED_BY_GOAL"
+flip = false
+
+[[alias]]
+surface = "ReceivesAction"
+canonical = "RECEIVES_ACTION"
+flip = false
+
+[[alias]]
+surface = "IsA"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "InstanceOf"
+canonical = "IS_INSTANCE_OF"
+flip = false
+
+[[alias]]
+surface = "PartOf"
+canonical = "HAS_PART"
+flip = true
+qualifier = "meronymy/part"
+
+[[alias]]
+surface = "HasContext"
+canonical = "HAS_CONTEXT"
+flip = false
+
+[[alias]]
+surface = "RelatedTo"
+canonical = "RELATED_TO"
+flip = false
+
+[[alias]]
+surface = "SimilarTo"
+canonical = "IS_SIMILAR_TO"
+flip = false
+
+[[alias]]
+surface = "Synonym"
+canonical = "IS_SYNONYM_OF"
+flip = false
+
+[[alias]]
+surface = "Antonym"
+canonical = "IS_ANTONYM_OF"
+flip = false
+
+[[alias]]
+surface = "DistinctFrom"
+canonical = "DISTINCT_FROM"
+flip = false
+
+[[alias]]
+surface = "DerivedFrom"
+canonical = "DERIVED_FROM"
+flip = false
+
+[[alias]]
+surface = "SymbolOf"
+canonical = "SYMBOL_OF"
+flip = false
+
+[[alias]]
+surface = "DefinedAs"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "MannerOf"
+canonical = "MANNER_OF"
+flip = false
+
+[[alias]]
+surface = "LocatedNear"
+canonical = "LOCATED_NEAR"
+flip = false
+
+[[alias]]
+surface = "CreatedBy"
+canonical = "CREATED_BY"
+flip = false
+
+[[alias]]
+surface = "FormOf"
+canonical = "FORM_OF"
+flip = false
+
+[[alias]]
+surface = "EtymologicallyRelatedTo"
+canonical = "ETYMOLOGICALLY_RELATED_TO"
+flip = false
+
+[[alias]]
+surface = "EtymologicallyDerivedFrom"
+canonical = "ETYMOLOGICALLY_DERIVED_FROM"
+flip = false
+
+[[alias]]
+surface = "xIntent"
+canonical = "X_INTENT"
+flip = false
+
+[[alias]]
+surface = "xAttr"
+canonical = "X_ATTR"
+flip = false
+
+[[alias]]
+surface = "xNeed"
+canonical = "X_NEED"
+flip = false
+
+[[alias]]
+surface = "xReason"
+canonical = "X_REASON"
+flip = false
+
+[[alias]]
+surface = "isFilledBy"
+canonical = "X_FILLED_BY"
+flip = false
+
+[[alias]]
+surface = "isBefore"
+canonical = "IS_BEFORE"
+flip = false
+
+[[alias]]
+surface = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
+canonical = "IS_A"
+flip = false
+
+[[alias]]
+surface = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+canonical = "IS_TYPED_AS"
+flip = false
+
+[[alias]]
+surface = "http://www.w3.org/2000/01/rdf-schema#label"
+canonical = "HAS_NAME"
+flip = false
+
+[[alias]]
+surface = "http://www.w3.org/2004/02/skos/core#prefLabel"
+canonical = "HAS_NAME"
+flip = false
+
+[[alias]]
+surface = "http://framebase.org/meta/hasDefinition"
+canonical = "HAS_DEFINITION"
+flip = false
+
+[[alias]]
+surface = "http://framebase.org/meta/isSimilarTo"
+canonical = "IS_SIMILAR_TO"
+flip = false
+
+[[alias]]
+surface = "http://framebase.org/meta/inheritsFrom"
+canonical = "INHERITS_FROM"
+flip = false
+
+[[alias]]
+surface = "http://framebase.org/meta/hasLexicalForm"
+canonical = "HAS_SENSE"
+flip = true
+
+[[alias]]
+surface = "http://framebase.org/meta/hasFramenetFrame"
+canonical = "EVOKES_FRAME"
+flip = false
+
+[[alias]]
+surface = "http://framebase.org/meta/hasFramenetLU"
+canonical = "EVOKES_FRAME"
+flip = true
+
+[[alias]]
+surface = "http://lemon-model.net/lemon#writtenRep"
+canonical = "HAS_NAME"
+flip = false
+
+[[alias]]
+surface = "http://www.lexinfo.net/ontology/2.0/lexinfo#partOfSpeech"
+canonical = "HAS_POS"
+flip = false

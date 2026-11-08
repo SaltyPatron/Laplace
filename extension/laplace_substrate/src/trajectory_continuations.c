@@ -151,6 +151,7 @@ laplace_trajectory_structural_candidates(LaplaceTrajectoryScope *scope,
     for (ScopedTrajectory *trajectory = scope->trajectories;
          trajectory; trajectory = trajectory->next)
     {
+        if (!trajectory->structural) continue;
         uint32 npoints = 0;
         const unsigned char *raw = laplace_trajectory_wkb_points(trajectory->wkb, &npoints);
         if (npoints == 0) continue;

@@ -26,8 +26,11 @@ static void
 receive_term_evidence(const LaplaceConsensusRow *row, void *context)
 {
     TermRead *read = context;
+    const laplace_relation_def_t *def = NULL;
     TermEvidence *entry = hash_search(read->evidence, &row->subject, HASH_FIND, NULL);
     if (!entry || row->object_is_null || !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
+    if (laplace_relation_lookup(&row->type, &def) != 0 || !def || !walk_relation_salient(row->type))
         return;
     entry->has_meaning = true;
 }

@@ -115,8 +115,18 @@ def main() -> int:
     assert "generation.forward_program(" in prompt_sql
     assert re.search(r"WHERE\s+p\.event\s*=\s*'emit'", prompt_sql, re.I)
 
-    program = (ROOT / "extension/laplace_substrate/src/trajectory_generate.c").read_text()
-    entry = program.split("forward_prompt(FunctionCallInfo fcinfo, bool trace)", 1)[1]
+    src_dir = ROOT / "extension/laplace_substrate/src"
+    program = "\n".join(
+        (src_dir / name).read_text(encoding="utf-8")
+        for name in (
+            "trajectory_generate_internal.h",
+            "trajectory_generate_evidence.c",
+            "trajectory_generate_election.c",
+            "trajectory_generate.c",
+            "trajectory_generate_couple.c",
+        )
+    )
+    entry = program.split("Datum\nlaplace_tg_forward_prompt(FunctionCallInfo fcinfo, bool trace)", 1)[1]
     assert count(entry, "laplace_prompt_input(") == 1
     assert "laplace_explore_web(" not in program
     assert "laplace_steer_candidates(" not in program
@@ -130,7 +140,14 @@ def main() -> int:
     assert "walk_continuations(" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
-    intent_header = (ROOT / "extension/laplace_substrate/src/prompt_intent.h").read_text()
+    intent_header = "\n".join(
+        (src_dir / name).read_text(encoding="utf-8")
+        for name in (
+            "prompt_intent.h",
+            "prompt_intent_geometry.h",
+            "prompt_intent_contract.h",
+        )
+    )
     # Naming/sense evidence remains data in the response field. Execution needs
     # a source/context-attributed whole-root invocation with exact input records;
     # naming an operation and finding an answer is not an invocation contract.
@@ -182,7 +199,14 @@ def main() -> int:
     assert "laplace_cognition_program_finalize(" in program
     assert "emit_terminal(" in program
 
-    completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
+    completion = "\n".join(
+        (src_dir / name).read_text(encoding="utf-8")
+        for name in (
+            "cognition_program.c",
+            "cognition_program_fingerprint.c",
+            "cognition_program_internal.h",
+        )
+    )
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
     assert re.search(r"program->required = operation_count == 0 && content_required\s*"
@@ -247,10 +271,18 @@ def main() -> int:
     assert "emitted IS DISTINCT FROM ARRAY[result_id]" in cognition_completion
 
     # Candidate proposal and exact candidate adjudication remain distinct.
-    evidence_native = (ROOT / "extension/laplace_substrate/src/query_evidence.c").read_text()
+    evidence_native = "\n".join(
+        (src_dir / name).read_text(encoding="utf-8")
+        for name in (
+            "query_evidence.c",
+            "query_evidence_state.c",
+            "query_evidence_observations.c",
+            "query_evidence_internal.h",
+        )
+    )
     assert "laplace_query_state_candidate_evidence(" in evidence_native
-    assert "laplace_consensus_scan(operand_ids, candidate_ids" in evidence_native
-    assert "laplace_consensus_scan(candidate_ids, operand_ids" in evidence_native
+    assert "laplace_consensus_candidates(operand_ids, candidate_ids" in evidence_native
+    assert "laplace_consensus_candidates(candidate_ids, operand_ids" in evidence_native
     assert "state->operands = DatumGetArrayTypePCopy" in evidence_native
     assert "query_state_append_operands(state, selected, selected_count, operand_role)" in evidence_native
     assert count(program, "laplace_query_state_candidate_evidence(") == 2
