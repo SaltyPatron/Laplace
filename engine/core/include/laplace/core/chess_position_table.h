@@ -11,6 +11,7 @@ extern "C" {
 
 int chess_position_table_load(const char* path);
 int chess_position_table_load_profile(const char* path, const char* profile);
+int chess_position_table_split_file(const char* path);
 void chess_position_table_unload(void);
 int chess_position_table_is_loaded(void);
 

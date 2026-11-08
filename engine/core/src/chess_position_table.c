@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
@@ -29,16 +30,11 @@ static struct {
     uint64_t                                record_count;
 } g_ch = {0};
 
-/* Immutable map readers remain concurrent. A fixed set of cache-line-separated
- * reader counters avoids making every search contend on one shared counter.
- * Threads select a shard once; reuse after 64 threads remains safe because each
- * shard counts its current readers. This is bounded state, not an unbounded TLS
- * registration/retirement list. Publication alone drains all shards. */
 #define CH_READER_SHARDS 64u
 typedef struct { _Alignas(64) atomic_uint count; } ch_reader_shard_t;
 static ch_reader_shard_t g_ch_readers[CH_READER_SHARDS];
-static atomic_uint g_ch_next_shard = ATOMIC_VAR_INIT(0);
-static atomic_bool g_ch_publishing = ATOMIC_VAR_INIT(0);
+static atomic_uint g_ch_next_shard = 0;
+static atomic_bool g_ch_publishing = 0;
 static atomic_flag g_ch_writer = ATOMIC_FLAG_INIT;
 #ifdef _MSC_VER
 static __declspec(thread) unsigned g_ch_reader_shard = CH_READER_SHARDS;
@@ -66,8 +62,6 @@ static void ch_read_enter(void) {
         if (!atomic_compare_exchange_weak_explicit(readers, &count, count + 1u,
                                                    memory_order_seq_cst, memory_order_relaxed))
             continue;
-        /* SC ordering is intentional: either publication sees this reader count,
-         * or this recheck sees publication before any mapped bytes are touched. */
         if (!atomic_load_explicit(&g_ch_publishing, memory_order_seq_cst)) return;
         atomic_fetch_sub_explicit(readers, 1u, memory_order_seq_cst);
     }
@@ -142,6 +136,94 @@ static void ch_unmap(const uint8_t* base, size_t len) {
 
 #endif
 
+static int ch_shard_path(const char* base_path, const char* shard_name, char* out, size_t cap) {
+    if (!base_path || !*base_path || !shard_name || !out || cap < 16) return -1;
+    size_t len = strlen(base_path);
+    const char* ext = (len > 4 && strcmp(base_path + len - 4, ".bin") == 0) ? (base_path + len - 4) : (base_path + len);
+    size_t stem_len = (size_t)(ext - base_path);
+    int w = snprintf(out, cap, "%.*s.%s.bin", (int)stem_len, base_path, shard_name);
+    return (w > 0 && (size_t)w < cap) ? 0 : -1;
+}
+
+static int ch_write_shard(const char* out_path,
+                          const laplace_chess_perfcache_header_t* src_hdr,
+                          const laplace_chess_perfcache_record_t* src_recs,
+                          uint64_t src_count,
+                          int want_tier1,
+                          const char* scope_name) {
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < src_count; ++i) {
+        int is_t1 = src_recs[i].tier <= 1;
+        if (is_t1 == want_tier1) count++;
+    }
+    size_t body_bytes = LAPLACE_CHESS_PERFCACHE_HEADER_SIZE + (size_t)count * LAPLACE_CHESS_PERFCACHE_RECORD_SIZE;
+    uint8_t* buf = (uint8_t*)calloc(1, body_bytes + LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES);
+    if (!buf) return -1;
+    laplace_chess_perfcache_header_t* h = (laplace_chess_perfcache_header_t*)buf;
+    *h = *src_hdr;
+    h->record_count = count;
+    memset(h->scope, 0, sizeof(h->scope));
+    snprintf(h->scope, sizeof(h->scope), "%s", scope_name);
+    laplace_chess_perfcache_record_t* dst =
+        (laplace_chess_perfcache_record_t*)(buf + LAPLACE_CHESS_PERFCACHE_HEADER_SIZE);
+    uint64_t k = 0;
+    for (uint64_t i = 0; i < src_count; ++i) {
+        int is_t1 = src_recs[i].tier <= 1;
+        if (is_t1 == want_tier1) dst[k++] = src_recs[i];
+    }
+    hash128_t crc;
+    hash128_blake3(buf, body_bytes, &crc);
+    memcpy(buf + body_bytes, &crc, sizeof(crc));
+
+    char tmp[4096];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", out_path);
+    FILE* f = fopen(tmp, "wb");
+    if (!f) { free(buf); return -1; }
+    size_t total = body_bytes + LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES;
+    int ok = fwrite(buf, 1, total, f) == total;
+    if (fclose(f) != 0) ok = 0;
+    free(buf);
+    if (ok) {
+#ifdef _WIN32
+        (void)remove(out_path);
+#endif
+        if (rename(tmp, out_path) != 0) ok = 0;
+    }
+    if (!ok) { (void)remove(tmp); return -1; }
+    return 0;
+}
+
+int chess_position_table_split_file(const char* path) {
+    if (!path || !*path) return -1;
+    const uint8_t* base = NULL;
+    size_t len = 0;
+    if (ch_map(path, &base, &len) != 0) return -1;
+    const laplace_chess_perfcache_header_t* h = (const laplace_chess_perfcache_header_t*)base;
+    if (h->magic != LAPLACE_CHESS_PERFCACHE_MAGIC || h->format_version != LAPLACE_CHESS_PERFCACHE_VERSION
+        || h->record_size != LAPLACE_CHESS_PERFCACHE_RECORD_SIZE
+        || h->records_offset != LAPLACE_CHESS_PERFCACHE_HEADER_SIZE) {
+        ch_unmap(base, len);
+        return -2;
+    }
+    uint64_t body_end = len - LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES;
+    if ((body_end - h->records_offset) / h->record_size != h->record_count) {
+        ch_unmap(base, len);
+        return -3;
+    }
+    const laplace_chess_perfcache_record_t* recs =
+        (const laplace_chess_perfcache_record_t*)(base + h->records_offset);
+    char t1_path[4096], op_path[4096];
+    int rc = 0;
+    if (ch_shard_path(path, "tier1", t1_path, sizeof(t1_path)) != 0
+        || ch_shard_path(path, "openings", op_path, sizeof(op_path)) != 0
+        || ch_write_shard(t1_path, h, recs, h->record_count, 1, "tier1") != 0
+        || ch_write_shard(op_path, h, recs, h->record_count, 0, "openings") != 0) {
+        rc = -1;
+    }
+    ch_unmap(base, len);
+    return rc;
+}
+
 void chess_position_table_unload(void) {
     ch_write_enter();
     if (g_ch.filtered_records) free(g_ch.filtered_records);
@@ -173,7 +255,14 @@ int chess_position_table_load_profile(const char* path, const char* profile) {
 
     const uint8_t* base = NULL;
     size_t len = 0;
-    if (ch_map(path, &base, &len) != 0) return -1;
+    char shard_file[4096];
+    int mapped_shard = 0;
+    if (tier1_only && ch_shard_path(path, "tier1", shard_file, sizeof(shard_file)) == 0
+        && ch_map(shard_file, &base, &len) == 0) {
+        mapped_shard = 1;
+    } else if (ch_map(path, &base, &len) != 0) {
+        return -1;
+    }
 
     const laplace_chess_perfcache_header_t* h =
         (const laplace_chess_perfcache_header_t*)base;
@@ -216,7 +305,7 @@ int chess_position_table_load_profile(const char* path, const char* profile) {
 
     laplace_chess_perfcache_record_t* filtered = NULL;
     uint64_t active_count = h->record_count;
-    if (tier1_only) {
+    if (tier1_only && !mapped_shard) {
         uint64_t n_tier1 = 0;
         for (uint64_t i = 0; i < h->record_count; ++i)
             if (records[i].tier <= 1) n_tier1++;

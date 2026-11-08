@@ -1,17 +1,10 @@
-
-
-
 DROP FUNCTION IF EXISTS laplace.translations(bytea, int);
 CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
     WITH src_langs AS (
-        SELECT c.object_id AS id FROM laplace.consensus c
-        WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-        UNION
-        SELECT b.language AS id FROM converse.binding_evidence(ARRAY[p_word], NULL, false) b
-        WHERE b.language IS NOT NULL
+        SELECT c.lang AS id FROM converse.word_language_candidates_batch(ARRAY[p_word]) c
     ),
     agg AS (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,

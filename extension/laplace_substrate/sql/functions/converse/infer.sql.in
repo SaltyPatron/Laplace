@@ -140,8 +140,8 @@ cand_members AS MATERIALIZED (
     SELECT DISTINCT c.object_id AS id
     FROM cand_ids ci, laplace.v_consensus_unrefuted c
     WHERE c.object_id = ANY (ci.ids)
-      AND c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'),
-                        laplace.relation_type_id('EVOKES_FRAME'))
+      AND c.type_id = ANY (consensus.relation_set_ids('PATH_LATERAL'))
+      AND consensus.relation_canonical(c.type_id) IN ('IS_SYNONYM_OF', 'EVOKES_FRAME')
 ),
 cand AS MATERIALIZED (
     SELECT rc.id, max(rc.m) AS m

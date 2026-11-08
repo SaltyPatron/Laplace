@@ -267,11 +267,34 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
             run_arm(realize_plan_synset_lemma(), PointerGetDatum(resid_arr), lang, lang_null,
                     &arm_lemma, render_ids, &union_ids, &un, &ucap, "lexicalization");
-            run_arm(realize_plan_has_name(), PointerGetDatum(resid_arr), lang, lang_null,
-                    &arm_name, render_ids, &union_ids, &un, &ucap, "has_name");
-            run_arm(realize_plan_translation(), PointerGetDatum(resid_arr), lang, lang_null,
-                    &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
-            arm_input = resid_arr;
+
+            /* Prune IDs already lexicalized before running name/translation/definition arms. */
+            {
+                int32 next_n = 0;
+
+                for (int32 r = 0; r < nresid; r++)
+                {
+                    IdKey rk;
+
+                    id_key(&rk, resid[r], "residual filter");
+                    if (hash_search(arm_lemma.by_id, &rk, HASH_FIND, NULL) == NULL)
+                        resid[next_n++] = resid[r];
+                }
+                nresid = next_n;
+            }
+
+            if (nresid > 0)
+            {
+                resid_arr = construct_array(resid, nresid, BYTEAOID, -1,
+                                            false, TYPALIGN_INT);
+                run_arm(realize_plan_has_name(), PointerGetDatum(resid_arr), lang, lang_null,
+                        &arm_name, render_ids, &union_ids, &un, &ucap, "has_name");
+                run_arm(realize_plan_translation(), PointerGetDatum(resid_arr), lang, lang_null,
+                        &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
+                arm_input = resid_arr;
+            }
+            else
+                arm_input = NULL;
         }
         else
             arm_input = NULL;

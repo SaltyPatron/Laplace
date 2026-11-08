@@ -31,13 +31,14 @@ BEGIN ATOMIC
              ) AS u(lang, lbl)
     ),
     lang_def_edges AS MATERIALIZED (
-        SELECT d.subject_id AS lang, d.object_id AS def_id,
-               row_number() OVER (ORDER BY d.subject_id, d.object_id) AS rn
-        FROM laplace.consensus d, want w0, cand_langs cl
+        SELECT d.subject_id AS lang, d.neighbour_id AS def_id,
+               row_number() OVER (ORDER BY d.subject_id, d.neighbour_id) AS rn
+        FROM want w0, cand_langs cl,
+             LATERAL consensus.edges_raw_batch(
+                 cl.langs, 'out', ARRAY[laplace.relation_type_id('HAS_DEFINITION')], 8, false, 'eff_mu') d
         WHERE w0.name IS NOT NULL
           AND cl.langs IS NOT NULL
-          AND d.subject_id = ANY (cl.langs)
-          AND d.type_id = laplace.relation_type_id('HAS_DEFINITION')
+          AND d.neighbour_id IS NOT NULL
           AND consensus.eff_mu(d.rating, d.rd) > 0
     ),
     lang_def_rendered AS MATERIALIZED (

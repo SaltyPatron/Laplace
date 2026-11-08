@@ -98,9 +98,18 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
 				&peers_exact_one_plan,
-				"SELECT EXISTS (SELECT 1 FROM laplace.consensus c "
-				"WHERE c.subject_id = $1 "
-				"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE')))",
+				"SELECT EXISTS ("
+				"  SELECT 1 FROM public.laplace_holders("
+				"      ARRAY[public.blake3_from_bytea($1)], '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,"
+				"      ARRAY[public.laplace_bank_bit('kind', 'tuple')], 1::smallint) h "
+				"  WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
+				"    AND public.laplace_path_length(h.path) = 3 "
+				"    AND (public.laplace_parts(h.path))[1] = public.blake3_from_bytea($1)"
+				") OR EXISTS ("
+				"  SELECT 1 FROM laplace.consensus c "
+				"  WHERE c.subject_id = $1 "
+				"    AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))"
+				")",
 				1, at, "lexical_peers_batch"),
 			av, NULL, true, 1);
 		if (rc != SPI_OK_SELECT || SPI_processed != 1)
@@ -125,9 +134,17 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
 				&peers_exact_batch_plan,
+				"SELECT DISTINCT public.blake3_send((public.laplace_parts(h.path))[1]) "
+				"FROM public.laplace_holders("
+				"    ARRAY(SELECT public.blake3_from_bytea(u.id) FROM unnest($1::bytea[]) u(id)),"
+				"    '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,"
+				"    ARRAY[public.laplace_bank_bit('kind', 'tuple')], 1::smallint) h "
+				"WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
+				"  AND public.laplace_path_length(h.path) = 3 "
+				"UNION "
 				"SELECT DISTINCT c.subject_id FROM laplace.consensus c "
 				"WHERE c.subject_id = ANY($1) "
-				"AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
+				"  AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
 				1, at, "lexical_peers_batch"),
 			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)

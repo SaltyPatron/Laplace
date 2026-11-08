@@ -183,8 +183,7 @@ public sealed class ElectorArchitectureGateTests
         Assert.Contains("program_id bytea", programSql);
         Assert.Contains("remaining_required int", programSql);
         Assert.Contains("semantic_act_id bytea", programSql);
-        var native = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
-            "extension", "laplace_substrate", "src", "trajectory_generate.c"));
+        var native = string.Join("`n", Directory.EnumerateFiles(Path.Combine(TypeIdLawTests.FindRepoRootPublic(), "extension", "laplace_substrate", "src"), "trajectory_generate*.c").OrderByDescending(p => Path.GetFileName(p).Equals("trajectory_generate.c", StringComparison.OrdinalIgnoreCase)).ThenBy(p => p).Select(File.ReadAllText));
         Assert.Contains("laplace_prompt_input(PG_GETARG_TEXT_PP(0))", native);
         Assert.DoesNotContain("laplace_explore_web(", native);
         Assert.DoesNotContain("laplace_steer_candidates(", native);
@@ -199,23 +198,23 @@ public sealed class ElectorArchitectureGateTests
         var promptEntry = native[native.IndexOf(
             "forward_prompt(FunctionCallInfo fcinfo, bool trace)", StringComparison.Ordinal)..];
         Assert.DoesNotContain("laplace_prompt_intent_compile(", promptEntry);
-        Assert.Contains("laplace_prompt_intent_compile(&coupled_intent, invocation_context, fanout)", native);
-        Assert.Contains("laplace_task_shape_compile(&coupled_intent, fanout)", native);
+        Assert.Contains("laplace_prompt_intent_compile(coupled_intent_out, invocation_context, fanout)", native);
+        Assert.Contains("laplace_task_shape_compile(coupled_intent_out, fanout)", native);
         var queryOffset = native.IndexOf("query_state = laplace_query_state_create(", StringComparison.Ordinal);
         var coupleOffset = native.IndexOf("laplace_prompt_intent_couple(", StringComparison.Ordinal);
         var compileOffset = native.IndexOf("laplace_prompt_intent_compile(", StringComparison.Ordinal);
         Assert.True(queryOffset >= 0 && queryOffset < coupleOffset && coupleOffset < compileOffset,
             "Operational interpretation must consume the coupled substrate response after query creation.");
         Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*NULL,\s*invocation_context,\s*discourse\s*\)", native);
-        Assert.Contains("laplace_prompt_intent_bind_discourse(&coupled_intent, discourse)", native);
+        Assert.Contains("laplace_prompt_intent_bind_discourse(coupled_intent_out, discourse)", native);
         Assert.Contains("context_array, frontier_array, discourse, walk_context", native);
         Assert.Contains("roles[used++] = LAPLACE_QUERY_OPERAND_DISCOURSE;", native);
         Assert.Contains("p_prior_frontier is the historical public parameter name", programSql);
         Assert.DoesNotMatch(
             @"if\s*\(!PG_ARGISNULL\(8\)\)\s*\{(?:(?!\}\s*LOCAL_FCINFO).)*prompt_frontier_add",
             native);
-        Assert.Contains("return forward_prompt(fcinfo, false);", native);
-        Assert.Contains("return forward_prompt(fcinfo, true);", native);
+        Assert.Contains("return laplace_tg_forward_prompt(fcinfo, false);", native);
+        Assert.Contains("return laplace_tg_forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
         Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
@@ -263,8 +262,7 @@ public sealed class ElectorArchitectureGateTests
     public void PromptCoherence_DefineVerb_IsPinnedToDefinitionRelation()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var source = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
+        var source = string.Join("`n", Directory.EnumerateFiles(Path.Combine(repoRoot, "extension", "laplace_substrate", "src"), "prompt_coherence*.c").OrderByDescending(p => Path.GetFileName(p).Equals("trajectory_generate.c", StringComparison.OrdinalIgnoreCase)).ThenBy(p => p).Select(File.ReadAllText));
 
         Assert.Matches(@"\{\s*""definition""\s*,\s*""define""\s*\}", source);
     }
@@ -273,8 +271,7 @@ public sealed class ElectorArchitectureGateTests
     public void PromptCoherence_HasNoSeedScaleOrCrossUnitScoreProduct()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var source = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
+        var source = string.Join("`n", Directory.EnumerateFiles(Path.Combine(repoRoot, "extension", "laplace_substrate", "src"), "prompt_coherence*.c").OrderByDescending(p => Path.GetFileName(p).Equals("trajectory_generate.c", StringComparison.OrdinalIgnoreCase)).ThenBy(p => p).Select(File.ReadAllText));
 
         Assert.DoesNotContain("1.0e13", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("mass_sat", source, StringComparison.OrdinalIgnoreCase);
@@ -295,8 +292,7 @@ public sealed class ElectorArchitectureGateTests
     public void PromptCoherence_SpecificityUsesBidirectionalIncidentMass()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var source = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
+        var source = string.Join("`n", Directory.EnumerateFiles(Path.Combine(repoRoot, "extension", "laplace_substrate", "src"), "prompt_coherence*.c").OrderByDescending(p => Path.GetFileName(p).Equals("trajectory_generate.c", StringComparison.OrdinalIgnoreCase)).ThenBy(p => p).Select(File.ReadAllText));
 
         Assert.Contains("cands[me->idx[i]].total_mass += rank * eff;", source,
             StringComparison.Ordinal);

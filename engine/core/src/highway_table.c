@@ -10,12 +10,17 @@ static _Atomic(const lp_highway *) active_highway;
 static const lp_highway *current_highway(void) {
     return atomic_load_explicit(&active_highway, memory_order_acquire);
 }
-int highway_table_load(const char *path) {
+int highway_table_load_profile(const char *path, const char *profile) {
     if (!path || !*path) return -1;
-    const lp_highway *mapped = lp_highway_map(path);
+    uint32_t mask = (profile && *profile) ? lp_highway_parse_branches(profile) : 0u;
+    if (profile && *profile && !mask) return -2;
+    const lp_highway *mapped = mask ? lp_highway_map_branches(path, mask) : lp_highway_map(path);
     if (!mapped) return -2;
     atomic_store_explicit(&active_highway, mapped, memory_order_release);
     return 0;
+}
+int highway_table_load(const char *path) {
+    return highway_table_load_profile(path, NULL);
 }
 void highway_table_unload(void) {
     atomic_store_explicit(&active_highway, NULL, memory_order_release);

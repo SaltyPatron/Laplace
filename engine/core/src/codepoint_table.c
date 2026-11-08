@@ -27,18 +27,34 @@ static const lp_tier0_record *current_floor(void) {
 int codepoint_table_load_perfcache(const char *path) {
     if (!path || !*path) return -1;
     if (strchr(path, '@') != NULL) return codepoint_table_load_branches(path, NULL);
-    size_t size = 0;
-    const void *candidate = lp_map_file(path, 0, &size);
-    if (!candidate) return -1;
+    const lp_tier0_record *prior = atomic_load_explicit(&active_floor, memory_order_acquire);
     const size_t bytes = (size_t)LP_TIER0_COUNT * sizeof(lp_tier0_record);
-    if (size != bytes) { lp_unmap_file(candidate, size); return -3; }
+    const void *candidate = NULL;
+    size_t size = 0;
+    if (prior) {
+        candidate = lp_map_file(path, 0, &size);
+        if (!candidate) return -1;
+        if (size != bytes) { lp_unmap_file(candidate, size); return -3; }
+    }
     const lp_tier0_record *canonical = text_identity_load_scalar_floor(path);
-    if (!canonical) { lp_unmap_file(candidate, size); return -5; }
-    /* An alias may select the same immutable floor. A second, divergent floor
-     * cannot change coordinates underneath live text contexts and readers. */
-    int same = memcmp(candidate, canonical, bytes) == 0;
-    lp_unmap_file(candidate, size);
-    if (!same) return -4;
+    if (!canonical) {
+        if (candidate) lp_unmap_file(candidate, size);
+        if (!prior) {
+            candidate = lp_map_file(path, 0, &size);
+            if (!candidate) return -1;
+            int mismatch = (size != bytes);
+            lp_unmap_file(candidate, size);
+            if (mismatch) return -3;
+        }
+        return -5;
+    }
+    if (candidate) {
+        /* An alias may select the same immutable floor. A second, divergent floor
+         * cannot change coordinates underneath live text contexts and readers. */
+        int same = memcmp(candidate, canonical, bytes) == 0;
+        lp_unmap_file(candidate, size);
+        if (!same) return -4;
+    }
     atomic_store_explicit(&explicitly_unloaded, 0, memory_order_release);
     atomic_store_explicit(&active_floor, canonical, memory_order_release);
     return 0;
@@ -54,6 +70,8 @@ int codepoint_table_load_branches(const char *path, const char *profile) {
     if (!floor) return -1;
     if (lp_tier0_active_branches(floor) == LP_TIER0_BRANCH_ALL)
         (void)text_identity_load_scalar_floor(path);
+    else
+        text_identity_set_scalar_floor(floor);
     atomic_store_explicit(&explicitly_unloaded, 0, memory_order_release);
     atomic_store_explicit(&active_floor, floor, memory_order_release);
     return 0;

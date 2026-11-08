@@ -30,26 +30,316 @@
 -- they never realize.render.
 DROP FUNCTION IF EXISTS laplace.edges_raw(bytea, text, bytea[], int, boolean, text);
 
-CREATE OR REPLACE FUNCTION consensus.edges_raw_batch(
+CREATE OR REPLACE FUNCTION consensus._edges_raw_batch_impl(
         p_subjects  bytea[],
-        p_direction text    DEFAULT 'both',   -- 'out' | 'in' | 'both'
-        p_types     bytea[] DEFAULT NULL,     -- NULL = every relation type
-        p_limit     int     DEFAULT 40,       -- per-subject limit over the ranking
-        p_refuted   boolean DEFAULT false,    -- include edges the fold consensus.refuted
-        p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
+        p_direction text,
+        p_types     bytea[],
+        p_limit     int,
+        p_refuted   boolean,
+        p_rank      text)
     RETURNS TABLE(subject_id bytea, direction text, type_id bytea, neighbour_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
+    LANGUAGE plpgsql STABLE PARALLEL SAFE
+AS $$
+BEGIN
+    IF COALESCE(cardinality(p_subjects), 0) = 0 THEN
+        RETURN;
+    END IF;
+
+    IF p_direction = 'out' THEN
+        RETURN QUERY
+        WITH keys AS MATERIALIZED (
+            SELECT s.id AS subject_id,
+                   public.blake3_from_bytea(s.id) AS b3_id,
+                   row_number() OVER (ORDER BY s.id) AS ord
+            FROM (SELECT DISTINCT u.id FROM unnest(p_subjects) AS u(id) WHERE u.id IS NOT NULL) s
+        ),
+        key_arr AS MATERIALIZED (
+            SELECT COALESCE(array_agg(k.b3_id ORDER BY k.ord), '{}'::public.blake3[]) AS b3_ids
+            FROM keys k
+        ),
+        surfaces AS MATERIALIZED (
+            SELECT s.surface_id,
+                   public.blake3_from_bytea(s.surface_id) AS surface_b3,
+                   s.canonical_id,
+                   s.inverse
+            FROM consensus.relation_surfaces(p_types) s
+        ),
+        type_filter AS MATERIALIZED (
+            SELECT CASE WHEN p_types IS NULL THEN NULL::public.blake3[]
+                        ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3)
+                   END AS b3_types,
+                   EXISTS (SELECT 1 FROM surfaces WHERE inverse) AS has_inverse
+        ),
+        native_claims AS MATERIALIZED (
+            SELECT k.subject_id, k.b3_id AS subj_b3, c.entity, c.path,
+                   public.laplace_parts(c.path) AS parts,
+                   c.rating, c.deviation, c.volatility, c.matches
+            FROM key_arr ka
+            CROSS JOIN type_filter tf
+            CROSS JOIN LATERAL public.laplace_claims_each(
+                ka.b3_ids, NULL::bigint, ARRAY[public.laplace_bank_bit('kind','claim')],
+                '{}'::public.blake3[],
+                (CASE WHEN tf.has_inverse THEN 3 ELSE 1 END)::smallint,
+                tf.b3_types) c
+            JOIN keys k ON k.ord = c.i
+            WHERE cardinality(ka.b3_ids) > 0
+              AND (public.laplace_path_starts(c.path, k.b3_id)
+                   OR public.laplace_path_ends(c.path, k.b3_id))
+        ),
+        claim_meta AS MATERIALIZED (
+            SELECT m.surface_id, m.canonical_id, m.inverse
+            FROM consensus.relation_metadata(ARRAY(
+                SELECT DISTINCT public.blake3_send(c.parts[2])
+                FROM native_claims c
+                WHERE cardinality(c.parts) = 3)) m
+        ),
+        oriented_native AS MATERIALIZED (
+            SELECT c.subject_id,
+                   c.entity,
+                   'out'::text AS direction,
+                   CASE WHEN cardinality(c.parts) = 3
+                        THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
+                   END AS type_id,
+                   CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3
+                        THEN public.blake3_send(c.parts[1])
+                        ELSE public.blake3_send(CASE WHEN cardinality(c.parts) <= 3 THEN c.parts[cardinality(c.parts)] ELSE c.entity END)
+                   END AS neighbour_id,
+                   round(c.rating::numeric*1e9)::bigint AS rating,
+                   round(c.deviation::numeric*1e9)::bigint AS rd,
+                   round(c.volatility::numeric*1e9)::bigint AS volatility,
+                   GREATEST(c.matches, 1)::bigint AS witness_count
+            FROM native_claims c
+            LEFT JOIN claim_meta m
+              ON cardinality(c.parts) = 3
+             AND m.surface_id = public.blake3_send(c.parts[2])
+            WHERE cardinality(c.parts) >= 1
+              AND ((NOT COALESCE(m.inverse, false) AND public.laplace_path_starts(c.path, c.subj_b3))
+                   OR (COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 AND public.laplace_path_ends(c.path, c.subj_b3)))
+        ),
+        native_dedup AS MATERIALIZED (
+            SELECT DISTINCT ON (o.subject_id, o.direction, o.type_id, o.neighbour_id)
+                   o.*
+            FROM oriented_native o
+            WHERE (p_types IS NULL
+                   OR o.type_id = ANY (p_types)
+                   OR o.type_id IN (SELECT canonical_id FROM surfaces))
+              AND (p_refuted OR NOT consensus.refuted(o.rating, o.rd))
+            ORDER BY o.subject_id, o.direction, o.type_id, o.neighbour_id,
+                     consensus.eff_mu(o.rating, o.rd) DESC, o.witness_count DESC, o.entity
+        ),
+        ranked AS (
+            SELECT e.*,
+                   row_number() OVER (
+                       PARTITION BY e.subject_id
+                       ORDER BY CASE WHEN p_rank = 'edge_rank'
+                                     THEN COALESCE(consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd)), 0.0)
+                                     ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
+                                END DESC NULLS LAST,
+                                e.neighbour_id,
+                                e.type_id
+                   ) AS rn
+            FROM native_dedup e
+        )
+        SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
+               r.rating, r.rd, r.volatility, r.witness_count
+        FROM ranked r
+        WHERE p_limit IS NULL OR r.rn <= p_limit
+        ORDER BY r.subject_id, r.rn;
+
+        IF FOUND THEN
+            RETURN;
+        END IF;
+
+        RETURN QUERY
+        WITH combined AS (
+            SELECT c.subject_id, 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
+                   c.rating, c.rd, c.volatility, c.witness_count
+            FROM laplace.consensus c
+            WHERE c.subject_id = ANY (p_subjects)
+              AND c.object_id IS NOT NULL
+              AND (p_types IS NULL OR c.type_id = ANY (p_types))
+              AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
+        ),
+        deduped_all AS (
+            SELECT DISTINCT ON (e.subject_id, e.direction, e.type_id, e.neighbour_id)
+                   e.*
+            FROM combined e
+            ORDER BY e.subject_id, e.direction, e.type_id, e.neighbour_id,
+                     consensus.eff_mu(e.rating, e.rd) DESC, e.witness_count DESC
+        ),
+        ranked AS (
+            SELECT e.*,
+                   row_number() OVER (
+                       PARTITION BY e.subject_id
+                       ORDER BY CASE WHEN p_rank = 'edge_rank'
+                                     THEN COALESCE(consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd)), 0.0)
+                                     ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
+                                END DESC NULLS LAST,
+                                e.neighbour_id,
+                                e.type_id
+                   ) AS rn
+            FROM deduped_all e
+        )
+        SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
+               r.rating, r.rd, r.volatility, r.witness_count
+        FROM ranked r
+        WHERE p_limit IS NULL OR r.rn <= p_limit
+        ORDER BY r.subject_id, r.rn;
+        RETURN;
+    END IF;
+
+    IF p_direction = 'in' THEN
+        RETURN QUERY
+        WITH keys AS MATERIALIZED (
+            SELECT s.id AS subject_id,
+                   public.blake3_from_bytea(s.id) AS b3_id,
+                   row_number() OVER (ORDER BY s.id) AS ord
+            FROM (SELECT DISTINCT u.id FROM unnest(p_subjects) AS u(id) WHERE u.id IS NOT NULL) s
+        ),
+        key_arr AS MATERIALIZED (
+            SELECT COALESCE(array_agg(k.b3_id ORDER BY k.ord), '{}'::public.blake3[]) AS b3_ids
+            FROM keys k
+        ),
+        surfaces AS MATERIALIZED (
+            SELECT s.surface_id,
+                   public.blake3_from_bytea(s.surface_id) AS surface_b3,
+                   s.canonical_id,
+                   s.inverse
+            FROM consensus.relation_surfaces(p_types) s
+        ),
+        type_filter AS MATERIALIZED (
+            SELECT CASE WHEN p_types IS NULL THEN NULL::public.blake3[]
+                        ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3)
+                   END AS b3_types,
+                   EXISTS (SELECT 1 FROM surfaces WHERE inverse) AS has_inverse
+        ),
+        native_claims AS MATERIALIZED (
+            SELECT k.subject_id, k.b3_id AS subj_b3, c.entity, c.path,
+                   public.laplace_parts(c.path) AS parts,
+                   c.rating, c.deviation, c.volatility, c.matches
+            FROM key_arr ka
+            CROSS JOIN type_filter tf
+            CROSS JOIN LATERAL public.laplace_claims_each(
+                ka.b3_ids, NULL::bigint, ARRAY[public.laplace_bank_bit('kind','claim')],
+                '{}'::public.blake3[],
+                (CASE WHEN tf.has_inverse THEN 3 ELSE 2 END)::smallint,
+                tf.b3_types) c
+            JOIN keys k ON k.ord = c.i
+            WHERE cardinality(ka.b3_ids) > 0
+              AND (public.laplace_path_starts(c.path, k.b3_id)
+                   OR public.laplace_path_ends(c.path, k.b3_id))
+        ),
+        claim_meta AS MATERIALIZED (
+            SELECT m.surface_id, m.canonical_id, m.inverse
+            FROM consensus.relation_metadata(ARRAY(
+                SELECT DISTINCT public.blake3_send(c.parts[2])
+                FROM native_claims c
+                WHERE cardinality(c.parts) = 3)) m
+        ),
+        oriented_native AS MATERIALIZED (
+            SELECT c.subject_id,
+                   c.entity,
+                   'in'::text AS direction,
+                   CASE WHEN cardinality(c.parts) = 3
+                        THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
+                   END AS type_id,
+                   CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3
+                        THEN public.blake3_send(c.parts[3])
+                        ELSE public.blake3_send(c.parts[1])
+                   END AS neighbour_id,
+                   round(c.rating::numeric*1e9)::bigint AS rating,
+                   round(c.deviation::numeric*1e9)::bigint AS rd,
+                   round(c.volatility::numeric*1e9)::bigint AS volatility,
+                   GREATEST(c.matches, 1)::bigint AS witness_count
+            FROM native_claims c
+            LEFT JOIN claim_meta m
+              ON cardinality(c.parts) = 3
+             AND m.surface_id = public.blake3_send(c.parts[2])
+            WHERE cardinality(c.parts) >= 1
+              AND ((NOT COALESCE(m.inverse, false) AND public.laplace_path_ends(c.path, c.subj_b3))
+                   OR (COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 AND public.laplace_path_starts(c.path, c.subj_b3)))
+        ),
+        native_dedup AS MATERIALIZED (
+            SELECT DISTINCT ON (o.subject_id, o.direction, o.type_id, o.neighbour_id)
+                   o.*
+            FROM oriented_native o
+            WHERE (p_types IS NULL
+                   OR o.type_id = ANY (p_types)
+                   OR o.type_id IN (SELECT canonical_id FROM surfaces))
+              AND (p_refuted OR NOT consensus.refuted(o.rating, o.rd))
+            ORDER BY o.subject_id, o.direction, o.type_id, o.neighbour_id,
+                     consensus.eff_mu(o.rating, o.rd) DESC, o.witness_count DESC, o.entity
+        ),
+        ranked AS (
+            SELECT e.*,
+                   row_number() OVER (
+                       PARTITION BY e.subject_id
+                       ORDER BY CASE WHEN p_rank = 'edge_rank'
+                                     THEN COALESCE(consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd)), 0.0)
+                                     ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
+                                END DESC NULLS LAST,
+                                e.neighbour_id,
+                                e.type_id
+                   ) AS rn
+            FROM native_dedup e
+        )
+        SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
+               r.rating, r.rd, r.volatility, r.witness_count
+        FROM ranked r
+        WHERE p_limit IS NULL OR r.rn <= p_limit
+        ORDER BY r.subject_id, r.rn;
+
+        IF FOUND THEN
+            RETURN;
+        END IF;
+
+        RETURN QUERY
+        WITH combined AS (
+            SELECT c.object_id AS subject_id, 'in'::text AS direction, c.type_id, c.subject_id AS neighbour_id,
+                   c.rating, c.rd, c.volatility, c.witness_count
+            FROM laplace.consensus c
+            WHERE c.object_id = ANY (p_subjects)
+              AND (p_types IS NULL OR c.type_id = ANY (p_types))
+              AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
+        ),
+        deduped_all AS (
+            SELECT DISTINCT ON (e.subject_id, e.direction, e.type_id, e.neighbour_id)
+                   e.*
+            FROM combined e
+            ORDER BY e.subject_id, e.direction, e.type_id, e.neighbour_id,
+                     consensus.eff_mu(e.rating, e.rd) DESC, e.witness_count DESC
+        ),
+        ranked AS (
+            SELECT e.*,
+                   row_number() OVER (
+                       PARTITION BY e.subject_id
+                       ORDER BY CASE WHEN p_rank = 'edge_rank'
+                                     THEN COALESCE(consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd)), 0.0)
+                                     ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
+                                END DESC NULLS LAST,
+                                e.neighbour_id,
+                                e.type_id
+                   ) AS rn
+            FROM deduped_all e
+        )
+        SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
+               r.rating, r.rd, r.volatility, r.witness_count
+        FROM ranked r
+        WHERE p_limit IS NULL OR r.rn <= p_limit
+        ORDER BY r.subject_id, r.rn;
+        RETURN;
+    END IF;
+
+    RETURN QUERY
     WITH keys AS MATERIALIZED (
         SELECT s.id AS subject_id,
                public.blake3_from_bytea(s.id) AS b3_id,
                row_number() OVER (ORDER BY s.id) AS ord
-        FROM (SELECT DISTINCT u.id FROM unnest(COALESCE(p_subjects, '{}'::bytea[])) AS u(id) WHERE u.id IS NOT NULL) s
+        FROM (SELECT DISTINCT u.id FROM unnest(p_subjects) AS u(id) WHERE u.id IS NOT NULL) s
     ),
     key_arr AS MATERIALIZED (
-        SELECT COALESCE(array_agg(k.b3_id ORDER BY k.ord), '{}'::public.blake3[]) AS b3_ids,
-               COALESCE(array_agg(k.subject_id ORDER BY k.ord), '{}'::bytea[]) AS bytea_ids
+        SELECT COALESCE(array_agg(k.b3_id ORDER BY k.ord), '{}'::public.blake3[]) AS b3_ids
         FROM keys k
     ),
     surfaces AS MATERIALIZED (
@@ -62,8 +352,7 @@ BEGIN ATOMIC
     type_filter AS MATERIALIZED (
         SELECT CASE WHEN p_types IS NULL THEN NULL::public.blake3[]
                     ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3)
-               END AS b3_types,
-               EXISTS (SELECT 1 FROM surfaces WHERE inverse) AS has_inverse
+               END AS b3_types
     ),
     native_claims AS MATERIALIZED (
         SELECT k.subject_id, k.b3_id AS subj_b3, c.entity, c.path,
@@ -73,11 +362,7 @@ BEGIN ATOMIC
         CROSS JOIN type_filter tf
         CROSS JOIN LATERAL public.laplace_claims_each(
             ka.b3_ids, NULL::bigint, ARRAY[public.laplace_bank_bit('kind','claim')],
-            '{}'::public.blake3[],
-            (CASE WHEN tf.has_inverse OR p_direction = 'both' THEN 3
-                  WHEN p_direction = 'out' THEN 1
-                  ELSE 2 END)::smallint,
-            tf.b3_types) c
+            '{}'::public.blake3[], 3::smallint, tf.b3_types) c
         JOIN keys k ON k.ord = c.i
         WHERE cardinality(ka.b3_ids) > 0
           AND (public.laplace_path_starts(c.path, k.b3_id)
@@ -94,19 +379,19 @@ BEGIN ATOMIC
         SELECT c.subject_id,
                c.entity,
                CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 THEN
-                        CASE WHEN public.laplace_path_ends(c.path, c.subj_b3) AND p_direction <> 'in' THEN 'out' ELSE 'in' END
+                        CASE WHEN public.laplace_path_ends(c.path, c.subj_b3) THEN 'out' ELSE 'in' END
                     ELSE
-                        CASE WHEN public.laplace_path_starts(c.path, c.subj_b3) AND p_direction <> 'in' THEN 'out' ELSE 'in' END
+                        CASE WHEN public.laplace_path_starts(c.path, c.subj_b3) THEN 'out' ELSE 'in' END
                END AS direction,
                CASE WHEN cardinality(c.parts) = 3
                     THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
                END AS type_id,
                CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 THEN
-                        CASE WHEN public.laplace_path_ends(c.path, c.subj_b3) AND p_direction <> 'in'
+                        CASE WHEN public.laplace_path_ends(c.path, c.subj_b3)
                              THEN public.blake3_send(c.parts[1])
                              ELSE public.blake3_send(c.parts[3]) END
                     ELSE
-                        CASE WHEN public.laplace_path_starts(c.path, c.subj_b3) AND p_direction <> 'in'
+                        CASE WHEN public.laplace_path_starts(c.path, c.subj_b3)
                              THEN public.blake3_send(CASE WHEN cardinality(c.parts) <= 3 THEN c.parts[cardinality(c.parts)] ELSE c.entity END)
                              ELSE public.blake3_send(c.parts[1]) END
                END AS neighbour_id,
@@ -119,12 +404,6 @@ BEGIN ATOMIC
           ON cardinality(c.parts) = 3
          AND m.surface_id = public.blake3_send(c.parts[2])
         WHERE cardinality(c.parts) >= 1
-          AND ((p_direction IN ('out', 'both')
-                AND ((NOT COALESCE(m.inverse, false) AND public.laplace_path_starts(c.path, c.subj_b3))
-                     OR (COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 AND public.laplace_path_ends(c.path, c.subj_b3))))
-               OR (p_direction IN ('in', 'both')
-                   AND ((NOT COALESCE(m.inverse, false) AND public.laplace_path_ends(c.path, c.subj_b3))
-                        OR (COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 AND public.laplace_path_starts(c.path, c.subj_b3)))))
     ),
     native_dedup AS MATERIALIZED (
         SELECT DISTINCT ON (o.subject_id, o.direction, o.type_id, o.neighbour_id)
@@ -133,33 +412,50 @@ BEGIN ATOMIC
         WHERE (p_types IS NULL
                OR o.type_id = ANY (p_types)
                OR o.type_id IN (SELECT canonical_id FROM surfaces))
-          AND (p_direction = 'in' OR o.direction = 'out' OR o.neighbour_id <> o.subject_id)
+          AND (o.direction = 'out' OR o.neighbour_id <> o.subject_id)
           AND (p_refuted OR NOT consensus.refuted(o.rating, o.rd))
         ORDER BY o.subject_id, o.direction, o.type_id, o.neighbour_id,
                  consensus.eff_mu(o.rating, o.rd) DESC, o.witness_count DESC, o.entity
     ),
-    combined AS (
-        SELECT n.subject_id, n.direction, n.type_id, n.neighbour_id,
-               n.rating, n.rd, n.volatility, n.witness_count
-        FROM native_dedup n
-        UNION ALL
+    ranked AS (
+        SELECT e.*,
+               row_number() OVER (
+                   PARTITION BY e.subject_id
+                   ORDER BY CASE WHEN p_rank = 'edge_rank'
+                                 THEN COALESCE(consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd)), 0.0)
+                                 ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
+                            END DESC NULLS LAST,
+                            e.neighbour_id,
+                            e.type_id,
+                            CASE e.direction WHEN 'out' THEN 0 ELSE 1 END
+               ) AS rn
+        FROM native_dedup e
+    )
+    SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
+           r.rating, r.rd, r.volatility, r.witness_count
+    FROM ranked r
+    WHERE p_limit IS NULL OR r.rn <= p_limit
+    ORDER BY r.subject_id, r.rn;
+
+    IF FOUND THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH combined AS (
         SELECT c.subject_id, 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM key_arr ka, laplace.consensus c
-        WHERE cardinality(ka.bytea_ids) > 0
-          AND p_direction IN ('out', 'both')
-          AND c.subject_id = ANY (ka.bytea_ids)
+        FROM laplace.consensus c
+        WHERE c.subject_id = ANY (p_subjects)
           AND c.object_id IS NOT NULL
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
           AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
         UNION ALL
         SELECT c.object_id AS subject_id, 'in'::text AS direction, c.type_id, c.subject_id AS neighbour_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM key_arr ka, laplace.consensus c
-        WHERE cardinality(ka.bytea_ids) > 0
-          AND p_direction IN ('in', 'both')
-          AND c.object_id = ANY (ka.bytea_ids)
-          AND (p_direction = 'in' OR c.subject_id <> c.object_id)
+        FROM laplace.consensus c
+        WHERE c.object_id = ANY (p_subjects)
+          AND c.subject_id <> c.object_id
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
           AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
     ),
@@ -189,6 +485,23 @@ BEGIN ATOMIC
     FROM ranked r
     WHERE p_limit IS NULL OR r.rn <= p_limit
     ORDER BY r.subject_id, r.rn;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION consensus.edges_raw_batch(
+        p_subjects  bytea[],
+        p_direction text    DEFAULT 'both',   -- 'out' | 'in' | 'both'
+        p_types     bytea[] DEFAULT NULL,     -- NULL = every relation type
+        p_limit     int     DEFAULT 40,       -- per-subject limit over the ranking
+        p_refuted   boolean DEFAULT false,    -- include edges the fold consensus.refuted
+        p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
+    RETURNS TABLE(subject_id bytea, direction text, type_id bytea, neighbour_id bytea,
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT *
+    FROM consensus._edges_raw_batch_impl(
+        p_subjects, p_direction, p_types, p_limit, p_refuted, p_rank);
 END;
 
 -- BEGIN ATOMIC: GH #764. No SET search_path (#617/#860) — inlining into wrappers.

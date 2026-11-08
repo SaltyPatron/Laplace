@@ -23,7 +23,7 @@ BEGIN ATOMIC
                consensus.relation_canonical(g.type_id) AS rel_canon
         FROM consensus.edges_raw_batch(
             ARRAY(SELECT DISTINCT subj FROM sense_subjs),
-            'out', ARRAY[laplace.relation_type_id('HAS_EXAMPLE'), laplace.relation_type_id('HAS_DEFINITION')],
+            'out', consensus.relation_family_ids('HAS_EXAMPLE') || consensus.relation_family_ids('HAS_DEFINITION'),
             32, true, 'eff_mu') g
         JOIN sense_subjs s ON s.subj = g.subject_id
         WHERE consensus.relation_canonical(g.type_id) IN ('HAS_EXAMPLE', 'HAS_DEFINITION')

@@ -4,12 +4,53 @@
 -- the control file pins schema = 'laplace' with relocatable = false, so that
 -- placeholder has exactly one possible expansion. Real schema names, written out.
 DROP FUNCTION IF EXISTS laplace.synset_gloss(bytea);
+
+CREATE OR REPLACE FUNCTION taxonomy.synset_gloss_batch(p_synsets bytea[])
+    RETURNS text[]
+    LANGUAGE plpgsql STABLE PARALLEL SAFE
+AS $$
+BEGIN
+    IF COALESCE(cardinality(p_synsets), 0) = 0 THEN
+        RETURN '{}'::text[];
+    END IF;
+
+    RETURN (
+        WITH input AS MATERIALIZED (
+            SELECT u.id, u.ord
+            FROM unnest(p_synsets) WITH ORDINALITY AS u(id, ord)
+        ),
+        defs AS MATERIALIZED (
+            SELECT DISTINCT ON (g.subject_id)
+                   g.subject_id,
+                   g.neighbour_id AS def_id
+            FROM consensus.edges_raw_batch(
+                ARRAY(SELECT DISTINCT id FROM input WHERE id IS NOT NULL),
+                'out', consensus.relation_family_ids('HAS_DEFINITION'), 8, false, 'eff_mu') g
+            WHERE g.neighbour_id IS NOT NULL
+            ORDER BY g.subject_id, consensus.eff_mu(g.rating, g.rd) DESC, g.neighbour_id
+        ),
+        distinct_defs AS MATERIALIZED (
+            SELECT d.def_id,
+                   row_number() OVER (ORDER BY d.def_id) AS rn
+            FROM (SELECT DISTINCT def_id FROM defs WHERE def_id IS NOT NULL) d
+        ),
+        rendered AS MATERIALIZED (
+            SELECT realize.render_text_batch(
+                COALESCE(array_agg(dd.def_id ORDER BY dd.rn), '{}'::bytea[]), 24) AS txt
+            FROM distinct_defs dd
+        )
+        SELECT COALESCE(array_agg(r.txt[dd.rn] ORDER BY i.ord), '{}'::text[])
+        FROM input i
+        LEFT JOIN defs d ON d.subject_id = i.id
+        LEFT JOIN distinct_defs dd ON dd.def_id = d.def_id
+        CROSS JOIN rendered r
+    );
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION taxonomy.synset_gloss(p_synset bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    -- ONE BODY (§15). This was byte-identical to realize._defines apart from the
-    -- parameter name -- same relation, same ordering, same LIMIT -- two definitions
-    -- free to drift. realize._defines ranks in id space and renders the winner once.
     SELECT realize._defines(p_synset);
 END;

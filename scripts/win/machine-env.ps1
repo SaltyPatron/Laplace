@@ -35,6 +35,7 @@ Set-LaplaceDefault LAPLACE_DEPLOY ([IO.Path]::Combine($env:LAPLACE_DATA_ROOT, 'd
 Set-LaplaceDefault LAPLACE_WORK ([IO.Path]::Combine($env:LOCALAPPDATA, 'Laplace', 'work'))
 # Corpus/model roots are declared independently in machine.env; never derive them from state.
 Set-LaplaceDefault LAPLACE_BUILD ([IO.Path]::Combine($env:LAPLACE_WORK, 'build'))
+Set-LaplaceDefault LAPLACE_GRAMMARS ([IO.Path]::Combine($env:LAPLACE_BUILD, 'grammars'))
 $checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..')).TrimEnd('\').ToLowerInvariant()
 $workspaceId = [IO.Path]::GetFileName($checkout) + '-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($checkout))).Substring(0,12).ToLowerInvariant()
 $canonical=[IO.Path]::GetFullPath([IO.Path]::Combine($env:LAPLACE_SRC,'Laplace')).TrimEnd('\').ToLowerInvariant()

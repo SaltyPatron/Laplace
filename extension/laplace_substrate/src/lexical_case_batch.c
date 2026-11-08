@@ -135,31 +135,66 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 		}
 	}
 
-	/* One trajectory unpack for every input word: first probe the canonical
-	 * (entity_id, type=1) primary-key address on the owning HASH(id) leaf via
-	 * laplace_content_trajectory_read, and fall back to the entity_id-indexed
-	 * query only for any word not found at its canonical physicality id. */
+	/* One trajectory unpack for every input word: first probe the Native
+	 * public.laplace_constituents face, and fall back to legacy laplace.physicalities
+	 * only for any word not found in public.physicality. */
 	{
 		Datum          *word_datums = (Datum *) palloc(sizeof(Datum) * n_words);
 		bool           *resolved_word = (bool *) palloc0(sizeof(bool) * n_words);
 		ArrayType      *word_array;
-		WordCaseTrajCtx traj_ctx;
+		Oid             at[1] = { BYTEAARRAYOID };
+		Datum           av[1];
 		int             rem_n = 0;
+
+		if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
+			elog(ERROR, "word_case_variants_batch: SPI_connect failed");
 
 		for (int i = 0; i < n_words; i++)
 			word_datums[i] = make_bytea16(words[i].key);
 		word_array = construct_array(word_datums, n_words, BYTEAOID,
 								 -1, false, TYPALIGN_INT);
-		traj_ctx.as_binary = ensure_lexical_asbinary_oid();
-		traj_ctx.word_lookup = word_lookup;
-		traj_ctx.words = words;
-		traj_ctx.resolved_word = resolved_word;
-		traj_ctx.total_graphemes = &total_graphemes;
-		traj_ctx.owner = owner;
-		laplace_content_trajectory_read(word_array, word_case_consume_trajectory, &traj_ctx);
+		av[0] = PointerGetDatum(word_array);
 
-		if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
-			elog(ERROR, "word_case_variants_batch: SPI_connect failed");
+		rc = SPI_execute_plan(
+			ensure_lexical_plan(
+				&batch_traj_fallback_plan,
+				"SELECT public.blake3_send(c.entity), public.blake3_send(c.child), c.run_length "
+				"FROM public.laplace_constituents("
+				"    ARRAY(SELECT public.blake3_from_bytea(u.id) FROM unnest($1::bytea[]) u(id))"
+				") c ORDER BY c.entity, c.ordinal",
+				1, at, "word_case_variants_batch"),
+			av, NULL, true, 0);
+		if (rc != SPI_OK_SELECT)
+			elog(ERROR, "word_case_variants_batch: native constituents failed: %s",
+				 SPI_result_code_string(rc));
+
+		for (uint64 rr = 0; rr < SPI_processed; rr++)
+		{
+			HeapTuple        tup = SPI_tuptable->vals[rr];
+			TupleDesc        td = SPI_tuptable->tupdesc;
+			bool             isnull;
+			Datum            wd = SPI_getbinval(tup, td, 1, &isnull);
+			char             wkey[16], gkey[16];
+			BatchWordLookup *entry;
+			Datum            gd;
+			int32            run;
+
+			if (isnull || !datum_key16(wd, wkey))
+				continue;
+			entry = (BatchWordLookup *) hash_search(word_lookup, wkey,
+												HASH_FIND, NULL);
+			if (entry == NULL)
+				continue;
+			resolved_word[entry->index] = true;
+			gd = SPI_getbinval(tup, td, 2, &isnull);
+			if (isnull || !datum_key16(gd, gkey))
+				continue;
+			run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
+			batch_word_add_grapheme(&words[entry->index], gkey,
+								 isnull ? 1 : run);
+			total_graphemes++;
+		}
+		SPI_freetuptable(SPI_tuptable);
 
 		for (int i = 0; i < n_words; i++)
 			if (!resolved_word[i])
@@ -167,63 +202,17 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 
 		if (rem_n > 0)
 		{
-			ArrayType *rem_array = construct_array(word_datums, rem_n, BYTEAOID,
-											   -1, false, TYPALIGN_INT);
-			Oid        at[1] = { BYTEAARRAYOID };
-			Datum      av[1] = { PointerGetDatum(rem_array) };
+			ArrayType      *rem_array = construct_array(word_datums, rem_n, BYTEAOID,
+													-1, false, TYPALIGN_INT);
+			WordCaseTrajCtx traj_ctx;
 
-			rc = SPI_execute_plan(
-				ensure_lexical_plan(
-					&batch_traj_fallback_plan,
-					"SELECT entity_id, constituent_id, run_length FROM ("
-					"SELECT q.entity_id, c.ordinal, c.entity_id AS constituent_id, c.run_length "
-					"FROM (SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory "
-					"      FROM laplace.physicalities p "
-					"      WHERE p.type = 1 AND p.trajectory IS NOT NULL "
-					"        AND p.entity_id = ANY($1) "
-					"      ORDER BY p.entity_id, p.id) q "
-					"CROSS JOIN LATERAL public.laplace_trajectory_constituents(q.trajectory) c "
-					"UNION ALL "
-					"SELECT public.blake3_send(c.entity), c.ordinal, "
-					"       public.blake3_send(c.child), c.run_length "
-					"FROM public.laplace_constituents("
-					"    ARRAY(SELECT public.blake3_from_bytea(u.id) "
-					"          FROM unnest($1::bytea[]) u(id) "
-					"          WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p "
-					"                            WHERE p.entity_id = u.id AND p.type = 1 "
-					"                              AND p.trajectory IS NOT NULL))) c"
-					") s ORDER BY entity_id, ordinal",
-					1, at, "word_case_variants_batch"),
-				av, NULL, true, 0);
-			if (rc != SPI_OK_SELECT)
-				elog(ERROR, "word_case_variants_batch: constituents failed: %s",
-					 SPI_result_code_string(rc));
-
-			for (uint64 rr = 0; rr < SPI_processed; rr++)
-			{
-				HeapTuple        tup = SPI_tuptable->vals[rr];
-				TupleDesc        td = SPI_tuptable->tupdesc;
-				bool             isnull;
-				Datum            wd = SPI_getbinval(tup, td, 1, &isnull);
-				char             wkey[16], gkey[16];
-				BatchWordLookup *entry;
-				Datum            gd;
-				int32            run;
-
-				if (isnull || !datum_key16(wd, wkey))
-					continue;
-				entry = (BatchWordLookup *) hash_search(word_lookup, wkey,
-													HASH_FIND, NULL);
-				if (entry == NULL)
-					continue;
-				gd = SPI_getbinval(tup, td, 2, &isnull);
-				if (isnull || !datum_key16(gd, gkey))
-					continue;
-				run = DatumGetInt32(SPI_getbinval(tup, td, 3, &isnull));
-				batch_word_add_grapheme(&words[entry->index], gkey,
-									 isnull ? 1 : run);
-				total_graphemes++;
-			}
+			traj_ctx.as_binary = ensure_lexical_asbinary_oid();
+			traj_ctx.word_lookup = word_lookup;
+			traj_ctx.words = words;
+			traj_ctx.resolved_word = resolved_word;
+			traj_ctx.total_graphemes = &total_graphemes;
+			traj_ctx.owner = owner;
+			laplace_content_trajectory_read(rem_array, word_case_consume_trajectory, &traj_ctx);
 		}
 	}
 

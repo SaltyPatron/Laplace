@@ -42,10 +42,9 @@ ensure_tax_edges_plan(void)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT u.ord, e.object_id, e.type_id, e.rating, e.rd "
-            "FROM unnest($1) WITH ORDINALITY AS u(id, ord) "
-            "CROSS JOIN LATERAL taxonomy.consensus_taxonomy_edges(u.id, $2) e "
-            "ORDER BY u.ord",
+            "SELECT e.ord, e.object_id, e.type_id, e.rating, e.rd "
+            "FROM taxonomy.consensus_taxonomy_edges_batch($1, $2) e "
+            "ORDER BY e.ord",
             2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "tax_bfs_up: SPI_prepare failed: %s",
@@ -77,14 +76,15 @@ tax_idx_add(HTAB *map, const hash128_t *h, int idx)
 static Datum
 spi_top_synset(Datum word)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   argtypes[1] = { BYTEAOID };
     Datum args[1] = { word };
     bool  isnull;
     int   rc;
 
-    rc = SPI_execute_with_args(
-        "SELECT taxonomy.top_synset($1)",
-        1, argtypes, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT taxonomy.top_synset($1)", 1, argtypes),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     {
@@ -453,10 +453,12 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
                                   -1, false, TYPALIGN_INT,
                                   &labels, &label_nulls, &n_labels);
 
-            rc2 = SPI_execute_with_args(
-                "SELECT array_agg(taxonomy.synset_gloss(u.id) ORDER BY u.ord) "
-                "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
-                1, rtypes, rargs, NULL, true, 1);
+            {
+                static SPIPlanPtr gloss_plan = NULL;
+                rc2 = SPI_execute_plan(
+                    spi_common_ensure_plan(&gloss_plan, "SELECT taxonomy.synset_gloss_batch($1)", 1, rtypes),
+                    rargs, NULL, true, 1);
+            }
             if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
             {
                 Datum arr = SPI_getbinval(SPI_tuptable->vals[0],

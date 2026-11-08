@@ -72,7 +72,7 @@ via AS MATERIALIZED (
         CROSS JOIN capped_ids ci
         JOIN laplace.consensus c ON c.subject_id = w.id AND c.object_id = ANY(ci.arr)
         UNION ALL
-        SELECT b.synset_id, laplace.relation_type_id('HAS_SENSE') AS type_id,
+        SELECT b.synset_id, (consensus.relation_set_ids('KEY_BINDING'))[1] AS type_id,
                b.mu
         FROM bindings b
     ) x

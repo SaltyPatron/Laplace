@@ -13,6 +13,7 @@ extern "C" {
 typedef struct { uint64_t w[4]; } laplace_mask256_t;
 
 int  highway_table_load(const char* path);
+int  highway_table_load_profile(const char* path, const char* profile);
 
 void highway_table_unload(void);
 

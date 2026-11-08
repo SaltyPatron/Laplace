@@ -291,9 +291,27 @@ render_or_label_batch_internal(ArrayType *in_arr, int mode, const char *what)
             realize_run_arm(realize_plan_synset_lemma(), PointerGetDatum(resid_arr),
                             (Datum) 0, true, &arm_lemma, render_ids, &union_ids,
                             &un, &ucap, "lexicalization");
-            realize_run_arm(realize_plan_has_name(), PointerGetDatum(resid_arr),
-                            (Datum) 0, true, &arm_name, render_ids, &union_ids,
-                            &un, &ucap, "has_name");
+            {
+                int32 next_n = 0;
+
+                for (int32 r = 0; r < nresid; r++)
+                {
+                    IdKey rk;
+
+                    realize_id_key(&rk, resid[r], "residual filter");
+                    if (hash_search(arm_lemma.by_id, &rk, HASH_FIND, NULL) == NULL)
+                        resid[next_n++] = resid[r];
+                }
+                nresid = next_n;
+            }
+            if (nresid > 0)
+            {
+                resid_arr = construct_array(resid, nresid, BYTEAOID, -1,
+                                            false, TYPALIGN_INT);
+                realize_run_arm(realize_plan_has_name(), PointerGetDatum(resid_arr),
+                                (Datum) 0, true, &arm_name, render_ids, &union_ids,
+                                &un, &ucap, "has_name");
+            }
         }
     }
 

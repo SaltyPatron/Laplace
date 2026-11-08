@@ -11,6 +11,7 @@
 #include "laplace/core/text_identity.h"
 #include "laplace/core/language_law.h"
 #include "laplace/core/sql_catalog.h"
+#include "perfcache_native.h"
 #include "spi_nested.h"
 
 typedef struct {
@@ -24,6 +25,7 @@ static HTAB *relation_metadata;
 static HTAB *metadata(void)
 {
     if(relation_metadata)return relation_metadata;
+    (void)laplace_perfcache_ready();
     size_t n=laplace_relation_table_count+laplace_relation_alias_table_count;
     MemoryContext owner=AllocSetContextCreate(TopMemoryContext,"Native relation metadata",ALLOCSET_DEFAULT_SIZES);
     HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(RelationMetadata);ctl.hcxt=owner;

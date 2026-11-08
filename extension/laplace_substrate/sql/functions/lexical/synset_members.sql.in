@@ -1,39 +1,42 @@
 DROP FUNCTION IF EXISTS laplace.synset_members(bytea);
-CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
+
+CREATE OR REPLACE FUNCTION lexical._synset_members_impl(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-BEGIN ATOMIC
+    LANGUAGE plpgsql LAPLACE_STABLE_STRICT
+AS $$
+DECLARE
+    v_peers bytea[];
+    v_syns  bytea[];
+BEGIN
+    SELECT lexical.lexical_peers(p_word) INTO v_peers;
+
+    RETURN QUERY
     WITH raw_senses AS MATERIALIZED (
         SELECT * FROM lexical.senses(p_word)
-    ),
-    inst_edges AS MATERIALIZED (
-        SELECT DISTINCT e.subject_id
-        FROM consensus.edges_raw_batch(
-            ARRAY(SELECT DISTINCT synset_id FROM raw_senses),
-            'out', ARRAY[laplace.relation_type_id('IS_INSTANCE_OF')], 1, false, 'eff_mu') e
     ),
     syn AS MATERIALIZED (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM raw_senses s
-        WHERE NOT EXISTS (
-            SELECT 1 FROM inst_edges ie WHERE ie.subject_id = s.synset_id
-        )
         GROUP BY s.synset_id
-    ),
-    peers AS MATERIALIZED (
-        SELECT lexical.lexical_peers(p_word) AS arr
     ),
     kb AS MATERIALIZED (
         SELECT d.term AS member, d.language AS lang,
                consensus.eff_mu(d.rating, d.rd) AS mu,
                d.witnesses, s.sense_mu
         FROM syn s
-        JOIN converse.key_binding_evidence(ARRAY(SELECT id FROM syn), NULL, false) d
+        JOIN converse.key_binding_evidence(ARRAY(SELECT syn.id FROM syn), NULL, false) d
           ON d.key = s.id
-        CROSS JOIN peers px
-        WHERE d.term <> ALL(px.arr)
+        WHERE d.term <> ALL(COALESCE(v_peers, '{}'::bytea[]))
     )
     SELECT kb.member, kb.lang, max(kb.mu)::bigint, max(kb.witnesses)::bigint, max(kb.sense_mu)
     FROM kb
     GROUP BY kb.member, kb.lang;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
+    RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
+    SELECT * FROM lexical._synset_members_impl(p_word);
 END;

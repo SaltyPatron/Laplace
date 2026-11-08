@@ -151,7 +151,7 @@ BEGIN ATOMIC
                                 || r.deriv_related)
           AND hs.rating IS NOT NULL
         UNION
-        SELECT be.term AS word_id, be.key AS anchor_id, laplace.relation_type_id('HAS_SENSE') AS anchor_type
+        SELECT be.term AS word_id, be.key AS anchor_id, (consensus.relation_set_ids('KEY_BINDING'))[1] AS anchor_type
         FROM converse.binding_evidence(COALESCE(p_word_ids, ARRAY[]::bytea[]), NULL, false) be
         WHERE be.key IS NOT NULL
     ),

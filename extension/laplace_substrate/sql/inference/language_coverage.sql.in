@@ -6,14 +6,18 @@ CREATE OR REPLACE FUNCTION converse.language_coverage(p_word bytea, p_limit int 
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH lang_ids AS MATERIALIZED (
+    WITH member_langs AS MATERIALIZED (
+        SELECT DISTINCT sm.lang
+        FROM lexical.synset_members(p_word) sm
+        WHERE sm.lang IS NOT NULL
+    ),
+    lang_ids AS MATERIALIZED (
         SELECT array_agg(DISTINCT u.lang ORDER BY u.lang) AS ids
         FROM (
-            SELECT sm.lang
-            FROM lexical.synset_members(p_word) sm
-            WHERE sm.lang IS NOT NULL
+            SELECT ml.lang FROM member_langs ml
             UNION
             SELECT converse.word_language(p_word) AS lang
+            WHERE NOT EXISTS (SELECT 1 FROM member_langs)
         ) u
         WHERE u.lang IS NOT NULL
     ),

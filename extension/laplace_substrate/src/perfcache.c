@@ -19,6 +19,7 @@
 static char *perfcache_path = NULL;
 static char *perfcache_profile = NULL;
 static char *highway_perfcache_path = NULL;
+static char *highway_profile = NULL;
 static char *chess_position_perfcache_path = NULL;
 static char *chess_position_profile = NULL;
 static char *vocabulary_perfcache_path = NULL;
@@ -50,6 +51,15 @@ laplace_substrate_perfcache_init(void)
         "Path to the highway perfcache blob (laplace_highway_perfcache.bin).",
         "Empty disables highway plane-selection functions; they error until configured.",
         &highway_perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.highway_profile",
+        "Highway domain profile (core, wordnet, frames, lexical, full).",
+        "Empty selects full (or LAPLACE_HIGHWAY_PROFILE when set).",
+        &highway_profile,
         "",
         PGC_SIGHUP,
         0,
@@ -166,7 +176,9 @@ laplace_highway_ready(void)
     if (highway_perfcache_path == NULL || highway_perfcache_path[0] == '\0')
         return false;
 
-    if (highway_table_load(highway_perfcache_path) != 0)
+    if (((highway_profile != NULL && highway_profile[0] != '\0')
+            ? highway_table_load_profile(highway_perfcache_path, highway_profile)
+            : highway_table_load(highway_perfcache_path)) != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR),
                  errmsg("laplace_substrate: failed to load highway perfcache \"%s\"",
@@ -273,7 +285,9 @@ laplace_substrate_perfcache_prewarm(void)
 
     if (highway_perfcache_path != NULL && highway_perfcache_path[0] != '\0')
     {
-        if (highway_table_load(highway_perfcache_path) != 0)
+        if (((highway_profile != NULL && highway_profile[0] != '\0')
+            ? highway_table_load_profile(highway_perfcache_path, highway_profile)
+            : highway_table_load(highway_perfcache_path)) != 0)
             ereport(WARNING,
                     (errmsg("laplace_substrate: highway prewarm failed (\"%s\"); "
                             "backends fall back to lazy load", highway_perfcache_path)));

@@ -33,6 +33,7 @@
 
 #include "producer.hpp"
 #include "laplace/core/chess_perfcache_format.h"
+#include "laplace/core/chess_position_table.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/math4d.h"
@@ -475,6 +476,7 @@ static int emit(const Cli& cli) {
         chess_emit::default_spill_bytes(primary.occurrences + additional.occurrences + 231360u);
     chess_emit::Statistics stats;
     if (chess_emit::validate_blob(cli.output, source, &stats.records)) {
+        if (!cli.verify_existing) (void)chess_position_table_split_file(cli.output.c_str());
         stats.controlled_memory_bytes = chess_emit::fixed_memory_bytes;
         report(primary, additional, source, true, stats, cli.memory_bytes, spill, cli.verify_existing);
         return 0;
@@ -499,6 +501,8 @@ static int emit(const Cli& cli) {
     if (!same(primary, repeated_primary) || !same(additional, repeated_additional))
         throw std::runtime_error("surface input changed between fingerprint and composition");
     stats = producer.publish(output, source);
+    if (chess_position_table_split_file(cli.output.c_str()) != 0)
+        throw std::runtime_error("failed to split chess position perfcache into shards");
     report(primary, additional, source, false, stats, cli.memory_bytes, spill, false);
     return 0;
 }

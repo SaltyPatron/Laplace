@@ -11,7 +11,7 @@ BEGIN ATOMIC
     -- line item in the system (1,496,183 calls, 19.6 hours cumulative).
     SELECT realize.render_text(
         (SELECT g.neighbour_id
-         FROM consensus.edges_raw(p_id, 'out', ARRAY[laplace.relation_type_id('HAS_DEFINITION')], 8, false, 'eff_mu') g
+         FROM consensus.edges_raw(p_id, 'out', consensus.relation_family_ids('HAS_DEFINITION'), 8, false, 'eff_mu') g
          WHERE g.neighbour_id IS NOT NULL
          ORDER BY consensus.eff_mu(g.rating, g.rd) DESC, g.neighbour_id
          LIMIT 1), 24);

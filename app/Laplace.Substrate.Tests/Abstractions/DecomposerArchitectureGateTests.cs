@@ -642,7 +642,7 @@ public sealed class DecomposerArchitectureGateTests
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var pipeline = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "IngestPipeline.cs");
         var flush = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "IngestDescentFlush.cs");
-        var pipelineText = File.ReadAllText(pipeline);
+        var pipelineText = string.Join("`n", Directory.EnumerateFiles(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions"), "IngestPipeline*.cs").OrderBy(p => p).Select(File.ReadAllText));
         var flushText = File.ReadAllText(flush);
         Assert.Contains("WorkingSetDeferredBatch", pipelineText, StringComparison.Ordinal);
         Assert.Contains("FinalizeWorkingSetAsync", pipelineText, StringComparison.Ordinal);

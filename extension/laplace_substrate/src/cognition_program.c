@@ -90,23 +90,13 @@ semantic_origin_add(LaplaceCognitionProgram *program, const hash128_t *id,
     entry->origins = bms_add_member(entry->origins, origin);
 }
 
-static bool
-semantic_channel_traversable(const LaplaceQueryChannel *channel)
-{
-    const laplace_relation_def_t *def = NULL;
-
-    if (channel->outbound)
-        return true;
-    return laplace_relation_lookup(&channel->relation, &def) == 0 &&
-           def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC;
-}
-
 static void
 record_semantic_channel(LaplaceCognitionProgram *program,
                         const LaplaceQueryChannel *channel)
 {
     SemanticOriginEntry *anchor;
     SemanticOriginEntry *candidate;
+    const laplace_relation_def_t *def = NULL;
 
     /* A channel anchored by a geometry neighbor is fingerprinted but never
      * propagates semantic ancestry: proximity is not testimony. */
@@ -114,7 +104,9 @@ record_semantic_channel(LaplaceCognitionProgram *program,
         return;
 
     if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
-        !semantic_channel_traversable(channel) ||
+        !(channel->outbound ||
+          (laplace_relation_lookup(&channel->relation, &def) == 0 &&
+           def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC)) ||
         laplace_prompt_contract_relation(&channel->relation))
         return;
 
@@ -122,9 +114,7 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     if (!anchor || !anchor->origins)
         return;
     /* A channel of a declared operation's result relation, anchored at one of
-     * its exact inputs, marks the candidate as answering that input. The mark
-     * counts only when the candidate is emitted. A witnessed operation is
-     * bound by identity; its result does not require a compiled salience rank. */
+     * its exact inputs, marks the candidate as answering that input. */
     bool declared_result = false;
     for (int i = 0; i < program->operation_relation_count; ++i)
     {

@@ -11,18 +11,26 @@
 _Static_assert(sizeof(hash128_t) == sizeof(lp_id), "text identities are Native IDs");
 
 static _Atomic(const lp_tier0_record *) scalar_floor;
+static _Atomic(const lp_tier0_record *) full_scalar_floor;
 const void *text_identity_load_scalar_floor(const char *path) {
-    const lp_tier0_record *floor = atomic_load_explicit(&scalar_floor, memory_order_acquire);
+    const lp_tier0_record *floor = atomic_load_explicit(&full_scalar_floor, memory_order_acquire);
     if (!floor) {
         const lp_tier0_record *candidate = lp_tier0_map(path);
         if (!candidate) return NULL;
-        atomic_compare_exchange_strong_explicit(&scalar_floor, &floor, candidate,
+        atomic_compare_exchange_strong_explicit(&full_scalar_floor, &floor, candidate,
                                                 memory_order_acq_rel, memory_order_acquire);
-        floor = atomic_load_explicit(&scalar_floor, memory_order_acquire);
+        floor = atomic_load_explicit(&full_scalar_floor, memory_order_acquire);
     }
+    atomic_store_explicit(&scalar_floor, floor, memory_order_release);
     return floor;
 }
-const void *text_identity_scalar_floor(void) { return text_identity_load_scalar_floor(NULL); }
+const void *text_identity_scalar_floor(void) {
+    const lp_tier0_record *floor = atomic_load_explicit(&scalar_floor, memory_order_acquire);
+    return floor ? (const void *)floor : text_identity_load_scalar_floor(NULL);
+}
+void text_identity_set_scalar_floor(const void *floor) {
+    if (floor) atomic_store_explicit(&scalar_floor, (const lp_tier0_record *)floor, memory_order_release);
+}
 
 void *text_identity_create(void) {
     const lp_tier0_record *floor = text_identity_scalar_floor();
