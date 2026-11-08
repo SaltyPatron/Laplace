@@ -38,19 +38,20 @@ pg_laplace_claim_leaders(PG_FUNCTION_ARGS)
     if (!laplace_highway_ready()) elog(ERROR, "claim leaders: declared relation selectors are not configured");
     size_t capacity = laplace_relation_table_count + laplace_relation_alias_table_count;
     if (capacity > MaxAllocSize / sizeof(Datum)) elog(ERROR, "claim leaders: relation selectors exceed allocation capacity");
+    Datum *req_bands = palloc(Max(count, 1) * sizeof(Datum));
+    Datum *surf_bands = palloc(Max(capacity, 1) * sizeof(Datum));
     Datum *surfaces = palloc(Max(capacity, 1) * sizeof(Datum));
-    Oid types[] = {TEXTARRAYOID, INT8OID, INT4OID};
-    if (!claim_leaders_plan) {
-        claim_leaders_plan = SPI_prepare_cursor(laplace_sql_query_text("leaders.native_page"), 3, types,
-            CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
-        if (!claim_leaders_plan || SPI_keepplan(claim_leaders_plan) != 0)
-            elog(ERROR, "claim leaders: cannot retain trajectory page plan");
-    }
+    int n_req = 0, n_surf = 0;
     for (int band = 0; band < count; band++) {
         CHECK_FOR_INTERRUPTS();
         if (missing[band]) continue;
+        req_bands[n_req++] = bands[band];
         int32 selected = DatumGetInt32(bands[band]);
-        int n = 0;
+        bool already = false;
+        for (int j = 0; j < n_req - 1; j++) {
+            if (DatumGetInt32(req_bands[j]) == selected) { already = true; break; }
+        }
+        if (already) continue;
         for (size_t i = 0; i < capacity; i++) {
             const char *surface = i < laplace_relation_table_count
                 ? laplace_relation_table[i].canonical
@@ -58,26 +59,30 @@ pg_laplace_claim_leaders(PG_FUNCTION_ARGS)
             hash128_t type; uint8_t actual;
             if (laplace_relation_resolve(surface, &type) != 0
                 || highway_table_relation_by_hash(&type, NULL, NULL, &actual) != 0 || actual != selected) continue;
-            surfaces[n++] = CStringGetTextDatum(surface);
+            surf_bands[n_surf] = bands[band];
+            surfaces[n_surf++] = CStringGetTextDatum(surface);
         }
-        if (n) {
-            ArrayType *array = construct_array(surfaces, n, TEXTOID, -1, false, TYPALIGN_INT);
-            Datum args[] = {PointerGetDatum(array), Int64GetDatum(per), Int32GetDatum(selected)};
-            if (SPI_execute_plan(claim_leaders_plan, args, NULL, true, 0) != SPI_OK_SELECT)
-                elog(ERROR, "claim leaders: trajectory page failed");
-            if (SPI_processed) spi_emit_all_rows(result);
-            else {
-                Datum values[6] = {bands[band], 0}; bool nulls[6] = {false,true,true,true,true,true};
-                tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
-            }
-            SPI_freetuptable(SPI_tuptable);
-            pfree(array);
-        } else {
-            Datum values[6] = {bands[band], 0}; bool nulls[6] = {false,true,true,true,true,true};
-            tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
-        }
-        for (int i = 0; i < n; i++) pfree(DatumGetPointer(surfaces[i]));
     }
+    if (n_req > 0) {
+        Oid types[] = {INT4ARRAYOID, INT4ARRAYOID, TEXTARRAYOID, INT8OID};
+        if (!claim_leaders_plan) {
+            claim_leaders_plan = SPI_prepare_cursor(laplace_sql_query_text("leaders.native_page"), 4, types,
+                CURSOR_OPT_PARALLEL_OK);
+            if (!claim_leaders_plan || SPI_keepplan(claim_leaders_plan) != 0)
+                elog(ERROR, "claim leaders: cannot retain trajectory page plan");
+        }
+        ArrayType *req_arr = construct_array(req_bands, n_req, INT4OID, 4, true, TYPALIGN_INT);
+        ArrayType *sb_arr = construct_array(surf_bands, n_surf, INT4OID, 4, true, TYPALIGN_INT);
+        ArrayType *st_arr = construct_array(surfaces, n_surf, TEXTOID, -1, false, TYPALIGN_INT);
+        Datum args[] = {PointerGetDatum(req_arr), PointerGetDatum(sb_arr), PointerGetDatum(st_arr), Int64GetDatum(per)};
+        if (SPI_execute_plan(claim_leaders_plan, args, NULL, true, 0) != SPI_OK_SELECT)
+            elog(ERROR, "claim leaders: trajectory page failed");
+        if (SPI_processed) spi_emit_all_rows(result);
+        SPI_freetuptable(SPI_tuptable);
+        pfree(req_arr); pfree(sb_arr); pfree(st_arr);
+    }
+    for (int i = 0; i < n_surf; i++) pfree(DatumGetPointer(surfaces[i]));
+    pfree(req_bands); pfree(surf_bands); pfree(surfaces);
     laplace_spi_finish(top);
     return (Datum)0;
 }

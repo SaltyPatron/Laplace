@@ -42,8 +42,7 @@ BEGIN
     WHERE p.type = 1
       AND p.entity_id <> v_id
       AND public.laplace_direction_4d(p.coord) IS NOT NULL
-    ORDER BY public.laplace_direction_4d(p.coord) <<->> v_direction,
-             p.entity_id, p.id
+    ORDER BY public.laplace_direction_4d(p.coord) OPERATOR(public.<<->>) v_direction
     LIMIT 1;
 
     RETURN QUERY
@@ -54,7 +53,7 @@ BEGIN
         WHERE p.type = 1
           AND p.entity_id <> v_id
           AND public.laplace_direction_4d(p.coord) IS NOT NULL
-          AND public.laplace_direction_4d(p.coord) &&&
+          AND public.laplace_direction_4d(p.coord) OPERATOR(public.&&&)
               public.ST_Expand(v_direction, v_chord, v_chord, v_chord, v_chord)
           AND public.laplace_angular_distance_4d(p.coord, v_coord) <= v_max_angle
         GROUP BY p.entity_id)

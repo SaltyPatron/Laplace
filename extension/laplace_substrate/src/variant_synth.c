@@ -366,9 +366,13 @@ pg_laplace_respell_variant(PG_FUNCTION_ARGS)
         elog(ERROR, "respell_variant: SPI_connect failed");
     ensure_variant_plans();
 
-    rc = SPI_execute_with_args(
-        "SELECT generation.respell_variant_seed($1, $2)",
-        2, argtypes, args, nulls, true, 1);
+    {
+        static SPIPlanPtr plan_seed = NULL;
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_seed,
+                "SELECT generation.respell_variant_seed($1, $2)", 2, argtypes),
+            args, nulls, true, 1);
+    }
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "respell_variant: seed lookup failed: %s", SPI_result_code_string(rc));
     if (SPI_processed == 0)

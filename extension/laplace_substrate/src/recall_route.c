@@ -17,6 +17,7 @@
 
 #include "recall_internal.h"
 #include "recall_route.h"
+#include "spi_common.h"
 
 void
 reply_buf_init(ReplyBuf *buf)
@@ -83,7 +84,33 @@ int
 spi_forward_replies(ReplyBuf *buf, const char *query,
                     int nparams, Oid *types, Datum *values, const char *nulls)
 {
-    int rc = SPI_execute_with_args(query, nparams, types, values, nulls, true, 0);
+    static struct { const char *q; SPIPlanPtr plan; } cache[16];
+    static int n_cached = 0;
+    SPIPlanPtr plan = NULL;
+    int rc;
+
+    for (int i = 0; i < n_cached; i++)
+    {
+        if (cache[i].q == query || strcmp(cache[i].q, query) == 0)
+        {
+            plan = cache[i].plan;
+            break;
+        }
+    }
+    if (plan == NULL)
+    {
+        if (n_cached < (int) lengthof(cache))
+        {
+            spi_common_ensure_plan(&cache[n_cached].plan, query, nparams, types);
+            cache[n_cached].q = query;
+            plan = cache[n_cached++].plan;
+        }
+        else
+        {
+            spi_common_ensure_plan(&plan, query, nparams, types);
+        }
+    }
+    rc = SPI_execute_plan(plan, values, nulls, true, 0);
 
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "recall: query failed: %s", SPI_result_code_string(rc));

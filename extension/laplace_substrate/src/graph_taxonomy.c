@@ -525,6 +525,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
     tax_fetch_relation_set("ISA_UPWARD", &up_types, &n_up);
 
     {
+        static SPIPlanPtr plan_trans = NULL;
         Datum *synsets;
         int    ns;
         Oid    argtypes[1] = { BYTEAOID };
@@ -532,9 +533,11 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         int    rc;
 
         spi_fetch_synset_ids(y, &synsets, &ns);
-        rc = SPI_execute_with_args(
-            "SELECT subject_id FROM taxonomy.translation_sources($1)",
-            1, argtypes, args, NULL, true, 0);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_trans,
+                "SELECT subject_id FROM taxonomy.translation_sources($1)",
+                1, argtypes),
+            args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "isa_path: translation targets query failed");
         if (SPI_processed + (uint64) ns + 2 > (uint64) INT_MAX ||

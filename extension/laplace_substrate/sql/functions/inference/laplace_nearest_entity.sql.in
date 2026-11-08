@@ -73,7 +73,7 @@ BEGIN ATOMIC
                END AS type_ids
     ), nearest AS (
         SELECT w.id, w.coord,
-               public.laplace_direction_4d(w.coord) <<->>
+               public.laplace_direction_4d(w.coord) OPERATOR(public.<<->>)
                public.laplace_direction_4d(public.ST_SetSRID(
                    public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)) AS chord
         FROM laplace.v_word_points w
@@ -99,7 +99,7 @@ BEGIN ATOMIC
           )
           AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
         ORDER BY public.laplace_direction_4d(w.coord)
-                 <<->> public.laplace_direction_4d(public.ST_SetSRID(
+                 OPERATOR(public.<<->>) public.laplace_direction_4d(public.ST_SetSRID(
                      public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0))
         LIMIT p_k
     )

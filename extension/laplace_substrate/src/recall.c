@@ -29,6 +29,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_recall_session);
 static Datum
 spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   types[2] = { TEXTOID, BYTEAOID };
     Datum args[2];
     char  nulls[3] = "  ";
@@ -43,9 +44,9 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
     if (ctx_null)
         nulls[1] = 'n';
 
-    rc = SPI_execute_with_args(
-        "SELECT converse.resolve_topic($1, $2)",
-        2, types, args, nulls, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT converse.resolve_topic($1, $2)", 2, types),
+        args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -72,6 +73,7 @@ emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
 static Datum
 spi_context_ids(const char *prompt, Datum topic)
 {
+    static SPIPlanPtr plan = NULL;
     Oid   types[2] = { TEXTOID, BYTEAOID };
     Datum args[2];
     bool  isnull;
@@ -82,9 +84,9 @@ spi_context_ids(const char *prompt, Datum topic)
 
     args[0] = CStringGetTextDatum(prompt);
     args[1] = topic;
-    rc = SPI_execute_with_args(
-        "SELECT converse.recall_context_exclude($1, $2)",
-        2, types, args, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan, "SELECT converse.recall_context_exclude($1, $2)", 2, types),
+        args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     {
@@ -132,13 +134,18 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
     }
 
     {
+        static SPIPlanPtr plan_isa = NULL;
+        static SPIPlanPtr plan_yes = NULL;
+        static SPIPlanPtr plan_no  = NULL;
         Oid   types[2] = { BYTEAOID, BYTEAOID };
         Datum args[2] = { topic, topic2 };
         bool  path_null, mu_null;
-        int   rc = SPI_execute_with_args(
-            "SELECT ip.path, ip.types, ip.path_mu "
-            "FROM converse.isa_path($1, $2) ip LIMIT 1",
-            2, types, args, NULL, true, 1);
+        int   rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_isa,
+                "SELECT ip.path, ip.types, ip.path_mu "
+                "FROM converse.isa_path($1, $2) ip LIMIT 1",
+                2, types),
+            args, NULL, true, 1);
 
         if (rc == SPI_OK_SELECT && SPI_processed > 0)
         {
@@ -165,9 +172,11 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
                 if (lang == (Datum) 0)
                     rnulls[2] = 'n';
 
-                crc = SPI_execute_with_args(
-                    "SELECT converse.recall_is_a_yes_reply($1, $2, $3)",
-                    3, rtypes, rargs, rnulls, true, 1);
+                crc = SPI_execute_plan(
+                    spi_common_ensure_plan(&plan_yes,
+                        "SELECT converse.recall_is_a_yes_reply($1, $2, $3)",
+                        3, rtypes),
+                    rargs, rnulls, true, 1);
                 if (crc == SPI_OK_SELECT && SPI_processed > 0)
                 {
                     Datum reply = SPI_getbinval(SPI_tuptable->vals[0],
@@ -191,9 +200,11 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
             if (lang == (Datum) 0)
                 rnulls[2] = 'n';
 
-            crc = SPI_execute_with_args(
-                "SELECT converse.recall_is_a_no_reply($1, $2, $3)",
-                3, rtypes, rargs, rnulls, true, 1);
+            crc = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_no,
+                    "SELECT converse.recall_is_a_no_reply($1, $2, $3)",
+                    3, rtypes),
+                rargs, rnulls, true, 1);
             if (crc == SPI_OK_SELECT && SPI_processed > 0)
             {
                 bool cn;
@@ -580,12 +591,14 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             elog(ERROR, "recall_session: SPI_connect failed");
 
         {
+            static SPIPlanPtr plan_last = NULL;
             Oid   types[1] = { BYTEAOID };
             Datum args[1] = { session };
             bool  isnull;
-            int   rc = SPI_execute_with_args(
-                "SELECT generation.session_last_resolved($1)",
-                1, types, args, NULL, true, 1);
+            int   rc = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_last,
+                    "SELECT generation.session_last_resolved($1)", 1, types),
+                args, NULL, true, 1);
             if (rc == SPI_OK_SELECT && SPI_processed > 0)
             {
                 context = SPI_getbinval(SPI_tuptable->vals[0],
@@ -596,6 +609,7 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
         }
 
         {
+            static SPIPlanPtr plan_rec = NULL;
             RouteResult route = { 0 };
             RouteBind   bind = { 0 };
             Oid         itypes[3] = { BYTEAOID, TEXTOID, BYTEAOID };
@@ -611,9 +625,10 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
 
             /* Records the observation as a conversational-provenance witness
              * of the session; failure raises rather than dropping the turn. */
-            int rec_rc = SPI_execute_with_args(
-                "SELECT generation.session_record_prompt($1, $2, $3)",
-                3, itypes, iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
+            int rec_rc = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_rec,
+                    "SELECT generation.session_record_prompt($1, $2, $3)", 3, itypes),
+                iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
             if (rec_rc != SPI_OK_SELECT)
                 elog(ERROR, "recall_session: session_record_prompt failed (SPI rc %d)",
                      rec_rc);

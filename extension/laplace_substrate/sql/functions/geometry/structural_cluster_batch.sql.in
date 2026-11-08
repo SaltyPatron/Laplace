@@ -69,7 +69,7 @@ BEGIN ATOMIC
             FROM laplace.v_word_points w
             WHERE w.id <> a.anchor_id
               AND w.trajectory IS NOT NULL
-            ORDER BY w.coord <<->> a.coord, w.id
+            ORDER BY w.coord OPERATOR(public.<<->>) a.coord
             LIMIT GREATEST(p_limit, 0)
         ) k
         WHERE a.curve IS NOT NULL

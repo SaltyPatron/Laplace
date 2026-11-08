@@ -66,7 +66,7 @@ BEGIN ATOMIC
                 FROM laplace.v_word_points w
                 JOIN own_type ot ON ot.type_id = w.type_id
                 WHERE w.id <> p_id AND w.trajectory IS NOT NULL
-                ORDER BY w.coord <<->> an.v_coord
+                ORDER BY w.coord OPERATOR(public.<<->>) an.v_coord
                 LIMIT GREATEST(p_k, 0)
             ) knn
             WHERE an.v_coord IS NOT NULL AND an.v_curve IS NOT NULL AND knn.curve IS NOT NULL

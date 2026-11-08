@@ -43,7 +43,7 @@ BEGIN ATOMIC
         FROM catalog c
         CROSS JOIN anchor an
         JOIN laplace.physicalities w ON w.entity_id = c.line_id AND w.type = 3
-        ORDER BY w.coord <<->> an.v_coord
+        ORDER BY w.coord OPERATOR(public.<<->>) an.v_coord
         LIMIT p_k
     ),
     scored AS (

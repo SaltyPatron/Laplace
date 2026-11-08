@@ -324,11 +324,14 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
                                   -1, false, TYPALIGN_INT,
                                   &facts, &fact_nulls, &n_facts);
 
+            static SPIPlanPtr plan_type_lbl = NULL;
             rargs[0] = PointerGetDatum(type_arr);
-            rc2 = SPI_execute_with_args(
-                "SELECT array_agg(lexical.type_label(u.id) ORDER BY u.ord) "
-                "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
-                1, rtypes, rargs, NULL, true, 1);
+            rc2 = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_type_lbl,
+                    "SELECT array_agg(lexical.type_label(u.id) ORDER BY u.ord) "
+                    "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
+                    1, rtypes),
+                rargs, NULL, true, 1);
             if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
             {
                 Datum arr = SPI_getbinval(SPI_tuptable->vals[0],

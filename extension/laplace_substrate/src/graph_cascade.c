@@ -74,14 +74,17 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         elog(ERROR, "cascade: SPI_connect failed");
 
     {
+        static SPIPlanPtr plan_resolve = NULL;
         Oid   argtypes[1] = { TEXTOID };
         Datum args[1];
         bool  isnull;
         int   rc;
 
         args[0] = PointerGetDatum(x_txt);
-        rc = SPI_execute_with_args(
-            "SELECT converse.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_resolve,
+                "SELECT converse.resolve_last_word($1)", 1, argtypes),
+            args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
             laplace_spi_finish(spi_top);
@@ -96,8 +99,10 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         }
 
         args[0] = PointerGetDatum(y_txt);
-        rc = SPI_execute_with_args(
-            "SELECT converse.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_resolve,
+                "SELECT converse.resolve_last_word($1)", 1, argtypes),
+            args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
             laplace_spi_finish(spi_top);
@@ -129,6 +134,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
     }
 
     {
+        static SPIPlanPtr plan_astar = NULL;
         Oid     argtypes[3] = { BYTEAOID, BYTEAARRAYOID, INT4OID };
         Datum   args[3];
         int     rc;
@@ -138,11 +144,13 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
                                                   -1, false, TYPALIGN_INT));
         args[2] = Int32GetDatum(max_depth);
 
-        rc = SPI_execute_with_args(
-            "SELECT ap.step, ap.entity_id, ap.g "
-            "FROM converse.astar_path($1, $2, $3) ap "
-            "ORDER BY ap.step",
-            3, argtypes, args, NULL, true, 0);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_astar,
+                "SELECT ap.step, ap.entity_id, ap.g "
+                "FROM converse.astar_path($1, $2, $3) ap "
+                "ORDER BY ap.step",
+                3, argtypes),
+            args, NULL, true, 0);
         pfree(DatumGetPointer(args[1]));
 
         if (rc != SPI_OK_SELECT || SPI_processed <= 1)
@@ -241,9 +249,14 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         if (lang == (Datum) 0)
             nulls[3] = 'n';
 
-        rc = SPI_execute_with_args(
-            "SELECT realize.path($1::bytea[], $2::bytea[], $3::int[], $4)",
-            4, argtypes, args, nulls, true, 1);
+        {
+            static SPIPlanPtr plan_path = NULL;
+            rc = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_path,
+                    "SELECT realize.path($1::bytea[], $2::bytea[], $3::int[], $4)",
+                    4, argtypes),
+                args, nulls, true, 1);
+        }
 
         if (rc == SPI_OK_SELECT && SPI_processed > 0)
         {

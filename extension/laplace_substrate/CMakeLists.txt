@@ -80,6 +80,7 @@ set(EXT_EXECUTION_SOURCES
     src/entity_mask_write.c
     src/chess_rating_repair.c
     src/chess_syzygy.c
+    src/band_leaders.c
     src/generate_walk.c
     src/generate_walk_plans.c
     src/generate_walk_render.c

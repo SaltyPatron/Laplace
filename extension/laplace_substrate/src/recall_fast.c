@@ -153,18 +153,28 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     ShapeCandidate *survivors;
     int    n_survivors = 0;
 
+    static SPIPlanPtr plan_anchor = NULL;
+    static SPIPlanPtr plan_case1  = NULL;
+    static SPIPlanPtr plan_knn    = NULL;
+    static SPIPlanPtr plan_casen  = NULL;
+    static SPIPlanPtr plan_frechet = NULL;
+    static SPIPlanPtr plan_xyzm1  = NULL;
+    static SPIPlanPtr plan_xyzmn  = NULL;
+
     /* The Frechet gate compares realized curves: structural.word_curve()
      * unpacks the trajectory's child ids and reads each child's coordinate in
      * ordinal order. The packed trajectory values are identities, not
      * positions. The anchor curve is built once and bound as a parameter so
      * it is not recomputed per candidate. */
-    rc = SPI_execute_with_args(
-        "SELECT structural.word_curve($1), w.coord, w.n_constituents "
-        "FROM laplace.v_word_points w "
-        "WHERE w.id = $1 "
-        "  AND w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
-        "LIMIT 1",
-        1, types1, args1, NULL, true, 1);
+    rc = SPI_execute_plan(
+        spi_common_ensure_plan(&plan_anchor,
+            "SELECT structural.word_curve($1), w.coord, w.n_constituents "
+            "FROM laplace.v_word_points w "
+            "WHERE w.id = $1 "
+            "  AND w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
+            "LIMIT 1",
+            1, types1),
+        args1, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return PointerGetDatum(construct_empty_array(BYTEAOID));
 
@@ -185,9 +195,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     {
         Oid   ctypes[1] = { BYTEAOID };
         Datum cargs[1] = { p_word };
-        int   crc = SPI_execute_with_args(
-            "SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[$1]::bytea[])",
-            1, ctypes, cargs, NULL, true, 1);
+        int   crc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_case1,
+                "SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[$1]::bytea[])",
+                1, ctypes),
+            cargs, NULL, true, 1);
         if (crc == SPI_OK_SELECT && SPI_processed > 0)
         {
             bool cn;
@@ -201,18 +213,20 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Oid   types2[3] = { BYTEAOID, geom_oid, INT4OID };
         Datum args2[3] = { p_word, me_coord, Int32GetDatum(500) };
 
-        rc = SPI_execute_with_args(
-            "WITH self_type AS MATERIALIZED ("
-            "  SELECT self.type_id FROM laplace.entities self WHERE self.id = $1 LIMIT 1"
-            ") "
-            "SELECT w.id, w.coord, EXISTS ("
-            "  SELECT 1 FROM self_type st WHERE st.type_id = w.type_id"
-            "), w.n_constituents "
-            "FROM laplace.v_word_points w "
-            "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
-            "  AND w.id <> $1 "
-            "ORDER BY w.coord <<->> $2 LIMIT $3",
-            3, types2, args2, NULL, true, 0);
+        rc = SPI_execute_plan(
+            spi_common_ensure_plan(&plan_knn,
+                "WITH self_type AS MATERIALIZED ("
+                "  SELECT self.type_id FROM laplace.entities self WHERE self.id = $1 LIMIT 1"
+                ") "
+                "SELECT w.id, w.coord, EXISTS ("
+                "  SELECT 1 FROM self_type st WHERE st.type_id = w.type_id"
+                "), w.n_constituents "
+                "FROM laplace.v_word_points w "
+                "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
+                "  AND w.id <> $1 "
+                "ORDER BY w.coord OPERATOR(public.<<->>) $2 LIMIT $3",
+                3, types2),
+            args2, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "word_shape_peers_fast: KNN query failed: %s", SPI_result_code_string(rc));
 
@@ -261,12 +275,14 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
             id_array = construct_array(idarr, n_raw, BYTEAOID, -1, false, 'i');
             cargs[0] = PointerGetDatum(id_array);
 
-            crc = SPI_execute_with_args(
-                "SELECT t.idx, c.case_class "
-                "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx) "
-                "JOIN lexical.word_case_classes_batch($1::bytea[]) c "
-                "ON c.word_id=t.entity_id",
-                1, ctypes, cargs, NULL, true, 0);
+            crc = SPI_execute_plan(
+                spi_common_ensure_plan(&plan_casen,
+                    "SELECT t.idx, c.case_class "
+                    "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx) "
+                    "JOIN lexical.word_case_classes_batch($1::bytea[]) c "
+                    "ON c.word_id=t.entity_id",
+                    1, ctypes),
+                cargs, NULL, true, 0);
             if (crc == SPI_OK_SELECT)
             {
                 for (uint64 r = 0; r < SPI_processed; r++)
@@ -322,10 +338,12 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     Oid   ftypes[2] = { BYTEAARRAYOID, geom_oid };
                     Datum fargs[2] = { PointerGetDatum(eid_array), me_curve };
 
-                    grc = SPI_execute_with_args(
-                        "SELECT t.idx, public.laplace_frechet_4d(structural.word_curve(t.entity_id), $2) "
-                        "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx)",
-                        2, ftypes, fargs, NULL, true, 0);
+                    grc = SPI_execute_plan(
+                        spi_common_ensure_plan(&plan_frechet,
+                            "SELECT t.idx, public.laplace_frechet_4d(structural.word_curve(t.entity_id), $2) "
+                            "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx)",
+                            2, ftypes),
+                        fargs, NULL, true, 0);
                     if (grc == SPI_OK_SELECT)
                     {
                         for (uint64 r = 0; r < SPI_processed; r++)
@@ -351,9 +369,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     Datum margs[1] = { me_coord };
                     int   mrc;
 
-                    mrc = SPI_execute_with_args(
-                        "SELECT ST_X($1), ST_Y($1), ST_Z($1), ST_M($1)",
-                        1, mtypes, margs, NULL, true, 1);
+                    mrc = SPI_execute_plan(
+                        spi_common_ensure_plan(&plan_xyzm1,
+                            "SELECT ST_X($1), ST_Y($1), ST_Z($1), ST_M($1)",
+                            1, mtypes),
+                        margs, NULL, true, 1);
                     if (mrc == SPI_OK_SELECT && SPI_processed == 1)
                     {
                         HeapTuple tup = SPI_tuptable->vals[0];
@@ -371,10 +391,12 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     Datum cargs2[1] = { PointerGetDatum(coord_array) };
                     int   crc2;
 
-                    crc2 = SPI_execute_with_args(
-                        "SELECT t.idx, ST_X(t.coord), ST_Y(t.coord), ST_Z(t.coord), ST_M(t.coord) "
-                        "FROM unnest($1) WITH ORDINALITY AS t(coord, idx)",
-                        1, ctypes, cargs2, NULL, true, 0);
+                    crc2 = SPI_execute_plan(
+                        spi_common_ensure_plan(&plan_xyzmn,
+                            "SELECT t.idx, ST_X(t.coord), ST_Y(t.coord), ST_Z(t.coord), ST_M(t.coord) "
+                            "FROM unnest($1) WITH ORDINALITY AS t(coord, idx)",
+                            1, ctypes),
+                        cargs2, NULL, true, 0);
                     if (crc2 == SPI_OK_SELECT)
                     {
                         for (uint64 r = 0; r < SPI_processed; r++)

@@ -2,10 +2,15 @@ DROP FUNCTION IF EXISTS laplace.multi_source_entity_count();
 
 CREATE OR REPLACE FUNCTION ops.multi_source_entity_count()
     RETURNS bigint
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT count(*) FROM (
-        SELECT a.subject_id FROM laplace.attestations a
-        GROUP BY a.subject_id
-        HAVING count(DISTINCT a.source_id) > 1) t;
+    SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM public.consensus_0 LIMIT 1) THEN
+            (SELECT count(*) * 16 FROM public.consensus_0 WHERE matches > 1)
+        ELSE
+            (SELECT count(*) FROM (
+                SELECT a.subject_id FROM laplace.attestations a
+                GROUP BY a.subject_id
+                HAVING count(DISTINCT a.source_id) > 1) t)
+    END;
 END;

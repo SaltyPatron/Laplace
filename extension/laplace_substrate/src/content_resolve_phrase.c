@@ -50,6 +50,7 @@ typedef struct
 /* One coarse holder read for the complete candidate set. Native owns GIN,
  * exact membership and hub classification; no per-candidate SQL executor. */
 static SPIPlanPtr resolve_container_plan;
+static SPIPlanPtr resolve_stored_ids_plan;
 static void ensure_resolve_container_plan(void)
 {
     Oid types[]={BYTEAARRAYOID,INT4OID};
@@ -182,9 +183,10 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
             arr = construct_array(elems, n_elems, BYTEAOID, -1, false, TYPALIGN_INT);
             args[0] = PointerGetDatum(arr);
-            qrc = SPI_execute_with_args(
-                laplace_sql_query_text("native.stored_ids"),
-                1, argtypes, args, NULL, true, 0);
+            qrc = SPI_execute_plan(
+                spi_common_ensure_plan(&resolve_stored_ids_plan,
+                    laplace_sql_query_text("native.stored_ids"), 1, argtypes),
+                args, NULL, true, 0);
             if (qrc != SPI_OK_SELECT)
                 elog(ERROR, "resolve_phrase: entity membership query failed: %s",
                      SPI_result_code_string(qrc));
@@ -575,9 +577,10 @@ pg_laplace_word_segment_resolved(PG_FUNCTION_ARGS)
 
         arr = construct_array(elems, n_elems, BYTEAOID, -1, false, TYPALIGN_INT);
         args[0] = PointerGetDatum(arr);
-        qrc = SPI_execute_with_args(
-            laplace_sql_query_text("native.stored_ids"),
-            1, argtypes, args, NULL, true, 0);
+        qrc = SPI_execute_plan(
+            spi_common_ensure_plan(&resolve_stored_ids_plan,
+                laplace_sql_query_text("native.stored_ids"), 1, argtypes),
+            args, NULL, true, 0);
         if (qrc != SPI_OK_SELECT)
             elog(ERROR, "word_segment_resolved: entity membership query failed: %s",
                  SPI_result_code_string(qrc));
