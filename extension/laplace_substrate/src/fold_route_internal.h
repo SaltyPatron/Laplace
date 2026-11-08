@@ -183,6 +183,11 @@ Datum *laplace_fold_typed_cell_ids(const uint8_t *type16,
                                    const InArray *subjects,
                                    const InArray *objects,
                                    const char *label);
+ArrayType *laplace_fold_retract_evidence_cells(
+    const uint8_t *type16, Datum type_datum, const Datum *cell_ids,
+    const InArray *subjects, const InArray *objects,
+    const FoldPriorStates *priors, const FoldEvidenceStates *evidence,
+    const char *label);
 
 /* fold_route_evidence.c */
 void laplace_fold_lock_evidence_targets(const uint8_t *type16, ArrayType *ids,

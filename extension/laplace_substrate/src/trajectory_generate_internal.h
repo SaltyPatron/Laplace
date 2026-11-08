@@ -212,5 +212,12 @@ void laplace_tg_couple_and_orient(
     const LaplacePromptIntent **intent_inout,
     LaplaceCognitionProgram **cognition_out,
     int *coupling_hops_out, bool *explicit_observation_scope_out);
+Datum laplace_tg_walk_continuations(
+    FunctionCallInfo fcinfo, const LaplacePromptInput *input,
+    int semantic_hop_limit, bool trace,
+    const LaplacePromptIntent *intent,
+    const hash128_t *invocation_context,
+    ArrayType *discourse);
+Datum laplace_tg_forward_prompt(FunctionCallInfo fcinfo, bool trace);
 
 #endif

@@ -9,60 +9,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Ingestion;
 
-public sealed class IngestRunner
+public sealed partial class IngestRunner
 {
-    private readonly ISubstrateWriter _writer;
-    private readonly ISubstrateReader _reader;
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly IIngestObservability _obs;
-
-    public IngestRunner(
-        ISubstrateWriter writer,
-        ISubstrateReader reader,
-        ILoggerFactory? loggerFactory = null,
-        IIngestObservability? observability = null)
-    {
-        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _reader = reader ?? throw new ArgumentNullException(nameof(reader));
-        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
-        _obs = observability ?? NoOpObservability.Instance;
-    }
-
-    public async Task<IngestRunResult> RunAsync(
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(decomposer);
-        ArgumentNullException.ThrowIfNull(options);
-
-        using var linked = new IngestCancellationScope(ct);
-
-        try
-        {
-            return await RunCoreAsync(decomposer, options, linked.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            _obs.OnRunFailed(decomposer.SourceName, "cancelled", "run cancelled");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _obs.OnRunFailed(decomposer.SourceName, "failed", $"[{ex.GetType().Name}] {ex.Message}");
-            throw;
-        }
-    }
-
-    private static bool IsPeriodBoundaryIntent(SubstrateChange change) =>
-        change.Metadata.SourceContentUnitName.StartsWith(
-            IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
-
-    private static bool IsFileTerminalIntent(SubstrateChange change) =>
-        IsPeriodBoundaryIntent(change)
-        || change.Metadata.SourceContentUnitName.StartsWith(
-            IngestBatchPipeline.FileFailedUnitPrefix, StringComparison.Ordinal);
-
     private async Task<IngestRunResult> RunCoreAsync(
         IDecomposer decomposer,
         IngestRunOptions options,
@@ -79,7 +27,6 @@ public sealed class IngestRunner
         long unitsAttempted = 0, unitsApplied = 0, unitsFailed = 0;
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
-
         if (!options.SkipSourceCompletion
             && !options.BypassSourceCompletionGuard
             && !decomposer.PerFileCompletion
@@ -98,7 +45,6 @@ public sealed class IngestRunner
                 TotalRoundTrips: 0, WallClock: sw.Elapsed,
                 Failures: Array.Empty<IngestFailure>());
         }
-
         var counters = new RunCounters
         {
             Sw = sw,
@@ -121,22 +67,18 @@ public sealed class IngestRunner
             Reader: _reader,
             Logger: _loggerFactory.CreateLogger($"Decomposer:{decomposer.SourceName}"),
             SubstrateVersion: "v1");
-
         await using var bulkRun = await BulkRunLease.BeginAsync(_writer, ct).ConfigureAwait(false);
         // The closure this run checks is of the entities this run writes.
         (_writer as Laplace.SubstrateCRUD.Npgsql.IPhysicalityClosure)?.TakePhysicalityClosure();
         await decomposer.InitializeAsync(ctx, ct);
-
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
         IngestTopology.EnsureReady();
-
         bool pathIsDir = Directory.Exists(ctx.EcosystemPath);
         bool pathIsFile = File.Exists(ctx.EcosystemPath);
         log.LogInformation(
             "INGEST_PATH source={Source} ecosystem_path={Path} exists={Exists} kind={Kind}",
             decomposer.SourceName, ctx.EcosystemPath, pathIsDir || pathIsFile,
             pathIsDir ? "dir" : pathIsFile ? "file" : "missing");
-
         var inventory = await ResolveInventoryAsync(decomposer, ctx, artifactGraph, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.SourceId, decomposer.LayerOrder, inventory, artifactGraph);
         using var obsScope = IngestObservabilityScope.Begin(_obs, decomposer.SourceName);
@@ -144,10 +86,8 @@ public sealed class IngestRunner
             "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
             decomposer.SourceName, decomposer.LayerOrder,
             inventory?.UnitType ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
-
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
         counters.Inventory = inventory;
-
         int batchSize = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
         var topo = IngestTopology.Current;
@@ -163,53 +103,12 @@ public sealed class IngestRunner
         int maxIntentsPerCommit = commitRows > 0
             ? sizing.MaxIntentsPerCommit
             : batchSize;
-
-        static long RowsOf(SubstrateChange c)
-        {
-            long rows = (long)c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
-            if (!c.IntentStages.IsDefaultOrEmpty)
-                foreach (var s in c.IntentStages)
-                    rows += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
-            return rows;
-        }
-
-        static long BytesOf(SubstrateChange c)
-        {
-            long traj = 0;
-            foreach (var p in c.Physicalities)
-                if (p.TrajectoryXyzm is { Length: > 0 } t) traj += (long)t.Length * 8;
-            long stageBytes = 0;
-            int stageAtt = 0;
-            if (!c.IntentStages.IsDefaultOrEmpty)
-            {
-                foreach (var s in c.IntentStages)
-                {
-                    if (s.IsInvalid) continue;
-                    stageBytes += s.TotalTupleBytes;
-                    stageAtt += s.AttestationCount;
-                }
-                // Commit grain covers the native allocations actually held. The serialized
-                // E/P/A metric is unchanged, and a stage referenced more than once is not
-                // counted twice.
-                stageBytes = Math.Max(stageBytes,
-                    IngestAdmissionSizing.HeldNativeStageBytes(c.IntentStages));
-            }
-            return IngestSizing.EstimateApplyGateBytes(
-                c.Entities.Length,
-                c.Physicalities.Length,
-                c.Attestations.Length,
-                traj,
-                stageBytes,
-                stageAtt);
-        }
-
         bool workingSet = Laplace.Decomposers.Abstractions.WorkingSetMode.Enabled;
         long wsBytes = 0;
         bool ShouldFlush(int intents, long rows) =>
             commitRows > 0
                 ? (rows >= Math.Min(commitRows, applyRowLimit) || intents >= batchSize)
                 : rows >= applyRowLimit || intents >= batchSize;
-
         long applyEnvelope = Math.Min(
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
@@ -220,7 +119,6 @@ public sealed class IngestRunner
                     || ShouldFlushWorkingSet(wsBytes, applyEnvelope)
                     || admissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
-
         void LogAdmissionWindow(int count)
         {
             if (workingSet)
@@ -231,19 +129,15 @@ public sealed class IngestRunner
                     admissionWindow.ModeledSourcePayloadBytes,
                     applyEnvelope, count == 1 && admissionWindow.ModeledSourcePayloadBytes > applyEnvelope);
         }
-
         bool syncIngest = false;
-
         var runCt = ct;
         bool extractionSucceeded = false;
         Exception? extractionFailure = null;
-
         try
         {
             if (syncIngest)
             {
                 CpuTopology.RequirePerformanceCorePin();
-
                 var sbatch = new List<SubstrateChange>(batchSize);
                 using var sbatchOwnership = new ApplyEnvelopeBatchOwner(sbatch);
                 long sbatchRows = 0;
@@ -356,7 +250,6 @@ public sealed class IngestRunner
                 long bufferedBytes = 0;
                 using var drained = new SemaphoreSlim(0, channelCap);
                 using var pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(runCt);
-
                 var channel = Channel.CreateBounded<QueuedIntent>(
                     new BoundedChannelOptions(channelCap)
                     {
@@ -364,7 +257,6 @@ public sealed class IngestRunner
                         SingleWriter = true,
                         FullMode = BoundedChannelFullMode.Wait,
                     });
-
                 var producer = CpuTopology.RunOnPinnedThread(async producerCt =>
                 {
                     try
@@ -405,12 +297,10 @@ public sealed class IngestRunner
                         throw;
                     }
                 }, "ingest-decompose-pcore", pipelineCts.Token);
-
                 // Apply batches accumulate per source, not per file, so the source's file
                 // packaging does not set the transaction cadence. File labels stay on every
                 // change for resume, observability and fold attribution.
                 var buckets = new Dictionary<Hash128, ApplyBatchBucket>();
-
                 ApplyBatchBucket BucketFor(SubstrateChange intent)
                 {
                     Hash128 owner = intent.Metadata.SourceId;
@@ -421,7 +311,6 @@ public sealed class IngestRunner
                     }
                     return bucket;
                 }
-
                 async Task FlushBucketAsync(ApplyBatchBucket bucket)
                 {
                     if (bucket.Batch.Count == 0) return;
@@ -440,10 +329,8 @@ public sealed class IngestRunner
                         counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                     bucket.Reset();
                 }
-
                 await using var pipelineCleanup = new ApplyPipelineCleanup(
                     pipelineCts, producer, buckets, channel.Reader);
-
                 try
                 {
                     while (await channel.Reader.WaitToReadAsync(runCt))
@@ -456,7 +343,6 @@ public sealed class IngestRunner
                             Interlocked.Add(ref bufferedRows, -queued.Rows);
                             Interlocked.Add(ref bufferedBytes, -queued.SerializedBytes);
                             try { drained.Release(); } catch (SemaphoreFullException) { }
-
                             if (intent.ApplyBarrier is { } applyBarrier)
                             {
                                 try
@@ -472,7 +358,6 @@ public sealed class IngestRunner
                                 }
                                 continue;
                             }
-
                             if (!workingSet && batchSize == 1 && commitRows == 0)
                             {
                                 transfer.Complete();
@@ -480,48 +365,39 @@ public sealed class IngestRunner
                                                              counters, failures, log, runCt);
                                 continue;
                             }
-
                             var bucket = BucketFor(intent);
                             long ib = queued.SerializedBytes;
                             var admission = queued.Admission;
-
                             // A terminal marker batches like any small control row: it follows its
                             // file's data in the stream and may share a transaction with other
                             // files. CompleteFileAsync runs only after the atomic apply returns,
                             // so files_done never outruns durable rows.
-
                             if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                                     bucket.Source, intent.Metadata.SourceId))
                                 await FlushBucketAsync(bucket);
-
                             if (workingSet && bucket.Batch.Count > 0
                                 && (bucket.Rows + queued.Rows > applyRowLimit
                                     || bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
                                     || bucket.AdmissionWindow.ShouldFlushBefore(admission)))
                                 await FlushBucketAsync(bucket);
-
                             if (workingSet) bucket.AdmissionWindow.Add(admission);
                             bucket.Batch.Add(intent);
                             transfer.Complete();
                             bucket.Source ??= intent.Metadata.SourceId;
                             bucket.Rows += queued.Rows;
                             bucket.Bytes += ib;
-
                             bool capacityReached = workingSet
                                 ? bucket.Rows >= applyRowLimit
                                     || ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
                                     || bucket.AdmissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
                                 : ShouldFlush(bucket.Batch.Count, bucket.Rows)
                                     || bucket.Batch.Count >= maxIntentsPerCommit;
-
                             if (capacityReached)
                                 await FlushBucketAsync(bucket);
                         }
                     }
-
                     foreach (var bucket in buckets.Values.ToArray())
                         await FlushBucketAsync(bucket);
-
                     await producer;
                 }
                 catch (Exception failure)
@@ -598,7 +474,6 @@ public sealed class IngestRunner
                 throw new AggregateException("Ingest extraction/completion failed.", distinct);
             }
         }
-
         // Cancellation can arrive during the non-cancellable durability/cleanup
         // join. It must still prevent a successful source completion receipt.
         ct.ThrowIfCancellationRequested();
@@ -609,9 +484,7 @@ public sealed class IngestRunner
         physicalitiesInserted = counters.PhysicalitiesInserted;
         attestationsInserted = counters.AttestationsInserted;
         totalRoundTrips = counters.RoundTrips;
-
         ReportStagedEntityAdmission(counters, log);
-
         long filesTotalForMarker = inventory?.FileCount ?? 0;
         bool filesComplete = filesTotalForMarker <= 0
             || counters.FilesDone == filesTotalForMarker;
@@ -619,7 +492,6 @@ public sealed class IngestRunner
             && counters.UnitsFailed == 0
             && failures.Count == 0
             && filesComplete;
-
         // A resumed run does not observe the input units of files skipped by their markers,
         // so when any file was reused the declared/previous inventory total is kept rather
         // than replaced by this run's partial count.
@@ -628,7 +500,6 @@ public sealed class IngestRunner
             && counters.InputUnitsDone > 0
             && counters.FilesSkippedComplete == 0)
             inventory.PublishExactTotal(counters.InputUnitsDone);
-
         if (fullSuccessfulExtraction)
         {
             var (writtenEntities, unplacedEntities) =
@@ -643,16 +514,13 @@ public sealed class IngestRunner
                 "INGEST_PHYSICALITY_COVERAGE source={Source} entities={Entities} missing=0 status=ok",
                 decomposer.SourceName, writtenEntities);
         }
-
         // Files proven complete by their own markers count toward the layer: a run
         // that reuses every committed file still establishes the source's layer.
         if (!options.SkipSourceCompletion
             && fullSuccessfulExtraction
             && (counters.UnitsApplied > 0 || counters.FilesSkippedComplete > 0))
             await _writer.ApplyAsync(LayerCompletion.Build(decomposer), ct);
-
         sw.Stop();
-
         var result = new IngestRunResult(
             SourceId: decomposer.SourceId,
             SourceName: decomposer.SourceName,
@@ -676,11 +544,9 @@ public sealed class IngestRunner
                    - foldObservationsAtStart),
             ConsensusCellDeposits: Math.Max(
                 0, (foldMetrics?.CellsFolded ?? foldCellsAtStart) - foldCellsAtStart));
-
         long declaredInput = inventory?.EffectiveTotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
-
         (string Status, string Detail)? explained = null;
         if (emptySourceNoOp && decomposer is IIngestNoOpExplainer explainer)
         {
@@ -693,7 +559,6 @@ public sealed class IngestRunner
                     decomposer.SourceName, e.Status, e.Detail);
             }
         }
-
         string status = DeriveRunStatus(
             result.UnitsFailed,
             emptySourceNoOp,
@@ -738,7 +603,6 @@ public sealed class IngestRunner
             ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
             : null;
         _obs.OnRunFinished(decomposer.SourceName, result, status, failureReason);
-
         if (status == "failed")
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: ingest run recorded status=failed — "
@@ -750,816 +614,5 @@ public sealed class IngestRunner
                 + "but ingested 0 — grammar/format mismatch (silent no-op). Failing instead of reporting success. "
                 + "Check the decomposer's modality/grammar matches the actual file format.");
         return result;
-    }
-
-    internal static string DeriveRunStatus(
-        long unitsFailed,
-        bool emptySourceNoOp,
-        bool capped,
-        int filesDone,
-        long filesTotal)
-    {
-        if (unitsFailed > 0) return "failed";
-        if (emptySourceNoOp) return "empty-noop";
-        if (capped) return "capped";
-        if (filesTotal > 0 && filesDone != filesTotal) return "failed";
-        return "ok";
-    }
-
-    internal static bool ShouldFlushWorkingSet(long bufferedBytes, long byteCap) =>
-        bufferedBytes >= byteCap;
-
-    internal static bool ShouldFlushWorkingSetSourceBoundary(
-        Hash128? bufferedSource, Hash128 nextSource) =>
-        bufferedSource is { } source && source != nextSource;
-
-    internal static string? DescribeRunFailure(long unitsFailed, int filesDone, long filesTotal)
-    {
-        if (unitsFailed > 0)
-            return $"{unitsFailed} unit(s) failed to apply";
-        if (filesTotal > 0 && filesDone < filesTotal)
-            return $"files_done {filesDone} of {filesTotal} — {filesTotal - filesDone} file(s) "
-                 + "did not reach completion; their content is absent from the substrate";
-        if (filesTotal > 0 && filesDone > filesTotal)
-            return $"files_done {filesDone} exceeds files_total {filesTotal} — "
-                 + "the lane counted more completions than it declared inputs";
-        return null;
-    }
-
-    private void TrackTerminalWhenDurable(
-        RunCounters counters,
-        SubstrateChange intent,
-        List<IngestFailure> failures)
-    {
-        if (intent.Metadata.FileLabel is not { Length: > 0 } fileLabel)
-        {
-            TrackIntent(counters, intent, failures);
-            return;
-        }
-
-        // CompleteFileAsync observes durability: under pipelined bulk ingest it waits for the
-        // dispatched fold/mask continuation carrying this file's completion marker. It is not
-        // awaited here, so the next working set's apply does not wait behind the fold.
-        Task durable = _writer.CompleteFileAsync(fileLabel, CancellationToken.None);
-        if (durable.IsCompletedSuccessfully)
-        {
-            TrackIntent(counters, intent, failures);
-            return;
-        }
-
-        async Task ObserveAsync()
-        {
-            await durable.ConfigureAwait(false);
-            TrackIntent(counters, intent, failures);
-        }
-
-        counters.TrackPendingFileCompletion(ObserveAsync());
-    }
-
-    private async Task ProcessOwnedIntentAsync(
-        SubstrateChange intent,
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        Random rng,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        CancellationToken ct)
-    {
-        Exception? applyFailure = null;
-        try
-        {
-            await ProcessOneIntentAsync(
-                intent, decomposer, options, rng, counters, failures, log, ct);
-        }
-        catch (Exception failure) { applyFailure = failure; throw; }
-        finally
-        {
-            try { intent.ApplyEnvelope?.Dispose(); }
-            catch (Exception releaseFailure) when (applyFailure is not null)
-            {
-                throw new AggregateException("Ingest apply/source release failed.", applyFailure, releaseFailure);
-            }
-        }
-    }
-
-    private async Task ProcessOneIntentAsync(
-        SubstrateChange intent,
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        Random rng,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        CancellationToken ct)
-    {
-        if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsAttempted);
-
-        // Native stages are disposed once the writer accepts them, so entity/physicality
-        // closure is checked here while the staged rows exist. The tracker is idempotent
-        // across a retry.
-        counters.EntityAdmission.Observe(intent);
-
-        Exception? lastEx = null;
-        int attempt = 0;
-        for (; attempt < options.RetryPolicy.MaxAttempts; attempt++)
-        {
-            try
-            {
-                if (attempt > 0)
-                {
-                    var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
-                    if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
-                }
-                Func<CancellationToken, ValueTask>? verifier =
-                    SubstrateApplyEnvelope.ComposeVerifier([intent]);
-                var apply = verifier is null
-                    ? await _writer.ApplyAsync(intent, ct)
-                    : await _writer.ApplyWorkingSetAsync([intent], verifier, ct);
-
-                if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsApplied);
-                Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);
-                Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
-                Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
-                Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
-
-                if (IsFileTerminalIntent(intent)
-                    && intent.Metadata.FileLabel is { Length: > 0 })
-                    TrackTerminalWhenDurable(counters, intent, failures);
-                else
-                    TrackIntent(counters, intent, failures);
-
-                _obs.OnIntentApplied(decomposer.SourceName, apply);
-                var progress = MakeProgress(counters);
-                _obs.OnProgress(progress);
-                options.Progress?.Report(progress);
-                return;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                lastEx = ex;
-                if (!options.RetryPolicy.IsTransient(ex))
-                {
-                    var fatal = new IngestFailure(
-                        intent.Metadata.IntentId,
-                        intent.Metadata.SourceContentUnitName,
-                        ex.GetType().FullName ?? "Exception",
-                        ex.Message,
-                        WasTransient: false,
-                        RetryAttempts: attempt,
-                        OccurredAt: DateTimeOffset.UtcNow);
-                    lock (failures) failures.Add(fatal);
-                    if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsFailed);
-                    _obs.OnIntentFailed(decomposer.SourceName, fatal);
-                    log.LogError(ex, "Fatal ingest error on intent {IntentId} (unit {Unit}); aborting run.",
-                        intent.Metadata.IntentId, intent.Metadata.SourceContentUnitName);
-                    throw;
-                }
-                log.LogWarning(ex, "Transient ingest error on intent {IntentId} (attempt {Attempt}); will retry.",
-                    intent.Metadata.IntentId, attempt + 1);
-            }
-        }
-
-        var failure = new IngestFailure(
-            intent.Metadata.IntentId,
-            intent.Metadata.SourceContentUnitName,
-            lastEx?.GetType().FullName ?? "TransientExhaustion",
-            lastEx?.Message ?? "transient retry exhausted",
-            WasTransient: true,
-            RetryAttempts: attempt,
-            OccurredAt: DateTimeOffset.UtcNow);
-        lock (failures) failures.Add(failure);
-        Interlocked.Increment(ref counters._unitsFailed);
-        _obs.OnIntentFailed(decomposer.SourceName, failure);
-        if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
-    }
-
-    private async Task ProcessOwnedBatchAsync(
-        List<SubstrateChange> batch,
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        Random rng,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        bool workingSet,
-        CancellationToken ct)
-    {
-        Exception? applyFailure = null;
-        try
-        {
-            await ProcessBatchAsync(
-                batch, decomposer, options, rng, counters, failures, log, workingSet, ct);
-        }
-        catch (Exception failure) { applyFailure = failure; throw; }
-        finally
-        {
-            SubstrateApplyEnvelope.Release(batch, applyFailure);
-        }
-    }
-
-    private async Task ProcessBatchAsync(
-        List<SubstrateChange> batch,
-        IDecomposer decomposer,
-        IngestRunOptions options,
-        Random rng,
-        RunCounters counters,
-        List<IngestFailure> failures,
-        ILogger log,
-        bool workingSet,
-        CancellationToken ct)
-    {
-        if (batch.Count == 0) return;
-
-        int unitCount = 0;
-        foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
-        Interlocked.Add(ref counters._unitsAttempted, unitCount);
-
-        // As in the single-intent path: check closure before the writer disposes the stages.
-        foreach (var intent in batch)
-            counters.EntityAdmission.Observe(intent);
-
-        Exception? lastEx = null;
-        int attempt = 0;
-        for (; attempt < options.RetryPolicy.MaxAttempts; attempt++)
-        {
-            try
-            {
-                if (attempt > 0)
-                {
-                    var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
-                    if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
-                }
-                Func<CancellationToken, ValueTask>? verifier =
-                    SubstrateApplyEnvelope.ComposeVerifier(batch);
-                var apply = verifier is not null
-                    ? await _writer.ApplyWorkingSetAsync(batch, verifier, ct)
-                    : workingSet
-                    ? await _writer.ApplyWorkingSetAsync(batch, ct)
-                    : await _writer.ApplyManyAsync(batch, ct);
-
-                Interlocked.Add(ref counters._unitsApplied, unitCount);
-                Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);
-                Interlocked.Add(ref counters._physicalitiesInserted, apply.PhysicalitiesInserted);
-                Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
-                Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
-
-                long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
-                double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
-                foreach (var intent in batch)
-                {
-                    if (IsFileTerminalIntent(intent)
-                        && intent.Metadata.FileLabel is { Length: > 0 })
-                        TrackTerminalWhenDurable(counters, intent, failures);
-                    else
-                        TrackIntent(counters, intent, failures);
-                }
-
-                log.LogInformation(
-                    "INGEST_BATCH source={Source} intents={Intents} rows={Rows} "
-                    + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_ms={Ms:N0} rate_rows_s={Rps:N0} round_trips={RT}",
-                    decomposer.SourceName, batch.Count, batchRows, apply.EntitiesInserted,
-                    apply.PhysicalitiesInserted, apply.AttestationsInserted,
-                    apply.WallClock.TotalMilliseconds, batchRows / secs, apply.RoundTrips);
-
-                _obs.OnIntentApplied(decomposer.SourceName, apply);
-                var progress = MakeProgress(counters);
-                _obs.OnProgress(progress);
-                options.Progress?.Report(progress);
-                return;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                lastEx = ex;
-                if (!options.RetryPolicy.IsTransient(ex))
-                {
-                    RecordBatchFailure(batch, decomposer.SourceName, ex,
-                                       wasTransient: false, attempt, failures, counters);
-                    log.LogError(ex,
-                        "Fatal ingest error in batch of {Count} intents "
-                        + "(first unit {FirstUnit}, last unit {LastUnit}, "
-                        + "~{Rows} staged rows, ~{Atts} managed attestations); aborting run.",
-                        batch.Count,
-                        batch[0].Metadata.SourceContentUnitName,
-                        batch[^1].Metadata.SourceContentUnitName,
-                        BatchRowEstimate(batch),
-                        BatchManagedAttestations(batch));
-                    throw;
-                }
-                log.LogWarning(ex, "Transient ingest error in batch of {Count} intents "
-                    + "(attempt {Attempt}); will retry whole batch.",
-                    batch.Count, attempt + 1);
-            }
-        }
-
-        RecordBatchFailure(batch, decomposer.SourceName, lastEx,
-                           wasTransient: true, attempt, failures, counters);
-        if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
-    }
-
-    private static long BatchManagedAttestations(IReadOnlyList<SubstrateChange> batch)
-    {
-        long total = 0;
-        for (int i = 0; i < batch.Count; i++)
-            total += batch[i].Attestations.Length;
-        return total;
-    }
-
-    private static long BatchRowEstimate(IReadOnlyList<SubstrateChange> batch)
-    {
-        long total = 0;
-        for (int i = 0; i < batch.Count; i++)
-        {
-            var c = batch[i];
-            total += c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
-            if (!c.IntentStages.IsDefaultOrEmpty)
-            {
-                foreach (var s in c.IntentStages)
-                {
-                    if (s.IsInvalid) continue;
-                    total += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
-                }
-            }
-        }
-        return total;
-    }
-
-    private void RecordBatchFailure(
-        List<SubstrateChange> batch,
-        string sourceName,
-        Exception? ex,
-        bool wasTransient,
-        int attempts,
-        List<IngestFailure> failures,
-        RunCounters counters)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var typeName = ex?.GetType().FullName ?? (wasTransient ? "TransientExhaustion" : "Exception");
-        var msg = ex?.Message ?? "transient retry exhausted";
-        var batchFailures = new IngestFailure[batch.Count];
-        for (int i = 0; i < batch.Count; i++)
-            batchFailures[i] = new IngestFailure(
-                batch[i].Metadata.IntentId,
-                batch[i].Metadata.SourceContentUnitName,
-                typeName, msg, wasTransient, attempts, now);
-
-        lock (failures) failures.AddRange(batchFailures);
-        int failedUnits = 0;
-        foreach (var c in batch) if (c.CountsAsUnit) failedUnits++;
-        Interlocked.Add(ref counters._unitsFailed, failedUnits);
-        foreach (var f in batchFailures)
-            _obs.OnIntentFailed(sourceName, f);
-    }
-
-    private static string ResolveEcosystemPath(IDecomposer decomposer, IngestRunOptions options)
-        => options.EcosystemPath ?? Directory.GetCurrentDirectory();
-
-    private static async Task<IngestInventory?> ResolveInventoryAsync(
-        IDecomposer decomposer,
-        IDecomposerContext ctx,
-        IngestArtifactGraph? artifactGraph,
-        IngestRunOptions options,
-        CancellationToken ct)
-    {
-        long cap = options.DecomposerOptions.MaxInputUnits;
-        if (decomposer is IIngestInventoryProvider provider)
-        {
-            var inv = await provider.DescribeInputAsync(ctx, options.DecomposerOptions, ct);
-            if (inv is not null)
-            {
-                if (artifactGraph is not null)
-                    artifactGraph.ValidateInventory(inv);
-                return ApplyInputCap(inv, cap);
-            }
-        }
-        if (artifactGraph is not null)
-            return artifactGraph.ToFileInventory("records");
-        if (cap > 0)
-            return IngestInventory.Single(cap, "records");
-        long? est = await decomposer.EstimateUnitCountAsync(ctx, ct);
-        return est is long n ? IngestInventory.Single(n) : null;
-    }
-
-    private static IngestArtifactGraph? LoadArtifactGraph(
-        string ecosystemPath,
-        bool required,
-        bool allowAmbientManifest)
-    {
-        if (!Directory.Exists(ecosystemPath))
-        {
-            if (required)
-                throw new DirectoryNotFoundException(
-                    $"Required source estate directory does not exist: '{ecosystemPath}'.");
-            return null;
-        }
-        string manifestPath = Path.Combine(ecosystemPath, "MANIFEST.tsv");
-        if (File.Exists(manifestPath) && (required || allowAmbientManifest))
-            return IngestArtifactGraph.Load(ecosystemPath);
-        if (required)
-            throw new FileNotFoundException(
-                "Production source ingest requires a complete MANIFEST.tsv artifact graph.",
-                manifestPath);
-        return null;
-    }
-
-    private static void ReportStagedEntityAdmission(
-        RunCounters counters,
-        ILogger log)
-    {
-        var pending = counters.EntityAdmission.SnapshotPendingContent();
-        if (pending.Length == 0)
-        {
-            log.LogInformation(
-                "INGEST_IDENTITY_ADMISSION source={Source} staged_unpaired=0 status=ok",
-                counters.SourceName);
-            return;
-        }
-
-        // Diagnostic only: an entity may already be placed by an earlier source or run. The
-        // durable source-closure check below decides, and blocks completion when an entity
-        // is truly unplaced.
-        string examples = string.Join(", ", pending.Take(8).Select(static item =>
-            $"{item.Id}:{item.TypeId}@{item.UnitName}"));
-        log.LogWarning(
-            "INGEST_IDENTITY_ADMISSION source={Source} staged_unpaired={Unplaced} "
-            + "status=diagnostic detail={Examples}",
-            counters.SourceName, pending.Length, examples);
-    }
-
-    private static IngestInventory ApplyInputCap(IngestInventory inv, long cap) =>
-        cap > 0 && inv.TotalInputUnits > cap
-            ? inv with { TotalInputUnits = cap }
-            : inv;
-
-    private void TrackIntent(RunCounters c, SubstrateChange intent, List<IngestFailure> failures)
-    {
-        string unit = intent.Metadata.SourceContentUnitName;
-
-        const string fileFailed = IngestBatchPipeline.FileFailedUnitPrefix;
-        if (unit.StartsWith(fileFailed, StringComparison.Ordinal))
-        {
-            Interlocked.Increment(ref c._unitsFailed);
-            var failure = new IngestFailure(
-                intent.Metadata.IntentId,
-                unit,
-                "FileIngestFailure",
-                unit[fileFailed.Length..],
-                WasTransient: false,
-                RetryAttempts: 0,
-                OccurredAt: DateTimeOffset.UtcNow);
-            lock (failures) failures.Add(failure);
-            _obs.OnIntentFailed(c.SourceName ?? "", failure);
-            string fileAndError = unit[fileFailed.Length..];
-            int errorAt = fileAndError.IndexOf(": [", StringComparison.Ordinal);
-            string file = errorAt >= 0 ? fileAndError[..errorAt] : fileAndError;
-            string error = errorAt >= 0 ? fileAndError[(errorAt + 2)..] : fileAndError;
-            _obs.OnFileFinished(c.SourceName ?? "", file, "failed", error: error);
-            return;
-        }
-
-        const string periodBoundary = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
-        if (unit.StartsWith(periodBoundary, StringComparison.Ordinal))
-        {
-            int done = Interlocked.Increment(ref c._filesDone);
-            string file = unit[periodBoundary.Length..];
-            string fileStatus = "ok";
-            if (unit.StartsWith(IngestBatchPipeline.SkippedBoundaryUnitPrefix, StringComparison.Ordinal))
-            {
-                file = unit[IngestBatchPipeline.SkippedBoundaryUnitPrefix.Length..];
-                fileStatus = "skipped-complete";
-                Interlocked.Increment(ref c._filesSkippedComplete);
-            }
-            else if (unit.StartsWith(IngestBatchPipeline.CancelledBoundaryUnitPrefix, StringComparison.Ordinal))
-            {
-                file = unit[IngestBatchPipeline.CancelledBoundaryUnitPrefix.Length..];
-                fileStatus = "cancelled";
-            }
-            _obs.OnFileFinished(c.SourceName ?? "", file, fileStatus);
-            c._currentFile = file;
-            int total = c.Inventory?.FileCount ?? 0;
-            if (MultiFileTelemetry.ShouldLogFileLine(done, total))
-            {
-                Console.Error.WriteLine(
-                    $"INGEST_FILE_COMMITTED source={c.SourceName} file={file} "
-                    + $"files={done}/{total} file_status={fileStatus} "
-                    + $"run_elapsed_s={c.Sw?.Elapsed.TotalSeconds ?? 0:F0}");
-            }
-            return;
-        }
-        if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
-
-        long consumed = intent.Metadata.InputUnitsConsumed;
-        if (consumed > 0 && intent.CountsAsUnit)
-            Interlocked.Add(ref c._inputUnitsDone, consumed);
-        else if (consumed == 0)
-            c._currentFile = unit;
-    }
-
-    private IngestProgress MakeProgress(RunCounters c)
-    {
-        var inv = c.Inventory;
-        var fold = _writer as IConsensusFoldMetrics;
-        inv?.PublishObservedFloor(Math.Max(c.InputUnitsDone, c.InputUnitsComposed));
-        return new(
-            c.SourceName ?? "",
-            c.LayerOrder,
-            c.UnitsAttempted,
-            c.UnitsApplied,
-            c.UnitsFailed,
-            inv?.EffectiveTotalInputUnits ?? 0,
-            c.InputUnitsDone,
-            inv?.FileCount ?? 0,
-            c.FilesDone,
-            c.CurrentFile,
-            inv?.UnitType ?? "units",
-            c.Sw?.Elapsed ?? TimeSpan.Zero,
-            c.EntitiesInserted,
-            c.PhysicalitiesInserted,
-            c.AttestationsInserted,
-            c.RoundTrips,
-            c.UnitsProduced,
-            c.InputUnitsComposed,
-            fold?.ConsensusUpsertBackendWallClock ?? TimeSpan.Zero,
-            fold?.HighwayMaskBackendWallClock ?? TimeSpan.Zero,
-            fold?.ConsensusUpsertCalls ?? 0,
-            fold?.HighwayMaskCalls ?? 0,
-            fold?.HighwayMaskPairs ?? 0);
-    }
-
-    private readonly record struct QueuedIntent(
-        SubstrateChange Intent, long Rows, long SerializedBytes, IngestAdmissionSizing Admission);
-
-    private sealed class ApplyBatchBucket(int capacity, long envelope)
-    {
-        internal List<SubstrateChange> Batch { get; } = new(capacity);
-        internal IngestAdmissionWindow AdmissionWindow { get; } = new(envelope);
-        internal long Rows;
-        internal long Bytes;
-        internal Hash128? Source;
-
-        internal void Reset()
-        {
-            Batch.Clear();
-            AdmissionWindow.Reset();
-            Rows = 0;
-            Bytes = 0;
-            Source = null;
-        }
-    }
-
-    private sealed class ApplyEnvelopeTransfer(SubstrateChange change) : IDisposable
-    {
-        private bool _completed;
-
-        internal void Complete() => _completed = true;
-
-        public void Dispose()
-        {
-            if (!_completed) change.ApplyEnvelope?.Dispose();
-        }
-    }
-
-    private sealed class ApplyEnvelopeBatchOwner(IReadOnlyList<SubstrateChange> changes) : IDisposable
-    {
-        public void Dispose() => SubstrateApplyEnvelope.Release(changes);
-    }
-
-    private sealed class ApplyPipelineCleanup(
-        CancellationTokenSource cancellation,
-        Task producer,
-        IReadOnlyDictionary<Hash128, ApplyBatchBucket> buckets,
-        ChannelReader<QueuedIntent> reader) : IAsyncDisposable
-    {
-        internal Exception? ApplyFailure { get; set; }
-
-        public async ValueTask DisposeAsync()
-        {
-            List<Exception>? failures = null;
-            // Cancellation callbacks, the producer and each source lease are
-            // independent owners. A fault in one must not abandon the rest.
-            try { cancellation.Cancel(); }
-            catch (Exception failure) { (failures ??= []).Add(failure); }
-            try { await producer.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-            catch (Exception failure) { (failures ??= []).Add(failure); }
-            foreach (var bucket in buckets.Values)
-            {
-                try { SubstrateApplyEnvelope.Release(bucket.Batch); }
-                catch (Exception failure) { (failures ??= []).Add(failure); }
-            }
-            while (reader.TryRead(out QueuedIntent abandoned))
-            {
-                try { abandoned.Intent.ApplyEnvelope?.Dispose(); }
-                catch (Exception failure) { (failures ??= []).Add(failure); }
-            }
-            if (failures is null) return;
-            if (ApplyFailure is not null) failures.Insert(0, ApplyFailure);
-            Exception[] distinct = failures.Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
-            if (distinct.Length == 1)
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(distinct[0]).Throw();
-            throw new AggregateException("Ingest apply/producer cleanup failed.", distinct);
-        }
-    }
-
-    private sealed class BulkRunLease : IAsyncDisposable
-    {
-        private readonly ISubstrateWriter _writer;
-        private int _completed;
-
-        private BulkRunLease(ISubstrateWriter writer) => _writer = writer;
-
-        public static async Task<BulkRunLease> BeginAsync(
-            ISubstrateWriter writer, CancellationToken ct)
-        {
-            await writer.BeginBulkRunAsync(ct).ConfigureAwait(false);
-            return new BulkRunLease(writer);
-        }
-
-        public async Task CompleteAsync(Action<BulkRunCompletionPhase>? onPhase)
-        {
-            if (Interlocked.Exchange(ref _completed, 1) != 0) return;
-            try
-            {
-                await _writer.CompleteBulkRunAsync(onPhase, CancellationToken.None)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception completionFailure)
-            {
-                try { await _writer.AbortBulkRunAsync(CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception abortFailure)
-                {
-                    throw new AggregateException("Ingest bulk completion/abort failed.", completionFailure, abortFailure);
-                }
-                throw;
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await AbortAsync().ConfigureAwait(false);
-        }
-
-        public async Task AbortAsync()
-        {
-            if (Interlocked.Exchange(ref _completed, 1) != 0) return;
-            await _writer.AbortBulkRunAsync(CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-    }
-
-    private sealed class RunCounters
-    {
-        internal long _unitsAttempted;
-        internal long _unitsApplied;
-        internal long _unitsFailed;
-        internal long _entitiesInserted;
-        internal long _physicalitiesInserted;
-        internal long _attestationsInserted;
-        internal long _roundTrips;
-        internal long _bootstrapEntitiesInserted;
-        internal long _bootstrapPhysicalitiesInserted;
-        internal long _bootstrapAttestationsInserted;
-        internal long _unitsProduced;
-        internal long _inputUnitsDone;
-        internal long _inputUnitsComposed;
-        internal int _filesDone;
-        internal int _filesSkippedComplete;
-        internal string? _currentFile;
-        internal EntityAdmissionTracker EntityAdmission { get; } = new();
-        private readonly object _fileCompletionGate = new();
-        private readonly List<Task> _pendingFileCompletions = [];
-
-        internal void TrackPendingFileCompletion(Task task)
-        {
-            ArgumentNullException.ThrowIfNull(task);
-            lock (_fileCompletionGate)
-                _pendingFileCompletions.Add(task);
-        }
-
-        internal async Task DrainPendingFileCompletionsAsync()
-        {
-            Task[] pending;
-            lock (_fileCompletionGate)
-                pending = _pendingFileCompletions.ToArray();
-            if (pending.Length > 0)
-                await Task.WhenAll(pending).ConfigureAwait(false);
-        }
-
-        internal Stopwatch? Sw;
-        internal string? SourceName;
-        internal int LayerOrder;
-        internal IngestInventory? Inventory;
-        public long InputUnitsDone => Interlocked.Read(ref _inputUnitsDone);
-        public long InputUnitsComposed => Interlocked.Read(ref _inputUnitsComposed);
-        public int FilesDone => Volatile.Read(ref _filesDone);
-        public int FilesSkippedComplete => Volatile.Read(ref _filesSkippedComplete);
-        public string? CurrentFile => Volatile.Read(ref _currentFile);
-        public long UnitsAttempted => Interlocked.Read(ref _unitsAttempted);
-        public long UnitsProduced => Interlocked.Read(ref _unitsProduced);
-        public long UnitsApplied => Interlocked.Read(ref _unitsApplied);
-        public long UnitsFailed => Interlocked.Read(ref _unitsFailed);
-        public long EntitiesInserted => Interlocked.Read(ref _entitiesInserted);
-        public long PhysicalitiesInserted => Interlocked.Read(ref _physicalitiesInserted);
-        public long AttestationsInserted => Interlocked.Read(ref _attestationsInserted);
-        public long RoundTrips => Interlocked.Read(ref _roundTrips);
-        public long BootstrapEntitiesInserted => Interlocked.Read(ref _bootstrapEntitiesInserted);
-        public long BootstrapPhysicalitiesInserted => Interlocked.Read(ref _bootstrapPhysicalitiesInserted);
-        public long BootstrapAttestationsInserted => Interlocked.Read(ref _bootstrapAttestationsInserted);
-    }
-
-    private sealed class InitializationAccountingWriter(
-        ISubstrateWriter inner,
-        RunCounters counters) : ISubstrateWriter
-    {
-        private void Observe(IReadOnlyList<SubstrateChange> changes)
-        {
-            for (int i = 0; i < changes.Count; i++)
-                counters.EntityAdmission.Observe(changes[i]);
-        }
-
-        public async Task<ApplyResult> ApplyAsync(
-            SubstrateChange change, CancellationToken ct = default)
-        {
-            Observe([change]);
-            var result = await inner.ApplyAsync(change, ct).ConfigureAwait(false);
-            Account(result, [change]);
-            return result;
-        }
-
-        public async Task<ApplyResult> ApplyManyAsync(
-            IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        {
-            Observe(changes);
-            var result = await inner.ApplyManyAsync(changes, ct).ConfigureAwait(false);
-            Account(result, changes);
-            return result;
-        }
-
-        public Task<ApplyResult> ApplyWorkingSetAsync(
-            SubstrateChange change, CancellationToken ct = default)
-            => ApplyWorkingSetAsync([change], ct);
-
-        public async Task<ApplyResult> ApplyWorkingSetAsync(
-            IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        {
-            Observe(changes);
-            var result = await inner.ApplyWorkingSetAsync(changes, ct).ConfigureAwait(false);
-            Account(result, changes);
-            return result;
-        }
-
-        public async Task<ApplyResult> ApplyWorkingSetAsync(
-            IReadOnlyList<SubstrateChange> changes,
-            Func<CancellationToken, ValueTask> verifier, CancellationToken ct = default)
-        {
-            Observe(changes);
-            var result = await inner.ApplyWorkingSetAsync(changes, verifier, ct).ConfigureAwait(false);
-            Account(result, changes);
-            return result;
-        }
-
-        public Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
-            => inner.CompleteFileAsync(fileLabel, ct);
-
-        private void Account(ApplyResult result, IReadOnlyList<SubstrateChange> changes)
-        {
-            Interlocked.Add(ref counters._entitiesInserted, result.EntitiesInserted);
-            Interlocked.Add(ref counters._physicalitiesInserted, result.PhysicalitiesInserted);
-            Interlocked.Add(ref counters._attestationsInserted, result.AttestationsInserted);
-            Interlocked.Add(ref counters._bootstrapEntitiesInserted, result.EntitiesInserted);
-            Interlocked.Add(ref counters._bootstrapPhysicalitiesInserted, result.PhysicalitiesInserted);
-            Interlocked.Add(ref counters._bootstrapAttestationsInserted, result.AttestationsInserted);
-            Interlocked.Add(ref counters._roundTrips, result.RoundTrips);
-        }
-    }
-
-    private sealed record InternalContext(
-        string EcosystemPath,
-        IReadOnlyList<IngestArtifact> SelectedArtifacts,
-        bool HasArtifactGraph,
-        ISubstrateWriter Writer,
-        ISubstrateReader Reader,
-        ILogger Logger,
-        string SubstrateVersion) : IDecomposerContext;
-}
-
-public sealed class LayerOrderingViolationException : Exception
-{
-    public int DecomposerLayer { get; }
-    public int MissingLayer { get; }
-    public LayerOrderingViolationException(int decomposerLayer, int missingLayer)
-        : base($"Layer {decomposerLayer} decomposer requires Layer {missingLayer} "
-             + "to have completed at least once.")
-    {
-        DecomposerLayer = decomposerLayer;
-        MissingLayer = missingLayer;
     }
 }

@@ -466,3 +466,83 @@ laplace_fold_typed_cell_ids(const uint8_t *type16, const InArray *subjects,
     hash_destroy(seen);
     return cell_ids;
 }
+
+ArrayType *
+laplace_fold_retract_evidence_cells(
+    const uint8_t *type16, Datum type_datum, const Datum *cell_ids,
+    const InArray *subjects, const InArray *objects,
+    const FoldPriorStates *priors, const FoldEvidenceStates *evidence,
+    const char *label)
+{
+    Datum *kept_ids = palloc(sizeof(Datum) * subjects->n);
+    Datum *kept_subjects = palloc(sizeof(Datum) * subjects->n);
+    Datum *kept_objects = palloc(sizeof(Datum) * subjects->n);
+    bool *kept_nulls = palloc(sizeof(bool) * subjects->n);
+    Datum *removed_ids = palloc(sizeof(Datum) * subjects->n);
+    Datum *removed_subjects = palloc(sizeof(Datum) * subjects->n);
+    FoldEvidenceStates kept;
+    FoldStateArrays folds = {0};
+    FoldPriorStates *states = laplace_fold_prior_states_create(subjects->n);
+    kept.recomputed = palloc(sizeof(bool) * subjects->n);
+    kept.counts = palloc(sizeof(Datum) * subjects->n);
+    kept.timestamps = palloc(sizeof(Datum) * subjects->n);
+    int live = 0, missing = 0;
+    for (int i = 0; i < subjects->n; ++i)
+    {
+        if (!evidence->recomputed[i])
+        {
+            removed_ids[missing] = cell_ids[i];
+            removed_subjects[missing++] = subjects->elems[i];
+            continue;
+        }
+        kept_ids[live] = cell_ids[i];
+        kept_subjects[live] = subjects->elems[i];
+        kept_objects[live] = objects->elems[i];
+        kept_nulls[live] = objects->nulls[i];
+        kept.recomputed[live] = true;
+        kept.counts[live] = evidence->counts[i];
+        kept.timestamps[live] = evidence->timestamps[i];
+        states->ratings[live] = priors->ratings[i];
+        states->rds[live] = priors->rds[i];
+        states->volatilities[live] = priors->volatilities[i];
+        ++live;
+    }
+    int64 written = 0, deleted = 0;
+    if (live > 0)
+    {
+        InArray ss = {0}, oo = {0};
+        ss.n = oo.n = live;
+        ss.elems = kept_subjects;
+        oo.elems = kept_objects;
+        oo.nulls = kept_nulls;
+        ss.array = construct_array(kept_subjects, live, BYTEAOID, -1, false, 'i');
+        oo.array = construct_md_array(kept_objects, kept_nulls, 1, &live, (int[]){1}, BYTEAOID, -1, false, 'i');
+        folds.rating_array = construct_array(states->ratings, live, INT8OID, 8, true, 'd');
+        folds.rd_array = construct_array(states->rds, live, INT8OID, 8, true, 'd');
+        folds.volatility_array = construct_array(states->volatilities, live, INT8OID, 8, true, 'd');
+        written = laplace_fold_write_evidence_states(type16,
+            construct_array(kept_ids, live, BYTEAOID, -1, false, 'i'), &ss, &oo, &kept, &folds, label);
+    }
+    if (missing > 0)
+    {
+        static SPIPlanPtr delete_plan = NULL;
+        static const Oid args[3] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAOID};
+        if (delete_plan == NULL)
+        {
+            SPIPlanPtr plan = SPI_prepare(laplace_sql_query_text("consensus.delete_locked_empty_cells"), 3, (Oid *) args);
+            if (plan == NULL || SPI_keepplan(plan) != 0)
+                elog(ERROR, "%s: empty-cell delete plan preparation failed", label);
+            delete_plan = plan;
+        }
+        Datum values[3] = {
+            PointerGetDatum(construct_array(removed_ids, missing, BYTEAOID, -1, false, 'i')),
+            PointerGetDatum(construct_array(removed_subjects, missing, BYTEAOID, -1, false, 'i')),
+            type_datum};
+        int rc = SPI_execute_plan(delete_plan, values, NULL, false, 0);
+        if (rc != SPI_OK_DELETE || SPI_processed != (uint64) missing)
+            elog(ERROR, "%s: locked empty-cell deletion did not preserve target cardinality", label);
+        deleted = (int64) SPI_processed;
+    }
+    Datum result[2] = {Int64GetDatum(written), Int64GetDatum(deleted)};
+    return construct_array(result, 2, INT8OID, 8, true, 'd');
+}

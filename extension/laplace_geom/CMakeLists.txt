@@ -161,7 +161,7 @@ if(WIN32)
         RYU_ONLY_64_BIT_OPS
         "PROJ_DLL=")
 
-    add_library(laplace_geom MODULE src/laplace_geom.c $<TARGET_OBJECTS:lwgeom_static>)
+    add_library(laplace_geom MODULE src/laplace_geom.c src/laplace_geom_ops.c $<TARGET_OBJECTS:lwgeom_static>)
     set_target_properties(laplace_geom PROPERTIES
         PREFIX "" OUTPUT_NAME laplace_geom SUFFIX ".dll"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE
@@ -200,6 +200,7 @@ set(EXT_NAME    laplace_geom)
 
 set(EXT_C_SOURCES
     src/laplace_geom.c
+    src/laplace_geom_ops.c
 )
 
 add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})

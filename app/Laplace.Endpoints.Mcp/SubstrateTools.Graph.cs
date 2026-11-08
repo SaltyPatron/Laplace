@@ -1,0 +1,520 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json.Nodes;
+using Laplace.Agents;
+using Laplace.Chess.Service;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+using Laplace.Ingestion;
+using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
+using Npgsql;
+
+namespace Laplace.Endpoints.Mcp;
+
+internal sealed partial class SubstrateTools : IMcpTools
+{
+    // Surface -> sense -> synset via taxonomy.bubble_up. Renders sense and synset
+    // with realize.render() — the gloss text is the point here, not a display tag (see
+    // the catalog's render-vs-label note) — and returns hex ids so the next call
+    // reads from the resolved layer instead of re-entering text.
+    private (string, bool) Bubble(JsonObject? args)
+    {
+        var id = NpgsqlSubstrateReads.ResolveRefAsync(
+                _dbReadOnly, ChessPositionRef.RewriteFenToHex(Req(args, "term"))!, default)
+            .GetAwaiter().GetResult();
+        if (id is null)
+            return JsonRows(Array.Empty<JsonObject>());
+
+        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "taxonomy.bubble_up_rendered", id, Int(args, "k", 5));
+        using var rd = cmd.ExecuteReader();
+        var rows = new List<JsonObject>();
+        while (rd.Read())
+            rows.Add(new JsonObject
+            {
+                ["sense"] = rd.IsDBNull(0) ? null : Convert.ToHexStringLower(rd.GetFieldValue<byte[]>(0)),
+                ["sense_text"] = rd.IsDBNull(1) ? null : rd.GetString(1),
+                ["synset"] = rd.IsDBNull(2) ? null : Convert.ToHexStringLower(rd.GetFieldValue<byte[]>(2)),
+                ["synset_text"] = rd.IsDBNull(3) ? null : rd.GetString(3),
+                ["via_relation"] = rd.IsDBNull(4) ? null : rd.GetString(4),
+                ["score"] = rd.IsDBNull(5) ? null : (double)rd.GetDecimal(5),
+                ["base_eff_mu"] = rd.IsDBNull(6) ? null : (double)rd.GetDecimal(6),
+                ["domain_hits"] = rd.IsDBNull(7) ? null : rd.GetInt64(7),
+                ["witnesses"] = rd.IsDBNull(8) ? null : rd.GetInt64(8),
+            });
+        return JsonRows(rows);
+    }
+
+    private (string, bool) Api(JsonObject? args)
+    {
+        var rows = NpgsqlSubstrateReads.ApiCatalogAsync(_dbReadOnly, Req(args, "query"), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["name"] = r.Name,
+            ["args"] = r.Args,
+            ["returns"] = r.Returns,
+            // 'procedure' means CALL, not SELECT — the op tool switches on this, and
+            // a caller reading the catalog by hand needs the same warning.
+            ["kind"] = r.Kind,
+        }), int.MaxValue);
+    }
+
+    /// <summary>
+    /// Call an installed operation by name. The installed catalog (ops.api) is the
+    /// allow-list, so this is strictly narrower than the sql hatch: `sql` accepts arbitrary
+    /// text, `op` accepts a name that must already exist as a reviewed, installed function.
+    /// Arguments bind as parameters cast to the signature's declared types — no caller text
+    /// reaches the planner as SQL.
+    ///
+    /// WHY A GENERIC INVOKER AND NOT A TOOL PER FUNCTION. A hand-written tool fails twice:
+    /// it may never be written (358 installed functions is 358 chances to forget, and
+    /// forgetting is silent), and once written it is invisible until this process restarts —
+    /// which nothing owns, because the server is a stdio child of whatever client launched
+    /// it (GH #809). Resolving against the LIVE catalog makes an operation callable the
+    /// moment it is installed in the database, with no rebuild and no restart.
+    ///
+    /// Read-only is the DEFAULT, not the only mode. The datasource is chosen by the
+    /// same <see cref="InstalledOpInvoker.WritableOps"/> allow-list the HTTP surface
+    /// uses, because binding the read-only source unconditionally made every entry on
+    /// that list unreachable from MCP: ops.analyze_substrate died as
+    /// "substrate unavailable" against default_transaction_read_only and a 15s
+    /// statement_timeout, which reads as a broken substrate rather than a tool that
+    /// declined to route. Anything NOT on the list still resolves read-only and fails
+    /// at the backend, so the allow-list is the grant and the name check is not a
+    /// substitute for it.
+    /// </summary>
+    private (string, bool) Op(JsonObject? args)
+    {
+        var name = Req(args, "name");
+        var supplied = args?["args"] as JsonObject;
+        var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        var writable = InstalledOpInvoker.IsWritable(name);
+        // Maintenance duration follows live relation size. Zero is Npgsql's explicit
+        // unbounded value; the request remains cancellable and backend cancellation is
+        // also exposed through the ops catalog.
+        var timeout = Int(args, "timeout_seconds",
+            writable ? 0
+                     : InstalledOpInvoker.DefaultCommandTimeoutSeconds);
+        if (timeout < 0)
+            return ("timeout_seconds must be zero (unbounded) or a positive number of seconds.", true);
+
+        var result = InstalledOpInvoker.InvokeAsync(
+                writable ? _db : _dbReadOnly, name, dict,
+                Int(args, "max_rows", DefaultRowCap), timeout, ct: default)
+            .GetAwaiter().GetResult();
+        if (result.Error is not null)
+            return (result.Error, true);
+
+        var rows = new JsonArray();
+        foreach (var row in result.Rows)
+        {
+            var obj = new JsonObject();
+            foreach (var (k, v) in row)
+                obj[k] = ToJson(v ?? DBNull.Value);
+            rows.Add(obj);
+        }
+        var payload = new JsonObject { ["rows"] = rows };
+        if (result.TruncatedAt is { } t) payload["truncated_at"] = t;
+        return (payload.ToJsonString(), false);
+    }
+
+    private (string, bool) Translate(JsonObject? args)
+    {
+        var term = ChessPositionRef.RewriteFenToHex(Req(args, "term"))!;
+        var rows = NpgsqlSubstrateReads.TranslationsAsync(
+            _db, term, Int(args, "limit", 24), default).GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["translation"] = r.Translation,
+            ["language"] = r.Language,
+            ["eff_mu"] = r.EffMu,
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Walk(JsonObject? args)
+    {
+        var prompt = ChessPositionRef.RewriteFenToHex(NodeText(args, "prompt"));
+        var rows = NpgsqlSubstrateReads.WalkBranchesAsync(
+            _dbReadOnly, prompt, Opt(args, "entity"), Opt(args, "relation_type"),
+            Int(args, "depth", 4), Int(args, "breadth", 5), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(r => new JsonObject
+        {
+            ["depth"] = r.Depth,
+            ["path"] = r.Path,
+            ["eff_mu"] = Math.Round(r.EffMu, 1),
+            ["path_mu"] = Math.Round(r.PathMu, 1),
+            ["witnesses"] = r.Witnesses,
+        }));
+    }
+
+    private (string, bool) Health()
+    {
+        var health = NpgsqlSubstrateReads.SubstrateHealthAsync(_dbReadOnly, default)
+            .GetAwaiter().GetResult();
+        var counts = NpgsqlSubstrateReads.SubstrateCountsAsync(_dbReadOnly, default)
+            .GetAwaiter().GetResult();
+        // JsonValue.Create(null) preserves an unmeasured metric as JSON null.
+        var rows = health.Select(h => new JsonObject
+            {
+                ["metric"] = h.Metric,
+                ["value"] = h.Value is null ? null : JsonValue.Create(h.Value),
+            })
+            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric,
+                ["value"] = c.Value is { } measured ? JsonValue.Create(measured) : null }))
+            .Append(new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory });
+        return JsonRows(rows);
+    }
+
+    private static (string, bool) McpRuntime()
+    {
+        var started = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+        return (new JsonObject
+        {
+            ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
+            ["pid"] = Environment.ProcessId,
+            ["started_utc"] = started.ToString("o"),
+        }.ToJsonString(), false);
+    }
+
+    /// <summary>
+    /// Ingest state per source. Typed, so nobody has to compose this question in SQL —
+    /// which is how it kept getting answered wrongly, including by this assistant, three
+    /// times in one session.
+    /// </summary>
+    private (string, bool) SourceStatus(JsonObject? args)
+    {
+        var rows = NpgsqlSubstrateReads
+            .SourceStatusAsync(_dbReadOnly, Opt(args, "source"), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(s => new JsonObject
+        {
+            ["source"] = s.Source,
+            ["source_id"] = Convert.ToHexString(s.SourceId).ToLowerInvariant(),
+            // known=false says "no record of this source id here", which is a different
+            // answer from ingested=false ("declared, wrote nothing"). Collapsing them is
+            // how a misspelled name reads as a missing corpus.
+            ["known"] = s.Known,
+            ["ingested"] = s.Ingested,
+            ["evidence_approx"] = s.EvidenceApprox,
+            ["has_entities"] = s.HasEntities,
+            ["last_run_status"] = s.LastRunStatus is null ? null : JsonValue.Create(s.LastRunStatus),
+            ["last_run_at"] = s.LastRunAt is null ? null : JsonValue.Create(s.LastRunAt.Value),
+            ["throughput_status"] = s.ThroughputStatus is null ? null : JsonValue.Create(s.ThroughputStatus),
+            ["throughput_compared"] = s.ThroughputCompared,
+            ["throughput_rows_per_s"] = s.ThroughputRowsPerS is null ? null : JsonValue.Create(s.ThroughputRowsPerS.Value),
+            ["throughput_baseline_rows_per_s"] = s.ThroughputBaselineRowsPerS is null ? null : JsonValue.Create(s.ThroughputBaselineRowsPerS.Value),
+            ["throughput_slowdown_ratio"] = s.ThroughputSlowdownRatio is null ? null : JsonValue.Create(s.ThroughputSlowdownRatio.Value),
+        }));
+    }
+
+    private static (string, bool) JsonRows(IEnumerable<JsonObject> rows, int cap = DefaultRowCap)
+    {
+        var arr = new JsonArray();
+        var truncated = false;
+        foreach (var row in rows)
+        {
+            if (arr.Count >= cap) { truncated = true; break; }
+            arr.Add(row);
+        }
+        var result = new JsonObject { ["rows"] = arr };
+        if (truncated) result["truncated_at"] = cap;
+        return (result.ToJsonString(), false);
+    }
+
+    private (string, bool) ChatTurn(JsonObject? args)
+    {
+        var prompt = Req(args, "prompt");
+        var sessionKey = Opt(args, "session") ?? _processSessionKey;
+        var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
+        var shape = Opt(args, "shape");
+        var bandsCsv = Opt(args, "bands");
+        int[]? bands = bandsCsv is null
+            ? null
+            : bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(int.Parse).ToArray();
+        var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
+        var languageInput = Opt(args, "language");
+        byte[]? language = null;
+        var languageCode = languageInput is null
+            ? LanguageReference.ResolveSystemCode()
+            : LanguageReference.ResolveCode(languageInput);
+        if (languageInput is not null && languageCode is null)
+            return ($"language does not resolve to ISO 639: {languageInput}", true);
+        if (languageCode is not null)
+        {
+            language = LanguageReference.IdForResolvedCode(languageCode).ToBytes();
+        }
+
+        int steps = Int(args, "max_tokens", 128);
+        int stride = Int(args, "window", 5);
+        int topK = Int(args, "top_k", 10);
+        double spread = args?["temperature"]?.GetValue<double>() ?? 0.6;
+        if (steps < 1 || stride < 1 || topK < 1 || !double.IsFinite(spread) || spread < 0)
+            return ("Output length, window, and top_k must be positive; temperature must be finite and nonnegative.", true);
+
+        bool inspection = !string.IsNullOrWhiteSpace(shape) || bands is { Length: > 0 } || elaborate;
+        string occurrenceKey = Guid.NewGuid().ToString("N");
+        if (!TurnCloser.CloseAsync(McpTenant, sessionId, prompt, null,
+                occurrenceKey: occurrenceKey, phase: ConversationContent.TurnPhase.Input)
+            .GetAwaiter().GetResult())
+            return ("The prompt did not commit to the substrate.", true);
+        string? reply;
+        JsonObject? terminal = null;
+        if (inspection)
+        {
+            reply = NpgsqlSubstrateReads.ChatAsync(
+                _db, prompt, sessionId.ToBytes(), default,
+                shape: shape, bands: bands, elaborate: elaborate,
+                language: language).GetAwaiter().GetResult();
+        }
+        else
+        {
+            // The same observed native invocation the HTTP chat surface reads: the
+            // reply is its emitted surfaces and the terminal row is its disposition,
+            // so an empty turn states why (unresolved, ambiguous, budget_exhausted)
+            // instead of collapsing to an absent reply.
+            (reply, terminal) = ObservedTurn(prompt, sessionId.ToBytes(), steps, stride, spread, topK);
+        }
+
+        bool witnessed = string.IsNullOrEmpty(reply) || TurnCloser.CloseAsync(
+            McpTenant, sessionId, prompt, reply, occurrenceKey: occurrenceKey,
+            phase: ConversationContent.TurnPhase.Output).GetAwaiter().GetResult();
+
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply }),
+            ["session"] = sessionKey,
+            ["witnessed"] = witnessed
+        };
+        if (terminal is not null) result["forward"] = terminal;
+        if (!witnessed) result["error"] = "The turn did not commit to the substrate.";
+        return (result.ToJsonString(), !witnessed);
+    }
+
+    private (string? Reply, JsonObject? Terminal) ObservedTurn(
+        string prompt, byte[] session, int steps, int stride, double spread, int topK)
+    {
+        var text = new StringBuilder();
+        int emitted = 0;
+        NpgsqlSubstrateReads.ForwardTurnObservedRow? couple = null, last = null;
+        var rows = NpgsqlSubstrateReads.ForwardTurnObservedStepsAsync(
+            _db, prompt, session, steps, stride, spread, topK, default).GetAsyncEnumerator();
+        try
+        {
+            while (rows.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+                var row = rows.Current;
+                if (row.Event == "couple") couple = row;
+                if (row.Event is "complete" or "unresolved" or "ambiguous" or "budget_exhausted")
+                    last = row;
+                if (row.Event != "emit" || row.Surface is null) continue;
+                text.Append(row.Surface);
+                ++emitted;
+            }
+        }
+        finally { rows.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+
+        JsonObject? terminal = last is not { } t ? null : new JsonObject
+        {
+            ["event"] = t.Event,
+            ["disposition"] = t.Disposition,
+            ["completion"] = t.Completion,
+            ["root_id"] = t.RootIdHex,
+            ["program_id"] = t.ProgramIdHex,
+            ["required_obligations"] = t.RequiredObligations,
+            ["satisfied_obligations"] = t.SatisfiedObligations,
+            ["ordered_context"] = t.OrderedContextCount,
+            ["coupled_candidates"] = couple?.CandidateCount,
+            ["coupled_relation_families"] = couple?.RelationFamilies,
+            ["coupled_sources"] = couple?.SupportSources,
+            ["semantic_act_id"] = t.SemanticActIdHex,
+            ["output_fingerprint"] = t.OutputFingerprintHex,
+            ["emitted"] = emitted,
+        };
+        return (emitted == 0 ? null : text.ToString(), terminal);
+    }
+
+    // The agent write lane: mint a note as witnessed content and fold it, so the
+    // substrate is the shared memory between every agent on this repo. Same spine
+    // and trust class as a chat turn; the note is one outrankable voice, not truth.
+    // Plain (untenanted) UserPrompt/Response sources — the same path the CLI and
+    // OpenAICompat/TurnWitness.cs use — deliberately distinct from the tenant-scoped
+    // ConversationContent path a chat turn deposits through (spec 34): a standalone
+    // note has no session/tenant to scope, so it rides the shared base sources.
+    private (string, bool) WitnessFact(JsonObject? args)
+    {
+        var text = Req(args, "text");
+        var origin = Opt(args, "origin") ?? "agent/note";
+
+        lock (_writerSync)
+        {
+            EnsurePlainWriter();
+            if (_plainWriterBroken)
+                return ("witness lane offline (writer spine failed earlier in this session)", true);
+
+            if (!UserPromptContent.TryBuildWitnessChange(
+                    Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
+                return ("text produced no witnessable content", true);
+
+            _plainWriter!.ApplyAsync(change).GetAwaiter().GetResult();
+
+            var result = new JsonObject
+            {
+                ["rows"] = new JsonArray(new JsonObject
+                {
+                    ["root"] = Convert.ToHexStringLower(root.ToBytes()),
+                    ["origin"] = origin,
+                    ["witnessed"] = true,
+                })
+            };
+            return (result.ToJsonString(), false);
+        }
+    }
+
+    // Confirm/refute through the one canonical implementation (FeedbackContent —
+    // the same lane as HTTP /v1/feedback and the CLI attest). Immediate fold;
+    // the next walk reads the moved rating.
+    private (string, bool) Feedback(JsonObject? args)
+    {
+        var verdict = Req(args, "verdict").Trim().ToLowerInvariant();
+        if (verdict is not ("confirm" or "refute"))
+            return ("verdict must be 'confirm' or 'refute'", true);
+        bool confirm = verdict == "confirm";
+
+        CodepointPerfcache.LoadDefault();
+        var subject = Opt(args, "subject");
+        var relation = Opt(args, "relation");
+        var obj = Opt(args, "object");
+        var tokensCsv = Opt(args, "tokens");
+
+        if (subject is not null || relation is not null || obj is not null)
+        {
+            if (subject is null || relation is null || obj is null)
+                return ("triple mode needs subject, relation and object", true);
+            if (!FeedbackContent.TryResolveRelation(relation, out var rel))
+                return ($"'{relation}' is not a canonical relation type", true);
+
+            var resolved = FeedbackContent.ResolveTokensAsync(_db, [subject, obj]).GetAwaiter().GetResult();
+            foreach (var t in resolved)
+                if (!t.Usable)
+                    return ($"'{t.Token}' has no substrate entity", true);
+            var subjectId = resolved[0].Id!.Value;
+            var objectId = resolved[1].Id!.Value;
+
+            var before = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+            var applied = FeedbackContent.ApplyAsync(
+                _db, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm)).GetAwaiter().GetResult();
+            var after = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
+
+            static JsonObject? State(FeedbackContent.ConsensusState? s) => s is null ? null : new JsonObject
+            {
+                ["rating"] = s.Rating,
+                ["rd"] = s.Rd,
+                ["witnesses"] = s.WitnessCount,
+            };
+
+            var result = new JsonObject
+            {
+                ["rows"] = new JsonArray(new JsonObject
+                {
+                    ["mode"] = "triple",
+                    ["verdict"] = verdict,
+                    ["relation"] = rel.Canonical,
+                    ["attestations_inserted"] = applied.AttestationsInserted,
+                    ["consensus_updated"] = applied.ConsensusUpdated,
+                    ["before"] = State(before),
+                    ["after"] = State(after),
+                })
+            };
+            return (result.ToJsonString(), false);
+        }
+
+        if (string.IsNullOrWhiteSpace(tokensCsv))
+            return ("provide subject/relation/object, or tokens for chain mode", true);
+        var tokens = tokensCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length < 2)
+            return ("chain mode needs 2+ comma-separated tokens", true);
+
+        var chainResolved = FeedbackContent.ResolveTokensAsync(_db, tokens).GetAwaiter().GetResult();
+        var ids = chainResolved.Where(t => t.Usable).Select(t => t.Id!.Value).ToList();
+        if (ids.Count < 2)
+            return ($"need 2+ tokens with substrate entities (got {ids.Count})", true);
+
+        var chainApplied = FeedbackContent.ApplyAsync(
+            _db, FeedbackContent.BuildPrecedesChain(ids, confirm)).GetAwaiter().GetResult();
+
+        var chainResult = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["mode"] = "chain",
+                ["verdict"] = verdict,
+                ["relation"] = "PRECEDES",
+                ["pairs"] = ids.Count - 1,
+                ["attestations_inserted"] = chainApplied.AttestationsInserted,
+                ["consensus_updated"] = chainApplied.ConsensusUpdated,
+            })
+        };
+        return (chainResult.ToJsonString(), false);
+    }
+
+    private void EnsurePlainWriter()
+    {
+        if (_plainWriterBroken || (_plainWriter is not null && _plainBootstrapped)) return;
+        try
+        {
+            if (_plainWriter is null)
+            {
+                CodepointPerfcache.LoadDefault();
+                _plainWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
+            }
+            if (!_plainBootstrapped)
+            {
+                _plainWriter.ApplyManyAsync([
+                    UserPromptContent.BuildBootstrapChange(),
+                    ResponseContent.BuildBootstrapChange(),
+                ]).GetAwaiter().GetResult();
+                _plainBootstrapped = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _plainWriterBroken = true;
+            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP writer initialization failed.");
+            Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
+        }
+    }
+
+    // The OODA close runs through the shared TurnCloser (Laplace.Ingestion), which
+    // owns the whole sequence — floor gate, writer, tenant scope cache, bootstrap,
+    // attribution, build, apply. This lane used to re-derive it and was missing the
+    // floor gate, so an MCP turn against a floorless database deposited testimony
+    // with no tier-0 constituents to anchor it.
+    private TurnCloser TurnCloser => _turnCloser ??= new TurnCloser(
+        _db, warn => Console.Error.WriteLine($"laplace-mcp: {warn}"));
+
+    private bool DepositTurn(string prompt, string? reply, Hash128 sessionId)
+    {
+        lock (_writerSync)
+        {
+            return TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
+        }
+    }
+
+    // The outbound lane: this substrate as a CLIENT of other models, symmetric with
+    // Laplace.Endpoints.OpenAICompat serving them. Routing, credentials and per-wire
+    // request shaping live in Laplace.Agents so the CLI and the HTTP surface reach
+    // the same table rather than each growing a second one that drifts.
+    //
+    // One client for the process. A fresh HttpClient per call strands sockets in
+    // TIME_WAIT, and this server can outlive a whole agent session. The CATALOG, by
+    // contrast, is re-read per call — see the `ask` description.
+    private ExternalAgentClient? _agents;
+    private ExternalAgentClient AgentClient => _agents ??= new ExternalAgentClient();
+}

@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
 #include <limits.h>
@@ -24,6 +25,7 @@ static struct {
     size_t                                  length;
     const laplace_chess_perfcache_header_t* header;
     const laplace_chess_perfcache_record_t* records;
+    laplace_chess_perfcache_record_t*       filtered_records;
     uint64_t                                record_count;
 } g_ch = {0};
 
@@ -142,6 +144,7 @@ static void ch_unmap(const uint8_t* base, size_t len) {
 
 void chess_position_table_unload(void) {
     ch_write_enter();
+    if (g_ch.filtered_records) free(g_ch.filtered_records);
     if (g_ch.base) ch_unmap(g_ch.base, g_ch.length);
     memset(&g_ch, 0, sizeof(g_ch));
     ch_write_leave();
@@ -154,8 +157,19 @@ int chess_position_table_is_loaded(void) {
     return loaded;
 }
 
-int chess_position_table_load(const char* path) {
+int chess_position_table_load_profile(const char* path, const char* profile) {
     if (path == NULL) return -1;
+    if (profile == NULL || profile[0] == '\0')
+        profile = getenv("LAPLACE_CHESS_PROFILE");
+
+    int tier1_only = 0;
+    if (profile != NULL && profile[0] != '\0') {
+        if (strcmp(profile, "tier1") == 0 || strcmp(profile, "vocab") == 0) {
+            tier1_only = 1;
+        } else if (strcmp(profile, "full") != 0 && strcmp(profile, "all") != 0) {
+            return -2;
+        }
+    }
 
     const uint8_t* base = NULL;
     size_t len = 0;
@@ -176,10 +190,6 @@ int chess_position_table_load(const char* path) {
     }
 
     uint64_t body_end = len - LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES;
-    /* Divide the actual mapped byte envelope before trusting the stored count.
-     * Multiplication/addition of an untrusted count can wrap and admit a table
-     * whose binary search walks outside its mapping. Version 1 has no padding
-     * or extra sections after the records. */
     uint64_t record_bytes = body_end - h->records_offset;
     if (record_bytes % h->record_size != 0
         || h->record_count != record_bytes / h->record_size) {
@@ -204,15 +214,44 @@ int chess_position_table_load(const char* path) {
         }
     }
 
+    laplace_chess_perfcache_record_t* filtered = NULL;
+    uint64_t active_count = h->record_count;
+    if (tier1_only) {
+        uint64_t n_tier1 = 0;
+        for (uint64_t i = 0; i < h->record_count; ++i)
+            if (records[i].tier <= 1) n_tier1++;
+        filtered = (laplace_chess_perfcache_record_t*)malloc(
+            (n_tier1 ? n_tier1 : 1) * sizeof(laplace_chess_perfcache_record_t));
+        if (!filtered) {
+            ch_unmap(base, len);
+            return -1;
+        }
+        uint64_t dst = 0;
+        for (uint64_t i = 0; i < h->record_count; ++i)
+            if (records[i].tier <= 1) filtered[dst++] = records[i];
+        ch_unmap(base, len);
+        base = NULL;
+        len = 0;
+        h = NULL;
+        records = filtered;
+        active_count = n_tier1;
+    }
+
     ch_write_enter();
+    if (g_ch.filtered_records) free(g_ch.filtered_records);
     if (g_ch.base) ch_unmap(g_ch.base, g_ch.length);
     g_ch.base = base;
     g_ch.length = len;
     g_ch.header = h;
     g_ch.records = records;
-    g_ch.record_count = h->record_count;
+    g_ch.filtered_records = filtered;
+    g_ch.record_count = active_count;
     ch_write_leave();
     return 0;
+}
+
+int chess_position_table_load(const char* path) {
+    return chess_position_table_load_profile(path, NULL);
 }
 
 static const laplace_chess_perfcache_record_t*

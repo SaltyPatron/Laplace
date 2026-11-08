@@ -8,12 +8,12 @@ PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 PG_FUNCTION_INFO_V1(pg_laplace_forward_prompt);
 PG_FUNCTION_INFO_V1(pg_laplace_forward_trace);
 
-static Datum
-walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
-                   int semantic_hop_limit, bool trace,
-                   const LaplacePromptIntent *intent,
-                   const hash128_t *invocation_context,
-                   ArrayType *discourse)
+Datum
+laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
+                              int semantic_hop_limit, bool trace,
+                              const LaplacePromptIntent *intent,
+                              const hash128_t *invocation_context,
+                              ArrayType *discourse)
 {
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *context_array;
@@ -630,112 +630,17 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
-    return walk_continuations(fcinfo, NULL, -1, false, NULL, NULL, NULL);
-}
-
-static Datum
-forward_prompt(FunctionCallInfo fcinfo, bool trace)
-{
-    int hops;
-    int fanout;
-    hash128_t active_invocation;
-    const hash128_t *invocation_context = NULL;
-    ArrayType *discourse = NULL;
-
-    if (PG_NARGS() > 10)
-    {
-        if (PG_ARGISNULL(10))
-            ereport(ERROR, (errmsg("bound program: invocation context must not be NULL")));
-        if (VARSIZE_ANY_EXHDR(PG_GETARG_BYTEA_PP(10)) != sizeof(hash128_t))
-            ereport(ERROR, (errmsg("bound program: invocation context must be 16 bytes")));
-        active_invocation = datum_to_hash128(PG_GETARG_DATUM(10));
-        invocation_context = &active_invocation;
-    }
-    if (PG_ARGISNULL(0) || VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_PP(0)) == 0)
-    {
-        InitMaterializedSRF(fcinfo, 0);
-        return (Datum) 0;
-    }
-
-    hops = PG_ARGISNULL(6) ? 2 : PG_GETARG_INT32(6);
-    fanout = PG_ARGISNULL(7) ? 8 : PG_GETARG_INT32(7);
-    if (hops < 0 || fanout < 0)
-        ereport(ERROR,
-                (errmsg("forward prompt: hops and fanout must not be negative")));
-
-    LaplacePromptInput *input = laplace_prompt_input(PG_GETARG_TEXT_PP(0));
-    HASHCTL ctl = {0};
-    ctl.keysize = ctl.entrysize = sizeof(hash128_t);
-    ctl.hcxt = CurrentMemoryContext;
-    PromptFrontier frontier = {
-        .owner = CurrentMemoryContext,
-        .seen = hash_create("forward prompt supplemental operands", 128, &ctl,
-                            HASH_ELEM | HASH_BLOBS | HASH_CONTEXT),
-    };
-
-    ArrayIterator iterator = array_create_iterator(input->seeds, 0, NULL);
-    Datum value;
-    bool isnull;
-    while (array_iterate(iterator, &value, &isnull))
-    {
-        if (isnull)
-            continue;
-        hash128_t id = datum_to_hash128(value);
-        laplace_tg_prompt_frontier_add(&frontier, &id);
-    }
-    array_free_iterator(iterator);
-
-    if (!PG_ARGISNULL(8))
-    {
-        discourse = PG_GETARG_ARRAYTYPE_P(8);
-        laplace_tg_validate_id_array(discourse, "discourse history", true);
-    }
-
-    LOCAL_FCINFO(walk_call, 12);
-    InitFunctionCallInfoData(*walk_call, fcinfo->flinfo, 12, fcinfo->fncollation,
-                             fcinfo->context, fcinfo->resultinfo);
-    for (int i = 0; i < 12; ++i)
-        walk_call->args[i].isnull = true;
-    walk_call->args[0] = (NullableDatum) {PointerGetDatum(input->context), false};
-    for (int i = 1; i <= 5; ++i)
-        walk_call->args[i] = fcinfo->args[i];
-    if (walk_call->args[5].isnull)
-    {
-        text *prompt = PG_GETARG_TEXT_PP(0);
-        const char *source = VARDATA_ANY(prompt);
-        int source_length = VARSIZE_ANY_EXHDR(prompt);
-        char *utf8 = pg_server_to_any(source, source_length, PG_UTF8);
-        Size utf8_length = utf8 == source ? (Size) source_length : strlen(utf8);
-        hash128_t digest;
-        const uint8 *bytes = (const uint8 *) &digest;
-        uint64 seed_bits = 0;
-        int64 seed;
-
-        hash128_blake3((const uint8 *) utf8, utf8_length, &digest);
-        for (int i = 0; i < 8; ++i)
-            seed_bits = (seed_bits << 8) | bytes[i];
-        memcpy(&seed, &seed_bits, sizeof(seed));
-        if (utf8 != source)
-            pfree(utf8);
-        walk_call->args[5] = (NullableDatum) {Int64GetDatum(seed), false};
-    }
-    walk_call->args[6] = (NullableDatum) {
-        makeArrayResult(frontier.ids, frontier.owner), false};
-    walk_call->args[8] = (NullableDatum) {Int32GetDatum(fanout), false};
-    walk_call->args[11] = fcinfo->args[9];
-
-    return walk_continuations(
-        walk_call, input, hops, trace, NULL, invocation_context, discourse);
+    return laplace_tg_walk_continuations(fcinfo, NULL, -1, false, NULL, NULL, NULL);
 }
 
 Datum
 pg_laplace_forward_prompt(PG_FUNCTION_ARGS)
 {
-    return forward_prompt(fcinfo, false);
+    return laplace_tg_forward_prompt(fcinfo, false);
 }
 
 Datum
 pg_laplace_forward_trace(PG_FUNCTION_ARGS)
 {
-    return forward_prompt(fcinfo, true);
+    return laplace_tg_forward_prompt(fcinfo, true);
 }

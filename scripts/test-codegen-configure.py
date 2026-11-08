@@ -22,6 +22,8 @@ class ConfigureGeneration(unittest.TestCase):
             (self.root / name).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "scripts/codegen-attestation-law.py",
                         self.root / "scripts/codegen-attestation-law.py")
+        shutil.copyfile(ROOT / "scripts/codegen_vocabulary_laws.py",
+                        self.root / "scripts/codegen_vocabulary_laws.py")
         shutil.copytree(ROOT / "engine/manifest", self.root / "engine/manifest", dirs_exist_ok=True)
         real = (ROOT / "engine/core/CMakeLists.txt").read_text()
         start = real.index('set(LAPLACE_PERFCACHE_DIR ')

@@ -20,6 +20,7 @@ static char *perfcache_path = NULL;
 static char *perfcache_profile = NULL;
 static char *highway_perfcache_path = NULL;
 static char *chess_position_perfcache_path = NULL;
+static char *chess_position_profile = NULL;
 static char *vocabulary_perfcache_path = NULL;
 static int native_mkl_threads = 1;
 
@@ -59,6 +60,15 @@ laplace_substrate_perfcache_init(void)
         "Tier-1 piecexsquare vocab + catalog tier-2 positions (GH #822). "
         "Empty disables chess floor lookups; compose falls back to t0 recomputation.",
         &chess_position_perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.chess_position_profile",
+        "Chess perfcache profile (tier1 for piece-square vocabulary only, full for all positions).",
+        "Empty selects full (or LAPLACE_CHESS_PROFILE when set).",
+        &chess_position_profile,
         "",
         PGC_SIGHUP,
         0,
@@ -198,7 +208,9 @@ laplace_chess_position_ready(void)
     if (chess_position_perfcache_path == NULL || chess_position_perfcache_path[0] == '\0')
         return false;
 
-    rc = chess_position_table_load(chess_position_perfcache_path);
+    rc = (chess_position_profile != NULL && chess_position_profile[0] != '\0')
+        ? chess_position_table_load_profile(chess_position_perfcache_path, chess_position_profile)
+        : chess_position_table_load(chess_position_perfcache_path);
     if (rc != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR),
@@ -279,7 +291,9 @@ laplace_substrate_perfcache_prewarm(void)
 
     if (chess_position_perfcache_path != NULL && chess_position_perfcache_path[0] != '\0')
     {
-        rc = chess_position_table_load(chess_position_perfcache_path);
+        rc = (chess_position_profile != NULL && chess_position_profile[0] != '\0')
+        ? chess_position_table_load_profile(chess_position_perfcache_path, chess_position_profile)
+        : chess_position_table_load(chess_position_perfcache_path);
         if (rc == 0)
             ereport(LOG,
                     (errmsg("laplace_substrate: chess position perfcache prewarmed (\"%s\")",

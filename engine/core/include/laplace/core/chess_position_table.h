@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 int chess_position_table_load(const char* path);
+int chess_position_table_load_profile(const char* path, const char* profile);
 void chess_position_table_unload(void);
 int chess_position_table_is_loaded(void);
 

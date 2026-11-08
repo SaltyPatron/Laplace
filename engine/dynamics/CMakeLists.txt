@@ -16,6 +16,7 @@ set(LAPLACE_DYNAMICS_SOURCES
     src/eigenmaps.cpp
     src/gram_schmidt.cpp
     src/bilinear_edges.cpp
+    src/bilinear_edges_kernels.cpp
     src/ffn_edges.cpp
     src/model_math.cpp
 )
