@@ -173,7 +173,19 @@ public sealed class ConversationProvenanceGateTests
             RepoPath("app/Laplace.Endpoints.OpenAICompat"), "EndpointMappings.*.cs",
             SearchOption.TopDirectoryOnly);
 
-    private static string Read(string repoRelative) => File.ReadAllText(RepoPath(repoRelative));
+    private static string Read(string repoRelative)
+    {
+        var path = RepoPath(repoRelative);
+        var text = File.ReadAllText(path);
+        var parent = Path.GetDirectoryName(path)!;
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var dir = Path.Combine(parent, stem);
+        if (Path.GetExtension(path) == ".def" && Directory.Exists(dir))
+            text += "\n" + string.Join("\n", Directory.GetFiles(dir, "*.def").OrderBy(f => f).Select(File.ReadAllText));
+        if (Path.GetExtension(path) == ".cs" && !stem.Contains('.'))
+            text += "\n" + string.Join("\n", Directory.GetFiles(parent, $"{stem}.*.cs").OrderBy(f => f).Select(File.ReadAllText));
+        return text;
+    }
 
     private static string RepoPath(string repoRelative) =>
         Path.Combine(RepoRoot(), repoRelative.Replace('/', Path.DirectorySeparatorChar));

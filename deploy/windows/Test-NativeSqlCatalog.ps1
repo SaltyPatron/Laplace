@@ -27,7 +27,13 @@ public static class LaplacePackageSqlCatalog {
 }
 '@
 }
-$source = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $Catalog))
+$catalogPath = (Resolve-Path -LiteralPath $Catalog).Path
+$catalogDir = Split-Path -Parent $catalogPath
+$source = [IO.File]::ReadAllText($catalogPath)
+$source = [regex]::Replace($source, '(?m)^\s*#include\s+"(?<inc>[^"]+)"\s*$', {
+    param($m)
+    [IO.File]::ReadAllText((Join-Path $catalogDir $m.Groups['inc'].Value))
+})
 $literal = '"(?:\\.|[^"\\])*"'
 $pattern = 'SQL_QUERY\(\s*"(?<name>[^"]+)"\s*,\s*"(?<parameters>[^"]*)"\s*,\s*(?<text>(?:'+$literal+'\s*)+)\)'
 $queries = [regex]::Matches($source, $pattern)

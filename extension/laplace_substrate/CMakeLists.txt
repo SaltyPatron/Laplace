@@ -91,7 +91,8 @@ set(EXT_EXECUTION_SOURCES
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/include/laplace/core/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog/*.def")
 file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/LaplaceWindowsExports.cmake" _exports_contract)
 set(_execution_inputs CMakeLists.txt "${_exports_contract}" ${EXT_EXECUTION_SOURCES} ${_execution_headers}
     "${LAPLACE_POSTGRES_SOURCE}/include/laplace_pg/executor.h"

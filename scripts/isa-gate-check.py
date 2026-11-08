@@ -321,6 +321,8 @@ def scan_g4_dead_canonical() -> Counter[str]:
     catalog = ROOT / "engine" / "core" / "src" / "sql_catalog.def"
     if catalog.exists():
         corpus.append((relative(catalog), strip_c_comments(catalog.read_text(encoding="utf-8"))))
+    for def_path in sorted((ROOT / "engine" / "core" / "src" / "sql_catalog").glob("*.def")):
+        corpus.append((relative(def_path), strip_c_comments(def_path.read_text(encoding="utf-8"))))
 
     for path in production_files(functions_root, (".sql.in",)):
         rel = relative(path)

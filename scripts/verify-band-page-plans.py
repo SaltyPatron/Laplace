@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--limits", type=int, nargs="+", default=[5])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    catalog = (root / "engine/core/src/sql_catalog.def").read_text()
+    catalog = "\n".join(p.read_text(encoding="utf-8") for p in [root / "engine/core/src/sql_catalog.def", *sorted((root / "engine/core/src/sql_catalog").glob("*.def"))] if p.exists())
     entry = re.search(r'SQL_QUERY\("consensus\.band_edges",[^\n]+\n(.*?)\)\s*\n',
                       catalog, re.S).group(1)
     query = "".join(json.loads(value) for value in re.findall(r'"(?:\\.|[^"\\])*"', entry))

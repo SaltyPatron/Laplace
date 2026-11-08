@@ -75,7 +75,7 @@ public sealed class ExploreDisplayLabelGateTests
     public void EntityFacets_KeepUnknownTypesUnknown_AndLexicalizationRemainsSeparate()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
-        var catalog = File.ReadAllText(Path.Combine(root, "engine", "core", "src", "sql_catalog.def"));
+        var catalog = TypeIdLawTests.ReadSqlCatalog(root);
         var facetsSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "inspect", "entity_facets.sql.in"));
         var realizeBatch = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",

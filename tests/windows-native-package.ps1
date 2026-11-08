@@ -17,7 +17,7 @@ foreach($kind in 'current','stale') {
     $directory=Join-Path $work $kind
     $null=New-Item -ItemType Directory -Path $directory
     Copy-Item -LiteralPath (Join-Path $repo 'engine/core/src/sql_catalog.c') -Destination $directory
-    $catalog=[IO.File]::ReadAllText((Join-Path $repo 'engine/core/src/sql_catalog.def'))
+    $catalog=[regex]::Replace([IO.File]::ReadAllText((Join-Path $repo 'engine/core/src/sql_catalog.def')), '(?m)^\s*#include\s+"(?<inc>[^"]+)"\s*$', { param($m) [IO.File]::ReadAllText((Join-Path $repo ('engine/core/src/' + $m.Groups['inc'].Value))) })
     if($kind -eq 'stale'){$catalog=$catalog.Replace('pg_catalog.pg_has_role','pg_catalog.pg_has_role_obsolete')}
     [IO.File]::WriteAllText((Join-Path $directory 'sql_catalog.def'),$catalog)
     Push-Location $directory

@@ -49,7 +49,15 @@ public sealed class LeaderBandCatalogGateTests
         return nextMethod > start ? text[start..nextMethod] : text[start..];
     }
 
-    private static string Read(string repoRelative) => File.ReadAllText(RepoPath(repoRelative));
+    private static string Read(string repoRelative)
+    {
+        var path = RepoPath(repoRelative);
+        var text = File.ReadAllText(path);
+        var dir = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path));
+        if (Path.GetExtension(path) == ".def" && Directory.Exists(dir))
+            text += "\n" + string.Join("\n", Directory.GetFiles(dir, "*.def").OrderBy(f => f).Select(File.ReadAllText));
+        return text;
+    }
 
     private static string RepoPath(string repoRelative) =>
         Path.Combine(RepoRoot(), repoRelative.Replace('/', Path.DirectorySeparatorChar));

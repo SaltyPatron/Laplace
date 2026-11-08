@@ -431,8 +431,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         Assert.Equal(Epoch, goodExpected.Time);
         Cell[] requested = [good, mixed, transient, unary, missing, good];
 
-        string source = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
-            "engine", "core", "src", "sql_catalog.def"));
+        string source = TypeIdLawTests.ReadSqlCatalog();
         const string marker = "SQL_QUERY(\"consensus.evidence_rows_batch\"";
         int start = source.IndexOf(marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "the native evidence query owner must exist");

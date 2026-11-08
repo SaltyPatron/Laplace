@@ -9,7 +9,7 @@ public sealed class ConsensusMutationRoutingTests
     private static string RepoRoot => TypeIdLawTests.FindRepoRootPublic();
 
     private static string Read(params string[] path) =>
-        File.ReadAllText(Path.Combine([RepoRoot, .. path]));
+        File.ReadAllText(Path.Combine([RepoRoot, .. path])) + (path[^1].EndsWith(".def", StringComparison.Ordinal) && Directory.Exists(Path.Combine([RepoRoot, .. path[..^1], Path.GetFileNameWithoutExtension(path[^1])])) ? "\n" + string.Join("\n", Directory.GetFiles(Path.Combine([RepoRoot, .. path[..^1], Path.GetFileNameWithoutExtension(path[^1])]), "*.def").OrderBy(f => f).Select(File.ReadAllText)) : "");
 
     [Fact]
     public void SingleWitnessUsesTheNativeKeyedWriter()

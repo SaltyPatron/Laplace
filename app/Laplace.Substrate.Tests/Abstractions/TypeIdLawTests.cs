@@ -133,7 +133,7 @@ public class TypeIdLawTests
         Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
         Assert.Contains("\"conversation.forward_turn\"", reads, StringComparison.Ordinal);
         Assert.Contains("converse.forward_turn($1,$2,$3,$4,$5,$6)",
-            File.ReadAllText(Path.Combine(repoRoot,"engine","core","src","sql_catalog.def")), StringComparison.Ordinal);
+            ReadSqlCatalog(repoRoot), StringComparison.Ordinal);
         Assert.DoesNotContain("generation.generate(", text, StringComparison.Ordinal);
     }
 
@@ -155,6 +155,17 @@ public class TypeIdLawTests
     }
 
     internal static string FindRepoRootPublic() => FindRepoRoot();
+
+    internal static string ReadSqlCatalog(string? repoRoot = null)
+    {
+        var root = repoRoot ?? FindRepoRoot();
+        var defFile = Path.Combine(root, "engine", "core", "src", "sql_catalog.def");
+        var defDir = Path.Combine(root, "engine", "core", "src", "sql_catalog");
+        var parts = new List<string> { File.ReadAllText(defFile) };
+        if (Directory.Exists(defDir))
+            parts.AddRange(Directory.GetFiles(defDir, "*.def").OrderBy(f => f).Select(File.ReadAllText));
+        return string.Join("\n", parts);
+    }
 
     private static string FindRepoRoot()
     {
