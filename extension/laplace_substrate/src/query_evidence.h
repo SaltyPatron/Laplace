@@ -146,6 +146,12 @@ extern const LaplaceQueryChannel *laplace_query_state_channels(
     const LaplaceQueryState *state,
     int *count);
 
+extern const LaplaceQueryChannel *laplace_query_state_channels_unbound(
+    const LaplaceQueryState *state,
+    int *count);
+
+extern int laplace_query_state_channel_count(const LaplaceQueryState *state);
+
 /*
  * Evidence for a proposed candidate set against every retained occurrence.
  * Unlike coupling, this reads every stored cell between operands and
@@ -160,6 +166,16 @@ extern LaplaceQueryChannel *laplace_query_state_candidate_evidence(
     ArrayType *candidates,
     int *count,
     LaplaceQueryEvidenceStats *stats);
+
+extern LaplaceQueryChannel *laplace_query_state_candidate_evidence_unbound(
+    const LaplaceQueryState *state,
+    ArrayType *candidates,
+    int *count);
+
+extern void laplace_query_state_bind_channels(
+    const LaplaceQueryState *state,
+    LaplaceQueryChannel *channels,
+    int channel_count);
 
 /* Distinct candidates / relation ids across the retained channels, allocated
  * in CurrentMemoryContext. */

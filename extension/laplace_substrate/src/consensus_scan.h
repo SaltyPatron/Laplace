@@ -82,6 +82,8 @@ extern void laplace_consensus_scan_ranked_planes(
  * before exposing them as source-counted results; zero here is not testimony. */
 extern void laplace_consensus_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
     LaplaceConsensusConsumer consume,void *context,LaplaceConsensusScanStats *stats);
+extern void laplace_consensus_candidates_stored(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    LaplaceConsensusConsumer consume,void *context);
 extern void laplace_consensus_ranked_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
     bool default_only,bool planes,LaplaceConsensusConsumer consume,LaplaceConsensusCutoff cutoff,
     void *context,LaplaceConsensusScanStats *stats);

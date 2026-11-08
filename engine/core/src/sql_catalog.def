@@ -2042,18 +2042,22 @@ SQL_QUERY("native.consensus_cells", "bytea[],bytea[],bytea[],bool",
     "WITH surfaces AS MATERIALIZED (\n"
     " SELECT s.surface_id,public.blake3_from_bytea(s.surface_id) AS surface_b3,s.canonical_id,s.inverse\n"
     " FROM consensus.relation_surfaces($3::bytea[]) s\n"
-    "), keys AS MATERIALIZED (\n"
-    " SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(id)\n"
-    " FROM unnest(coalesce($1::bytea[],$2::bytea[])) u(id) WHERE id IS NOT NULL ORDER BY 1) AS ids,\n"
-    " CASE WHEN $3 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3) END AS types,\n"
-    " CASE WHEN $1 IS NOT NULL AND $2 IS NOT NULL AND NOT ($3 IS NULL OR EXISTS (SELECT 1 FROM surfaces WHERE inverse))\n"
-    "      THEN ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL)\n"
-    "      ELSE NULL::public.blake3[] END AS opp,\n"
+    "), raw_keys AS MATERIALIZED (\n"
+    " SELECT CASE WHEN $1 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($1::bytea[]) u(id) WHERE id IS NOT NULL ORDER BY 1) END AS s_ids,\n"
+    " CASE WHEN $2 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id) WHERE id IS NOT NULL ORDER BY 1) END AS o_ids,\n"
     " ($3 IS NULL OR EXISTS (SELECT 1 FROM surfaces WHERE inverse)) AS has_inverse\n"
+    "), keys AS MATERIALIZED (\n"
+    " SELECT CASE WHEN $1 IS NOT NULL AND $2 IS NOT NULL AND NOT $4 AND r.has_inverse AND cardinality(r.o_ids)<cardinality(r.s_ids) THEN r.o_ids ELSE coalesce(r.s_ids,r.o_ids) END AS ids,\n"
+    " CASE WHEN $3 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT DISTINCT surface_b3 FROM surfaces ORDER BY surface_b3) END AS types,\n"
+    " CASE WHEN $1 IS NULL OR $2 IS NULL OR $4 THEN NULL::public.blake3[]\n"
+    "      WHEN r.has_inverse AND cardinality(r.o_ids)<cardinality(r.s_ids) THEN r.s_ids\n"
+    "      ELSE r.o_ids END AS opp,\n"
+    " ($4 AND $1 IS NOT NULL AND $2 IS NOT NULL) OR r.has_inverse AS has_inverse\n"
+    " FROM raw_keys r\n"
     "), selected AS MATERIALIZED (\n"
     " SELECT DISTINCT ON(c.entity) c.entity,public.laplace_parts(c.path) AS ids,c.rating,c.deviation,c.volatility,c.matches\n"
     " FROM keys k CROSS JOIN LATERAL public.laplace_claims_each(\n"
-    " k.ids,NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
+    " k.ids,CASE WHEN $4 THEN 64::bigint ELSE NULL::bigint END,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
     " (CASE WHEN k.has_inverse THEN 3 WHEN $1 IS NOT NULL THEN 1 ELSE 2 END)::smallint,k.types,3::bigint,k.opp) c\n"
     " ORDER BY c.entity\n"
     "), claim_meta AS MATERIALIZED (\n"
@@ -2073,8 +2077,7 @@ SQL_QUERY("native.consensus_cells", "bytea[],bytea[],bytea[],bool",
     " WHERE cardinality(s.ids)=3\n"
     ") SELECT o.subj_id,o.type_id,o.obj_id,o.rating,o.rd,o.volatility,o.witnesses,public.blake3_send(o.entity)\n"
     " FROM oriented o\n"
-    " WHERE ($1 IS NULL OR o.subj_id=ANY($1))\n"
-    " AND ($2 IS NULL OR o.obj_id=ANY($2))\n"
+    " WHERE (CASE WHEN $4 AND $1 IS NOT NULL AND $2 IS NOT NULL THEN (o.subj_id=ANY($1) OR o.obj_id=ANY($2)) ELSE ($1 IS NULL OR o.subj_id=ANY($1)) AND ($2 IS NULL OR o.obj_id=ANY($2)) END)\n"
     " AND ($3 IS NULL OR o.type_id=ANY($3) OR o.type_id IN (SELECT canonical_id FROM surfaces))\n"
     " ORDER BY o.standing DESC,o.entity")
 
@@ -2105,7 +2108,7 @@ SQL_QUERY("geometry.prompt.angular", "float8,float8,float8,float8,bytea,int4,int
  * The directional scan selects a boundary key, not an arbitrary subset of its
  * ties: the equality seek returns its smallest IDs using the existing index. */
 SQL_QUERY("geometry.prompt.hilbert", "float8,float8,float8,float8,bytea,int4,int2",
-    "WITH anchor AS MATERIALIZED (\n SELECT public.laplace_hilbert4(public.ST_MakePoint($1,$2,$3,$4)) # '-9223372036854775808'::bigint AS key\n), same AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert=(SELECT key FROM anchor)\n ORDER BY e.id LIMIT $6\n), lower_raw AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert<(SELECT key FROM anchor)\n ORDER BY e.hilbert DESC LIMIT $6\n), lower_tie AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert=(SELECT min(hilbert) FROM lower_raw)\n ORDER BY e.id LIMIT $6\n), upper_raw AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert>(SELECT key FROM anchor)\n ORDER BY e.hilbert LIMIT $6\n), upper_tie AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert=(SELECT max(hilbert) FROM upper_raw)\n ORDER BY e.id LIMIT $6\n), selected AS (\n SELECT * FROM same\n UNION ALL SELECT * FROM lower_raw WHERE hilbert>(SELECT min(hilbert) FROM lower_raw)\n UNION ALL SELECT * FROM lower_tie\n UNION ALL SELECT * FROM upper_raw WHERE hilbert<(SELECT max(hilbert) FROM upper_raw)\n UNION ALL SELECT * FROM upper_tie\n)\nSELECT public.blake3_send(s.id),\n pg_catalog.int8send(s.hilbert # '-9223372036854775808'::bigint),\n pg_catalog.int8send(a.key # '-9223372036854775808'::bigint)\nFROM selected s CROSS JOIN anchor a")
+    "WITH anchor AS MATERIALIZED (\n SELECT public.laplace_hilbert4(public.ST_MakePoint($1,$2,$3,$4)) # '-9223372036854775808'::bigint AS key\n), upper_same AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert>=(SELECT key FROM anchor)\n ORDER BY e.hilbert,e.id LIMIT $6\n), lower_raw AS MATERIALIZED (\n SELECT e.id,e.hilbert,row_number() OVER (ORDER BY e.hilbert DESC,e.id DESC) AS rn\n FROM (SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert<(SELECT key FROM anchor)\n ORDER BY e.hilbert DESC,e.id DESC LIMIT $6+1) e\n), tie_key AS MATERIALIZED (\n SELECT a.hilbert FROM lower_raw a JOIN lower_raw b ON a.rn=$6 AND b.rn=$6+1 AND a.hilbert=b.hilbert\n), lower_tie AS MATERIALIZED (\n SELECT e.id,e.hilbert FROM public.entity e\n WHERE e.tier=$7 AND e.id<>public.blake3_from_bytea($5)\n   AND e.hilbert=(SELECT hilbert FROM tie_key)\n ORDER BY e.id LIMIT $6\n), selected AS (\n SELECT id,hilbert FROM upper_same\n UNION ALL SELECT id,hilbert FROM lower_raw WHERE rn<=$6 AND hilbert IS DISTINCT FROM (SELECT hilbert FROM tie_key)\n UNION ALL SELECT id,hilbert FROM lower_tie\n)\nSELECT public.blake3_send(s.id),\n pg_catalog.int8send(s.hilbert # '-9223372036854775808'::bigint),\n pg_catalog.int8send(a.key # '-9223372036854775808'::bigint)\nFROM selected s CROSS JOIN anchor a")
 
 SQL_QUERY("geometry.prompt.frechet", "float8[],float8[],float8[],float8[],bytea[],int4",
     "WITH anchor_points AS MATERIALIZED (\n SELECT public.ST_MakePoint(p.x,p.y,p.z,p.m) coord,p.ord FROM unnest($1::float8[],$2::float8[],$3::float8[],$4::float8[]) WITH ORDINALITY AS p(x,y,z,m,ord)\n), anchor AS MATERIALIZED (SELECT public.ST_MakeLine(coord ORDER BY ord) curve FROM anchor_points), candidates AS MATERIALIZED (\n SELECT u.id,structural.entity_curve(u.id) curve FROM unnest($5::bytea[]) u(id)\n), scored AS (SELECT c.id,public.laplace_frechet_4d(c.curve,a.curve) d FROM candidates c CROSS JOIN anchor a WHERE c.curve IS NOT NULL AND a.curve IS NOT NULL)\nSELECT id,d FROM scored WHERE d IS NOT NULL ORDER BY d,id LIMIT $6")

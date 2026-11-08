@@ -56,6 +56,43 @@ typedef struct QueryBucket
     int capacity;
 } QueryBucket;
 
+typedef struct QueryIncidentRow
+{
+    LaplaceConsensusRow row;
+    bool reverse;
+} QueryIncidentRow;
+
+typedef struct QueryCellKey
+{
+    hash128_t subject;
+    hash128_t type;
+    hash128_t object;
+    uint8 native_claim;
+    uint8 reserved[7];
+} QueryCellKey;
+
+typedef struct QueryBoundCell
+{
+    QueryCellKey key;
+    int64 witnesses;
+    int64 confirm_occurrences;
+    int64 draw_occurrences;
+    int64 refute_occurrences;
+    int64 observation_occurrences;
+    int32 observation_rows;
+    int32 distinct_sources;
+    int32 distinct_contexts;
+    hash128_t provenance_root;
+    int64 calculation_confirm_occurrences;
+    int64 calculation_draw_occurrences;
+    int64 calculation_refute_occurrences;
+    int64 calculation_occurrences;
+    int32 calculation_rows;
+    int32 distinct_calculation_sources;
+    int32 distinct_calculation_contexts;
+    hash128_t calculation_provenance_root;
+} QueryBoundCell;
+
 typedef struct QueryScanState
 {
     HTAB *operands;
@@ -64,6 +101,8 @@ typedef struct QueryScanState
     HTAB *channels;
     int fanout;
     bool reverse;
+    bool cutoff_triggered;
+    LaplaceQueryState *state_cache;
     MemoryContext owner;
 } QueryScanState;
 
@@ -121,9 +160,17 @@ struct LaplaceQueryState
     LaplaceQueryChannel *channels;
     uint32 *operand_roles;
     int channel_count;
+    int bound_channel_count;
     int channel_capacity;
     int operand_count;
+    int expanded_operand_count;
     int fanout;
+    QueryIncidentRow *incident_rows;
+    int incident_count;
+    int incident_capacity;
+    bool incident_complete;
+    bool incident_overflow;
+    HTAB *bound_cells;
 };
 
 static inline void
@@ -221,5 +268,22 @@ void laplace_qe_bind_channel_observations(ArrayType *operands,
                                           int channel_count,
                                           LaplaceQueryEvidenceStats *stats,
                                           MemoryContext work);
+
+/* query_evidence_state.c / query_evidence.c */
+void laplace_qe_state_record_incident(LaplaceQueryState *state,
+                                      const LaplaceConsensusRow *row,
+                                      bool reverse);
+void laplace_qe_state_bind_channels(const LaplaceQueryState *state,
+                                    ArrayType *operands,
+                                    LaplaceQueryChannel *channels,
+                                    int channel_count,
+                                    LaplaceQueryEvidenceStats *stats,
+                                    MemoryContext work);
+LaplaceQueryChannel *laplace_qe_channels_internal(ArrayType *operands,
+                                                  ArrayType *types,
+                                                  int fanout,
+                                                  int *count,
+                                                  LaplaceQueryEvidenceStats *stats,
+                                                  LaplaceQueryState *state_cache);
 
 #endif

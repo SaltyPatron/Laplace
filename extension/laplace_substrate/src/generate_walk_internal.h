@@ -80,7 +80,7 @@ typedef struct WalkOrderKey
 } WalkOrderKey;
 
 /* generate_walk_plans.c */
-SPIPlanPtr laplace_walk_get_batch_plan(bool use_geometry);
+SPIPlanPtr laplace_walk_get_batch_plan(bool use_geometry, bool have_intent_mask);
 int laplace_walk_raw_edge_cmp_idx(const void *a, const void *b);
 int laplace_walk_ranked_edge_cmp_score_desc(const void *a, const void *b);
 bool laplace_walk_mask_overlaps(Datum highway_mask_bytea,

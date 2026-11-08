@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION consensus.walk_branches_native(
     p_use_geometry        bool)
     RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_walk_branches'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_branches'
     LANGUAGE C STABLE;
 
 CREATE OR REPLACE FUNCTION consensus.walk_branches(

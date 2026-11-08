@@ -486,7 +486,7 @@ laplace_tg_evidence_summaries(const LaplaceQueryState *state, bool projection_on
                               const LaplaceCognitionProgram *cognition, MemoryContext owner)
 {
     int count = 0;
-    const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
+    const LaplaceQueryChannel *channels = laplace_query_state_channels_unbound(state, &count);
     return laplace_tg_evidence_summaries_from_channels(
         channels, count, projection_only, origins, required, cognition, owner);
 }

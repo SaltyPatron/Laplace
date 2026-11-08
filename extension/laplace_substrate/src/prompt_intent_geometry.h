@@ -273,13 +273,13 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
          * and replans the partitioned geometry joins on every prompt in auto mode. */
         SPIPlanPtr angular = SPI_prepare_cursor(
             angular_sql, 7, angular_types,
-            CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
         SPIPlanPtr hilbert = SPI_prepare_cursor(
             hilbert_sql, 7, angular_types,
-            CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
         SPIPlanPtr frechet = SPI_prepare_cursor(
             frechet_sql, 6, frechet_types,
-            CURSOR_OPT_PARALLEL_OK);
+            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
         if (!angular || !hilbert || !frechet ||
             SPI_keepplan(angular) != 0 ||
             SPI_keepplan(hilbert) != 0 ||

@@ -224,7 +224,7 @@ laplace_tg_couple_and_orient(
     if (trace && input)
     {
         int resolved_channels = 0;
-        (void) laplace_query_state_channels(query_state, &resolved_channels);
+        (void) laplace_query_state_channels_unbound(query_state, &resolved_channels);
         laplace_tg_emit_stage(result, 0, "resolve", input, context_length, 0,
                               resolved_channels, 0, 0, NULL);
     }
@@ -239,6 +239,7 @@ laplace_tg_couple_and_orient(
             ArrayGetNItems(ARR_NDIM(coupled_intent_out->structural_frontier),
                            ARR_DIMS(coupled_intent_out->structural_frontier)) > 0)
         {
+            ArrayBuildState *structural_new = NULL;
             ArrayIterator structural_iterator =
                 array_create_iterator(coupled_intent_out->structural_frontier, 0, NULL);
             Datum structural_value;
@@ -247,20 +248,31 @@ laplace_tg_couple_and_orient(
             {
                 if (structural_null) continue;
                 hash128_t id = datum_to_hash128(structural_value);
-                hash_search(route_seen, &id, HASH_ENTER, NULL);
+                bool found;
+                hash_search(route_seen, &id, HASH_ENTER, &found);
                 laplace_tg_origin_add_occurrences(origins, &id,
                     laplace_prompt_intent_origins(coupled_intent_out, &id), walk_context);
+                if (!found)
+                    structural_new = accumArrayResult(
+                        structural_new, structural_value, false, BYTEAOID, walk_context);
             }
             array_free_iterator(structural_iterator);
-            laplace_query_state_extend_batch_role(
-                query_state, coupled_intent_out->structural_frontier,
-                LAPLACE_QUERY_OPERAND_PHYSICALITY, NULL);
+            if (structural_new)
+            {
+                ArrayType *structural_ids =
+                    DatumGetArrayTypeP(makeArrayResult(structural_new, walk_context));
+                laplace_query_state_extend_batch_role(
+                    query_state, structural_ids,
+                    LAPLACE_QUERY_OPERAND_PHYSICALITY, NULL);
+                pfree(structural_ids);
+            }
         }
 
         if (coupled_intent_out->geometry_frontier &&
             ArrayGetNItems(ARR_NDIM(coupled_intent_out->geometry_frontier),
                            ARR_DIMS(coupled_intent_out->geometry_frontier)) > 0)
         {
+            ArrayBuildState *geometry_new = NULL;
             ArrayIterator geometry_iterator =
                 array_create_iterator(coupled_intent_out->geometry_frontier, 0, NULL);
             Datum geometry_value;
@@ -269,22 +281,32 @@ laplace_tg_couple_and_orient(
             {
                 if (geometry_null) continue;
                 hash128_t id = datum_to_hash128(geometry_value);
-                hash_search(route_seen, &id, HASH_ENTER, NULL);
+                bool found;
+                hash_search(route_seen, &id, HASH_ENTER, &found);
                 laplace_tg_origin_add_occurrences(origins, &id,
                     laplace_prompt_intent_origins(
                         coupled_intent_out, &coupled_intent_out->root), walk_context);
+                if (!found)
+                    geometry_new = accumArrayResult(
+                        geometry_new, geometry_value, false, BYTEAOID, walk_context);
             }
             array_free_iterator(geometry_iterator);
-            laplace_query_state_extend_batch_role(
-                query_state, coupled_intent_out->geometry_frontier,
-                LAPLACE_QUERY_OPERAND_GEOMETRY, NULL);
+            if (geometry_new)
+            {
+                ArrayType *geometry_ids =
+                    DatumGetArrayTypeP(makeArrayResult(geometry_new, walk_context));
+                laplace_query_state_extend_batch_role(
+                    query_state, geometry_ids,
+                    LAPLACE_QUERY_OPERAND_GEOMETRY, NULL);
+                pfree(geometry_ids);
+            }
         }
 
         for (;;)
         {
             int channel_count = 0;
             const LaplaceQueryChannel *channels =
-                laplace_query_state_channels(query_state, &channel_count);
+                laplace_query_state_channels_unbound(query_state, &channel_count);
             ArrayType *changed = laplace_prompt_intent_couple(
                 coupled_intent_out, channels, channel_count);
             int changed_count = ArrayGetNItems(ARR_NDIM(changed), ARR_DIMS(changed));
@@ -321,7 +343,7 @@ laplace_tg_couple_and_orient(
         if (trace)
         {
             int coupled_channels = 0;
-            (void) laplace_query_state_channels(query_state, &coupled_channels);
+            (void) laplace_query_state_channels_unbound(query_state, &coupled_channels);
             laplace_tg_emit_stage(result, 0, "couple", input, context_length, 0,
                                   coupled_channels, 0, coupling_hops, NULL);
         }

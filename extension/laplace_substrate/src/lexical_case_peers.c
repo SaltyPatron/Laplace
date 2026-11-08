@@ -13,16 +13,18 @@
 
 #include <string.h>
 
-static SPIPlanPtr peers_exact_one_plan = NULL;
-static SPIPlanPtr peers_exact_batch_plan = NULL;
+static SPIPlanPtr peers_native_one_plan = NULL;
+static SPIPlanPtr peers_legacy_one_plan = NULL;
+static SPIPlanPtr peers_native_batch_plan = NULL;
+static SPIPlanPtr peers_legacy_batch_plan = NULL;
 static SPIPlanPtr peers_widen_plan = NULL;
 
 /*
  * Lexical peers of every input word, one row per input position (NULL inputs
  * yield NULL rows). A word that is itself the subject of a HAS_SENSE-family
- * consensus cell is its own only peer; every other word is widened to its
- * case variants by one word_case_variants_batch call. One indexed read
- * classifies the whole set; peers are emitted in bytewise order.
+ * consensus cell or native sense tuple is its own only peer; every other word
+ * is widened to its case variants by one word_case_variants_batch call. One
+ * indexed read classifies the whole set; peers are emitted in bytewise order.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_lexical_peers_batch);
 
@@ -93,31 +95,46 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		Oid   at[1] = { BYTEAOID };
 		Datum av[1] = { make_bytea16(words[0].key) };
 		bool  isnull;
-		bool  exists;
+		bool  exists = false;
 
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
-				&peers_exact_one_plan,
+				&peers_native_one_plan,
 				"SELECT EXISTS ("
 				"  SELECT 1 FROM public.laplace_holders("
-				"      ARRAY[public.blake3_from_bytea($1)], '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,"
+				"      ARRAY[public.blake3_from_bytea($1)], '{}'::public.blake3[], true, -1::smallint, 1::bigint, 2::smallint,"
 				"      ARRAY[public.laplace_bank_bit('kind', 'tuple')], 1::smallint) h "
-				"  WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
-				"    AND public.laplace_path_length(h.path) = 3 "
-				"    AND (public.laplace_parts(h.path))[1] = public.blake3_from_bytea($1)"
-				") OR EXISTS ("
-				"  SELECT 1 FROM laplace.consensus c "
-				"  WHERE c.subject_id = $1 "
-				"    AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))"
+				"  WHERE h.hub"
+				"     OR (public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
+				"         AND public.laplace_path_length(h.path) = 3 "
+				"         AND (public.laplace_parts(h.path))[1] = public.blake3_from_bytea($1))"
 				")",
 				1, at, "lexical_peers_batch"),
 			av, NULL, true, 1);
 		if (rc != SPI_OK_SELECT || SPI_processed != 1)
-			elog(ERROR, "lexical_peers_batch: exact probe failed: %s",
+			elog(ERROR, "lexical_peers_batch: native probe failed: %s",
 				 SPI_result_code_string(rc));
 		exists = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
-										 SPI_tuptable->tupdesc, 1, &isnull));
-		if (!isnull && exists)
+										 SPI_tuptable->tupdesc, 1, &isnull)) && !isnull;
+		if (!exists)
+		{
+			rc = SPI_execute_plan(
+				ensure_lexical_plan(
+					&peers_legacy_one_plan,
+					"SELECT EXISTS ("
+					"  SELECT 1 FROM laplace.consensus c "
+					"  WHERE c.subject_id = $1 "
+					"    AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))"
+					")",
+					1, at, "lexical_peers_batch"),
+				av, NULL, true, 1);
+			if (rc != SPI_OK_SELECT || SPI_processed != 1)
+				elog(ERROR, "lexical_peers_batch: legacy probe failed: %s",
+					 SPI_result_code_string(rc));
+			exists = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0],
+											 SPI_tuptable->tupdesc, 1, &isnull)) && !isnull;
+		}
+		if (exists)
 			(void) hash_search(resolved, words[0].key, HASH_ENTER, NULL);
 	}
 	else if (n_words > 1)
@@ -126,6 +143,8 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		ArrayType *id_array;
 		Oid        at[1] = { BYTEAARRAYOID };
 		Datum      av[1];
+		Datum     *unresolved_ids;
+		int        n_unresolved = 0;
 
 		for (int i = 0; i < n_words; i++)
 			ids[i] = make_bytea16(words[i].key);
@@ -133,22 +152,26 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 		av[0] = PointerGetDatum(id_array);
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
-				&peers_exact_batch_plan,
-				"SELECT DISTINCT public.blake3_send((public.laplace_parts(h.path))[1]) "
-				"FROM public.laplace_holders("
-				"    ARRAY(SELECT public.blake3_from_bytea(u.id) FROM unnest($1::bytea[]) u(id)),"
-				"    '{}'::public.blake3[], false, -1::smallint, -1::bigint, 2::smallint,"
+				&peers_native_batch_plan,
+				"WITH input_words AS MATERIALIZED ("
+				"  SELECT ord, id, public.blake3_from_bytea(id) AS b3 "
+				"  FROM unnest($1::bytea[]) WITH ORDINALITY AS u(id, ord)"
+				") "
+				"SELECT DISTINCT w.id "
+				"FROM input_words w "
+				"JOIN public.laplace_holders("
+				"    ARRAY(SELECT b3 FROM input_words ORDER BY ord),"
+				"    '{}'::public.blake3[], true, -1::smallint, 1::bigint, 2::smallint,"
 				"    ARRAY[public.laplace_bank_bit('kind', 'tuple')], 1::smallint) h "
-				"WHERE public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
-				"  AND public.laplace_path_length(h.path) = 3 "
-				"UNION "
-				"SELECT DISTINCT c.subject_id FROM laplace.consensus c "
-				"WHERE c.subject_id = ANY($1) "
-				"  AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
+				"  ON h.ordinal = w.ord "
+				"WHERE h.hub"
+				"   OR (public.laplace_mask_has_value(h.mask, 'kind', 'tuple') "
+				"       AND public.laplace_path_length(h.path) = 3 "
+				"       AND (public.laplace_parts(h.path))[1] = w.b3)",
 				1, at, "lexical_peers_batch"),
 			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
-			elog(ERROR, "lexical_peers_batch: exact batch probe failed: %s",
+			elog(ERROR, "lexical_peers_batch: native batch probe failed: %s",
 				 SPI_result_code_string(rc));
 		for (uint64 row = 0; row < SPI_processed; row++)
 		{
@@ -159,6 +182,37 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 
 			if (!isnull && datum_key16(d, key))
 				(void) hash_search(resolved, key, HASH_ENTER, NULL);
+		}
+
+		unresolved_ids = (Datum *) palloc(sizeof(Datum) * n_words);
+		for (int i = 0; i < n_words; i++)
+			if (hash_search(resolved, words[i].key, HASH_FIND, NULL) == NULL)
+				unresolved_ids[n_unresolved++] = ids[i];
+		if (n_unresolved > 0)
+		{
+			av[0] = PointerGetDatum(construct_array(unresolved_ids, n_unresolved,
+													BYTEAOID, -1, false, TYPALIGN_INT));
+			rc = SPI_execute_plan(
+				ensure_lexical_plan(
+					&peers_legacy_batch_plan,
+					"SELECT DISTINCT c.subject_id FROM laplace.consensus c "
+					"WHERE c.subject_id = ANY($1) "
+					"  AND c.type_id = ANY(consensus.relation_family_ids('HAS_SENSE'))",
+					1, at, "lexical_peers_batch"),
+				av, NULL, true, 0);
+			if (rc != SPI_OK_SELECT)
+				elog(ERROR, "lexical_peers_batch: legacy batch probe failed: %s",
+					 SPI_result_code_string(rc));
+			for (uint64 row = 0; row < SPI_processed; row++)
+			{
+				bool  isnull;
+				Datum d = SPI_getbinval(SPI_tuptable->vals[row],
+									SPI_tuptable->tupdesc, 1, &isnull);
+				char  key[16];
+
+				if (!isnull && datum_key16(d, key))
+					(void) hash_search(resolved, key, HASH_ENTER, NULL);
+			}
 		}
 	}
 

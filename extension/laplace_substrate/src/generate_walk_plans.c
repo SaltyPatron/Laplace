@@ -29,28 +29,7 @@ ensure_edge_plan(void)
 }
 
 static const char *WALK_BATCH_QUERY =
-    "SELECT e.idx, e.neighbor, false, "
-    "e.type_id, e.rating, e.rd, e.witness_count, "
-    "       eo.highway_mask, "
-    "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.tableoid, "
-    "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.tableoid "
-    "FROM ( "
-    "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
-    "         c.type_id, c.rating, c.rd, c.witness_count "
-    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "    JOIN laplace.consensus c ON c.subject_id = f.subject_id "
-    "   WHERE c.object_id IS NOT NULL "
-    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
-    "  UNION ALL "
-    "  SELECT f.idx, f.subject_id AS anchor, c.subject_id AS neighbor, "
-    "         c.type_id, c.rating, c.rd, c.witness_count "
-    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "    JOIN laplace.consensus c ON c.object_id = f.subject_id "
-    "   WHERE c.object_id IS NOT NULL "
-    "     AND c.subject_id <> c.object_id "
-    "     AND c.type_id = ANY($3::bytea[]) "
-    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
-    "  UNION ALL "
+    "WITH e AS MATERIALIZED ( "
     "  SELECT f.idx, f.subject_id AS anchor, r.neighbour_id AS neighbor, "
     "         r.type_id, r.rating, r.rd, r.witness_count "
     "    FROM consensus.edges_raw_batch( "
@@ -75,32 +54,72 @@ static const char *WALK_BATCH_QUERY =
     "   WHERE r.neighbour_id IS NOT NULL "
     "     AND r.type_id IS NOT NULL "
     "     AND r.neighbour_id <> f.subject_id "
-    ") e "
-    "LEFT JOIN laplace.entities eo ON eo.id = e.neighbor "
-    "LEFT JOIN laplace.physicalities ps ON ps.entity_id = e.anchor AND ps.type = 1 "
-    "LEFT JOIN laplace.physicalities po ON po.entity_id = e.neighbor AND po.type = 1";
+    "), ids AS MATERIALIZED ( "
+    "  SELECT anchor AS id FROM e UNION SELECT neighbor AS id FROM e "
+    "), native_coords AS MATERIALIZED ( "
+    "  SELECT public.blake3_send(en.id) AS id, en.coord "
+    "    FROM public.laplace_entities(ARRAY(SELECT public.blake3_from_bytea(id) FROM ids WHERE id IS NOT NULL)) en "
+    "   WHERE en.coord IS NOT NULL "
+    "), coords AS MATERIALIZED ( "
+    "  SELECT i.id, COALESCE(nc.coord, (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = i.id AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1)) AS coord "
+    "    FROM ids i LEFT JOIN native_coords nc ON nc.id = i.id "
+    ") "
+    "SELECT e.idx, e.neighbor, false, "
+    "       e.type_id, e.rating, e.rd, e.witness_count, "
+    "       (SELECT eo.highway_mask FROM laplace.entities eo WHERE eo.id = e.neighbor), "
+    "       ST_X(cs.coord), ST_Y(cs.coord), ST_Z(cs.coord), ST_M(cs.coord), 0::oid, "
+    "       ST_X(co.coord), ST_Y(co.coord), ST_Z(co.coord), ST_M(co.coord), 0::oid "
+    "FROM e "
+    "LEFT JOIN coords cs ON cs.id = e.anchor "
+    "LEFT JOIN coords co ON co.id = e.neighbor";
+
+static const char *WALK_BATCH_QUERY_NOMASK =
+    "WITH e AS MATERIALIZED ( "
+    "  SELECT f.idx, f.subject_id AS anchor, r.neighbour_id AS neighbor, "
+    "         r.type_id, r.rating, r.rd, r.witness_count "
+    "    FROM consensus.edges_raw_batch( "
+    "        $1::bytea[], 'out', "
+    "        CASE WHEN $2::bytea IS NULL THEN NULL ELSE ARRAY[$2::bytea] END, "
+    "        64, false, 'edge_rank') r "
+    "    JOIN unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "      ON f.subject_id = r.subject_id "
+    "   WHERE r.neighbour_id IS NOT NULL "
+    "     AND r.type_id IS NOT NULL "
+    "  UNION ALL "
+    "  SELECT f.idx, f.subject_id AS anchor, r.neighbour_id AS neighbor, "
+    "         r.type_id, r.rating, r.rd, r.witness_count "
+    "    FROM consensus.edges_raw_batch( "
+    "        $1::bytea[], 'in', "
+    "        CASE WHEN $2::bytea IS NULL THEN $3::bytea[] "
+    "             WHEN $2::bytea = ANY($3::bytea[]) THEN ARRAY[$2::bytea] "
+    "             ELSE ARRAY[]::bytea[] END, "
+    "        64, false, 'edge_rank') r "
+    "    JOIN unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "      ON f.subject_id = r.subject_id "
+    "   WHERE r.neighbour_id IS NOT NULL "
+    "     AND r.type_id IS NOT NULL "
+    "     AND r.neighbour_id <> f.subject_id "
+    "), ids AS MATERIALIZED ( "
+    "  SELECT anchor AS id FROM e UNION SELECT neighbor AS id FROM e "
+    "), native_coords AS MATERIALIZED ( "
+    "  SELECT public.blake3_send(en.id) AS id, en.coord "
+    "    FROM public.laplace_entities(ARRAY(SELECT public.blake3_from_bytea(id) FROM ids WHERE id IS NOT NULL)) en "
+    "   WHERE en.coord IS NOT NULL "
+    "), coords AS MATERIALIZED ( "
+    "  SELECT i.id, COALESCE(nc.coord, (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = i.id AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1)) AS coord "
+    "    FROM ids i LEFT JOIN native_coords nc ON nc.id = i.id "
+    ") "
+    "SELECT e.idx, e.neighbor, false, "
+    "       e.type_id, e.rating, e.rd, e.witness_count, "
+    "       NULL::bytea AS highway_mask, "
+    "       ST_X(cs.coord), ST_Y(cs.coord), ST_Z(cs.coord), ST_M(cs.coord), 0::oid, "
+    "       ST_X(co.coord), ST_Y(co.coord), ST_Z(co.coord), ST_M(co.coord), 0::oid "
+    "FROM e "
+    "LEFT JOIN coords cs ON cs.id = e.anchor "
+    "LEFT JOIN coords co ON co.id = e.neighbor";
 
 static const char *WALK_BATCH_QUERY_NOGEO =
-    "SELECT e.idx, e.neighbor, false, "
-    "e.type_id, e.rating, e.rd, e.witness_count, "
-    "       eo.highway_mask "
-    "FROM ( "
-    "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
-    "         c.type_id, c.rating, c.rd, c.witness_count "
-    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "    JOIN laplace.consensus c ON c.subject_id = f.subject_id "
-    "   WHERE c.object_id IS NOT NULL "
-    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
-    "  UNION ALL "
-    "  SELECT f.idx, f.subject_id AS anchor, c.subject_id AS neighbor, "
-    "         c.type_id, c.rating, c.rd, c.witness_count "
-    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "    JOIN laplace.consensus c ON c.object_id = f.subject_id "
-    "   WHERE c.object_id IS NOT NULL "
-    "     AND c.subject_id <> c.object_id "
-    "     AND c.type_id = ANY($3::bytea[]) "
-    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
-    "  UNION ALL "
+    "WITH e AS MATERIALIZED ( "
     "  SELECT f.idx, f.subject_id AS anchor, r.neighbour_id AS neighbor, "
     "         r.type_id, r.rating, r.rd, r.witness_count "
     "    FROM consensus.edges_raw_batch( "
@@ -125,41 +144,103 @@ static const char *WALK_BATCH_QUERY_NOGEO =
     "   WHERE r.neighbour_id IS NOT NULL "
     "     AND r.type_id IS NOT NULL "
     "     AND r.neighbour_id <> f.subject_id "
-    ") e "
-    "LEFT JOIN laplace.entities eo ON eo.id = e.neighbor";
+    ") "
+    "SELECT e.idx, e.neighbor, false, "
+    "       e.type_id, e.rating, e.rd, e.witness_count, "
+    "       (SELECT eo.highway_mask FROM laplace.entities eo WHERE eo.id = e.neighbor) "
+    "FROM e";
+
+static const char *WALK_BATCH_QUERY_NOGEO_NOMASK =
+    "SELECT f.idx, r.neighbour_id AS neighbor, false, "
+    "       r.type_id, r.rating, r.rd, r.witness_count, "
+    "       NULL::bytea AS highway_mask "
+    "  FROM consensus.edges_raw_batch( "
+    "      $1::bytea[], 'out', "
+    "      CASE WHEN $2::bytea IS NULL THEN NULL ELSE ARRAY[$2::bytea] END, "
+    "      64, false, 'edge_rank') r "
+    "  JOIN unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    ON f.subject_id = r.subject_id "
+    " WHERE r.neighbour_id IS NOT NULL "
+    "   AND r.type_id IS NOT NULL "
+    "UNION ALL "
+    "SELECT f.idx, r.neighbour_id AS neighbor, false, "
+    "       r.type_id, r.rating, r.rd, r.witness_count, "
+    "       NULL::bytea AS highway_mask "
+    "  FROM consensus.edges_raw_batch( "
+    "      $1::bytea[], 'in', "
+    "      CASE WHEN $2::bytea IS NULL THEN $3::bytea[] "
+    "           WHEN $2::bytea = ANY($3::bytea[]) THEN ARRAY[$2::bytea] "
+    "           ELSE ARRAY[]::bytea[] END, "
+    "      64, false, 'edge_rank') r "
+    "  JOIN unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    ON f.subject_id = r.subject_id "
+    " WHERE r.neighbour_id IS NOT NULL "
+    "   AND r.type_id IS NOT NULL "
+    "   AND r.neighbour_id <> f.subject_id";
 
 static SPIPlanPtr walk_batch_plan = NULL;
+static SPIPlanPtr walk_batch_nomask_plan = NULL;
 static SPIPlanPtr walk_batch_nogeo_plan = NULL;
+static SPIPlanPtr walk_batch_nogeo_nomask_plan = NULL;
 
 SPIPlanPtr
-laplace_walk_get_batch_plan(bool use_geometry)
+laplace_walk_get_batch_plan(bool use_geometry, bool have_intent_mask)
 {
     Oid argtypes[3] = { BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID };
+    int opts = CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN;
     if (use_geometry)
     {
-        if (walk_batch_plan == NULL)
+        if (have_intent_mask)
         {
-            SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
+            if (walk_batch_plan == NULL)
+            {
+                SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY, 3, argtypes, opts);
+                if (plan == NULL)
+                    elog(ERROR, "walk_branches: SPI_prepare(batch) failed: %s",
+                         SPI_result_code_string(SPI_result));
+                if (SPI_keepplan(plan) != 0)
+                    elog(ERROR, "walk_branches: SPI_keepplan(batch) failed");
+                walk_batch_plan = plan;
+            }
+            return walk_batch_plan;
+        }
+        if (walk_batch_nomask_plan == NULL)
+        {
+            SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOMASK, 3, argtypes, opts);
             if (plan == NULL)
-                elog(ERROR, "walk_branches: SPI_prepare(batch) failed: %s",
+                elog(ERROR, "walk_branches: SPI_prepare(batch nomask) failed: %s",
                      SPI_result_code_string(SPI_result));
             if (SPI_keepplan(plan) != 0)
-                elog(ERROR, "walk_branches: SPI_keepplan(batch) failed");
-            walk_batch_plan = plan;
+                elog(ERROR, "walk_branches: SPI_keepplan(batch nomask) failed");
+            walk_batch_nomask_plan = plan;
         }
-        return walk_batch_plan;
+        return walk_batch_nomask_plan;
     }
-    if (walk_batch_nogeo_plan == NULL)
+    if (have_intent_mask)
     {
-        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
+        if (walk_batch_nogeo_plan == NULL)
+        {
+            SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO, 3, argtypes, opts);
+            if (plan == NULL)
+                elog(ERROR, "generate walk: SPI_prepare failed: %s",
+                     SPI_result_code_string(SPI_result));
+            if (SPI_keepplan(plan) != 0)
+                elog(ERROR, "generate walk: SPI_keepplan failed");
+            walk_batch_nogeo_plan = plan;
+        }
+        return walk_batch_nogeo_plan;
+    }
+    if (walk_batch_nogeo_nomask_plan == NULL)
+    {
+        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO_NOMASK, 3, argtypes, opts);
         if (plan == NULL)
-            elog(ERROR, "generate walk: SPI_prepare failed: %s",
+            elog(ERROR, "generate walk: SPI_prepare(nomask) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "generate walk: SPI_keepplan failed");
-        walk_batch_nogeo_plan = plan;
+            elog(ERROR, "generate walk: SPI_keepplan(nomask) failed");
+        walk_batch_nogeo_nomask_plan = plan;
     }
-    return walk_batch_nogeo_plan;
+    return walk_batch_nogeo_nomask_plan;
 }
 
 int

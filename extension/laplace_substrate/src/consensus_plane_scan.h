@@ -112,7 +112,7 @@ scan_plane_ranges(Relation relation, Relation index,
                 Datum s = slot_getattr(slot, subject, &snull);
                 Datum o = slot_getattr(slot, object, &onull);
                 Datum t = slot_getattr(slot, type, &tnull);
-                LaplaceConsensusRow row;
+                LaplaceConsensusRow row = {0};
                 ++stats->rows_read;
                 if ((stats->rows_read & 4095) == 0) CHECK_FOR_INTERRUPTS();
                 if (snull || tnull || onull ||

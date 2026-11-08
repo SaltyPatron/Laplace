@@ -86,7 +86,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_branches: SPI_connect failed");
-    SPIPlanPtr batch_plan = laplace_walk_get_batch_plan(use_geometry);
+    SPIPlanPtr batch_plan = laplace_walk_get_batch_plan(use_geometry, have_intent_mask);
 
     cap = 1;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);

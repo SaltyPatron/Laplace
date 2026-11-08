@@ -14,6 +14,7 @@
 #include "laplace/core/relation_law.h"
 #include "laplace/core/qualifier_law.h"
 #include "spi_common.h"
+#include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_relation_type_resolve);
 
@@ -100,7 +101,10 @@ typedef struct RankMemoEntry
     bool      has_rank;
 } RankMemoEntry;
 
-static HTAB *rank_resolve_memo = NULL;
+static HTAB      *rank_resolve_memo = NULL;
+static SPIPlanPtr rank_resolve_plan = NULL;
+static hash128_t  rank_is_a_id;
+static bool       rank_is_a_ready = false;
 
 PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
 
@@ -113,6 +117,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     const laplace_relation_def_t* def = NULL;
     RankMemoEntry *memo;
     bool      memo_found;
+    bool      spi_top = false;
 
     if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
         PG_RETURN_FLOAT8(def->rank);
@@ -137,8 +142,32 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    if (SPI_connect() != SPI_OK_CONNECT)
+    if (!rank_is_a_ready)
+    {
+        if (laplace_relation_resolve_surface("IS_A", &rank_is_a_id, NULL, NULL, NULL, NULL) < 0)
+            PG_RETURN_NULL();
+        rank_is_a_ready = true;
+    }
+
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         PG_RETURN_NULL();
+
+    if (rank_resolve_plan == NULL)
+    {
+        Oid argtypes[2] = { BYTEAOID, BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            "SELECT object_id FROM laplace.consensus "
+            "WHERE subject_id = $1 "
+            "  AND type_id = $2 "
+            "ORDER BY consensus.eff_mu(rating, rd) DESC LIMIT 1",
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+        {
+            laplace_spi_finish(spi_top);
+            PG_RETURN_NULL();
+        }
+        rank_resolve_plan = plan;
+    }
 
     double out_rank = 0.0;
     bool   found    = false;
@@ -154,8 +183,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     }
     while (!found)
     {
-        Oid    argtypes[1]  = { BYTEAOID };
-        Datum  args[1]      = { hash128_to_datum(&cur_id) };
+        Datum  args[2] = { hash128_to_datum(&cur_id), hash128_to_datum(&rank_is_a_id) };
         bool   isnull;
         bool   seen;
 
@@ -163,12 +191,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
         if (seen)
             break;
 
-        int    rc = SPI_execute_with_args(
-            "SELECT object_id FROM laplace.consensus "
-            "WHERE subject_id = $1 "
-            "  AND type_id = laplace.relation_type_id('IS_A') "
-            "ORDER BY consensus.eff_mu(rating, rd) DESC LIMIT 1",
-            1, argtypes, args, NULL, true, 1);
+        int rc = SPI_execute_plan(rank_resolve_plan, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
             break;
 
@@ -191,7 +214,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     }
     hash_destroy(visited);
 
-    SPI_finish();
+    laplace_spi_finish(spi_top);
 
     memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
                                          HASH_ENTER, &memo_found);
@@ -274,7 +297,7 @@ pg_laplace_has_qualifier(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(1) || PG_ARGISNULL(2))
         PG_RETURN_NULL();
-    family = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    family = text_to_cstring(PG_GETARG_TEXT_PP(0 + 1));
     value  = text_to_cstring(PG_GETARG_TEXT_PP(2));
     bit    = laplace_qualifier_bit(family, value);
     if (bit < 0)

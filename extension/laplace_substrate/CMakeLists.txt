@@ -84,6 +84,10 @@ set(EXT_EXECUTION_SOURCES
     src/generate_walk.c
     src/generate_walk_plans.c
     src/generate_walk_render.c
+    src/laplace_substrate_relations.c
+    src/lexical_case.c
+    src/lexical_case_batch.c
+    src/lexical_case_peers.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"

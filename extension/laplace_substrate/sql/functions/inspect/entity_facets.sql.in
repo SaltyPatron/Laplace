@@ -51,44 +51,15 @@ CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     LANGUAGE sql STABLE PARALLEL SAFE
     SUPPORT @extschema@.array_length_rows_support
 BEGIN ATOMIC
-WITH ids AS MATERIALIZED (
- SELECT id,@extschema:laplace@.blake3_from_bytea(id) AS key,row_number() OVER (ORDER BY id) AS ord
- FROM (SELECT DISTINCT id FROM unnest(p_ids) u(id) WHERE id IS NOT NULL) d
-),
-req AS MATERIALIZED (
- SELECT array_agg(key ORDER BY ord) AS keys FROM ids
-),
+WITH ids AS MATERIALIZED (SELECT DISTINCT id,@extschema:laplace@.blake3_from_bytea(id) AS key FROM unnest(p_ids) u(id) WHERE id IS NOT NULL),
 native AS MATERIALIZED (
- SELECT @extschema:laplace@.blake3_send(id) AS id,tier,mask
- FROM @extschema:laplace@.laplace_entities((SELECT COALESCE(keys, '{}'::@extschema:laplace@.blake3[]) FROM req))
+ SELECT id,tier FROM @extschema:laplace@.laplace_entities(ARRAY(SELECT key FROM ids))
 ),
-labels AS MATERIALIZED (
- SELECT i.id,l.content,i.key::text AS hex_key
- FROM ids i
- JOIN @extschema:laplace@.laplace_labels((SELECT COALESCE(keys, '{}'::@extschema:laplace@.blake3[]) FROM req)) l ON l.i=i.ord
-),
-forms AS (
- SELECT i.id,
-        CASE
-            WHEN e.mask IS NOT NULL AND bit_count(e.mask) > 0 THEN coalesce(e.tier, t.tier)
-            WHEN l.content IS NOT NULL AND l.content <> l.hex_key THEN GREATEST(e.tier, t.tier, @extschema:laplace@.laplace_tier(l.content))
-            ELSE GREATEST(e.tier, t.tier)
-        END AS tier,
-        t.type_id,
-        @extschema:laplace@.laplace_codepoint(i.key) AS scalar
- FROM ids i
- LEFT JOIN native e ON e.id=i.id
- LEFT JOIN labels l ON l.id=i.id
- LEFT JOIN laplace.entities t ON t.id=i.id
-)
+forms AS (SELECT i.id,coalesce(e.tier,t.tier) AS tier,t.type_id,
+ @extschema:laplace@.laplace_codepoint(i.key) AS scalar FROM ids i
+ LEFT JOIN native e ON e.id=i.key LEFT JOIN laplace.entities t ON t.id=i.id)
 SELECT id,coalesce(tier,0)::smallint,
- coalesce(type_id,CASE
-   WHEN scalar IS NOT NULL OR coalesce(tier,0)=0 THEN laplace.entity_type_id('Codepoint')
-   WHEN tier=1 THEN laplace.entity_type_id('Grapheme')
-   WHEN tier=2 THEN laplace.entity_type_id('Word')
-   WHEN tier=3 THEN laplace.entity_type_id('Sentence')
-   ELSE laplace.entity_type_id('Document')
- END)
+ coalesce(type_id,CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') END)
 FROM forms WHERE tier IS NOT NULL OR scalar IS NOT NULL ORDER BY id;
 END;
 

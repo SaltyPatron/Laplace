@@ -408,6 +408,8 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
           LaplaceConsensusScanStats *stats, LaplaceConsensusCutoff cutoff,
           bool plane_local)
 {
+    if (RelationGetNumberOfBlocks(relation) == 0)
+        return;
     AttrNumber subject = scan_attribute(relation, "subject_id", BYTEAOID);
     AttrNumber object = scan_attribute(relation, "object_id", BYTEAOID);
     AttrNumber type = scan_attribute(relation, "type_id", BYTEAOID);
@@ -417,10 +419,10 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     AttrNumber witnesses = scan_attribute(relation, "witness_count", INT8OID);
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
     AttrNumber endpoint = subjects->array != NULL ? subject : object;
-    Relation index = plane_local
+    Relation index = (plane_local && cutoff != NULL)
         ? scan_plane_index(relation, endpoint, type, object, rating, rd)
         : cutoff != NULL ? scan_rank_index(relation, endpoint, object, rating, rd) : NULL;
-    if (plane_local && index != NULL)
+    if (plane_local && cutoff != NULL && index != NULL)
     {
         scan_plane_ranges(relation, index, subject, object, type, rating, rd,
                           volatility, witnesses, subjects, objects, types,
@@ -431,7 +433,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     /* A type-local cutoff is not valid on an endpoint-wide rank index. When
      * the typed index is absent, every matching plane is read through the
      * complete keyed batch scan, so index availability never hides a cell. */
-    bool ranked = !plane_local && index != NULL;
+    bool ranked = !plane_local && cutoff != NULL && index != NULL;
     if (index == NULL) index = scan_index(relation, endpoint,
                                object, objects->array != NULL,
                                type, types->array != NULL);
@@ -530,7 +532,10 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
         (objects.array != NULL && objects.count == 0) ||
         (types.array != NULL && types.count == 0)) goto done;
 
-    scan_native(subjects.array, objects.array, types.array, witnesses, consume, context, stats);
+    if (!default_only && !(plane_local && !witnesses && (cutoff == NULL || subjects.array == NULL)))
+        scan_native(subjects.array,
+                    (plane_local && !witnesses && objects.array == NULL) ? subjects.array : objects.array,
+                    types.array, cutoff != NULL, consume, context, stats);
 
     root = get_relname_relid("consensus", get_namespace_oid("laplace", false));
     if (!OidIsValid(root))
@@ -618,6 +623,11 @@ void laplace_consensus_candidates(ArrayType *subjects,ArrayType *objects,ArrayTy
     LaplaceConsensusConsumer consume,void *context,LaplaceConsensusScanStats *stats)
 {
     consensus_scan_impl(subjects,objects,types,false,consume,context,stats,NULL,false,false);
+}
+void laplace_consensus_candidates_stored(ArrayType *subjects,ArrayType *objects,ArrayType *types,
+    LaplaceConsensusConsumer consume,void *context)
+{
+    consensus_scan_impl(subjects,objects,types,false,consume,context,NULL,NULL,true,false);
 }
 void laplace_consensus_ranked_candidates(ArrayType *subjects,ArrayType *objects,ArrayType *types,
     bool default_only,bool planes,LaplaceConsensusConsumer consume,LaplaceConsensusCutoff cutoff,

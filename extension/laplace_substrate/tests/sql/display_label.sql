@@ -62,7 +62,7 @@ BEGIN
  OR EXISTS(SELECT FROM realize.display_label_batch(ARRAY[NULL::bytea])) THEN
   RAISE EXCEPTION 'Native display did not preserve the non-null endpoint batch';
  END IF;
- IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=2 AND type_id IS NULL) THEN
+ IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=public.laplace_tier('dog') AND type_id IS NULL) THEN
   RAISE EXCEPTION 'Native facet guessed a semantic type';
  END IF;
  IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(scalar::text,'hex')]) WHERE tier=0 AND type_id IS NOT NULL) THEN

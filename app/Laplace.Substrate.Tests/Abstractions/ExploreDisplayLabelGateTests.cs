@@ -53,7 +53,9 @@ public sealed class ExploreDisplayLabelGateTests
         var root = TypeIdLawTests.FindRepoRootPublic();
         var path = Path.Combine(root, "app", "Laplace.Endpoints.OpenAICompat",
             "SubstrateClient.Explore.cs");
-        var source = File.ReadAllText(path);
+        var graphPath = Path.Combine(root, "app", "Laplace.Endpoints.OpenAICompat",
+            "SubstrateClient.ExploreGraph.cs");
+        var source = File.ReadAllText(path) + "\n" + File.ReadAllText(graphPath);
 
         Assert.Contains("NpgsqlDisplayLabels.ReadAsync", source, StringComparison.Ordinal);
         Assert.Contains("NpgsqlDisplayLabels.ReadOneAsync", source, StringComparison.Ordinal);
@@ -77,7 +79,8 @@ public sealed class ExploreDisplayLabelGateTests
         var facetsSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "inspect", "entity_facets.sql.in"));
         var realizeBatch = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",
-            "realize_batch.c"));
+            "realize_batch.c")) + "\n" + File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",
+            "realize_batch_arms.c"));
         var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
             "functions", "realize", "realize_synset_lemma.sql.in"));
 

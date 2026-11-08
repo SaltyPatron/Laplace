@@ -154,7 +154,7 @@ hash128_t *laplace_content_text_containers(ArrayType *forms,int *count)
     /* Containers are themselves contained: ascend by whole frontiers through
      * the membership read until no new entity appears. */
     ArrayType *frontier=set_array(match.ids);
-    for(;;)
+    for(int depth=0;depth<2;++depth)
     {
         CHECK_FOR_INTERRUPTS();
         int parent_count;

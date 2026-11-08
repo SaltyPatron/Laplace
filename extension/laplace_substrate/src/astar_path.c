@@ -33,8 +33,13 @@ static const char *Q_DIRECTED =
 /* One entity's own point physicality, read only when geometry tie-ordering is
  * requested. */
 static const char *Q_COORD =
-    "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) "
-    "FROM laplace.physicalities WHERE entity_id = $1 AND type = 1 AND coord IS NOT NULL LIMIT 1";
+    ""
+    "SELECT ST_X(c), ST_Y(c), ST_Z(c), ST_M(c) FROM ("
+    "  SELECT COALESCE("
+    "    (SELECT en.coord FROM public.laplace_entities(ARRAY[public.blake3_from_bytea($1)]) en WHERE en.coord IS NOT NULL LIMIT 1),"
+    "    (SELECT p.coord FROM laplace.physicalities p WHERE p.entity_id = $1 AND p.type = 1 AND p.coord IS NOT NULL LIMIT 1)"
+    "  ) AS c"
+    ") s WHERE c IS NOT NULL";
 
 static SPIPlanPtr coord_plan = NULL;
 
@@ -44,7 +49,7 @@ ensure_coord_plan(void)
     if (coord_plan == NULL)
     {
         Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(Q_COORD, 1, argtypes, CURSOR_OPT_PARALLEL_OK);
+        SPIPlanPtr plan = SPI_prepare_cursor(Q_COORD, 1, argtypes, CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
         if (plan == NULL)
             elog(ERROR, "astar_path: SPI_prepare(coord) failed: %s",
                  SPI_result_code_string(SPI_result));

@@ -100,22 +100,18 @@ query_channel_insert(QueryScanState *state, int ordinal,
 }
 
 static void
-query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
+query_consensus_cell_dir(QueryScanState *state, const LaplaceConsensusRow *row, bool reverse)
 {
-    QueryScanState *state = (QueryScanState *) opaque;
-    const hash128_t *anchor;
-    const hash128_t *candidate;
-    QueryOperandEntry *operand;
+    const hash128_t *anchor = reverse ? &row->object : &row->subject;
+    const hash128_t *candidate = reverse ? &row->subject : &row->object;
+    QueryOperandEntry *operand =
+        (QueryOperandEntry *) hash_search(state->operands, anchor, HASH_FIND, NULL);
 
-    if (row->object_is_null)
-        return;
-    if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
-        return;
-
-    anchor = state->reverse ? &row->object : &row->subject;
-    candidate = state->reverse ? &row->subject : &row->object;
-    operand = (QueryOperandEntry *) hash_search(state->operands, anchor, HASH_FIND, NULL);
     if (!operand)
+        return;
+    if (state->state_cache && !state->state_cache->incident_overflow)
+        laplace_qe_state_record_incident(state->state_cache, row, reverse);
+    if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
 
     for (int index = operand->first; index >= 0; index = state->next[index])
@@ -127,7 +123,7 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.anchor = *anchor;
         channel.candidate = *candidate;
         channel.relation = row->type;
-        channel.outbound = !state->reverse;
+        channel.outbound = !reverse;
         channel.rating = row->rating;
         channel.rd = row->rd;
         channel.volatility = row->volatility;
@@ -135,6 +131,24 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.claim = row->claim;
         channel.native_claim = row->native_claim;
         query_channel_insert(state, channel.ordinal, &channel);
+    }
+}
+
+static void
+query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
+{
+    QueryScanState *state = (QueryScanState *) opaque;
+
+    if (row->object_is_null)
+        return;
+    if (row->native_claim)
+    {
+        query_consensus_cell_dir(state, row, false);
+        query_consensus_cell_dir(state, row, true);
+    }
+    else
+    {
+        query_consensus_cell_dir(state, row, state->reverse);
     }
 }
 
@@ -168,13 +182,17 @@ query_consensus_cutoff(const LaplaceConsensusRow *row, void *opaque)
         if (score >= worst)
             return false;
     }
+    state->cutoff_triggered = true;
+    if (state->state_cache)
+        state->state_cache->incident_complete = false;
     return true;
 }
 
 LaplaceQueryChannel *
-laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
-                                int fanout, int *count,
-                                LaplaceQueryEvidenceStats *stats)
+laplace_qe_channels_internal(ArrayType *operands, ArrayType *types,
+                             int fanout, int *count,
+                             LaplaceQueryEvidenceStats *stats,
+                             LaplaceQueryState *state_cache)
 {
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext work;
@@ -201,8 +219,13 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
 
     laplace_qe_validate_id_array(operands, "operands");
     laplace_qe_validate_id_array(types, "relation types");
-    if (fanout == 0 ||
-        ArrayGetNItems(ARR_NDIM(operands), ARR_DIMS(operands)) == 0 ||
+    if (fanout == 0)
+    {
+        if (state_cache)
+            state_cache->incident_complete = false;
+        return NULL;
+    }
+    if (ArrayGetNItems(ARR_NDIM(operands), ARR_DIMS(operands)) == 0 ||
         (types && ArrayGetNItems(ARR_NDIM(types), ARR_DIMS(types)) == 0))
         return NULL;
 
@@ -224,6 +247,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     MemSet(&scan, 0, sizeof(scan));
     scan.next = (int *) palloc(sizeof(int) * operand_count);
     scan.fanout = fanout;
+    scan.state_cache = state_cache;
     scan.owner = work;
 
     MemSet(&ctl, 0, sizeof(ctl));
@@ -323,7 +347,10 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         }
     }
 
-    laplace_qe_bind_channel_observations(operands, result, result_count, stats, work);
+    if (!state_cache)
+        laplace_qe_bind_channel_observations(operands, result, result_count, stats, work);
+    else if (stats != NULL)
+        laplace_qe_state_bind_channels(state_cache, operands, result, result_count, stats, work);
 
     MemoryContextSwitchTo(owner);
     qsort(result, (size_t) result_count, sizeof(LaplaceQueryChannel), query_channel_order);
@@ -332,6 +359,14 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         stats->channels = (uint64) result_count;
     MemoryContextDelete(work);
     return result;
+}
+
+LaplaceQueryChannel *
+laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
+                                int fanout, int *count,
+                                LaplaceQueryEvidenceStats *stats)
+{
+    return laplace_qe_channels_internal(operands, types, fanout, count, stats, NULL);
 }
 
 static void
@@ -411,10 +446,12 @@ query_exact_cell(const LaplaceConsensusRow *row, void *opaque)
     }
 }
 
-LaplaceQueryChannel *
-laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
-                                       ArrayType *candidates, int *count,
-                                       LaplaceQueryEvidenceStats *stats)
+static LaplaceQueryChannel *
+query_state_candidate_evidence_impl(const LaplaceQueryState *state,
+                                    ArrayType *candidates,
+                                    bool bind_observations,
+                                    int *count,
+                                    LaplaceQueryEvidenceStats *stats)
 {
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext work;
@@ -516,26 +553,56 @@ laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
         return NULL;
     }
 
-    operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
-    candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
-    exact.reverse = false;
-    laplace_consensus_candidates(operand_ids, candidate_ids, state->types,
-                                 query_exact_cell, &exact,
-                                 stats ? &stats->forward : NULL);
+    if (state->expanded_operand_count == state->operand_count &&
+        !state->incident_overflow && stats == NULL)
+    {
+        for (int i = 0; i < state->incident_count; ++i)
+        {
+            const QueryIncidentRow *inc = &state->incident_rows[i];
+            const hash128_t *cand = inc->reverse ? &inc->row.subject : &inc->row.object;
+            if (hash_search(candidate_seen, cand, HASH_FIND, NULL) == NULL)
+                continue;
+            exact.reverse = inc->reverse;
+            query_exact_cell(&inc->row, &exact);
+        }
+        if (!state->incident_complete)
+        {
+            operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
+            candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
+            exact.reverse = false;
+            laplace_consensus_candidates_stored(operand_ids, candidate_ids, state->types,
+                                                query_exact_cell, &exact);
+            exact.reverse = true;
+            laplace_consensus_candidates_stored(candidate_ids, operand_ids, state->types,
+                                                query_exact_cell, &exact);
+        }
+    }
+    else
+    {
+        operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
+        candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
+        exact.reverse = false;
+        laplace_consensus_candidates(operand_ids, candidate_ids, state->types,
+                                     query_exact_cell, &exact,
+                                     stats ? &stats->forward : NULL);
 
-    exact.reverse = true;
-    laplace_consensus_candidates(candidate_ids, operand_ids, state->types,
-                                 query_exact_cell, &exact,
-                                 stats ? &stats->reverse : NULL);
+        exact.reverse = true;
+        laplace_consensus_candidates(candidate_ids, operand_ids, state->types,
+                                     query_exact_cell, &exact,
+                                     stats ? &stats->reverse : NULL);
+    }
 
     if (exact.count > 0)
     {
         MemoryContextSwitchTo(owner);
         result = (LaplaceQueryChannel *) palloc(sizeof(*result) * exact.count);
         memcpy(result, exact.channels, sizeof(*result) * exact.count);
-        MemoryContextSwitchTo(work);
-        laplace_qe_bind_channel_observations(state->operands, result, exact.count, stats, work);
-        MemoryContextSwitchTo(owner);
+        if (bind_observations)
+        {
+            MemoryContextSwitchTo(work);
+            laplace_qe_state_bind_channels(state, state->operands, result, exact.count, stats, work);
+            MemoryContextSwitchTo(owner);
+        }
         for (int i = 0; i < exact.count; ++i)
             result[i].operand_role =
                 laplace_qe_state_operand_role(state, result[i].ordinal);
@@ -549,4 +616,19 @@ laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
 
     MemoryContextDelete(work);
     return result;
+}
+
+LaplaceQueryChannel *
+laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
+                                       ArrayType *candidates, int *count,
+                                       LaplaceQueryEvidenceStats *stats)
+{
+    return query_state_candidate_evidence_impl(state, candidates, true, count, stats);
+}
+
+LaplaceQueryChannel *
+laplace_query_state_candidate_evidence_unbound(const LaplaceQueryState *state,
+                                               ArrayType *candidates, int *count)
+{
+    return query_state_candidate_evidence_impl(state, candidates, false, count, NULL);
 }

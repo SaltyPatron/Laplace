@@ -162,7 +162,6 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         Candidate *candidates = NULL;
         int candidate_count = 0, candidate_capacity = 0;
         HTAB *candidate_index;
-        HTAB *query_proposals;
         HTAB *query_traversal_proposals = NULL;
         HTAB *projection_proposals = NULL;
         HTAB *query_evidence_table;
@@ -222,9 +221,6 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
             }
         }
 
-        query_proposals = laplace_tg_evidence_summaries(
-            query_state, false, origins, obligations, cognition, step_context);
-
         if (input && ((intent && intent->relation_count > 0) ||
                       semantic_hop_limit < 0 || routing_hops < semantic_hop_limit))
         {
@@ -280,16 +276,11 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
             array_free_iterator(carried_iterator);
         }
 
-        (void) query_proposals;
         (void) projection_proposals;
         if (trace)
-        {
-            int proposal_channels = 0;
-            (void) laplace_query_state_channels(query_state, &proposal_channels);
             laplace_tg_emit_stage(result, step, "propose", input, context_length,
-                                  candidate_count, proposal_channels, 0,
+                                  candidate_count, laplace_query_state_channel_count(query_state), 0,
                                   routing_hops, cognition);
-        }
         if (candidate_count == 0)
         {
             exhausted = true;
@@ -298,13 +289,11 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
 
         ArrayType *candidate_ids = laplace_tg_candidate_id_array(candidates, candidate_count);
         int query_channel_count = 0;
-        LaplaceQueryChannel *query_channels =
-            laplace_query_state_candidate_evidence(query_state, candidate_ids,
-                                                   &query_channel_count, NULL);
-        query_evidence_table = laplace_tg_evidence_summaries_from_channels(
-            query_channels, query_channel_count, false, origins, obligations, cognition, step_context);
-        query_traversal_table = laplace_tg_evidence_summaries_from_channels(
-            query_channels, query_channel_count, true, origins, obligations, cognition, step_context);
+        LaplaceQueryChannel *query_channels = trace
+            ? laplace_query_state_candidate_evidence(query_state, candidate_ids,
+                                                     &query_channel_count, NULL)
+            : laplace_query_state_candidate_evidence_unbound(query_state, candidate_ids,
+                                                             &query_channel_count);
 
         for (int i = 0; intent && i < query_channel_count; ++i)
         {
@@ -324,17 +313,52 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
                 output_state, candidate_ids, &projection_channel_count, NULL);
             projection_table = laplace_tg_evidence_summaries_from_channels(
                 projection_channels, projection_channel_count, true, origins, obligations, cognition, step_context);
+            for (int i = 0; i < candidate_count; ++i)
+            {
+                EvidenceEntry *projection = hash_search(projection_table,
+                    &candidates[i].id, HASH_FIND, NULL);
+                if (projection)
+                    candidates[i].projection = projection->summary;
+            }
         }
         pfree(candidate_ids);
-        if (trace)
+
+        if (!trace && query_channel_count > 0)
         {
-            int proposal_channels = 0;
-            (void) laplace_query_state_channels(query_state, &proposal_channels);
+            int *bind_idx = palloc(sizeof(int) * query_channel_count);
+            LaplaceQueryChannel *bind_buf = palloc(sizeof(LaplaceQueryChannel) * query_channel_count);
+            int bind_count = 0;
+            for (int i = 0; i < query_channel_count; ++i)
+            {
+                double w = laplace_walk_edge_weight(query_channels[i].rating, query_channels[i].rd);
+                bool neutral = !(w > 0.0 && isfinite(w)) && !(w < 0.0 && isfinite(w));
+                CandidateIndex *ci = hash_search(candidate_index, &query_channels[i].candidate, HASH_FIND, NULL);
+                if (neutral || (ci && laplace_tg_candidate_can_output(&candidates[ci->index], intent)))
+                {
+                    bind_idx[bind_count] = i;
+                    bind_buf[bind_count] = query_channels[i];
+                    bind_count++;
+                }
+            }
+            if (bind_count > 0)
+            {
+                laplace_query_state_bind_channels(query_state, bind_buf, bind_count);
+                for (int m = 0; m < bind_count; ++m)
+                    query_channels[bind_idx[m]] = bind_buf[m];
+            }
+            pfree(bind_buf);
+            pfree(bind_idx);
+        }
+
+        query_evidence_table = laplace_tg_evidence_summaries_from_channels(
+            query_channels, query_channel_count, false, origins, obligations, cognition, step_context);
+        query_traversal_table = laplace_tg_evidence_summaries_from_channels(
+            query_channels, query_channel_count, true, origins, obligations, cognition, step_context);
+        if (trace)
             laplace_tg_emit_stage(result, step, "scan", input, context_length,
-                                  candidate_count, proposal_channels,
+                                  candidate_count, laplace_query_state_channel_count(query_state),
                                   query_channel_count + projection_channel_count,
                                   routing_hops, cognition);
-        }
 
         if (cognition)
         {
@@ -387,14 +411,10 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         }
         candidate_count = kept;
         if (trace)
-        {
-            int proposal_channels = 0;
-            (void) laplace_query_state_channels(query_state, &proposal_channels);
             laplace_tg_emit_stage(result, step, "compose", input, context_length,
-                                  candidate_count, proposal_channels,
+                                  candidate_count, laplace_query_state_channel_count(query_state),
                                   query_channel_count + projection_channel_count,
                                   routing_hops, cognition);
-        }
         if (candidate_count == 0)
         {
             exhausted = true;
@@ -430,8 +450,7 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
 
         qsort(candidates, (size_t) candidate_count, sizeof(Candidate),
               laplace_tg_candidate_compare);
-        int retained_channel_count = 0;
-        (void) laplace_query_state_channels(query_state, &retained_channel_count);
+        int retained_channel_count = trace ? laplace_query_state_channel_count(query_state) : 0;
 
         int output_count = 0;
         for (int i = 0; i < candidate_count; ++i)
@@ -466,10 +485,10 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
         }
         if (output_count == 0 || (route_for_meeting && routing_budget))
         {
+            ArrayBuildState *new_routed = NULL;
             ++routing_hops;
             if (cognition)
                 laplace_cognition_program_note_route(cognition);
-            ArrayType *routed = laplace_tg_candidate_id_array(candidates, candidate_count);
             if (trace)
                 for (int i = 0; i < candidate_count; ++i)
                     laplace_tg_emit_result(result, step, &candidates[i], true, input,
@@ -493,15 +512,26 @@ laplace_tg_walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput 
             }
             for (int i = 0; i < candidate_count; ++i)
             {
-                hash_search(route_seen, &candidates[i].id, HASH_ENTER, NULL);
+                bool already_routed;
+                hash_search(route_seen, &candidates[i].id, HASH_ENTER, &already_routed);
                 if (laplace_tg_geometry_summary_present(&candidates[i].geometry))
                     hash_search(geometry_routed, &candidates[i].id, HASH_ENTER, NULL);
+                if (!already_routed)
+                {
+                    Datum id = hash128_to_datum(&candidates[i].id);
+                    new_routed = accumArrayResult(new_routed, id, false, BYTEAOID, walk_context);
+                    pfree(DatumGetPointer(id));
+                }
             }
-            laplace_query_state_extend_batch(query_state, routed, NULL);
-            if (output_state)
-                laplace_query_state_extend_batch(output_state, routed, NULL);
+            if (new_routed)
+            {
+                ArrayType *routed = DatumGetArrayTypeP(makeArrayResult(new_routed, walk_context));
+                laplace_query_state_extend_batch(query_state, routed, NULL);
+                if (output_state)
+                    laplace_query_state_extend_batch(output_state, routed, NULL);
+                pfree(routed);
+            }
             MemoryContextSwitchTo(step_context);
-            pfree(routed);
             continue;
         }
         kept = 0;
