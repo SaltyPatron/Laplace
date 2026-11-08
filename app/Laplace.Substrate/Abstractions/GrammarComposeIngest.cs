@@ -81,21 +81,22 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         // [path, content]. A container edge would restate that composition.
         if (record.ConceptAnchorKey is not { Length: > 0 } key
             || record.ConceptCategoryTypeId is not { } ctype || ctype == default
-            || CategoryAnchor.Emit(builder, key, sourceId) is not { } pathId)
+            || ContentEmitter.StageComponent(builder, key.Trim(), sourceId) is not { } pathComponent)
             return;
 
-        string path = key.Trim();
-        if (!CompositionLaw.TryFace(path, out CompositionLaw.Face pathFace) || pathFace.Id != pathId)
-            throw new InvalidOperationException("named-file path floor diverged from its content id");
-        byte rootTier = unit switch
+        OrderedCompositionComponent rootComponent = unit switch
         {
-            Unit native => native.ReturnedTier,
-            RawFileUnit raw => raw.ReturnedTier,
+            Unit native => native.ReturnedComponent,
+            RawFileUnit raw => raw.ReturnedComponent,
             _ => throw new InvalidOperationException("named-file root was staged without a floor"),
         };
-        byte floor = CompositionLaw.ParentFloor([pathFace.Tier, rootTier]);
-        Hash128 named = Hash128.Merkle(floor, [pathId, rootId]);
-        builder.AddEntity(named, floor, ctype);
+        if (rootComponent.Id != rootId)
+            throw new InvalidOperationException("named-file root component diverged from its staged id");
+        Span<OrderedCompositionResult> results = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            builder.ContentStage,
+            [new OrderedCompositionRequest([pathComponent, rootComponent], ctype, sourceId, 0)],
+            results);
         _ = trust;
     }
 
@@ -105,10 +106,10 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private readonly Hash128 _sourceId;
         private readonly double _trust;
         private readonly IIngestDeferredUnit _content;
-        private byte _returnedTier;
+        private OrderedCompositionComponent _returnedComponent;
         private bool _returned;
-        internal byte ReturnedTier => _returned
-            ? _returnedTier
+        internal OrderedCompositionComponent ReturnedComponent => _returned
+            ? _returnedComponent
             : throw new InvalidOperationException("raw source root was staged without a floor");
         public RawFileUnit(GrammarComposeRecord record, Hash128 sourceId, double trust)
         {
@@ -131,7 +132,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (content == default || content != file.ContentRootId)
                 throw new InvalidDataException("Raw source changed between native content and file composition.");
             builder.SetFileId(file.FileId);
-            _returnedTier = file.Tier;
+            _returnedComponent = file.Component;
             _returned = true;
             return file.FileId;
         }
@@ -150,12 +151,12 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private TierTree? _promptTree;
         private OrderedCompositionRequest? _observation;
         private OrderedCompositionComponent _root;
+        private OrderedCompositionComponent _returnedComponent;
         private Hash128 _rootId;
-        private byte _returnedTier;
         private bool _returned;
         private bool _disposed;
-        internal byte ReturnedTier => _returned
-            ? _returnedTier
+        internal OrderedCompositionComponent ReturnedComponent => _returned
+            ? _returnedComponent
             : throw new InvalidOperationException("source root was staged without a floor");
 
         public Unit(GrammarComposeRecord record, Hash128 sourceId, double trust, ISubstrateReader? reader)
@@ -196,7 +197,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             GrammarTagWitness.Emit(builder, _record.Utf8, _ast, _composer,
                 _record.Modality, _sourceId, _trust, _rootId);
 
-            byte stagedTier = _root.Tier;
+            OrderedCompositionComponent stagedComponent = _root;
             if (_observation is not null && _promptComposer is not null)
             {
                 _promptComposer.DrainInto(builder, witnessWeight);
@@ -207,7 +208,9 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 OrderedComposition.StageBatch(builder.ContentStage, [_observation], pair);
                 if (pair[0].Id != _rootId)
                     throw new InvalidOperationException("observed prompt/response identity changed during staging");
-                stagedTier = pair[0].Tier;
+                stagedComponent = new OrderedCompositionComponent(
+                    pair[0].Id, pair[0].Tier,
+                    pair[0].CoordX, pair[0].CoordY, pair[0].CoordZ, pair[0].CoordM);
                 if (!string.IsNullOrEmpty(_record.Language))
                     ContentEmitter.Emit(builder, _record.Language, _sourceId);
                 _ = prompt;
@@ -216,7 +219,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
 
             if (_record.FileMetadata is not { } metadata)
             {
-                _returnedTier = stagedTier;
+                _returnedComponent = stagedComponent;
                 _returned = true;
                 return _rootId;
             }
@@ -228,7 +231,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 throw new InvalidOperationException(
                     "whole-source file composition changed its grammar content identity");
             builder.SetFileId(file.FileId);
-            _returnedTier = file.Tier;
+            _returnedComponent = file.Component;
             _returned = true;
             return file.FileId;
         }

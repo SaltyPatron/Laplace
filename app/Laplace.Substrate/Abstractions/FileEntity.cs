@@ -173,7 +173,15 @@ public readonly record struct FileIdentity(
     Hash128 ContentRootId,
     Hash128 MetadataRootId,
     Hash128 FileId,
-    byte Tier);
+    byte Tier,
+    double CoordX = 0,
+    double CoordY = 0,
+    double CoordZ = 0,
+    double CoordM = 0)
+{
+    public OrderedCompositionComponent Component =>
+        new(FileId, Tier, CoordX, CoordY, CoordZ, CoordM);
+}
 
 /// <summary>
 /// A file is a real composition in the Merkle DAG:
@@ -272,7 +280,9 @@ public static class FileEntity
             OrderedComposition.StageBatch(stage, [request], results);
             result = results[0];
         }
-        return new FileIdentity(contentRoot.Id, metadataRoot.Id, result.Id, result.Tier);
+        return new FileIdentity(
+            contentRoot.Id, metadataRoot.Id, result.Id, result.Tier,
+            result.CoordX, result.CoordY, result.CoordZ, result.CoordM);
     }
 
     /// <summary>Transport an already composed native tree root into the common file carrier.</summary>
