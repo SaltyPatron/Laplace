@@ -1,4 +1,4 @@
-#include "physicality_descriptor_admission_internal.h"
+#include "physicality_descriptor_admission_internal.hpp"
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"

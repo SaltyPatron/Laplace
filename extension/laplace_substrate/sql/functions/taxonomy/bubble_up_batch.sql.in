@@ -179,7 +179,7 @@ BEGIN
     WHERE p_k IS NULL OR o.rn <= p_k
     ORDER BY o.term, o.rn;
 
-    IF FOUND THEN
+    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
         RETURN;
     END IF;
 

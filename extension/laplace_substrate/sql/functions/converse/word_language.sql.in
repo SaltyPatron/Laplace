@@ -39,7 +39,7 @@ BEGIN
     WHERE b.language IS NOT NULL
     ORDER BY b.term, b.language, (b.eff_mu * 1e9)::double precision DESC;
 
-    IF FOUND THEN
+    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
         RETURN;
     END IF;
 

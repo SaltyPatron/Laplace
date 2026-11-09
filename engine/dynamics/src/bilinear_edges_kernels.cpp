@@ -1,4 +1,4 @@
-#include "bilinear_edges_internal.h"
+#include "bilinear_edges_internal.hpp"
 #include "laplace/core/glicko2.h"
 #include "laplace/core/score.h"
 

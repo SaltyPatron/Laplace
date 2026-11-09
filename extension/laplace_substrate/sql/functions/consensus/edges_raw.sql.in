@@ -147,7 +147,7 @@ BEGIN
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
 
-        IF FOUND THEN
+        IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
             RETURN;
         END IF;
 
@@ -290,7 +290,7 @@ BEGIN
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
 
-        IF FOUND THEN
+        IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
             RETURN;
         END IF;
 
@@ -437,7 +437,7 @@ BEGIN
     WHERE p_limit IS NULL OR r.rn <= p_limit
     ORDER BY r.subject_id, r.rn;
 
-    IF FOUND THEN
+    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
         RETURN;
     END IF;
 

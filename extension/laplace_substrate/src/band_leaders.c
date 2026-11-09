@@ -67,7 +67,7 @@ pg_laplace_claim_leaders(PG_FUNCTION_ARGS)
         Oid types[] = {INT4ARRAYOID, INT4ARRAYOID, TEXTARRAYOID, INT8OID};
         if (!claim_leaders_plan) {
             claim_leaders_plan = SPI_prepare_cursor(laplace_sql_query_text("leaders.native_page"), 4, types,
-                CURSOR_OPT_PARALLEL_OK);
+                CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
             if (!claim_leaders_plan || SPI_keepplan(claim_leaders_plan) != 0)
                 elog(ERROR, "claim leaders: cannot retain trajectory page plan");
         }

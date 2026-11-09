@@ -169,7 +169,7 @@ BEGIN
     FROM direct_oriented d
     LEFT JOIN direct_langs dl ON dl.word = d.term AND dl.rn = 1;
 
-    IF FOUND THEN
+    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
         RETURN;
     END IF;
 
@@ -390,7 +390,7 @@ BEGIN
     LEFT JOIN direct_langs dl ON dl.word = d.term AND dl.rn = 1
     WHERE p_lang IS NULL OR dl.lang = p_lang;
 
-    IF FOUND THEN
+    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
         RETURN;
     END IF;
 

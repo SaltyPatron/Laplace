@@ -1,4 +1,4 @@
-#include "bilinear_edges_internal.h"
+#include "bilinear_edges_internal.hpp"
 #include "laplace/dynamics/model_math.h"
 #include "laplace/core/score.h"
 
