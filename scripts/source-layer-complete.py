@@ -33,6 +33,10 @@ def main(argv: list[str]) -> int:
         return 2
     name = canonical_source(argv[1])
     src = json.loads(GATES.read_text(encoding="utf-8"))["sources"].get(name, {})
+    if src.get("native"):
+        # A Native recipe source with no managed decomposer: its run journal is its only completion record.
+        print(f"ops.native_source_completed({quote(name)})\tnative={name}")
+        return 0
     decomposer = src.get("decomposer") or (argv[2] if len(argv) > 2 else None)
     layer = src.get("layer", int(argv[3]) if len(argv) > 3 else None)
     if layer is None or (not src.get("witness") and not decomposer):
