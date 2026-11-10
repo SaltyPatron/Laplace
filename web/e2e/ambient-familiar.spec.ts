@@ -4,6 +4,8 @@ test.describe('ambient familiar', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test('responds to explicit visit and swim signals without capturing input or clipping behind panels', async ({ page }) => {
+    // The familiar is opt-in (rail toggle); enable it for this test.
+    await page.addInitScript(() => localStorage.setItem('laplace.familiar', 'on'));
     await page.goto('/');
 
     const familiar = page.getByTestId('ambient-familiar');

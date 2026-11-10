@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { BrowserRouter, Link as RouterLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AppHeader, Button, Input, LoadingText, NavTabs, Panel, TenantField } from '@ui';
+import { BrowserRouter, Link as RouterLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Button, LoadingText, Panel, TenantField } from '@ui';
+import { AppShell } from './shell/AppShell';
 import { ChessSection } from './chess/ChessSection';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
 import { useAppStore } from './store';
@@ -9,7 +10,7 @@ import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { ViewErrorBoundary } from './layout/ViewErrorBoundary';
 import { AccountControls } from './auth/AccountControls';
 import { apiGet, describeFailure, setApiWorkspace } from './api/client';
-import type { AuthProvider, AuthUser } from './store';
+import type { AuthProvider, AuthUser, ServicePrincipal } from './store';
 import styles from './App.module.css';
 
 const loadChat = () => import('./chat/ChatView');
@@ -35,44 +36,8 @@ const ForwardProofView = lazy(() => loadForwardProof().then((m) => ({ default: m
 const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
 
-const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
-  chat: loadChat, library: loadExplore, data: loadData, chess: loadChess, operator: loadOperator,
-};
-
-/** Existing route addresses remain stable for saved references. */
-const TABS: { id: string; label: string; path: string; owns: string[] }[] = [
-  { id: 'library', label: 'Knowledge', path: '/explore', owns: ['/explore', '/query', '/topic', '/proof', '/unicode'] },
-  { id: 'chat', label: 'Chat', path: '/chat', owns: ['/chat', '/forward-proof'] },
-  { id: 'data', label: 'Data', path: '/data', owns: ['/data'] },
-  { id: 'chess', label: 'Chess', path: '/chess', owns: ['/chess', '/play', '/lab'] },
-  { id: 'operator', label: 'Admin', path: '/operator', owns: ['/operator'] },
-];
-function isActive(pathname: string, tab: (typeof TABS)[number]): boolean {
-  if (tab.path === '/') return pathname === '/';
-  return tab.owns.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
-
-/** Laplace discovery from anywhere: the text enters Browse's canonical decomposition. */
-function HeaderSearch() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [text, setText] = useState('');
-  return <form role="search" className={styles.search} onSubmit={(event) => {
-    event.preventDefault();
-    if (text.trim()) {
-      const current = ['/explore', '/query', '/topic'].some(prefix => location.pathname === prefix || location.pathname.startsWith(prefix + '/')) ? new URLSearchParams(location.search) : new URLSearchParams();
-      for (const key of ['selected', 'answer', 'offset', 'games_offset', 'detail', 'inspect', 'presentation']) current.delete(key);
-      current.set('q', text);
-      navigate(`/explore?${current}`);
-    }
-  }}>
-    <Input aria-label="Search the substrate" value={text} placeholder="Search knowledge…" onChange={(event) => setText(event.target.value)} />
-  </form>;
-}
-
 function Shell() {
-  const { tenant, setTenant, authReady, authUser, authProviders, devPrincipal, setAuth } = useAppStore();
-  const navigate = useNavigate();
+  const { tenant, setTenant, authReady, authUser, authProviders, devPrincipal, servicePrincipal, setAuth } = useAppStore();
   const location = useLocation();
   const viewScope = JSON.stringify([tenant, authUser?.id]);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -81,37 +46,37 @@ function Shell() {
     let live = true;
     const controller = new AbortController();
     setAuthError(null);
-    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[]; devPrincipal?: string | null }>('/v1/auth/me', { signal: controller.signal })
+    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[]; devPrincipal?: string | null;
+      principal?: { kind: string; tenantId: string; label?: string | null } | null }>('/v1/auth/me', { signal: controller.signal })
       .then((result) => {
         if (!live) return;
-        setApiWorkspace(result.authenticated ? result.user?.tenantId ?? null : null);
-        setAuth(result.authenticated ? result.user : null, result.providers ?? [], result.devPrincipal ?? null);
+        const service: ServicePrincipal | null = result.authenticated && !result.user && result.principal
+          && (result.principal.kind === 'api_key' || result.principal.kind === 'operator')
+          ? { kind: result.principal.kind, tenantId: result.principal.tenantId, label: result.principal.label ?? null } : null;
+        setApiWorkspace(result.authenticated ? result.user?.tenantId ?? service?.tenantId ?? null : null);
+        setAuth(result.authenticated ? result.user : null, result.providers ?? [], result.devPrincipal ?? null, service);
       })
       .catch((error: unknown) => { if (live) setAuthError(describeFailure(error).message); });
     return () => { live = false; controller.abort(); };
   }, [setAuth, authAttempt]);
-  return <UploadProvider><div className={styles.shell}>
-    <a className={styles.skipLink} href="#main-content">Skip to workspace</a>
-    <AppHeader title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>} tagline="witnessed consensus, not weights"
-      nav={<NavTabs tabs={TABS.map((tab) => ({ id: tab.id, label: tab.label, href: tab.path, active: isActive(location.pathname, tab), onClick: () => navigate(tab.path), onIntent: () => { void WORKSPACE_PREFETCH[tab.id]?.(); } }))} />}
-      tenant={<div className={styles.headerTools}>
-        <HeaderSearch />
-        {devPrincipal && !authUser && <span className={styles.devPrincipal} title="LAPLACE_AUTH_DEV_PRINCIPAL: this host serves uncredentialed requests as this workspace">dev · {devPrincipal}</span>}
-        {authReady && (authUser || authProviders.length > 0)
-          ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${location.pathname}${location.search}${location.hash}`} />
-          : !devPrincipal && <TenantField value={tenant} onChange={setTenant} />}
-        <nav className={styles.accountLinks} aria-label="Account">
-          <RouterLink to="/billing">Billing</RouterLink>
-          <RouterLink to="/settings">Settings</RouterLink>
-        </nav>
-      </div>} />
-    {authError && <Panel title="Account information could not be loaded">
-      <p role="alert">{authError}</p>
-      <Button onClick={() => setAuthAttempt((attempt) => attempt + 1)}>Retry account information</Button>
-    </Panel>}
-    <SubstrateStatusBanner />
-    <DataActivity />
-    <main id="main-content" tabIndex={-1} className={styles.main}>
+  const signedIn = !!(authUser || servicePrincipal || devPrincipal);
+  return <UploadProvider><AppShell showAdmin={signedIn} familiar={<AmbientFamiliar />}
+    account={<>
+      {devPrincipal && !authUser && !servicePrincipal && <span className={styles.devPrincipal} title="LAPLACE_AUTH_DEV_PRINCIPAL: this host serves uncredentialed requests as this workspace">dev · {devPrincipal}</span>}
+      {servicePrincipal && !authUser && <span className={styles.devPrincipal} title="Signed in with a service credential">
+        {servicePrincipal.kind === 'operator' ? 'operator' : `API key · ${servicePrincipal.label ?? servicePrincipal.tenantId}`}</span>}
+      {authReady && !servicePrincipal && (authUser || authProviders.length > 0)
+        ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${location.pathname}${location.search}${location.hash}`} />
+        : !devPrincipal && !servicePrincipal && <TenantField value={tenant} onChange={setTenant} />}
+    </>}
+    banners={<>
+      {authError && <Panel title="Account information could not be loaded">
+        <p role="alert">{authError}</p>
+        <Button onClick={() => setAuthAttempt((attempt) => attempt + 1)}>Retry account information</Button>
+      </Panel>}
+      <SubstrateStatusBanner />
+      <DataActivity />
+    </>}>
       <ViewErrorBoundary resetKey={JSON.stringify([viewScope, location.key])}>
         <Suspense fallback={<LoadingText>Loading workspace…</LoadingText>}>
         <Routes key={viewScope}>
@@ -133,12 +98,10 @@ function Shell() {
           <Route path="/billing/cancel" element={<BillingReturnView />} />
           <Route path="/settings" element={<SettingsView />} />
           <Route path="/operator" element={<AdminView />} />
-          <Route path="*" element={<Panel title="Workspace not found"><p>This address does not match a Laplace workspace. Use the navigation above or return Home.</p><RouterLink to="/">Return Home</RouterLink></Panel>} />
+          <Route path="*" element={<Panel title="Page not found"><p>This address does not match a page. Use the navigation or search (Ctrl K).</p><RouterLink to="/">Go to Look up</RouterLink></Panel>} />
         </Routes>
         </Suspense>
       </ViewErrorBoundary>
-    </main>
-    <AmbientFamiliar />
-  </div></UploadProvider>;
+  </AppShell></UploadProvider>;
 }
 export function App() { return <BrowserRouter><Shell /></BrowserRouter>; }

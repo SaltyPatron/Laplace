@@ -51,6 +51,13 @@ export interface AuthProvider {
   loginUrl: string;
 }
 
+/** A non-browser identity the server recognised: a workload API key or the installation operator credential. */
+export interface ServicePrincipal {
+  kind: 'api_key' | 'operator';
+  tenantId: string;
+  label?: string | null;
+}
+
 export interface AuthUser {
   id: string;
   tenantId: string;
@@ -76,6 +83,7 @@ interface AppState {
   authProviders: AuthProvider[];
   /** The sandbox workspace this host serves an uncredentialed browser as, when configured. */
   devPrincipal: string | null;
+  servicePrincipal: ServicePrincipal | null;
   setTenant: (tenant: string) => void;
   setSession: (session: string | null) => void;
   setQuoteId: (quoteId: string) => void;
@@ -85,7 +93,7 @@ interface AppState {
   setPendingQuote: (gate: QuoteGate | null) => void;
   setExploreSeedPrompt: (prompt: string | null) => void;
   setQuerySeed: (seed: QuerySeed | null) => void;
-  setAuth: (user: AuthUser | null, providers: AuthProvider[], devPrincipal?: string | null) => void;
+  setAuth: (user: AuthUser | null, providers: AuthProvider[], devPrincipal?: string | null, servicePrincipal?: ServicePrincipal | null) => void;
   clearConversation: () => void;
 }
 
@@ -105,6 +113,7 @@ export const useAppStore = create<AppState>((set) => ({
   authUser: null,
   authProviders: [],
   devPrincipal: null,
+  servicePrincipal: null,
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
     // A tenant switch is a different witnessed world — never carry a session across.
@@ -132,7 +141,14 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
   setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
   setQuerySeed: (querySeed) => set({ querySeed }),
-  setAuth: (authUser, authProviders, devPrincipal = null) => set((state) => {
+  setAuth: (authUser, authProviders, devPrincipal = null, servicePrincipal = null) => set((state) => {
+    if (!authUser && servicePrincipal) {
+      return {
+        authReady: true, authUser: null, authProviders, devPrincipal, servicePrincipal, tenant: servicePrincipal.tenantId,
+        session: localStorage.getItem(sessionKey(servicePrincipal.tenantId)),
+        messages: state.tenant === servicePrincipal.tenantId ? state.messages : [],
+      };
+    }
     if (!authUser && devPrincipal) {
       localStorage.setItem('laplace.tenant', devPrincipal);
       return {
@@ -141,13 +157,14 @@ export const useAppStore = create<AppState>((set) => ({
         messages: state.tenant === devPrincipal ? state.messages : [],
       };
     }
-    if (!authUser) return { authReady: true, authUser: null, authProviders, devPrincipal };
+    if (!authUser) return { authReady: true, authUser: null, authProviders, devPrincipal, servicePrincipal: null };
     localStorage.setItem('laplace.tenant', authUser.tenantId);
     return {
       authReady: true,
       authUser,
       authProviders,
       devPrincipal,
+      servicePrincipal: null,
       tenant: authUser.tenantId,
       session: localStorage.getItem(sessionKey(authUser.tenantId)),
       messages: state.tenant === authUser.tenantId ? state.messages : [],

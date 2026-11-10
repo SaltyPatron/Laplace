@@ -192,7 +192,9 @@ try {
   assert.equal(bodies.at(-1).topic, ' King ');
   assert.equal(bodies.at(-1).shape, 'describe');
   failQuery = true;
-  await page.getByRole('button', { name: 'Refresh search', exact: true }).click();
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  // Read failures are summarized; details (with request ids) sit behind a disclosure.
+  await page.getByText('Some results could not be read', { exact: false }).click();
   await expect(page.getByText('Fixture query unavailable', { exact: false })).toBeVisible();
   failQuery = false;
   await page.getByText('Search criteria', { exact: true }).click();

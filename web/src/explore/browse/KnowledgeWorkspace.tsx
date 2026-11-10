@@ -20,7 +20,23 @@ const EntityDetail = lazy(() => import('../entity/EntityDetail').then(module => 
 const TrajectoryCalculation = lazy(() => import('../../query/TrajectoryCalculation').then(module => ({ default: module.TrajectoryCalculation })));
 const PAGE = 50, MAX_CAPACITY = 32768;
 type Read = { method: string; status: 'loading' | 'ready' | 'error'; error?: string; result?: KnowledgeAnswers; browse?: BrowseResponse };
-const label = (method: string) => method.replaceAll('_', ' ');
+/** How a result was found, in words a reader uses. Internal shape ids never reach the page. */
+const METHOD_LABELS: Record<string, string> = {
+  entities: 'Content match', surface: 'Content match', define: 'Definition', fallback: 'Definition', what_is: 'Classification',
+  describe: 'Description', synonyms: 'Synonym', translate: 'Translation', languages: 'Language', examples: 'Example',
+  walk: 'Path', path: 'Path', complete: 'Completion', band_facts: 'Related fact', beam: 'Related fact',
+};
+const label = (method: string) => METHOD_LABELS[method] ?? method.replaceAll('_', ' ');
+/** Shape similarity is not meaning: geometric neighbors belong to shape views, never to knowledge answers. */
+const NOT_KNOWLEDGE = new Set(['generate', 'neighbors']);
+/** Release-local packaging and format metadata that sources carry but that is not knowledge about the subject. */
+const PACKAGING = /type of pointer that lemma has|^upos:\s|\bHAS[ _]SENSE\b|variety of language:|^I hold "/i;
+/** A read that resolved no stored content returned nothing; that is an empty result, not a failure. */
+const isNoMatch = (message: string) => /No content is witnessed|topic_not_witnessed/.test(message);
+const round = (value: number | string | null | undefined, digits = 2) => {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return n == null || !Number.isFinite(n) ? '—' : n.toFixed(digits);
+};
 const integer = (value: string | null, fallback: number) => value !== null && /^\d+$/.test(value) ? Number(value) : fallback;
 
 /** One search collection. Retrieval methods contribute results; facets constrain them. */
@@ -44,7 +60,7 @@ export function KnowledgeWorkspace() {
   const relations = useReadResource({ key: JSON.stringify(['knowledge-relations', tenant, quoteId]), read: signal => relationTypes({ tenant, quoteId, signal }) });
   const bands = useReadResource({ key: JSON.stringify(['knowledge-bands', tenant, quoteId]), read: signal => relationBands({ tenant, quoteId, signal }) });
   const leaders = useReadResource({ key: JSON.stringify(['knowledge-overview', tenant, quoteId]), enabled: !query, read: signal => queryHomeLeaders({ tenant, quoteId, signal }) });
-  const searchMethods = shapes.data?.shapes.filter(shape => shape.shape !== 'generate') ?? [];
+  const searchMethods = shapes.data?.shapes.filter(shape => !NOT_KNOWLEDGE.has(shape.shape)) ?? [];
   const catalogKey = JSON.stringify(searchMethods);
   const scope = JSON.stringify([query, topic2, relation, lang, controlsKey, methodKey, hasMethods, tenant, quoteId, offset, capacity, attempt]);
   const entitiesEnabled = !!query && (!hasMethods || params.getAll('method').includes('entities'));
@@ -95,7 +111,10 @@ export function KnowledgeWorkspace() {
           const value = await task.read();
           if (!controller.signal.aborted) setMethodReads(current => current.scope === scope ? { scope, reads: current.reads.map(read => read.method === task.method ? { ...read, ...value, status: 'ready' } : read) } : current);
         } catch (error) {
-          if (!controller.signal.aborted) setMethodReads(current => current.scope === scope ? { scope, reads: current.reads.map(read => read.method === task.method ? { ...read, status: 'error', error: error instanceof Error ? error.message : String(error) } : read) } : current);
+          const message = error instanceof Error ? error.message : String(error);
+          const noMatch = isNoMatch(message);
+          if (!controller.signal.aborted) setMethodReads(current => current.scope === scope ? { scope, reads: current.reads.map(read => read.method === task.method
+            ? noMatch ? { ...read, status: 'ready' } : { ...read, status: 'error', error: message } : read) } : current);
         }
       }
     }
@@ -105,7 +124,8 @@ export function KnowledgeWorkspace() {
 
   const browse = reads.find(read => read.browse)?.browse;
   const all = useMemo(() => {
-    if (query) return collectKnowledge(browse?.hits ?? [], reads.flatMap(read => read.result ? [read.result] : []));
+    if (query) return collectKnowledge(browse?.hits ?? [], reads.flatMap(read => read.result ? [read.result] : []))
+      .filter(row => !PACKAGING.test(row.text));
     const result = new Map<string, KnowledgeResult>();
     for (const band of leaders.data?.bands ?? []) {
       for (const claim of band.claims ?? []) {
@@ -120,7 +140,7 @@ export function KnowledgeWorkspace() {
     }
     return [...result.values()];
   }, [query, browse, reads, leaders.data]);
-  const rows = all.filter(row => (!types.length || types.includes(row.kind)) && (!tiers.length || tiers.includes(String(row.tier ?? ''))) && (!matchedBy.length || row.methods.some(method => matchedBy.includes(method))));
+  const rows = all.filter(row => (!types.length || types.includes(row.kind)) && (!tiers.length || tiers.includes(String(row.tier ?? ''))) && (!matchedBy.length || row.methods.some(method => matchedBy.includes(label(method)))));
   const answer = all.find(row => row.key === selectedAnswer);
   const loading = reads.some(read => read.status === 'loading'), errors = reads.filter(read => read.status === 'error');
   function apply(patch: Record<string, string | string[] | null>) {
@@ -170,23 +190,23 @@ export function KnowledgeWorkspace() {
       </details>
     </header>
     {!query && <><p>Recorded assertions and relations, sampled from the current consensus. Search to investigate a subject.</p><ReadStatus label="Recorded knowledge" resource={leaders} /></>}
-    {query && <div role="status" className={styles.toolbar}><Muted>{loading ? `Searching… ${reads.filter(read => read.status === 'ready').length} of ${reads.length} methods complete` : `${reads.filter(read => read.status === 'ready').length} search methods complete`}</Muted><Button size="sm" onClick={() => setAttempt(value => value + 1)} disabled={loading}>Refresh search</Button></div>}
-    {shapes.error && query && <ErrorText>Search method catalogue unavailable. Entity search remains available.</ErrorText>}
+    {query && loading && <div role="status" className={styles.toolbar}><Muted>Searching…</Muted></div>}
+    {shapes.error && query && <ErrorText>Part of search is unavailable right now; content matches are still shown.</ErrorText>}
     {world.issues.map(issue => <ErrorText key={issue}>{issue}</ErrorText>)}
     <RetainedContext world={world} />
-    {errors.length > 0 && <details open className={styles.readErrors}><summary>{errors.length} search method{errors.length === 1 ? '' : 's'} unavailable; successful results remain below</summary>{errors.map(read => <ErrorText key={read.method}>{label(read.method)}: {read.error}</ErrorText>)}</details>}
+    {errors.length > 0 && <details className={styles.readErrors}><summary>Some results could not be read; everything that was read is shown below</summary>{errors.map(read => <ErrorText key={read.method}>{label(read.method)}: {read.error}</ErrorText>)}</details>}
     <div className={styles.facets} role="group" aria-label="Search result filters">
       <FacetCheckboxes label="Type" values={all.map(row => row.kind)} selected={types} onChange={values => apply({ type: values })} />
       <FacetCheckboxes label="Tier" values={all.map(row => row.tier === undefined ? null : String(row.tier))} selected={tiers} onChange={values => apply({ tier: values })} />
-      <FacetCheckboxes label="Matched by" values={all.flatMap(row => row.methods)} selected={matchedBy} onChange={values => apply({ matched: values })} />
+      <FacetCheckboxes label="Found as" values={all.flatMap(row => [...new Set(row.methods.map(label))])} selected={matchedBy} onChange={values => apply({ matched: values })} />
       {(types.length + tiers.length + matchedBy.length > 0) && <Button variant="ghost" onClick={() => apply({ type: null, tier: null, matched: null })}>Clear result filters</Button>}
     </div>
     <MasterDetail label="Knowledge results and detail" selected={!!selected || !!selectedAnswer} onBack={() => apply({ selected: null, answer: null })} master={<Panel title={`${rows.length} results${query ? ` for “${query}”` : ''}`}>
-      {!rows.length ? <Muted>{loading ? 'Reading knowledge…' : errors.length ? 'The available methods returned no results. Failed methods have not been counted as empty.' : 'No results returned in this read.'}</Muted> : <Table className={styles.resultsTable}><thead><tr><Th>Knowledge</Th><Th>Type</Th><Th>Matched by</Th></tr></thead><tbody>{rows.map(row => <tr key={row.key} data-claim-id={row.claim?.claim_id} className={row.entityId === selected || row.key === selectedAnswer ? styles.selected : undefined}><Td><Link className={styles.entityLink} to={destination(row)} preventScrollReset aria-current={row.entityId === selected || row.key === selectedAnswer ? 'true' : undefined}>{row.text}</Link>{row.claim && <><Muted>{row.claim.witnesses} wit · confidence {row.claim.confidence}</Muted><details><summary>Ordered assertion members</summary><ol>{row.claim.parts.map((part, ordinal) => <li key={ordinal}><EntityLink idHex={part.id} label={part.label || part.id} />{part.run > 1 ? ` × ${part.run}` : ''}</li>)}</ol><p>Recorded trajectory</p><pre className={styles.claimTrajectory}><code>{row.claim.trajectory}</code></pre></details></>}</Td><Td data-label="Type">{row.kind}</Td><Td data-label="Matched by">{row.methods.map(label).join(', ')}</Td></tr>)}</tbody></Table>}
+      {!rows.length ? <Muted>{loading ? 'Reading knowledge…' : query ? `Nothing recorded matches “${query}”. Try a single word or a name.` : 'Nothing to show yet.'}</Muted> : <Table className={styles.resultsTable}><thead><tr><Th>Knowledge</Th><Th>Type</Th><Th>Found as</Th></tr></thead><tbody>{rows.map(row => <tr key={row.key} data-claim-id={row.claim?.claim_id} className={row.entityId === selected || row.key === selectedAnswer ? styles.selected : undefined}><Td><Link className={styles.entityLink} to={destination(row)} preventScrollReset aria-current={row.entityId === selected || row.key === selectedAnswer ? 'true' : undefined}>{row.text}</Link>{row.claim && <><Muted>{row.claim.witnesses} {row.claim.witnesses === 1 ? 'witness' : 'witnesses'} · confidence {round(row.claim.confidence)}</Muted><details><summary>Ordered assertion members</summary><ol>{row.claim.parts.map((part, ordinal) => <li key={ordinal}><EntityLink idHex={part.id} label={part.label || part.id} />{part.run > 1 ? ` × ${part.run}` : ''}</li>)}</ol><p>Recorded trajectory</p><pre className={styles.claimTrajectory}><code>{row.claim.trajectory}</code></pre></details></>}</Td><Td data-label="Type">{row.kind}</Td><Td data-label="Found as">{[...new Set(row.methods.map(label))].join(', ')}</Td></tr>)}</tbody></Table>}
       {browse && <div className={styles.pager}><Button variant="ghost" disabled={!offset} onClick={() => apply({ offset: String(Math.max(0, offset - PAGE)) })}>‹ Previous entities</Button><Muted>{browse.receipt.matched_entities} entities reached</Muted><Button variant="ghost" disabled={offset + browse.hits.length >= browse.receipt.matched_entities} onClick={() => apply({ offset: String(offset + PAGE) })}>Next entities ›</Button>{browse.receipt.candidate_truncated && capacity < MAX_CAPACITY && <Button onClick={() => apply({ capacity: String(Math.min(MAX_CAPACITY, capacity * 2)), offset: null })}>Expand entity frontier</Button>}</div>}
     </Panel>}>
       {(selected || selectedAnswer) && !rows.some(row => row.entityId === selected || row.key === selectedAnswer) && all.length > 0 && <p role="status">{all.some(row => row.entityId === selected || row.key === selectedAnswer) ? 'The selected result is outside the current filters.' : 'The selected subject is outside this returned collection. The originating search remains available.'}</p>}
-      {answer ? <><h2>{answer.text}</h2><dl className={styles.receipt}>{answer.observations.map((observation, index) => <div key={index}><dt>{label(observation.method)}</dt><dd>{observation.standing == null ? 'Standing not returned' : `Conservative standing ${observation.standing}`} · {observation.witnesses == null ? 'Witness count not returned' : `${observation.witnesses} witnesses`}</dd></div>)}</dl>{answer.topicId && <Button onClick={() => apply({ selected: answer.topicId!, answer: null })}>Inspect related subject</Button>}</> : selected && /^[0-9a-f]{32}$/i.test(selected) ? <Suspense fallback={<LoadingText>Loading knowledge…</LoadingText>}><EntityDetail key={selected} selectedId={selected} selectedLabel={all.find(row => row.entityId === selected)?.text} selectedType={all.find(row => row.entityId === selected)?.kind} /><details><summary>Calculate a trajectory from this content</summary><TrajectoryCalculation key={selected} topic={selected} /></details></Suspense> : selectedAnswer ? <p role="status">{loading ? 'Reading the selected answer…' : 'The selected answer was not returned in this read. Its reference has been retained.'}</p> : <><h2>Select a result</h2><p>Read its content and relations here. Your search and filters remain in place.</p></>}
+      {answer ? <><h2>{answer.text}</h2><dl className={styles.receipt}>{answer.observations.map((observation, index) => <div key={index}><dt>{label(observation.method)}</dt><dd>{observation.standing == null ? 'Standing not returned' : `Conservative standing ${round(observation.standing, 1)}`} · {observation.witnesses == null ? 'Witness count not returned' : `${observation.witnesses} witnesses`}</dd></div>)}</dl>{answer.topicId && <Button onClick={() => apply({ selected: answer.topicId!, answer: null })}>Inspect related subject</Button>}</> : selected && /^[0-9a-f]{32}$/i.test(selected) ? <Suspense fallback={<LoadingText>Loading knowledge…</LoadingText>}><EntityDetail key={selected} selectedId={selected} selectedLabel={all.find(row => row.entityId === selected)?.text} selectedType={all.find(row => row.entityId === selected)?.kind} /><details><summary>Calculate a trajectory from this content</summary><TrajectoryCalculation key={selected} topic={selected} /></details></Suspense> : selectedAnswer ? <p role="status">{loading ? 'Reading the selected answer…' : 'The selected answer was not returned in this read. Its reference has been retained.'}</p> : <><h2>Select a result</h2><p>Read its content and relations here. Your search and filters remain in place.</p></>}
     </MasterDetail>
     {query && <details className={styles.receiptDetails}><summary>Search read scope</summary><p>Methods combine by union. Result checkboxes use OR within a field and AND between fields; they filter the returned collection. Entity paging and frontier limits apply to the entity method. Other methods return their own bounded reads. Equal reply text is combined without merging method measurements.</p>{reads.map(read => <p key={read.method}>{label(read.method)}: {read.status}{read.result ? ` · ${read.result.rows.length} rows` : ''}</p>)}{browse && <pre>{JSON.stringify(browse.receipt, null, 2)}</pre>}</details>}
   </Stack>;

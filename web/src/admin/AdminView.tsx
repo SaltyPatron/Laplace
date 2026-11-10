@@ -32,7 +32,7 @@ const tools: { id: Section; label: string; description: string; permission: stri
 export function AdminView() {
   const navigate = useNavigate();
   const [section, setSection] = useSectionParam('section', [...SECTIONS], 'overview');
-  const { authReady, authUser, authProviders, devPrincipal } = useAppStore();
+  const { authReady, authUser, authProviders, devPrincipal, servicePrincipal } = useAppStore();
   const access = useAccess();
   const [revision, setRevision] = useState(0);
   const permissions = access.error ? [] : access.data?.platform.permissions ?? [];
@@ -40,7 +40,7 @@ export function AdminView() {
   const selected = tools.find((tool) => tool.id === section);
   const allowed = section === 'overview' || !!selected && permissions.includes(selected.permission);
   if (!authReady) return <div className={styles.page}><LoadingText>Loading administration…</LoadingText></div>;
-  if (!authUser && !devPrincipal) return <div className={styles.page}><Panel title="Administration">
+  if (!authUser && !devPrincipal && !servicePrincipal) return <div className={styles.page}><Panel title="Administration">
     <p>Sign in to manage your workspace or use the platform tools assigned to your account.</p>
     <AccountControls user={null} providers={authProviders} returnUrl="/operator" />
   </Panel></div>;

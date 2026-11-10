@@ -134,6 +134,33 @@ internal static class BillingIdentityEndpoints
         .Produces<ApiKeyIssueResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
 
+        // Operator key management for any tenant: list (never secrets) and revoke by prefix,
+        // so an interrupted verification run never leaves a live key nobody can revoke.
+        app.MapGet("/v1/billing/operator/keys", async (
+            string? tenant, HttpRequest request, IApiKeyService apiKeys, IOptions<LaplaceAuthOptions> auth, CancellationToken ct) =>
+        {
+            if (!OperatorAuth.IsAuthorized(request, auth.Value)) return OperatorForbidden();
+            if (string.IsNullOrWhiteSpace(tenant))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'tenant' is required.");
+            var keys = await apiKeys.ListAsync(tenant.Trim(), ct);
+            return Results.Json(new ApiKeyListResponse(tenant.Trim(), keys.Select(View).ToArray()));
+        })
+        .WithTags("billing").Produces<ApiKeyListResponse>();
+
+        app.MapPost("/v1/billing/operator/keys/revoke", async (
+            HttpRequest request, IApiKeyService apiKeys, IOptions<LaplaceAuthOptions> auth, CancellationToken ct) =>
+        {
+            if (!OperatorAuth.IsAuthorized(request, auth.Value)) return OperatorForbidden();
+            var payload = await EndpointJson.ReadJsonAsync<ApiKeyRevokeRequest>(request, ct);
+            if (payload is null || string.IsNullOrWhiteSpace(payload.Tenant) || string.IsNullOrWhiteSpace(payload.KeyPrefix))
+                return EndpointJson.BadRequest("invalid_request_error", "Fields 'tenant' and 'key_prefix' are required.");
+            var revoked = await apiKeys.RevokeByPrefixAsync(payload.Tenant.Trim(), payload.KeyPrefix.Trim(), ct);
+            return revoked
+                ? Results.Json(new { revoked = true, tenant = payload.Tenant.Trim(), key_prefix = payload.KeyPrefix.Trim() })
+                : EndpointJson.BadRequest("key_not_found", "No active key with that prefix for this tenant.");
+        })
+        .WithTags("billing").Accepts<ApiKeyRevokeRequest>("application/json");
+
         app.MapPost("/v1/billing/operator/bootstrap", async (
             HttpRequest request,
             IBillingBootstrap bootstrap,

@@ -57,7 +57,7 @@ export function Repair() {
   }
 
   function startVacuum() {
-    if (vacFull && !confirmVacuumFull) { setConfirmVacuumFull(true); return; }
+    if (!confirmVacuumFull) { setConfirmVacuumFull(true); return; }
     void run(
       'VACUUM',
       () => vacuum(
@@ -87,8 +87,8 @@ export function Repair() {
         {health == null ? <LoadingText>Reading ops.index_health()…</LoadingText>
           : health.length === 0 ? (
             <Muted>
-              No invalid index. An empty set here IS the healthy answer — row counts read green
-              through the 2026-08-13 shell incident, this does not.
+              All indexes are valid. Row counts alone can look healthy while an index is unusable;
+              this check reads index validity directly.
             </Muted>
           ) : (
             <>
@@ -153,10 +153,9 @@ export function Repair() {
 
       <Panel title="Maintenance">
         <Muted>
-          ANALYZE refreshes planner statistics — the fix for the class of slowdown where the right
-          index exists and the planner will not pick it. VACUUM reclaims dead tuples; it is not an
-          installed operation because Postgres refuses it inside a transaction block, so the
-          endpoint issues it on its own connection.
+          Run ANALYZE when queries slow down even though the right index exists. Run VACUUM to reclaim
+          space after large deletes or reloads; it runs on its own connection and can take hours on the
+          whole database.
         </Muted>
 
         <Button
@@ -184,7 +183,7 @@ export function Repair() {
             <Toggle checked={vacFull} onCheckedChange={setVacFull} aria-label="Vacuum full" />
             FULL
           </label>
-          <Button loading={busy === 'VACUUM'} onClick={startVacuum}>Run VACUUM</Button>
+          <Button variant="ghost" loading={busy === 'VACUUM'} onClick={startVacuum}>Run VACUUM</Button>
         </div>
         {vacFull && (
           <Muted className={styles.writeWarn}>
@@ -225,7 +224,7 @@ export function Repair() {
       <Modal
         open={confirmVacuumFull}
         onClose={() => setConfirmVacuumFull(false)}
-        title="VACUUM FULL rewrites the table"
+        title={vacFull ? 'VACUUM FULL rewrites the table' : `Run VACUUM on ${vacTable.trim() || 'the whole database'}?`}
         actions={
           <>
             <Button variant="ghost" onClick={() => setConfirmVacuumFull(false)}>Cancel</Button>
@@ -233,12 +232,14 @@ export function Repair() {
           </>
         }
       >
-        <p>
-          ACCESS EXCLUSIVE for the whole rewrite: every read and write to{' '}
-          <code>{vacTable.trim() || 'every substrate table'}</code> blocks until it finishes, and
-          it needs free disk equal to the table's current size.
-        </p>
-        <p>Plain VACUUM reclaims space without the lock and is almost always what you want.</p>
+        {vacFull ? <>
+          <p>
+            ACCESS EXCLUSIVE for the whole rewrite: every read and write to{' '}
+            <code>{vacTable.trim() || 'every substrate table'}</code> blocks until it finishes, and
+            it needs free disk equal to the table's current size.
+          </p>
+          <p>Plain VACUUM reclaims space without the lock and is almost always what you want.</p>
+        </> : <p>VACUUM does not block reads or writes, but on the whole database it can run for hours and adds I/O load to the host.</p>}
       </Modal>
     </div>
   );
