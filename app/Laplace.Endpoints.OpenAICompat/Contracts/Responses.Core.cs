@@ -82,7 +82,10 @@ public sealed record CapabilityEndpoints(
     [property: JsonPropertyName("feedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? Feedback = null,
     [property: JsonPropertyName("recipe_compile"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? RecipeCompile = null,
     [property: JsonPropertyName("synthesis_export"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? SynthesisExport = null,
-    [property: JsonPropertyName("op"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? Op = null);
+    [property: JsonPropertyName("op"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? Op = null,
+    /// <summary>Entity facet reads (/v1/entities/{id}/{facet}, web/docs/entity-contract.md). Omitted until served;
+    /// clients use it to choose the contract endpoints instead of probing them.</summary>
+    [property: JsonPropertyName("entity_facets"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapabilityStatus? EntityFacets = null);
 
 public sealed record CapabilityStatus(
     [property: JsonPropertyName("status")] string Status,
