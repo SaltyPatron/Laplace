@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { browseSubstrate } from '../explore/browse/api';
 import type { BrowseHit } from '../explore/browse/types';
@@ -25,6 +25,7 @@ export function CommandPalette() {
   const { open, seed, hide } = usePalette();
   const { tenant, quoteId } = useAppStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const inspector = useInspector();
   const [text, setText] = useState('');
   const [hits, setHits] = useState<BrowseHit[]>([]);
@@ -58,7 +59,7 @@ export function CommandPalette() {
     ]).filter((d) => !query || d.label.toLowerCase().includes(query));
     return [
       ...hits.map((hit) => ({ kind: 'entity' as const, key: `e:${hit.id_hex}`, hit })),
-      ...(query ? [{ kind: 'search' as const, key: 'search', text: text.trim() }] : []),
+      ...(query ? [{ kind: 'search' as const, key: 'search', text }] : []),
       ...destinations.slice(0, query ? 4 : 12).map((d) => ({ kind: 'go' as const, key: `go:${d.path}`, ...d })),
     ];
   }, [hits, text]);
@@ -71,7 +72,15 @@ export function CommandPalette() {
     if (!option) return;
     hide();
     if (option.kind === 'entity') inspector.open(option.hit.id_hex, option.hit.label);
-    else if (option.kind === 'search') navigate(`/explore?q=${encodeURIComponent(option.text)}`);
+    else if (option.kind === 'search') {
+      // Searching from a knowledge page keeps its criteria (epoch, world, bands…) and clears the previous selection.
+      // The observation is kept exactly as typed; it is the content that gets decomposed.
+      const onKnowledge = ['/explore', '/query', '/topic'].some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`));
+      const next = onKnowledge ? new URLSearchParams(location.search) : new URLSearchParams();
+      for (const key of ['selected', 'answer', 'offset', 'games_offset', 'detail', 'inspect', 'presentation', 'peek']) next.delete(key);
+      next.set('q', option.text);
+      navigate(`/explore?${next}`);
+    }
     else navigate(option.path);
   }
 
@@ -100,7 +109,7 @@ export function CommandPalette() {
                 <span className={styles.primary}>{option.hit.label}</span>
                 <span className={styles.meta}>{option.hit.type || 'content'} · T{option.hit.tier}{option.hit.witnesses ? ` · ${option.hit.witnesses} witnesses` : ''}</span>
               </> : option.kind === 'search' ? <>
-                <span className={styles.primary}>Search for “{option.text}”</span>
+                <span className={styles.primary}>Search for “{option.text.trim()}”</span>
                 <span className={styles.meta}>Open full results</span>
               </> : <>
                 <span className={styles.primary}>{option.label}</span>

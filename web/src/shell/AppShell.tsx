@@ -47,12 +47,12 @@ export function AppShell({ account, banners, showAdmin, familiar, children }: Ap
     <div className={cn(styles.shell, inspecting && styles.inspecting)}>
       <a className={styles.skipLink} href="#main-content">Skip to content</a>
       <nav className={cn(styles.rail, menuOpen && styles.railOpen)} aria-label="Primary navigation">
-        <RouterLink to="/" className={styles.brand}><span className={styles.mark} aria-hidden="true">◇</span><span>Laplace</span></RouterLink>
+        <RouterLink to="/" className={styles.brand} aria-label="Laplace home"><span className={styles.mark} aria-hidden="true">◇</span><span>Laplace</span></RouterLink>
         <ul className={styles.navList}>
           {items.map((item) => {
             const active = item.id === currentItem?.id;
             return <li key={item.id}>
-              <RouterLink to={item.path} className={cn(styles.navItem, active && styles.navActive)} aria-current={active && !currentChild ? 'page' : undefined} title={item.description}>
+              <RouterLink to={item.path} className={cn(styles.navItem, active && styles.navActive)} aria-current={active && !currentChild ? 'page' : undefined} title={item.description} aria-label={item.label}>
                 <Icon name={item.icon} /><span className={styles.navLabel}>{item.label}</span>
               </RouterLink>
               {active && item.children && <ul className={styles.subList}>
@@ -64,9 +64,9 @@ export function AppShell({ account, banners, showAdmin, familiar, children }: Ap
           })}
         </ul>
         <div className={styles.railFoot}>
-          <RouterLink to="/settings" className={cn(styles.navItem, pathname.startsWith('/settings') && styles.navActive)}><Icon name="settings" /><span className={styles.navLabel}>Settings &amp; billing</span></RouterLink>
+          <RouterLink to="/settings" className={cn(styles.navItem, pathname.startsWith('/settings') && styles.navActive)} aria-label="Settings & billing"><Icon name="settings" /><span className={styles.navLabel}>Settings &amp; billing</span></RouterLink>
           <label className={styles.familiarToggle}>
-            <input type="checkbox" checked={familiarOn} onChange={(event) => {
+            <input type="checkbox" aria-label="Show familiar" checked={familiarOn} onChange={(event) => {
               setFamiliarOn(event.target.checked);
               try { localStorage.setItem(FAMILIAR_KEY, event.target.checked ? 'on' : 'off'); } catch { /* storage unavailable */ }
             }} />

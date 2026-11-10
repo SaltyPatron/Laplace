@@ -36,23 +36,20 @@ try {
   page.on('pageerror', error => report.errors.push(error.message.replaceAll(key, '[credential]')));
   await page.goto(base + '/');
   await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
-  const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
-  for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
-    await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+  const primary = page.getByRole('navigation', { name: 'Primary navigation' });
+  for (const label of ['Look up', 'Compare', 'Explore', 'Ask', 'My data', 'Chess', 'Search', 'Sources', 'Identifiers']) {
+    await expect(primary.getByRole('link', { name: label, exact: true })).toBeVisible();
   }
-  mark('Knowledge is the opening workspace; provenance is not primary navigation');
+  mark('Look up is the opening workspace; its pages sit under it in the rail');
   const catalogueRead = page.waitForResponse(response => new URL(response.url()).pathname === '/v1/explore/catalog');
-  await sections.getByRole('link', { name: 'Sources', exact: true }).click();
+  await primary.getByRole('link', { name: 'Sources', exact: true }).click();
   const response = await catalogueRead;
   if (response.status() !== 200) throw new Error('Installed source catalogue returned HTTP ' + response.status());
   const catalogue = await response.json();
   report.sources = catalogue.sources.map(source => ({ key: source.key, stage: source.stage, layer: source.layer, id_hex: source.id_hex }));
   if (!catalogue.sources.length) throw new Error('Installed source catalogue is empty.');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(catalogue.sources.length);
-  const primary = page.getByRole('navigation', { name: 'Primary navigation' });
-  await expect(primary.getByRole('link', { name: 'Knowledge', exact: true })).toBeVisible();
-  await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
+  await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveAttribute('aria-current', 'page');
   const stage = page.getByRole('group', { name: 'Stage', exact: true }).getByRole('checkbox').first();
   await stage.click(); await expect(stage).toBeChecked();
   const params = new URL(page.url()).searchParams;
@@ -68,7 +65,7 @@ try {
   if (page.url() !== address) throw new Error('Source reload changed its address.');
   await page.screenshot({ path: resolve(output, 'warehouse.png'), fullPage: true });
   mark('Installed source catalogue, direct navigation, checkbox filter and source master/detail survive reload');
-  await primary.getByRole('link', { name: 'Knowledge', exact: true }).click();
+  await primary.getByRole('link', { name: 'Look up', exact: true }).click();
   await page.getByRole('textbox', { name: 'Search knowledge', exact: true }).fill('dog');
   const searchRead = page.waitForResponse(response => new URL(response.url()).pathname === '/v1/explore/browse');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
@@ -101,7 +98,7 @@ try {
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)) throw new Error('Horizontal page overflow at ' + width);
-    await expect(primary.getByRole('link', { name: 'Knowledge', exact: true })).toBeVisible();
+    await expect(primary.getByRole('link', { name: 'Look up', exact: true })).toHaveCount(1);
   await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
     const scan = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
     report.accessibility.push({ width, violations: scan.violations.map(item => ({ id: item.id, nodes: item.nodes.map(node => node.target) })) });

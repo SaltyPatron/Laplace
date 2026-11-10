@@ -94,14 +94,13 @@ try {
   const base = server.resolvedUrls.local[0];
   await page.goto(base + 'explore/sources');
   const primary = page.getByRole('navigation', { name: 'Primary navigation' });
-  await expect(primary.getByRole('link', { name: 'Knowledge', exact: true })).toBeVisible();
-  await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
-  await expect(primary.getByRole('link', { name: 'Explore', exact: true })).toHaveCount(0);
-  const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
-  for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
-    await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+  // One rail: destinations, with the current destination's pages under it (no stacked tab bars).
+  for (const label of ['Look up', 'Compare', 'Explore', 'Ask', 'My data', 'Chess']) {
+    await expect(primary.getByRole('link', { name: label, exact: true })).toBeVisible();
   }
-  await expect(sections.getByRole('link', { name: 'Sources', exact: true })).toHaveAttribute('aria-current', 'page');
+  for (const label of ['Search', 'Sources', 'Identifiers']) await expect(primary.getByRole('link', { name: label, exact: true })).toBeVisible();
+  await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Knowledge sections', exact: true })).toHaveCount(0);
   await expect(page.getByRole('navigation', { name: 'Views and operations' })).toHaveCount(0);
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(4);
   await page.getByRole('group', { name: 'Stage', exact: true }).getByRole('checkbox', { name: 'language', exact: false }).click();
@@ -141,11 +140,13 @@ try {
   await page.screenshot({ path: resolve(output, 'mono-warehouse-fixture.png'), fullPage: true });
   mark('Direct source collection; checkbox OR/AND; keyboard selection; source identity with duplicate names; Back and reload');
 
-  await primary.getByRole('link', { name: 'Knowledge', exact: true }).click();
+  await primary.getByRole('link', { name: 'Look up', exact: true }).click();
   await expect(page.locator('[data-collection-master]')).toContainText('Whale IS A mammal');
   await page.getByRole('textbox', { name: 'Search knowledge', exact: true }).fill('fixture');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
+  // Read failures are summarized; the per-read detail sits behind a disclosure.
+  await page.getByText('Some results could not be read', { exact: false }).click();
   await expect(page.getByText('Translation fixture unavailable', { exact: false }).first()).toBeVisible();
   assert.deepEqual([...new Set(queryReads.map(read => read.shape))].sort(), ['band_facts', 'define', 'describe', 'translate']);
   await page.locator('[data-collection-master]').getByRole('link', { name: 'Fixture combined answer.', exact: true }).click();
@@ -179,8 +180,7 @@ try {
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `overflow at ${width}`);
-    await expect(primary.getByRole('link', { name: 'Knowledge', exact: true })).toBeVisible();
-  await expect(primary.getByRole('link', { name: 'Sources', exact: true })).toHaveCount(0);
+    await expect(primary.getByRole('link', { name: 'Look up', exact: true })).toHaveCount(1);
     const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
     accessibility.push({ width, violations: result.violations.map(item => ({ id: item.id, nodes: item.nodes.map(node => node.target) })) });
   }
@@ -239,8 +239,6 @@ try {
   await expect(inspectionViews.getByRole('link', { name: 'overview', exact: true })).not.toHaveAttribute('aria-current', 'page');
   await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
   await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
-  await expect(sections.getByRole('link', { name: 'Storage Proof', exact: true })).toHaveAttribute('href', '/proof?q=fixture');
-  await expect(sections.getByRole('link', { name: 'Mesh', exact: true })).toHaveAttribute('href', `/explore/mesh/${ids[1]}`);
   await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Full entity', exact: true })).toBeVisible();
   await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Prove storage', exact: true })).toBeVisible();
   await page.getByText('Structure, standing and evidence', { exact: true }).click();
@@ -295,8 +293,10 @@ try {
   await expect(page.getByRole('textbox', { name: 'first entity', exact: true })).toHaveValue(ids[2]);
   mark('Relation search opens the actual shared presentation; unlabelled subjects remain navigable; parent/member pivots, comparison and reload preserve the originating collection and scope');
   const headerObservation = '  header observation  ';
-  await page.getByRole('textbox', { name: 'Search the substrate', exact: true }).fill(headerObservation);
-  await page.getByRole('textbox', { name: 'Search the substrate', exact: true }).press('Enter');
+  // The header search is the command palette (Ctrl+K); "Search for …" opens full results.
+  await page.getByRole('button', { name: 'Search (Ctrl+K)', exact: true }).click();
+  await page.getByRole('combobox').fill(headerObservation);
+  await page.getByRole('option', { name: /Search for “header observation”/ }).click();
   assert.equal(new URL(page.url()).searchParams.get('q'), headerObservation);
   assert.equal(new URL(page.url()).searchParams.get('epoch'), '2026');
   assert.equal(new URL(page.url()).searchParams.get('world'), 'language');
