@@ -13,7 +13,7 @@ namespace Laplace.Modality.Chess.Tests;
 public sealed class ChessEngineIdentityTests
 {
     // A game of no moves and no tags holds its start position (a one-child composition is its child).
-    private const string EngineStart = "98522a8a1f8931ba76d1992a94e7dbcd";
+    private const string EngineStart = "6546b7964667fe459eead69e9ef46c87";
 
     private static string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes()).ToLowerInvariant();
 
@@ -41,10 +41,10 @@ public sealed class ChessEngineIdentityTests
 
     private static string LineHex(string movetext) => Hex(Line(movetext));
 
-    // What the Engine prints for a tagless, unfinished game: its record is its line, and it attests the one claim
-    // [record, line], so the record it holds is [record, [record, line]].
+    // What the Engine prints for a tagless, unfinished game: its record is its line. A record is never the subject
+    // of a claim and an unfinished game claims no move, so the record it holds is the line itself.
     private static string EngineHeldHex(Hash128 line)
-        => Hex(ChessEngineIdentity.Compose(new[] { line, ChessEngineIdentity.Compose(new[] { line, line }) }));
+        => Hex(line);
 
     [Fact]
     public void StartPosition_IsTheEnginesId()
@@ -63,14 +63,14 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Theory]
-    [InlineData("e4", "bab7041d3051e91c3f361ec0124aff8e")]
-    [InlineData("e4 e5 Nf3 Nc6", "9a2ace38a08cddfc0ffcb944e6efcf44")]
-    [InlineData("Nf3 Nc6 e4 e5", "48858d05244b68465d2c0f1e7bac323f")]
+    [InlineData("e4", "b17034a030605a7b729131993c5ca42d")]
+    [InlineData("e4 e5 Nf3 Nc6", "2559928d51a3fa236734fbb1a71ac18b")]
+    [InlineData("Nf3 Nc6 e4 e5", "eda2a5d7bf07835788bac9def6f122f5")]
     // e5 beside d5: the en passant square d6 is capturable, so it is in the position.
-    [InlineData("e4 a6 e5 d5", "dead9d5c40c1fa81fed0b5f6f5dd254c")]
+    [InlineData("e4 a6 e5 d5", "0597f55a22171c49d3c144ed95e019c3")]
     // White has castled, Black has not: the masks are 0 and 137.
-    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6", "df5e2f9cf8fb64057b0d3328e1a90d84")]
-    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6 Re1 O-O", "da3caadfc3f2c4dc833aa46b44419add")]
+    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6", "bd4dc4877779bb570ebebe65c5b474dc")]
+    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6 Re1 O-O", "78b2c74d8df5a0d64473fe5f79f6cc5f")]
     public void Lines_AreTheEnginesRecords(string movetext, string engineLineId)
         => Assert.Equal(engineLineId, EngineHeldHex(Line(movetext)));
 
