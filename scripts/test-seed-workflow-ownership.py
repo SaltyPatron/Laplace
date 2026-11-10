@@ -204,8 +204,9 @@ class SeedHostOwnership(unittest.TestCase):
 class FoundationCompletion(unittest.TestCase):
     """Execute the real ladder shell with explicit ingest/psql test boundaries."""
 
-    LADDER = ("unicode", "iso639", "operational", "cili", "wordnet", "verbnet", "propbank",
-              "framenet", "mapnet", "wordframenet", "semlink")
+    # The ladder ensure-foundation.sh runs: the manifest's, never a copy that can drift from it.
+    LADDER = tuple(json.loads((ROOT / "scripts" / "win" / "witness-manifest.json")
+                              .read_text(encoding="utf-8"))["foundation"]["sources"])
 
     @staticmethod
     def completion(name):
@@ -217,8 +218,9 @@ class FoundationCompletion(unittest.TestCase):
         predicate, label = line.split("\t")
         native = re.search(r"ops\.native_source_completed\('([^']+)'\)", predicate).group(1)
         witness = re.search(r"witness_id\('([^']+)', '([^']+)'\)", predicate)
-        key = f"{witness.group(1)}@{witness.group(2)}" if witness else \
-            re.search(r"source_id\('([^']+)'\)", predicate).group(1)
+        legacy = re.search(r"source_id\('([^']+)'\)", predicate)
+        # A Native-only source has no legacy completion key: its run journal is its only record.
+        key = f"{witness.group(1)}@{witness.group(2)}" if witness else legacy.group(1) if legacy else native
         return native, key, label
 
     SOURCES = {}
@@ -270,6 +272,9 @@ elif "ops.native_source_completed" in query and "ops.layer_completed" in query:
         re.search(r"laplace\.source_id\('([^']+)'\)", query).group(1)
     present = json.loads(Path(os.environ["FOUNDATION_TEST_STATE"]).read_text())
     print("t" if (native in present or key in present) else "f")
+elif "ops.native_source_completed" in query:
+    native = re.search(r"ops\.native_source_completed\('([^']+)'\)", query).group(1)
+    print("t" if native in json.loads(Path(os.environ["FOUNDATION_TEST_STATE"]).read_text()) else "f")
 elif "laplace.ingest_run_journal" in query:
     print("test journal: ingest returned without fabricating a completion marker")
 else:
