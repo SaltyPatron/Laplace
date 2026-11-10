@@ -18,7 +18,7 @@ BEGIN
     -- Other public extension tables retain their existing read-only grants.
     WITH RECURSIVE substrate(oid) AS (
         SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname IN ('entity','physicality','witness','consensus')
+        WHERE n.nspname='public' AND c.relname IN ('entity','physicality','attestation','consensus')
           AND c.relkind IN ('r','p')
         UNION
         SELECT i.inhrelid FROM pg_inherits i JOIN substrate s ON s.oid=i.inhparent
