@@ -152,7 +152,7 @@ public sealed class NativeIngestionParityTests
           SELECT 'e|'||id::text||'|'||tier||'|'||encode(ST_AsEWKB(coord),'hex')||'|'||hilbert||'|'||mask::text AS row FROM public.entity
           UNION ALL SELECT 'p|'||entity::text||'|'||tier||'|'||encode(ST_AsEWKB(path),'hex')||'|'||hilbert||'|'||mask::text FROM public.physicality
           UNION ALL SELECT 'c|'||claim::text||'|'||encode(float8send(rating),'hex')||'|'||encode(float8send(deviation),'hex')||'|'||encode(float8send(volatility),'hex')||'|'||matches FROM public.consensus
-          UNION ALL SELECT 'w|'||id::text||'|'||coalesce(lineage::text,'-')||'|'||encode(float8send(trust),'hex') FROM public.witness
+          UNION ALL SELECT 'a|'||claim::text||'|'||witness::text||'|'||coalesce(lineage::text,'-')||'|'||games||'|'||tokens||'|'||encode(float8send(score),'hex')||'|'||coalesce("position"::text,'-')||'|'||encode(float8send(trust),'hex') FROM public.attestation
         ) records ORDER BY row COLLATE "C"
         """;
 }

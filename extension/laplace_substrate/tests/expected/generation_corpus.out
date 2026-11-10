@@ -355,7 +355,8 @@ BEGIN
         INSERT INTO public.entity(id,tier,coord,hilbert) VALUES(root,altitude,point,h);
         INSERT INTO public.physicality(entity,tier,hilbert,path)
         VALUES(root,altitude,h,public.laplace_path(parts));
-        INSERT INTO public.witness(id,trust) VALUES(root,0.85);
+        INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+        VALUES(md5('corpus-witness-'||root::text)::public.blake3,root,NULL,1,1,1.0,NULL,0.85); -- a known witness: a trunk with attestations
     END;
     -- Native export now has recorded evidence: of→france is P=1.0.
     IF NOT EXISTS (

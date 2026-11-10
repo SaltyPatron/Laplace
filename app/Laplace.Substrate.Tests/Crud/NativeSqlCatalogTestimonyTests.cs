@@ -34,7 +34,12 @@ public sealed partial class NativeSqlCatalogPreparationTests
         var scored = Compose([Text("scored" + suffix), dependence, saying]);
         var witness = Compose([positive, positive, draw, negative, scored]);
         await new NpgsqlSubstrateWriter(native).ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
-        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,0.85)", connection, transaction))
+        // A witness is a trunk with attestations: one fixture claim makes it known, so the
+        // claims under test are still read from containment.
+        await using (var register = new NpgsqlCommand("""
+            INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+            VALUES(md5('testimony-witness-'||$1::text)::public.blake3,$1,NULL,1,1,1.0,NULL,0.85)
+            """, connection, transaction))
         {
             register.Parameters.AddWithValue(witness.Id);
             await register.ExecuteNonQueryAsync();
@@ -166,7 +171,12 @@ public sealed partial class NativeSqlCatalogPreparationTests
         for (int index = 0; index < claims.Length; index++) claims[index].Said = 1;
         var witness = Compose(claims);
         await new NpgsqlSubstrateWriter(native).ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
-        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
+        // A witness is a trunk with attestations: one fixture claim makes it known, so the
+        // classification claims are still read from containment.
+        await using (var register = new NpgsqlCommand("""
+            INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+            VALUES(md5('classification-witness-'||$1::text)::public.blake3,$1,NULL,1,1,1.0,NULL,1.0)
+            """, connection, transaction))
         {
             register.Parameters.AddWithValue(witness.Id);
             await register.ExecuteNonQueryAsync();

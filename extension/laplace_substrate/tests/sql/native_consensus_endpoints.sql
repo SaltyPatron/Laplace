@@ -37,7 +37,8 @@ BEGIN
  VALUES(id,altitude,point,public.laplace_hilbert4(point),mask);
  INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
  VALUES(id,altitude,public.laplace_hilbert4(point),path,mask);
- INSERT INTO public.witness(id,trust) VALUES(id,0.75);
+ INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+ VALUES(md5('endpoint-witness-'||id::text)::public.blake3,id,NULL,1,1,1.0,NULL,0.75); -- a known witness: a trunk with attestations
  RETURN id;
 END $$;
 DO $$

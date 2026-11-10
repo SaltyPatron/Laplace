@@ -85,12 +85,8 @@ public sealed partial class NativeSqlCatalogPreparationTests
             }
             Assert.Equal(3, count);
         }
-        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
-        {
-            register.Parameters.AddWithValue(witness.Id);
-            await register.ExecuteNonQueryAsync();
-        }
-        foreach (var claim in new[] { xc, yc, link }.Concat(declaredClaims))
+        var attested = new[] { xc, yc, link }.Concat(declaredClaims).ToArray();
+        foreach (var claim in attested)
         {
             await using var standing = new NpgsqlCommand("""
                 INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
@@ -108,22 +104,34 @@ public sealed partial class NativeSqlCatalogPreparationTests
             games.Parameters.AddWithValue(xc.Id);
             Assert.Equal(3L, await games.ExecuteScalarAsync());
         }
-        // Cardinality belongs to claim/witness pairs. An old, unmeasured
-        // source remains unknown; three games on xc do not make three assertions.
+        // Cardinality belongs to claim/witness pairs. Before the source publishes
+        // its attestations it has none; three games on xc do not make three assertions.
         await using (var totals = new NpgsqlCommand("SELECT ops.attestation_count()", connection, transaction))
-            Assert.Equal(DBNull.Value, await totals.ExecuteScalarAsync());
+            Assert.Equal(0L, await totals.ExecuteScalarAsync());
         await using (var sourceCount = new NpgsqlCommand("SELECT ops.evidence_count(p_source=>$1)", connection, transaction))
         {
             sourceCount.Parameters.AddWithValue(witness.Id.ToBytes());
-            Assert.Equal(DBNull.Value, await sourceCount.ExecuteScalarAsync());
+            Assert.Equal(0L, await sourceCount.ExecuteScalarAsync());
         }
-        await using (var measure = new NpgsqlCommand("UPDATE public.witness SET attestations=6 WHERE id=$1", connection, transaction))
+        foreach (var claim in attested)
         {
-            measure.Parameters.AddWithValue(witness.Id);
-            Assert.Equal(1, await measure.ExecuteNonQueryAsync());
+            long games = claim.Id == xc.Id ? 3L : 1L;
+            await using var publish = new NpgsqlCommand("""
+                INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+                VALUES($1,$2,NULL,$3,$3,1.0,NULL,1.0)
+                """, connection, transaction);
+            publish.Parameters.AddWithValue(claim.Id);
+            publish.Parameters.AddWithValue(witness.Id);
+            publish.Parameters.AddWithValue(games);
+            Assert.Equal(1, await publish.ExecuteNonQueryAsync());
         }
         await using (var totals = new NpgsqlCommand("SELECT ops.attestation_count()", connection, transaction))
             Assert.Equal(6L, await totals.ExecuteScalarAsync());
+        await using (var sourceCount = new NpgsqlCommand("SELECT ops.evidence_count(p_source=>$1)", connection, transaction))
+        {
+            sourceCount.Parameters.AddWithValue(witness.Id.ToBytes());
+            Assert.Equal(6L, await sourceCount.ExecuteScalarAsync());
+        }
         await using (var selected = new NpgsqlCommand("SELECT ops.evidence_count(p_type=>$1)", connection, transaction))
         {
             selected.Parameters.AddWithValue(predicate.Id.ToBytes());

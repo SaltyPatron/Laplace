@@ -10,7 +10,9 @@ COPY (
         FROM public.laplace_contained_series(ARRAY(SELECT id FROM latest)) s
     ), snapshot AS (
         SELECT 0 AS kind,w.id::text AS id,to_jsonb(w)::text AS value
-        FROM latest JOIN public.witness w USING(id)
+        FROM latest JOIN (SELECT a.witness AS id,a.lineage,a.trust,count(*) AS attestations
+                          FROM public.attestation a WHERE a.witness IN (SELECT id FROM latest)
+                          GROUP BY a.witness,a.lineage,a.trust) w USING(id)
         UNION ALL
         SELECT 1,s.value->>'claim',jsonb_build_object(
             'series',s.value,'standing',to_jsonb(c))::text

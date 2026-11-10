@@ -58,7 +58,7 @@ BEGIN
   ft=pg_temp.claim_node(ARRAY[fm,rec],'file',ARRAY[4294967296,5368709120]::bigint[]);
   sm=pg_temp.claim_node(ARRAY[laplace_id('source'),laplace_id('fixture')],'tuple');
   witness_id=pg_temp.claim_node(ARRAY[sm,ft],'file',ARRAY[4294967296,5368709120]::bigint[]);
-  INSERT INTO public.witness VALUES(witness_id,NULL,0.85);
+  -- The trunk becomes a witness when it publishes attestations (below, with its receipt).
   INSERT INTO leader_witness VALUES(witness_id);
 END $$;
 DO $$
@@ -71,19 +71,21 @@ BEGIN
   INSERT INTO laplace.ingest_run_journal(run_id,source_name,source_id,layer,status,ended_at,files_done,files_total,attestations,attestations_measured)
   VALUES(receipt,'native-completion-fixture',published,0,'ok',clock_timestamp(),1,1,7000,true);
   IF ops.native_source_completed('native-completion-fixture') THEN
-    RAISE EXCEPTION 'measured Native receipt without witness attestation count completed a source';
+    RAISE EXCEPTION 'measured Native receipt without published witness attestations completed a source';
   END IF;
-  UPDATE public.witness SET attestations=7000 WHERE id=(SELECT id FROM leader_witness);
+  -- Publication: the trunk attests. A distinct fixture claim keeps the leader claims on the
+  -- containment path the reads below exercise.
+  INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+  SELECT md5('leader-witness-'||id::text)::public.blake3,id,NULL,1,1,1.0,NULL,0.85 FROM leader_witness;
   IF NOT ops.native_source_completed('native-completion-fixture') THEN
     RAISE EXCEPTION 'published Native witness and measured completed receipt were ignored';
   END IF;
+  -- The receipt's own measurement flag no longer decides completion: the attestations are the measure.
   UPDATE laplace.ingest_run_journal SET attestations_measured=false WHERE run_id=receipt;
-  UPDATE public.witness SET attestations=NULL WHERE id=(SELECT id FROM leader_witness);
   IF NOT ops.native_source_completed('native-completion-fixture') THEN
     RAISE EXCEPTION 'published Native witness and unmeasured completed receipt were ignored';
   END IF;
   UPDATE laplace.ingest_run_journal SET attestations_measured=true WHERE run_id=receipt;
-  UPDATE public.witness SET attestations=7000 WHERE id=(SELECT id FROM leader_witness);
   UPDATE laplace.ingest_run_journal SET source_id=(SELECT decode(id::text,'hex') FROM leader_claims WHERE name='four') WHERE run_id=receipt;
   IF ops.native_source_completed('native-completion-fixture') THEN
     RAISE EXCEPTION 'an unregistered claim was accepted as a published source witness';
