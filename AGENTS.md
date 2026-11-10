@@ -1,197 +1,190 @@
-# Laplace — Architecture, Invariants & Operational Reference
+# Laplace — Agent Core
 
-Laplace is a deterministic, content-addressed, recursively compositional computer and cognition architecture over persistent 4D geometric state. Its scope spans language, software construction, chess and other games, images, audio, video, model circuit ingestion and export, consequence-driven learning, and the browsable entity world. It replaces opaque dense-model embeddings, arbitrary text chunking, and neural rerankers with exact reusable multi-tier structure, 4D $S^3$ / 4-ball geometry, 4D trajectory similarity, attributable containment provenance, and Glicko-2 consensus standing. Native C (`icx`, `-fp-model=precise` / `/fp:precise`, no FMA contraction, CORE-MATH) performs repeated computation; PostgreSQL 18.6 + PostGIS provides durable indexed 4D geometry and set access; SQL and C# bind operations and orchestrate lifecycle.
+Laplace is a deterministic, content-addressed, recursively compositional substrate: every modality (text, code, structured corpora, chess, images, audio, model weights) decomposes losslessly into a BLAKE3 Merkle DAG with 4D $S^3$ / 4-ball geometry, attributable containment provenance, and Glicko-2 consensus standing. Native C (`icx`, precise FP, no FMA contraction, CORE-MATH) computes; PostgreSQL 18 + PostGIS + the `laplace` extension stores and indexes; SQL and C# only orchestrate.
 
----
-
-## 1. Mathematical, Geometric & Byte-Level Substrate Laws (`Laplace-Native` / `laplace.h`)
-
-- **Identity (`lp_id`, 16 bytes)**: First 16 bytes of BLAKE3-256 (`uint8_t b[16]`, 32 lowercase hex digits), with **zero** domain byte, tier, type, recipe, version, source, or position salt.
-  - Codepoint ID (`lp_id_codepoint`): BLAKE3-128 of its 1–4 UTF-8 bytes (surrogates in generalized 3-byte form).
-  - 1-child composition (`lp_id_compose`): No re-hash; equals the child's ID.
-  - $n \ge 2$ composition (`lp_id_compose`): BLAKE3-128 over the $16n$ contiguous bytes of the children's IDs in exact sequence order, repeats included.
-  - Universal Structural Convergence: `[k,i,n,g]` is one entity everywhere regardless of whether it appears as a word, identifier, title, or substring. Finite digital scalars reuse canonical digit trajectories (`0.34567` $\rightarrow$ `[0][.][3][4][5][6][7]`, `255` $\rightarrow$ `[2][5][5]`); an ordered $2\times2$ pixel patch inside any $8\times8$ block, image, or video frame is the same global subpatch entity. Never mint arbitrary numeric or media values as new Tier-0 atoms, and never hash made-up strings (`substrate/source/X/v1`, `language:eng`) or raw file byte blobs (`file_close`: a file is always `[metadata, content]`).
-- **Tier-0 Floor (`$LAPLACE_TIER0`, `lp_tier0_record`, 64 B $\times$ 1,114,112 = 71,303,168 B)**:
-  - Layout: `id` (16 B), fixed-point `m[4]` (`int64_t[4]`, 32 B, value $m / 2^{53}$ per axis), `hilbert` (`uint64_t`, 8 B), `rank` (`uint32_t`, 4 B DUCET total order rank), `pad` (`0`, 4 B).
-  - Placement: DUCET collation rank $r$ maps to the $r$-th 4D Hilbert-ordered Marc Alexa Super-Fibonacci point on $S^3$ (`cr_sin`, `cr_cos`, `cr_atan2`, `cr_hypot`, `cr_cbrt`), nudged inward so $\sum_{d=0}^3 m_d^2 \le 2^{106}$ (`lp_coord_inside`).
-  - Universal Content Determinism (`4 ULP`): Guaranteed by compiler flags + CORE-MATH + $2^{53}$ / `fp1e9` fixed-point quantization on $S^3$ and the memory-mapped perf-cache (`tier0.bin` + `flags.bin` + `highway.bin`). Same content = same 16-byte `blake3` hash and 4D coordinate across all architectures without database lookups.
-  - Composition Centroid (`lp_coord_centroid`): Exact integer mean $s_d = \sum m_{i,d}$ in `__int128`, truncated toward zero (`s_d / n`), placing compositions strictly inside the closed unit 4-ball.
-  - Centroid vs. Trajectory: Coordinate equality is deliberately many-to-one with respect to content identity (`[c,a,t]` and `[a,c,t]` share a 4D centroid while retaining distinct `blake3` IDs and distinct 4D trajectories).
-  - Hilbert Index (`lp_hilbert4`): 4D 16-bit Skilling transpose + bit interleave (`pdep`), stored in PostgreSQL `bigint` as `h ^ 0x8000000000000000` so signed `bigint` order equals unsigned Hilbert order.
-  - Companion Flags (`$LAPLACE_FLAGS`, `lp_flags`, 32 B / 256 bits per codepoint + `.layout`): All UCD binary and enumerated properties indexed $O(1)$ without database reads.
-- **Packed 4D ZM Path Geometry (`lp_id_to_xyz`, 32 B/vertex EWKB) vs. Realized 4D Trajectories**:
-  - Stored in `physicality.path` as `POINT ZM` (1 run, 37 B EWKB `0xC0000001`) or `LINESTRING ZM` ($n$ runs, $9 + 32n$ B EWKB `0xC0000002`). Always transmitted as binary EWKB / `PGCOPY` (never text WKT).
-  - `X, Y, Z` pack the 128-bit constituent `lp_id` into the low $43 + 43 + 42$ mantissa bits of positive IEEE-754 doubles with exponent $1021$ (`[0.25, 0.5)`). The remaining $9 + 9 + 10 = 28$ mantissa bits (`lp_xyz_spare`) hold a 4-bit layout tag and 24-bit perf-cache slot payload; scans mask to the 128 ID bits (`lp_xyz_id_mask`).
-  - `M` packs the RLE run length in its low 30 bits (`LP_M_RUN_BITS`, `lp_m_run`) and vertex role above it (`lp_m_said`): `LP_SAID_CLAIM = 1`, `LP_SAID_RECORD = 2`, `LP_SAID_TUPLE = 3`, `LP_SAID_METADATA = 4`.
-  - **Trajectory Realization Law**: Packed `X, Y, Z, M` vertices serialize constituent **identity, order, run-length, and role** — they are **not** spatial coordinates. Never apply spatial metrics directly to packed carrier doubles. Realized 4D curves (`laplace_frechet4d`, `laplace_dtw4d`, `laplace_edr4d`) unpack the child `lp_id` sequence (`lp_xyz_to_id` / `lp_path_vertices`), resolve each child's real 4D coordinate (`entity.coord` or `tier0.bin` / `highway.bin`), and compute curve similarity over those ordered 4D points in $\mathbb{R}^4 / S^3$.
-- **Segmentation & Repeat Factoring**:
-  - Tailored UAX #29: At the word tier, separators always separate (`WB6, WB7, WB11, WB12, WB13a, WB13b` disabled: `3.14` $\rightarrow$ `[3][.][14]`, `a_b` $\rightarrow$ `[a][_][b]`).
-  - Adjacent identical constituents collapse into vertex run length; periodic sub-blocks factor deterministically from content alone (leftmost shortest period, recursive: `banana` $\rightarrow$ `b [an]×2 a`).
+> [!IMPORTANT]
+> This file holds **stable laws and navigation only**. Versions, counts, column lists and line numbers drift weekly — always read them from the source of truth named below; never quote numbers from memory. When this file and the code disagree, the **code wins**; record the drift (§9).
+>
+> Canonical source: `E:\Repositories\Laplace\Laplace-Operations\agents\` (edit there, then run `agents\sync.ps1`). Deep byte-level reference: skill `laplace-invention`.
 
 ---
 
-## 2. Schema, Multi-Tier Search, Highway Perf-Cache & Recording Law (`Laplace-postgres` & `Laplace-Engine`)
+## 0. How to work on Laplace (use Laplace to build Laplace)
 
-- **Core Schema (`CREATE EXTENSION laplace`, `laplace--1.12.sql`)**:
-  - `entity` (256 range partitions `entity_00`..`entity_ff` on byte 0 of `id`): `id blake3`, `tier smallint`, `lexical smallint`, `kind smallint`, `coord geometry(PointZM)`, `hilbert bigint`. Indexed by `(id)`, `(hilbert)`, and `USING gist (coord gist_geometry_ops_nd)`.
-  - `physicality` (256 range partitions `physicality_00`..`physicality_ff` on byte 0 of `entity`): `entity blake3`, `tier smallint`, `hilbert bigint`, `path geometry`, `mask bit(256)`. Indexed by `(entity)` and one composite `USING gin (path laplace_path_ops, mask laplace_mask_ops) WITH (gin_pending_list_limit = 262144)` that intersects constituent containment and mask bits in a single posting-list scan.
-  - `witness`: `id blake3` (source trunk `[source_record, file_trunks...]`), `lineage blake3`, `trust double precision`.
-  - `consensus` (16 partitions `consensus_0`..`consensus_f`, `fillfactor = 80`): `claim blake3 PRIMARY KEY`, `rating float8`, `deviation float8`, `volatility float8`, `matches int4`.
-  - Provenance is containment (`laplace_attested`, `laplace_attribution`, `laplace held`, `laplace replay`); the legacy `attestation` table is retired in `1.12`. Never run `DROP EXTENSION laplace CASCADE`.
-- **Multi-Tier, Multi-Modality Search & Retrieval (Why Laplace Never Chunks Content)**:
-  - Content is **never** cut at arbitrary line or token lengths. Every modality decomposes recursively across tiers (`0` = codepoint/atom $\rightarrow$ `1` = grapheme $\rightarrow$ `2` = word/token $\rightarrow$ `3` = phrase/sentence/AST expression $\rightarrow$ `4` = paragraph/section/AST declaration $\rightarrow$ `5+` = file content tree $\rightarrow$ `[metadata, content]` file trunk $\rightarrow$ witness trunk).
-  - Because every node at every tier is recorded in `entity` and `physicality`, **any tier of any modality can be searched and compared directly**:
-    1. **Exact & Containment Search (`laplace_containers`, `laplace_paths`, GIN `laplace_path_ops`)**: Querying a codepoint, grapheme, word, phrase, sentence, paragraph, AST node, or chess move sequence decomposes the query to its `lp_id` and constituents, immediately locating every parent container at tier $T+1, T+2, \dots$ that holds those constituents. The lowest common ancestor (LCA) in the DAG that holds the query constituents is the natural unit of retrieval.
-    2. **4D Geometric Neighborhood (`entity.coord <-> target`, `laplace_distance4d`, `laplace_couple`)**: GiST 4D k-NN over real $S^3$ / 4-ball centroids finds morphologically and compositionally proximate entities at any tier.
-    3. **4D Trajectory Shape (`laplace_frechet4d`, `laplace_dtw4d`, `laplace_edr4d`)**: Unpacks constituent `lp_id` sequences from `physicality.path` mantissas, resolves their real 4D coordinates, and scores ordered sequence/curve shape across any tier (grapheme trajectories inside words, word trajectories inside sentences, sentence trajectories inside paragraphs, statement trajectories inside functions).
-    4. **Concept & Attestation Hops (`laplace_claims`, `laplace_follows`, `highway.bin`, `consensus`)**: Bridges across vocabulary and languages by walking attested claims (`[lemma, language, identifier]`, `[concept, relation, concept]`, `[declaration, "declared identifier", name]`) weighted by Glicko-2 consensus standing.
-- **Identifiers vs. Packaging Indexes (The Recording Law)**:
-  - **Persistent Identifiers are Entities**: Cross-release identifiers cited across resources — CILI `i46360`, ISO 639 codes, PropBank rolesets (`abandon.01`), VerbNet classes (`give-13.1`), FrameNet frames (`fnframe`, `fnfe`, `fnlu`), VerbAtlas frames (`va:0001f`), GeoNames IDs, Unicode scalars — are canonical Tier-0 compositions of their identifier string and highway nodes in `$LAPLACE_HIGHWAY`.
-  - **Packaging Pointers are Recorded Nowhere**: Release-local keys and internal file pointers — WordNet synset offsets (`02084071-n` in PWN 3.0 vs `02086723-n` in PWN 3.1), sense keys (`dog%1:05:00::`), `oewn-` IDs, CoNLL-U `id`/`sent_id`, XML element IDs, dump row numbers, byte offsets — are resolved during ingestion (`key`, `refer`, `type` directives) to the target entity/ILI and **never** written as entities or `HAS_EXTERNAL_ID` claims.
-- **Highway Banks vs. Concept Hops (`$LAPLACE_HIGHWAY`, `manifest/banks.tsv`, `manifest/slots/*.tsv`)**:
-  - Highway banks (`kind` width 8, `upos` 32, `lexfile` 64, `deprel` 64, `vnrole` 64, `wnframe` 64) are frozen-slot filter bitmasks (`laplace_bank_bit`, `?`, `?&`, `?|`), never English word entities and never concept hops.
-  - Generating or using `highway.bin` must never require the full raw corpus suite on disk or a `.nodes` sidecar dump; corpus definitions (`skos:definition`, roleset/frame glosses) are attested as claims about highway identifier nodes during ingestion.
-  - A lexical sense is the composition `[lemma, language, identifier]` where `language` is an ISO 639 constituent, never a mask bit on the concept.
-  - Relations come from the source's semantics, never raw XML/JSON markup attribute names or invented `HAS_*` enum strings.
+1. **Search the substrate first, then read the file.** The `laplace-code` MCP server indexes every Laplace repo and the Wiki as a multi-tier DAG. Both servers are HTTP (Bearer auth), not stdio: `laplace-code` = `https://dev.hartonomous.com/modular/mcp`, `laplace` = `https://dev.hartonomous.com/mcp`. If your tool list has no `laplace-code` tools, the server is not registered for your client; register it rather than working without it.
+   - `code_search` (`scope: code|docs|all`) → ranked file + line ranges; `code_where` (definition), `code_callers` / `code_callees` (call graph), `file_outline` (symbols of one file).
+   - `ingest_status` → what the database holds, running sessions, per-source ingest logs. `recipe_catalog` / `recipe_plan` → recipe coverage for a source.
+   - `search`, `hop`, `translate`, `degrees`, `pull`, `forward`, `turn`, `shape`, `provenance`, `library`, `catalog` → exercise the actual read path (doubles as a smoke test).
+   - `code_search` takes a few seconds; batch queries, keep `limit` small. `code_where` / `code_callers` / `code_callees` / `file_outline` read the `workspace-code` ingest in the database and return nothing until that source is ingested. Fall back to `Select-String` / `git grep` for exact symbol lookups.
+   - The `laplace` (monorepo) MCP server is for `api` / `op` (SQL catalog discovery), `health`, `source_status`, `pipeline`, `facts`, `taxonomy`, `walk`. Do not use its `code_search`.
+2. **Truth order:** code (`laplace.h`, `sql/*.sql.in`, Engine `src/`) > Wiki `Reference/` (as-built) > Wiki `Sequence/` (spec & build order) > Wiki `Sequence/Conflicts.md` (decided disagreements) > everything under `Laplace-Wiki/Repositories/` (moved, often historical).
+3. **Check repo state before editing.** Several repos routinely carry large uncommitted WIP (`git -C <repo> status --short`). Never revert, stash, or "clean up" changes you did not make.
+4. **Ignore** `Laplace-Refactor` (frozen), `Laplace-Wiki/Repositories/**/archive/`, dated `2026-*` audit/handoff/verification notes, and `Workspace/` scratchpads unless investigating history.
+5. **Verify claims you write down.** Every path, symbol, flag, or number you put in a doc or agent file must be confirmed in code in the same session.
 
 ---
 
-## 3. Native C, Tree-sitter Chaining, Tier Traversal, Assembly-Line ETL & Forbidden Patterns
+## 1. Repositories (`E:\Repositories\Laplace`, GitHub `SaltyPatron`) and where truth lives
 
-### A. Division of Ownership: Native C + Perf-Cache vs. Thin C# & SQL Orchestrators
-- **Client-Side Decomposition & Reduction (Native C + Perf-Cache)**: Content decomposition and deduplication occur on the client in native C (`Laplace-Native` / `Laplace-Engine`) before talking to PostgreSQL. C# is a **thin orchestrator** over native C and `Npgsql` binary `COPY` streams — never allocate per-node managed C# heap objects (`Intent`, `KeptRow`, per-row dictionaries) on the hot path, and never reimplement C# math/BPE/SVD/attribution logic that duplicates native C.
-- **Database-Side Set Merge & Continuous Series Updates (Thin SQL + `Laplace-postgres` C Extension)**: SQL is a thin set-based orchestrator over native C extension functions (`laplace_attest_series`, `laplace_attested`, `laplace_attribution`, `laplace_clean_pending_list`). Database crossings are $O(\text{tiers})$, never $O(\text{nodes/atoms/records})$.
-  - In `Laplace` (`laplace-mono`), 100% of SQL statements across substrate, application (`app.*`), billing, auth, and chess reside in `engine/core/src/sql_catalog.def` and execute via `NpgsqlCatalog.Command(...)` (enforced by `ReadPathArchitectureGateTests` with zero hand-written SQL exemptions).
-  - The monorepo database schema is consolidated into three canonical migrations (`20260606000000_layer1_database.sql`, `20260611000000_app_billing.sql`, `20261015000000_substrate_runtime_grants.sql`). Never pull `consensus` rows back over the socket to update standings on the client.
-
-### B. Packaging vs. Product: Chained Tree-sitter $\rightarrow$ Laplace Grammars
-1. **Multi-Level Tree-sitter Grammar Chaining (`ts_parser_set_included_ranges`)**:
-   - **Outer Packaging Grammar**: Every standardized container format is parsed by its compiled Tree-sitter grammar (`tree-sitter-xml` for WN-LMF/FrameNet/PropBank/UCD, `tree-sitter-json` for Wiktextract/JSONL, `tree-sitter-turtle` for CILI/FrameBase, `tree-sitter-csv`/`tsv`/`psv` for Tatoeba/ATOMIC/HateSpeech/GeoNames/ConceptNet, `tree-sitter-conllu` for UD, `tree-sitter-wndb` for Princeton WordNet, `tree-sitter-pgn` for chess, plus 300+ code grammars).
-   - **Inner / Injected Sub-Grammars**: When an outer grammar field contains structured sub-syntax (CoNLL-U `FEATS` `Key=Val|Key=Val`, `DEPS`, `MISC`, TSV columns containing JSON or pipe-delimited lists, or structured identifier notation like `drop%2:38:00::` / `mcr:ili-30-01976841-v`), the child parser is invoked directly on the parent `TSNode` byte range via `ts_parser_set_included_ranges`, chaining down to UAX #29 text leaves and `tier0.bin` / `highway.bin`.
-2. **Compiled Integer Symbol Dispatch (Zero Runtime String Parsing)**:
-   - `.format` and `.recipe` files are Laplace semantic grammars. Every field in a curated source must have an explicit recipe disposition (`content`, `key`, `refer`, `type`, `metadata`, `omit`, `perfcache`, `own`, `thing`, `attest`, `relate`, `pair`); unhandled fields stop ingestion as unresolved obligations.
-   - At recipe load time, every node type and field rule is compiled once against `ts_language_symbol_for_name()` and `ts_language_field_id_for_name()` into flat $O(1)$ integer jump tables (`uint16_t TSSymbol` / `TSFieldId` $\rightarrow$ disposition & composition instructions).
-   - Worker threads walk the `TSTree` using `TSTreeCursor` + compiled integer jump tables directly over the input byte buffer, reusing thread-local `TSParser` instances (`ts_parser_reset`) and thread-local arenas across records.
-3. **Bidirectional AST $\leftrightarrow$ Merkle DAG**:
-   - Ingest maps `Bytes -> Chained Tree-sitter AST -> Laplace Merkle DAG + Claims`.
-   - Realization / export is the exact inverse (`Laplace Merkle DAG -> AST -> Formatted Bytes`), enabling lossless byte-for-byte round-trip reconstruction and cross-format synthesis.
-
-### C. Bidirectional Tier Traversal Law (`Leaf -> Trunk` Creation + `Trunk -> Leaf` Deduplication)
-1. **Leaf $\rightarrow$ Trunk (Bottom-Up on Client for Creation & In-RAM Deduplication)**:
-   - Compose bottom-up from perf-cache leaves (`tier0.bin` and `highway.bin`) through canonical tier boundaries (UAX #29 for text leaves and chained Tree-sitter AST nodes for structured records/files). Every repeated substructure in the batch collapses in $O(1)$ into the lock-free client node table (`NODE[]` / `staged_set`).
-2. **Trunk $\rightarrow$ Leaf (Top-Down Against PostgreSQL for Self-Reducing Subtree Pruning)**:
-   - Deduplication against PostgreSQL proceeds top-down from the highest logical roots (File Trunk $\rightarrow$ Section/Record Trunks $\rightarrow$ Sentences $\rightarrow$ Words), skipping synthetic binary-tree (`blocks_of`) spine nodes.
-   - By the Merkle DAG containment invariant, if a node at tier $T$ already exists in PostgreSQL (or in the client's perf-cache / `staged_set`), **its entire descendant subtree is already recorded and is immediately amputated on the client** (`keep = recorded`). Only novel branches descend to the next frontier and are `COPY`ed to the database.
-
-### D. Assembly-Line Record Streaming ETL
-1. **$O(1)$ Pre-Check**: Probe the file trunk / OS metadata identity before reading or decomposing file bytes; never run a 2-pass (`pass 0` / `pass 1`) full-file decomposition or re-read files from disk.
-2. **Single-Pass Grammar-Bounded Record Streaming**: Stream files in a single pass, slicing strictly on outer grammar record boundaries (XML `<LexicalEntry>` / `<Synset>`, Turtle statement block, JSONL line, CoNLL-U sentence block, PGN game, CSV/TSV row). Never split at arbitrary byte offsets.
-3. **Parallel Arena-Allocated Record Workers**: Worker threads pull record slices from the ring buffer, parse each record via thread-local `TSParser` + chained sub-grammars + compiled integer jump tables, compose bottom-up into the lock-free `NODE[]`/`VTX[]` table, and accumulate per-witness `(claim, games, score)` series in-stream using thread-local arenas reset per record (`0` `malloc`/`free` calls per record). Cross-record internal pointers (`key` / `refer`) resolve against a lock-free concurrent `key_hash -> EntityID` table.
-4. **Continuous Pipelined `stage.*` COPY & In-DB Series Updates**:
-   - Top-down `Trunk -> Leaf` deduplication prunes known subtrees, and novel `entity` / `physicality` rows + accumulated `(claim, games, score)` series stream via binary `PGCOPY` into `UNLOGGED` `stage.*` tables using bounded connection concurrency (`min(cores, max_pool_size - headroom)`).
-   - Standings update inside PostgreSQL via set-based `laplace_attest_series` (`stage.consensus_<h>` $\rightarrow$ `public.consensus_<h>`) at `trust_classes.toml` priors, followed by Hilbert-ordered `stage.*` $\rightarrow$ `public.*` set merge, GIN pending-list cleanup (`laplace_clean_pending_list`), and atomic `witness` trunk registration.
-
-### E. Explicitly Deprecated & Forbidden Patterns (Never Extend or Reintroduce)
-1. **`STree` / `SNode` Intermediate Heap DOM (`Laplace-Engine/src/structure.c`)**:
-   - `g_node()`, `STree`, `SNode`, and `s_grammar_split()` (`copy_around` / `graft` / `copy_rec`, copying 2 MB chunks into `<_>...</_>` buffers and single-threadedly grafting a whole-file DOM in RAM) are **deprecated**. Walk `TSNode` / `TSTreeCursor` directly into `compose()`.
-2. **Bespoke Hand-Rolled Format Scanners & Split Codepaths (`structure.c`, `recipe.c`)**:
-   - `s_decompose()`, `tier_read()`, `part_end()`, `mini_json()`, `parts_of()`, and the `s_boundary()` single-thread bug (`if (l->ntier > 1 && l->tier[0].quoted) return n;`) in `structure.c` are **deprecated**.
-   - Blocking `csv`/`tsv`/`psv` from loading `tree-sitter-csv` (`recipe.c:322`) and maintaining separate hardcoded C walkers (`attest_json_node`, `attest_xml_node`, `attest_delimited`, `attest_code_node` in `recipe.c`) are **deprecated**. All formats use chained Tree-sitter grammars + compiled recipe dispatch.
-3. **Runtime String Path Building & Per-Row Heap Churn (`Laplace-Engine/src/say.c`)**:
-   - `child_path()` (`snprintf` + `strtok_r` on every AST node), `dis_scan()` linear string loops, `owed()` (`snprintf` on every claim), and per-row `records_of()` heap allocations (`lp_idmap *rm`, `of[]`, `recs`, `at[]`, `ord[]`, `fill[]`, `part[]` allocated per row) are **deprecated**. Use precompiled integer `TSSymbol`/`TSFieldId` jump tables and thread-local arenas.
-4. **Two-Pass Stretch Reads, Lagged End-of-Source `standings_write()`, 2PC on Unlogged Tables & Client-RAM Partition Rewrites (`ingest.c`, `db.c`)**:
-   - Whole-file slurping (`read_all`), 2-pass stretch reads (`pass 0` + `table_reset()` + `pass 1` in `ingest.c`), and disk re-reads (`ingest.c:503-514`) are **deprecated**.
-   - Lagged end-of-source `standings_write()` (`ingest.c:557`, `db.c:195-254`) with `#pragma omp critical` + `DELETE FROM stage.consensus_%x` is **deprecated** ("consensus fold" as a lagged batch-end phase is forbidden).
-   - 16-connection `PREPARE TRANSACTION` / `COMMIT PREPARED` on `UNLOGGED` `stage.*` tables, the 528-table startup loop in `stage_open()`, and client-RAM partition rewrites (`L->rewrite` pulling partitions back via `COPY TO STDOUT` in `db.c:448-484`) are **deprecated**.
-5. **Arbitrary Line-Count Chunking, Stopword Lists, In-RAM BM25 Sidecars & External Vector DB Wrappers (`Laplace-MCP/native/lpm.c`, `semantic.c`)**:
-   - Fixed line-count chunking (`LPM_CHUNK_MIN_LINES 3..120`, `LPM_TEXT_MIN_LINES 8..48`, `admit_text_blocks`), hardcoded English stopword lists (`is_stop_word_bytes`), ASCII-only `lower_token_ref` / `collect_subtoken_feats`, sidecar in-RAM BM25 indexes (`workspace.lpm`), and external `llama-server` / Qdrant HTTP wrappers (`semantic.c`) in `Laplace-MCP` are **deprecated** anti-patterns that destroy multi-tier DAG structure. All MCP search, embedding, and reranking must operate over the lossless multi-tier PostgreSQL substrate (`entity` + `physicality` + `consensus`) and perf-caches (`tier0.bin` + `flags.bin` + `highway.bin`).
-
-### F. Forward Program, The Three Proofs & `laplace-blake3-v1` Mold-A-Model Export
-- **Forward Program (`RESOLVE -> COUPLE -> ORIENT -> ROUTE -> SCAN -> COMPOSE -> PROPOSE -> STEER -> SELECT -> REALIZE -> WITNESS`)**:
-  - Governed by three orthogonal axes: **Knowledge** (shared substrate), **Authority** (effective principal scope), and **Compute Envelope** (explicit hop/fanout/frontier/memory budget), steered by detached **Personality Firmware** (`firmware/program.firmware`, rated by observed consequences, never mixed into substrate truth).
-  - Functional correspondence: $Q =$ exact admitted observation/bindings/obligations; $K =$ indexed typed responders; $QK =$ coupling across structure, relation, geometry, and consensus planes; $V =$ responding structure/evidence/calculations; $O =$ receipted state update.
-- **The Three Proofs**:
-  - **Proof 1 (`db-roundtrip`)**: Decompose multi-domain inputs into `entity` + `physicality` and recompose 100% byte-for-byte from PostgreSQL alone while verifying all structural invariants.
-  - **Proof 2 (`Linguistic Super Highway`)**: Fixed-width bitmasks + cross-source identifier indexing, filtering, and hops in `highway.bin` without requiring raw corpora on disk.
-  - **Proof 3 (`Full Corpus Ingestion`)**: Multi-corpus ingestion on top of Proofs 1 and 2 where cross-source claims collide on deterministic highway identifier nodes and update standings via `laplace_attest_series`.
-- **BLAKE3-Addressed Multi-Tier Model Export (`laplace-blake3-v1`) & Royalty Attribution**:
-  - Exported GGUF models (`laplace.tokenizer.scheme = "laplace-blake3-v1"`, `laplace.vocab.size`, `laplace.vocab.blake3_ids`) replace flat BPE/SentencePiece integer token IDs with **16-byte `blake3` entity IDs** across all DAG tiers, locked to Laplace's decomposer + perf-cache (commercial cartridges encrypted via `FoundryCartridgeCrypto` `LPCART01` AES-256-GCM envelope).
-  - Every query receipt and **Mold-A-Model** synthesis computes exact per-witness attribution (`share_bp`, summing to `10000` basis points) from containment provenance (`laplace_attested` / `laplace_attribution` over `physicality` + `witness`) weighted by Glicko-2 Fisher information ($I_i = 1/\sigma_i^2$), persisted in `app.billing_royalties` (`GET /v1/billing/royalties`).
-
----
-
-## 4. MCP Servers & Search Routing
-
-Both deployed HTTP MCP endpoints are configured across `agy`/`gemini`, `codex`, `grok`, `copilot`, and VS Code:
-
-| MCP Server | Endpoint | Backing Stack & DB | When to Use |
-| :--- | :--- | :--- | :--- |
-| **`laplace-code`** *(Primary)* | `https://dev.hartonomous.com/modular/mcp` | Modular Native C (`lpm.exe`), DB `laplace` | **Use first for all code/doc search & native ops (~150 ms)**: `code_search`, `file_outline`, `code_where`, `code_callers`, `code_callees`, `embeddings`, `rerank`, `shape`, `search`, `forward`, `hop`, `translate`, `degrees`, `pull`, `library`, `catalog`, `provenance`, `recipe_catalog`, `recipe_plan`, `ingest_status`. |
-| **`laplace`** *(Monorepo)* | `https://dev.hartonomous.com/mcp` | Monorepo C# (`w3wp.exe`), DB `laplace-mono` | Use for monorepo SQL catalog discovery (`api`, `op`), `health`, `source_status`, `pipeline`, `facts`, `taxonomy`, `walk`. Do not use its slow C# `code_search`. |
-
-- Ignore hits under `Laplace-Refactor` (frozen historical reference) and dated `2026-10-*` incident logs under `Laplace-Wiki/Repositories/` unless investigating historical state.
-
----
-
-## 5. Environments, Host Topology & Execution Boundaries
-
-| Host | Tailscale / LAN IP | Role & Config | Source / Build / Work | Databases (PostgreSQL 18.6, Port 5432) |
-| :--- | :--- | :--- | :--- | :--- |
-| **`HART-DESKTOP`** | `100.70.222.78`<br>`192.168.1.x` | Local Interactive Dev + RTX 4060 Ti (`C:\ProgramData\Laplace\machine.env`, `https://dev.hartonomous.com`) | Src: `E:\Repositories\Laplace`<br>Build: `D:\Libraries\build\Laplace`<br>Data: `E:\Data\Ingest`<br>Work: `E:\Data\Laplace\work` | `laplace` (modular), `laplace-mono` (mono substrate), `laplace-desktop-app` (mono app). Heap: `E:\Data\Laplace\pgdata`, WAL: `D:\Data\Laplace\pg_wal`. |
-| **`hart-server`** | `100.76.181.27`<br>`192.168.1.2` | Staging (CI/CD deploy), failover DB, OpenBao, Vaultwarden (`/etc/laplace/machine.env`, `https://staging.hartonomous.com`) | Src: `/repos/src`<br>Build: `/repos/build`<br>Data: `/vault/Data`<br>Work: `/repos/work` | `laplace`, `laplace-mono`. (1080 Ti GPU disabled/offline). |
-| **`hart-prod`** | `100.124.95.17` | Locked Enterprise Prod (`https://api.hartonomous.com`, `https://mcp.hartonomous.com`, CI/CD promotion only) | `/opt/laplace/app` | `laplace-app` local; proxies substrate/UCI to `hart-server` or `hart-cloud`. |
-| **`hart-cloud`** | `100.103.255.122` | On-Demand AVX-512 qualification (`c3-standard-8`) | Qualification | Kept `TERMINATED` when idle; started on demand via CI lease (`qualify-cloud`). |
-| **`hart-router`** | `192.168.1.1` | OpenWrt router | LAN gateway | Split-horizon DNS and LAN routing. |
-
-- **Windows UAC / ACL Invariant (`HART-DESKTOP`)**: Every elevated script that configures ACLs on `E:\Data\Laplace`, `D:\Libraries\build\Laplace`, `D:\Data\Laplace`, or `C:\ProgramData\Laplace` must explicitly grant `$declared.windows_sid` (`HART-DESKTOP\ahart`, SID `S-1-5-21-1955383224-1799969050-1119319971-1001`) `FullControl` alongside `SYSTEM`, `BUILTIN\Administrators`, and IIS AppPool/service SIDs (`Repair-DesktopPermissions.ps1`).
-- **Database Safety & Bandwidth**: Push/merge workflows never automatically drop or reseed databases. Do not reset/recreate shared databases (`laplace`, `laplace-mono`) without explicit instruction, and never download bulk external corpora or large model checkpoints over the metered 5G connection on `HART-DESKTOP`.
-- **Default Platform Administrators**: Canonical migration `20260611000000_app_billing.sql` automatically seeds the 3 owner OAuth bindings (`aharttn@gmail.com` Google, `thesaltypatron@gmail.com` Google, `thesaltypatron@gmail.com` Microsoft) as audited `installation-owner` administrators.
-
----
-
-## 6. Repositories (`E:\Repositories\Laplace` / GitHub `SaltyPatron`)
-
-| Repository | Stack | Role |
+| Repo | Owns | Source of truth for |
 | :--- | :--- | :--- |
-| `Laplace-Native` | C (ICX) | Shared deterministic native library (`include/laplace/laplace.h`), golden tests, and `manifest/` (`banks.tsv`, `slots/`, `maps/`, `trust_classes.toml`). |
-| `Laplace-postgres` | C / SQL | PostgreSQL 18 extension (`CREATE EXTENSION laplace`): `blake3` type, 82 C/SQL functions, partitioned schema & GiST/GIN index builders. |
-| `Laplace-Engine` | C (ICX) | Unified `laplace` CLI (24 commands), `.recipe` / `.format` decomposer (`structure.c`, `say.c`), lock-free node table (`table.c`), bulk COPY loader (`db.c`), native reader (`read.c`, `pull.c`, `forward.c`, `program.c`). |
-| `Laplace-MCP` | C / C# | Native `lpm` HTTP/MCP server (`native/`) + `Laplace.Modular.Web` IIS host (`web/`, `/modular/mcp`). |
-| `Laplace-Operations` | PowerShell / Sh / Py | Host setup (`setup.ps1`/`setup.sh`), `laplace.env`, and lifecycle/deployment controller (`laplace.ps1` / `laplace-ops`). |
-| `Laplace` | C# / C++ / SQL / TS | Monorepo (`laplace-mono` CLI, `/mcp`, OpenAI-compat API, Ingest Admin Portal & Recipe Studio, Lichess/Chess Lab, Foundry, web UI, `sql_catalog.def`). |
-| `Laplace-UCI` | C# | UCI WebSocket relay and Lichess match engine connector (`mono-development`, `mono-staging`, `mono-prod`). |
-| `Laplace-Wiki` | Markdown | Canonical specification (`Sequence/`, `Storage/`, `Semantics/`, `Corpora/`, `Operations/`, `Reference/`, `Research/`) + relocated repo docs (`Repositories/`). |
-| `Laplace-Prototype` | C / SQL | Cleanroom test bench for the Three Proofs (`db-roundtrip`, `highway.bin`, `Full Corpus Ingestion`) and `laplace-blake3-v1` export verification. |
-| `Laplace-Conventional` | Python | Conventional model evaluation and comparison benchmarks. |
-| `Laplace-Refactor` | Frozen | **Frozen historical reference only** — do not build, modify, or run CI in `Laplace-Refactor`. |
+| `Laplace-Native` | Deterministic C library | `include/laplace/laplace.h` (+ `tier0.h`, `highway.h`, `consensus.h`, `geometry.h`); `manifest/banks.tsv`, `manifest/slots/*.tsv`, `manifest/trust_classes.toml`, `manifest/function_bindings.tsv`; tier-0 generator `tools/tier0.c` |
+| `Laplace-postgres` | `CREATE EXTENSION laplace` | Version: `laplace.control` `default_version`. Schema/DDL: `sql/laplace.sql.in`. Indexes, staging, consensus SQL: `sql/operations.sql`, `sql/api.sql`. C: `laplace_pg.c`, `couple.c`, `provenance.c`, `attribution.c`, `gin_path.c`, `gin_mask.c`, `gist4d.c`, `realize.c`, `walk.c` |
+| `Laplace-Engine` | `laplace` CLI, recipe compiler, record VM, ingest/loader, native reader | Command table `src/op.c`; recipes `recipes/` (`.recipe`, `.format`, `formats/grammars/`); firmware `firmware/` |
+| `Laplace-MCP` | Native `lpm` MCP/HTTP server + `Laplace.Modular.Web` IIS host | MCP tool list: `native/api_mcp.c` (`TOOLS`); routes: `web/Program.cs` |
+| `Laplace` (monorepo) | C# app, OpenAI-compat API, `/mcp`, Recipe Studio, Chess Lab, Foundry, billing, web UI | SQL: `engine/core/src/sql_catalog.def` → `sql_catalog/*.def`; migrations: `db/migrations/`; MCP tools: `app/Laplace.Endpoints.Mcp/SubstrateTools.cs` |
+| `Laplace-Operations` | Host setup, `laplace.env`, `laplace-ops` controller, CI ingest | `laplace.ps1` (Windows ops), `laplace-ops` (Linux bash), `ingest.sh`/`ingest.ps1`, `installation/*.json`, `.github/workflows/ingest.yml`, `agents/` (these files) |
+| `Laplace-UCI` | UCI WebSocket relay / Lichess connector | `configuration.example.json`, `installations/*.json` |
+| `Laplace-Prototype` | Native proofs bench | `tests/proof_native.c`, `run-proofs.ps1` |
+| `Laplace-Conventional` | Conventional-model training/eval baselines | `train.yml`, `verify.yml`, `scripts/` |
+| `Laplace-Wiki` | **All documentation** (repo READMEs are 3-line stubs pointing here) | `README.md` page tree; own rules in `Laplace-Wiki/AGENTS.md` (`python3 tools/check_wiki.py` before commit) |
+| `Laplace-Refactor` | **Frozen** — never build, modify, or run CI | — |
+
+Build order: PostgreSQL → `Laplace-Native` → `Laplace-postgres` → `Laplace-Engine` (→ MCP / monorepo). Every C repo has CMake preset `icx-release` (Ninja, output `$LAPLACE_BUILD/<repo>/<preset>`); Native also has `icx-debug`, `gcc-release` and ctest presets. postgres tests: `ctest` → `postgres_regress` (cases in `tests/regression_cases.txt`). Engine tests: mostly `EXCLUDE_FROM_ALL` targets in `CMakeLists.txt` + scripts in `tests/`; CI recipe in `.github/workflows/laplace.yml`.
 
 ---
 
-## 7. Essential Commands & Canonical Specification Index
+## 2. Substrate laws (stable; details in skill `laplace-invention` and `laplace.h`)
+
+- **Identity** `lp_id` = first 16 bytes of BLAKE3-256. No salt of any kind (domain, tier, type, recipe, version, source, position). Codepoint: hash of its UTF-8 bytes (surrogates in generalized 3-byte form).
+- **Singleton collapse:** a 1-child composition *is* the child (`lp_ref_compose`: `*out = ch[0]`) — no re-hash, no wrapper, no tier bump.
+- **Merkle height:** for $n \ge 2$ children, `id` = BLAKE3-128 over the $16n$ concatenated child IDs in order (repeats included), and `tier = 1 + max(child.tier)` (`lp_tier_above`, enforced inside compose regardless of caller). **Tiers are heights, never roles**: `[H,e,l,l,o]` is tier 1; a sentence of tier-1 words is tier 2. Any doc saying "grapheme = 1, word = 2, sentence = 3" is wrong.
+- **Universal convergence:** the same content is the same entity everywhere (word, identifier, title, substring, digit run `[2][5][5]`, $2\times2$ pixel patch). Never mint numeric/media values as new atoms; never hash invented strings (`language:eng`, `source/X/v1`); a file is always `[metadata, content]`, never a byte blob.
+- **Tier-0 floor:** 1,114,112 × 64 B `lp_tier0_record` (`id`, `int64 m[4]` fixed point $m/2^{53}$, `hilbert`, DUCET `rank`, pad). DUCET rank $r$ → $r$-th Hilbert-ordered Super-Fibonacci point on $S^3$ (CORE-MATH `cr_sin`/`cr_cos`, correctly-rounded `sqrt`), nudged inside $\sum m^2 \le 2^{106}$. Shards: `ascii`, `utf`, `cjk`, `ext` (select with `LAPLACE_TIER0_PROFILE` or `@profile` path suffix; IDs/coords identical in every profile). Flags: 32 B/codepoint, same shards.
+- **Centroid:** exact `__int128` integer mean truncated toward zero → compositions lie strictly inside the 4-ball. Centroids are many-to-one (`[c,a,t]` and `[a,c,t]` share one); IDs and trajectories are not.
+- **Hilbert:** 4D 16-bit Skilling + `pdep`; stored as `h ^ 0x8000000000000000` so signed `bigint` order = unsigned Hilbert order.
+- **Packed path vertices ≠ geometry.** `physicality.path` is `POINT ZM` / `LINESTRING ZM` EWKB whose X/Y/Z mantissas carry the child `lp_id` (43+43+42 bits, values in [0.25, 0.5), 28 spare bits = 4-bit tag + 24-bit payload) and whose M carries run length (30 bits), role `LP_SAID_*` (3 bits), outcome (2 bits) and position (18 bits). This is a deliberate exploitation of PostGIS storage, EWKB/binary COPY, TOAST and index machinery as an ordered ID-sequence carrier. Its axes are hash bits that uniformly fill the cube [0.25, 0.5)³, so spatial predicates on `path` answer **identity** questions (exact vertex match, ID-bit ranges) and never **shape**. Multi-vertex bounding boxes cover almost the whole cube, and distance on carrier doubles is meaningless. (UI symptom: carrier values drawn as coordinates show up as a square "hologram" on the glome.) Trajectory similarity = unpack IDs → resolve each child's real coordinate (`entity.coord` / `tier0.bin` / `highway.bin`) → measure (see `laplace_couple`, `laplace_project_path`). The raw `laplace_frechet4d` / `dtw4d` / `edr4d` SQL functions measure **the geometry they are given** — pass realized curves, not `path`.
+- **Segmentation:** tailored UAX #29 — separators always separate at word tier (`3.14` → `[3][.][14]`, `a_b` → `[a][_][b]`). Adjacent repeats collapse into run length; periodic blocks factor leftmost-shortest, recursively (`banana` → `b [an]×2 a`).
+- **Banks are fields, not bitmaps:** `manifest/banks.tsv` assigns disjoint fields in one 64-bit `mask` carrier. `kind` is a flag set (bit = slot); every other bank (`upos`, `lexfile`, `deprel`, `vnrole`, `wnframe`, …) is an enum storing slot+1 (0 = absent). Banks filter; they are never word entities and never concept hops. Unicode property records (flags) stay 256-bit and separate.
+- **Recording law:** persistent cross-release identifiers (CILI `i46360`, ISO 639, PropBank `abandon.01`, VerbNet `give-13.1`, FrameNet, VerbAtlas, GeoNames, Unicode scalars) are entities / highway nodes. Release-local packaging pointers (WordNet offsets, sense keys, `oewn-` IDs, CoNLL-U `id`/`sent_id`, XML IDs, row numbers, byte offsets) are resolved during ingest (`key` / `refer` / `type`) and recorded **nowhere**. A lexical sense is `[lemma, language, identifier]`. Relations come from the source's semantics, never markup attribute names or invented `HAS_*` strings.
+- **Highway** (`$LAPLACE_HIGHWAY`): shards `core` (banks), `wordnet` (ILI), `frames` (roles); `lexical`/`full` = all (`LAPLACE_HIGHWAY_PROFILE`). Building or using it never needs raw corpora on disk.
+- **Geometry is shape, not meaning.** A coordinate on $S^3$ / in the 4-ball is the shape of a Merkle DAG segment: Tier-0 placement plus centroids of constituents, and the realized trajectory through them. Closeness in 4D means *compositional / morphological* similarity (shared or similarly-placed constituents, similar trajectory). It is **not** an AI-embedding "semantic neighbor". Meaning and relatedness come from attested evidence: relations, usages, observations, examples, highway identifiers, all weighted by consensus. Never present GiST k-NN on `entity.coord` as semantic similarity.
+  - **Why shape matters ("find one bug, fix 50,000"):** ingest error logs from 10,000 companies. Logs from 300 repositories have realized trajectories with very low Fréchet distance, meaning the same structural failure. Attested fixes exist for N of them (physicalities under their witnesses, with standing). Propose those fixes to the rest, try them, and fold the outcomes back into consensus. Shape finds the candidates; attestation and consensus decide what's true. Embeddings can't do this deterministically, losslessly, or with attribution.
+- **No chunking, ever.** Every tier of every modality is recorded, so retrieval works at any tier:
+  - containment (GIN `laplace_path_ops`; the lowest common ancestor is the retrieval unit);
+  - shape (GiST on `entity.coord`, realized trajectory comparison);
+  - meaning (attested hops and relations weighted by consensus).
+
+---
+
+## 3. Database (verify every detail in `Laplace-postgres/sql/laplace.sql.in` + `operations.sql`)
+
+- `entity` and `physicality`: 256 range partitions each on byte 0 of the ID. `entity` carries `id`, `tier`, `coord` (PointZM), `hilbert`, `mask bit(64)`. `physicality` carries `entity`, `tier`, `hilbert`, `path`, `mask`.
+- Indexes: GiST on `entity.coord` with Laplace opclasses (`laplace_point4d_ops`, `laplace_angular4d_ops`), Hilbert btrees, and one composite GIN `(path laplace_path_ops, mask laplace_mask_ops)` on `physicality` (+ partial GINs). Read the `WITH (...)` settings from `operations.sql`; do not quote them from memory.
+- `consensus`: 16 partitions, Glicko-2 `rating`, `deviation`, `volatility`, `matches`.
+- **Witnesses and provenance** (Wiki `Sequence/Sources.md` 9.4, `Sequence/Attestations.md` 12.2–12.3, `Semantics/Attestations.md`):
+  - **The trunk node is the source is the witness.** WordNet, UD and Wiktionary are each one source trunk `[source record, its files' trunks in path order]`: one Merkle DAG of source → files → records, stored as `entity` + `physicality`. A treebank or lexicon inside it is a file under the trunk, never a witness of its own. **No witness table**: the trunk ID is the witness.
+  - **Physicalities are usages, observations and examples**: how building blocks combine. Building blocks are content and content is building blocks. A physicality is **not** an attestation.
+  - **Attestations are their own records** (`attestation`, in progress in `sql/laplace.sql.in`). There is one per claim and witness (and lineage), holding games, score, position and trust. WordNet attesting "dog is a noun" is a different attestation from Wiktionary, UD or ConceptNet attesting the same claim.
+  - **Consensus** is the round table: every attestation of a claim, folded into one Glicko-2 standing per claim.
+  - **Trust** is the witness's class from the registry (`manifest/trust_classes.toml` → native law). The class prior seeds and bounds each attestation ($s_{eff} = 0.5 + t(s - 0.5)$, `Sequence/Conflicts.md`). Lineage keeps derived copies from counting as independent witnesses.
+  - Persistent tables: `entity`, `physicality`, `attestation`, `consensus`.
+- Database crossings are $O(\text{tiers})$, never $O(\text{rows})$. Standings update **inside PostgreSQL**. Never pull `consensus` rows to the client to update them.
+- Never `DROP EXTENSION laplace CASCADE`. Never reset or reseed shared databases (`laplace`, `laplace-mono`) without explicit instruction.
+- Monorepo: 100% of SQL lives in `engine/core/src/sql_catalog.def` (+ `sql_catalog/*.def`) and runs via `NpgsqlCatalog.Command(...)`. `ReadPathArchitectureGateTests` enforces zero hand-written SQL. Schema = the migrations in `db/migrations/` (consolidated; do not add ad-hoc ones without being asked).
+
+---
+
+## 4. Ingest architecture (Engine; current shape)
+
+Bytes → chained Tree-sitter AST → compiled recipe bytecode → record VM → lock-free node table → top-down dedup → binary COPY into per-run `stage.*` tables → in-DB merge + series fold.
+
+- **Recipe compile once:** `recipe.c` (parse/select) → `recipe_compile.c` (`say_compile`) + `structure_compile.c` (binds `ts_language_symbol_for_name` / `ts_language_field_id_for_name` → integer jump tables) → immutable `recipe_program.h` bytecode. Every field in a curated source needs an explicit disposition (`content`, `key`, `refer`, `type`, `metadata`, `omit`, `perfcache`, `own`, `thing`, `attest`, `relate`, `pair`); unhandled fields stop ingest.
+- **Stream records, single pass:** `structure_records.c` slices on outer-grammar record boundaries (XML element, Turtle block, JSONL line, CoNLL-U sentence, PGN game, CSV row) with thread-local `TSParser` (`grammars.c`, `ts_parser_reset`). Injected sub-grammars use `ts_parser_set_included_ranges` on the parent node's range (`structure_decode.c`). Scheduling: `record_stream.c`.
+- **Record VM:** `say.c` `record_execute` + `record_*.c`, `recipe_says.c`; per-worker arenas (`record_worker.h`), zero per-record malloc. Cross-record keys resolve through the concurrent key table (`table.c`).
+- **Node table:** `table.c` lock-free open addressing, CAS claim, `compose`. Every repeated substructure collapses in RAM.
+- **Dedup top-down:** `db.c` `prune`. If a node exists (DB, perf-cache, or staged set), its whole subtree is amputated. Skip synthetic `blocks_of` spine nodes.
+- **Load:** `db.c` / `db_metadata.c` → binary COPY (`pg.c`) into per-run, per-lane `stage.lp_*_<xid>_<lane>` tables (lanes = `min(cores, pool, available)`) → `laplace_merge_stage`, `laplace_accumulate_series`, `laplace_attest_stage`, partition GIN cleanup. Follow the calls in `db.c` rather than this list when changing it.
+
+**Removed — never reintroduce:** `STree`/`SNode`/`g_node`/`s_grammar_split` heap DOM; hand-rolled scanners (`s_decompose`, `tier_read`, `part_end`, `mini_json`, `parts_of`, `s_boundary`); per-format C walkers (`attest_json_node` etc.) and any csv/tsv bypass of Tree-sitter; runtime string path building (`child_path`, `dis_scan`, `snprintf` per claim) and per-row heap churn; two-pass reads; lagged end-of-source `standings_write`; 2PC on unlogged tables; 528-table stage startup; client-RAM partition rewrites (`COPY TO STDOUT`).
+**Still present, to be retired:** `read_all` whole-file slurp for non-streamable recipes (`recipe_decompose.c`); in `Laplace-MCP`: heading/paragraph chunker `admit_text_blocks` (`native/lpm_index.c`), in-RAM BM25 (`native/lpm.c`), `workspace.lpm` sidecar (`web/NativeRuntime.cs`). Target: all MCP search over `entity` + `physicality` + `consensus` + perf-caches.
+
+**C# is a thin orchestrator.** No per-node managed objects on hot paths; never reimplement native math, BPE, SVD, or attribution in C#.
+
+---
+
+## 5. Forward program & proofs
+
+- Forward: `RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS`. Three orthogonal axes: Knowledge (substrate), Authority (principal scope), Compute Envelope (hop/fanout/frontier/memory budget). Detached personality firmware (`Laplace-Engine/firmware/*.firmware`) is rated by consequences and never mixed into substrate truth. Spec: Wiki `Sequence/Forward.md`, `Sequence/Firmware.md`.
+- Proofs: (1) round-trip: decompose → recompose byte-for-byte from PostgreSQL alone. (2) highway: bank/identifier filtering and hops without raw corpora. (3) full corpus ingestion: cross-source claims collide on highway identifiers and fold into consensus.
+- Export `laplace-blake3-v1` (monorepo `FoundrySynthesis.Export.cs`): GGUF with 16-byte BLAKE3 entity IDs as vocabulary. A token can be **any entity at any tier**: a codepoint, word, phrase, AST subtree, chess line or pixel patch. Each token comes with its deterministic 4D coordinate (shape) and its attested relations (meaning), so the vocabulary is open, lossless (detokenize = recompose from the DAG), shared across models, and attributable per token. This replaces BPE/SentencePiece integer IDs. Royalty attribution: `share_bp` summing to 10000, from containment provenance weighted by Glicko-2 Fisher information, persisted in `app.billing_royalties`.
+
+---
+
+## 6. Hosts & environments (truth: `C:\ProgramData\Laplace\machine.env`, `Laplace-Operations/laplace.env`, `installation/*.json`)
+
+| Host | Role | Paths | DBs |
+| :--- | :--- | :--- | :--- |
+| `HART-DESKTOP` (`100.70.222.78`) | Interactive dev, RTX 4060 Ti, IIS `https://dev.hartonomous.com` | src `E:\Repositories\Laplace`, build `D:\Libraries\build\Laplace`, data `E:\Data\Ingest`, work `E:\Data\Laplace\work`, pgdata `E:\Data\Laplace\pgdata`, WAL `D:\Data\Laplace\pg_wal` | `laplace` (modular), `laplace-mono`, `laplace-desktop-app` |
+| `hart-server` (`100.76.181.27`, LAN `192.168.1.2`) | Staging + failover DB, OpenBao, Vaultwarden, self-hosted CI runner, `https://staging.hartonomous.com` | `/etc/laplace/machine.env`; src `/repos/src`, build `/repos/build`, work `/repos/work`, data `/vault/Data`, models `/vault/models` | `laplace`, `laplace-mono` |
+| `hart-prod` (`100.124.95.17`) | Locked prod (`api.` / `mcp.hartonomous.com`), CI/CD promotion only | `/opt/laplace` | `laplace-app`; substrate proxied |
+| `hart-cloud` (`100.103.255.122`) | On-demand AVX-512 qualification; TERMINATED when idle (CI lease) | — | — |
+| `hart-router` (`192.168.1.1`) | OpenWrt, split-horizon DNS | — | — |
+
+- **Elevated ACL scripts on HART-DESKTOP** must grant `HART-DESKTOP\ahart` (SID `S-1-5-21-1955383224-1799969050-1119319971-1001`) FullControl alongside SYSTEM, Administrators, and service/AppPool SIDs (`Repair-DesktopPermissions.ps1`).
+- **HART-DESKTOP is on metered 5G:** never download bulk corpora or model checkpoints there.
+- The 3 owner OAuth bindings are seeded as `installation-owner` admins by `20260611000000_app_billing.sql`.
+
+---
+
+## 7. Commands
 
 ```powershell
-# Modular CLI (E:\Data\Laplace\clients\laplace\client.json -> DB: laplace):
-laplace --where                                      # Print resolved binary, client profile, and database
-laplace status                                       # Verify Tier-0, flags, and highway fingerprints + table/index counts
-laplace ingest --plan [SOURCE]                       # Plan recipe coverage without loading
-laplace ingest --claims SOURCE                       # Dry-run decompose and print emitted claims without loading
-laplace replay                                       # Verify recorded consensus standings bit-for-bit against containment
-
-# Monorepo CLI (E:\Data\Laplace\clients\laplace-mono\client.json -> DB: laplace-mono):
-laplace-mono --where                                 # Print resolved monorepo binary, profile, and database
-
-# Operations Controller (from any directory via laplace-ops or E:\Repositories\Laplace\Laplace-Operations):
-laplace-ops runs                                     # View recent CI/CD runs across all Laplace repositories
-laplace-ops status -Target desktop                   # Check local development process status
-laplace-ops build -Target desktop                    # Build desktop artifacts
-laplace-ops verify -Target desktop                   # Run end-to-end runtime verification against desktop
-laplace-ops deploy -Target desktop                   # Build, publish to dev.hartonomous.com + laplace-mono, migrate, and verify
-laplace-ops deploy desktop -Components modular-web   # Deploy & verify Modular Web + MCP (/modular/mcp) in IIS
-laplace-ops db -Database both -DatabaseOperation status # Inspect substrate and application databases
-laplace-ops deploy -Target staging -Wait             # Build, deploy, and verify main on hart-server
-laplace-ops deploy -Target production -Wait          # Promote verified staging package to hart-prod
+# Client launchers (Laplace-Operations/installation/client.py → %LOCALAPPDATA%\Laplace\bin):
+laplace --where                 # resolved binary, client profile, database
+laplace-mono --where
+# Engine CLI (laplace help | laplace describe; table in Laplace-Engine/src/op.c):
+laplace status [--joins]        # perf-cache fingerprints + table/index counts
+laplace ingest --plan [SOURCE]  # recipe coverage, no load
+laplace ingest --claims SOURCE  # dry-run decompose, print claims
+laplace ingest --catalog
+laplace replay                  # recompute standings from containment, bit-for-bit
+# Operations (Windows: laplace-ops → pwsh Laplace-Operations/laplace.ps1; `laplace-ops help`):
+laplace-ops runs                                   # recent CI/CD runs
+laplace-ops status -Target desktop                 # NOTE: no -Target defaults to staging
+laplace-ops build|verify|deploy -Target desktop    # deploy -Components modular-web for MCP/IIS only
+laplace-ops db -Database both -DatabaseOperation status
+laplace-ops deploy -Target staging -Wait           # then -Target production -Wait to promote
+laplace-ops ingest staging [SOURCE...] -Wait       # dispatches Laplace-Operations ingest.yml on hart-server
+laplace-ops data staging ...                       # data.sh over SSH to $LAPLACE_PEER
 ```
 
-- **Canonical Specifications (`E:\Repositories\Laplace\Laplace-Wiki`)**:
-  - **Execution Sequence (1–30)**: `Sequence/README.md` (`Unicode.md` $\rightarrow$ `Tier-0.md` $\rightarrow$ `Registries.md` $\rightarrow$ `Recipes.md` $\rightarrow$ `Content.md` $\rightarrow$ `Attestations.md` $\rightarrow$ `Consensus.md` $\rightarrow$ `Indexes.md` $\rightarrow$ `Forward.md` $\rightarrow$ `Conflicts.md`).
-  - **Contracts & Byte Layouts**: `Reference/Formats.md`, `Reference/Schema.md`, `Reference/Types.md`, `Reference/Native.md`, `Reference/SQL.md`, `Reference/CLI.md`, `Reference/Recipes.md`, `Reference/Ingest.md`, `Reference/Reads.md`, `Reference/Firmware.md`, `Reference/Laplace-MCP.md`, `Reference/Checks.md`.
+**Staging ingests (hart-server):** `ingest.yml` runs `laplace ingest --catalog` and then `ingest.sh` on the self-hosted runner, with one ingest per database (flock `$LAPLACE_LOCKS/ingest-<db>.lock`). Logs: `$LAPLACE_WORK/logs/ingest-runs/<UTC>/<step>.log|.exit` + `wal.tsv` (`ingest.sh`). The CI runner sets `LAPLACE_WORK=/repos/work/agents/Laplace-Operations`, so CI runs land in `/repos/work/agents/Laplace-Operations/logs/ingest-runs/`; manual `laplace-mono ingest chain` runs log to `/repos/work/agents/Laplace/laplace-mono/ingest-logs/laplace-ingest-chain.log`. Monitor with `laplace-ops runs`, `gh run watch`, or MCP `ingest_status`. Do not start, stop, or reseed staging ingests unless asked.
+
+---
+
+## 8. Documentation index (`E:\Repositories\Laplace\Laplace-Wiki`, abbreviated `W/`)
+
+| Topic | Read first | Then |
+| :--- | :--- | :--- |
+| Overview / page tree | `W/README.md`, `W/Architecture.md`, `W/Query.md` | `W/Reference/Glossary.md` |
+| Build order (30 stages) | `W/Sequence/README.md` | each `W/Sequence/<Stage>.md` |
+| Byte layouts (ID, tier-0, flags, path vertex, banks) | `W/Reference/Formats.md` | `W/Reference/Native.md`, `W/Storage/Identity.md`, `W/Storage/Physicality.md` |
+| Tier / composition rules | `W/Storage/Compositions.md` | `laplace.h` (`lp_tier_above`) |
+| Projection, Tier-0, perf-caches | `W/Sequence/Projection.md`, `Tier-0.md`, `Perfcaches.md` | `W/Research/Placement.md`, `Numerics.md` |
+| Highway / banks / registries | `W/Reference/Types.md`, `W/Sequence/Registries.md` | `manifest/banks.tsv`, `W/Repositories/Laplace/docs/decisions/0001*`, `0004*` |
+| Schema / SQL / indexes | `W/Reference/Schema.md`, `SQL.md`, `W/Sequence/Indexes.md` | `sql/laplace.sql.in` (truth) |
+| Recipes / `.format` | `W/Reference/Recipes.md`, `W/Sequence/Recipes.md` | `W/Corpora/TreeSitter.md`, `W/Repositories/Laplace-Engine/recipes/BRIEF.md` |
+| Sources / witnesses | `W/Sequence/Sources.md` | `W/Semantics/Attestations.md` |
+| Ingest pipeline | `W/Reference/Ingest.md`, `W/Sequence/Content.md` | `W/Storage/Ingestion.md`, `W/Research/Performance.md` |
+| Claims / attestations / consensus | `W/Sequence/Attestations.md`, `Consensus.md` | `W/Semantics/*`, `W/Research/Trust.md` |
+| Reads (hop, translate, pull) | `W/Reference/Reads.md`, `W/Sequence/Pull.md` | `W/Sequence/Web.md`, `W/Corpora/Hops.md` |
+| Per-corpus specifics | `W/Corpora/README.md` (source table) | `W/Corpora/<Source>.md` |
+| CLI / env | `W/Reference/CLI.md`, `Environment.md` | `src/op.c` (truth) |
+| Build / checks | `W/Reference/Build.md`, `Checks.md` | `W/Sequence/Builds.md`, `W/Operations/Builds.md` |
+| Forward / firmware / authority | `W/Sequence/Forward.md`, `Firmware.md`, `Authority.md`, `Envelope.md` | `W/Reference/Firmware.md` |
+| Models / export / code / chess | `W/Sequence/Models.md`, `Export.md`, `Code.md`, `Chess.md`, `Games.md` | `W/Reference/Monorepo.md` |
+| Ops / deploy / hosts / secrets | `W/Operations/*`, `W/Repositories/Laplace-Operations/docs/installation-map.md`, `operating-laplace.md`, `delivery.md` | `secrets-*.md`, `operator-database-access.md` |
+| MCP | `W/Repositories/Laplace-MCP/docs/API.md`, `W/Reference/Laplace-MCP.md` | `native/api_mcp.c` (truth) |
+| Monorepo app / billing / UCI | `W/Reference/Monorepo.md`, `W/Repositories/Laplace/docs/INDEX.md` | `W/Repositories/Laplace-UCI/*` |
+| Spec disagreements | `W/Sequence/Conflicts.md` | — |
+
+---
+
+## 9. Known drift (fix the doc *or* the code, then delete the line)
+
+- Wiki `Reference/Repositories.md` / `SQL.md` / `CLI.md` quote stale extension version, function count, and command count. Code is truth.
+- **Witness table → trunk (work in progress):** committed HEAD still has a `witness(id, lineage, trust, attestations)` table (postgres `laplace.sql.in`, Engine `db.c` `load_register`). The in-progress working trees replace it with `attestation` (claim, witness = trunk ID, lineage, games, tokens, score, position, trust). Wiki `Reference/Schema.md` still lists `witness`.
+- **Two path-carrier encodings:** Native `lp_id_to_xyz` (exponent 1021, 43/43/42 + 28 spare) versus monorepo `engine/core/src/mantissa.c` `mantissa_pack` / `extension/laplace_geom` (exponent 1023, 53/53/22 + flags). `laplace` and `laplace-mono` paths are not interchangeable. Converge on the Native one.
+- Web glome `Laplace/web/src/explore/glome/GlomeCanvas.tsx` `unpackMantissaCoord` decodes Native M as a "51-bit run count". The real M is run30/said3/outcome2/position18.
+- `laplace-code` MCP still runs on the `workspace.lpm` sidecar with BM25 and a paragraph chunker (§4). In `laplace`, 1,020 of 1,033 witnesses are individual code files named from `statx` bytes. Cause: `ingest.c` registers each file trunk as a witness when there is no source declaration, and `recipe.c` defaults trust to 0.60. A load with no source is content, not a witness.
