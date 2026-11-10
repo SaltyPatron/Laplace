@@ -41,7 +41,9 @@ internal static partial class IngestCommands
             ConnectionInfo: NativeConnectionInfo(CliRuntime.ConnString), Threads: CpuTopology.ResolveCpuBoundWorkers(),
             ExpandPrerequisites: cli.NativeExpandPrerequisites);
         using var output = Console.OpenStandardOutput();
-        using var error = Console.OpenStandardError();
+        using var standardError = Console.OpenStandardError();
+        // The terminal still sees everything; a failure records what Native said, not only its status.
+        using var error = new TailCaptureStream(standardError);
         using (var cancellation = new IngestCancellationScope(ct))
         {
             if (cli.NativeMode != NativeRecipeMode.Ingest)
@@ -127,7 +129,12 @@ internal static partial class IngestCommands
                 if (code != 0)
                 {
                     if (lastProgress is { } final) journal.OnNativeProgress(final, force: true);
-                    journal.OnRunFailed(source, "failed", $"Native ingestion exited with status {code}.");
+                    string said = error.Tail();
+                    string failure = said.Length == 0
+                        ? $"Native ingestion exited with status {code} and wrote nothing to stderr."
+                        : $"Native ingestion exited with status {code}:\n{said}";
+                    CliRuntime.LoggerFactory.CreateLogger("ingest").LogError("{Source}: {Failure}", source, failure);
+                    journal.OnRunFailed(source, "failed", failure);
                     journal.OnNativeFilesFinished("failed");
                     return code;
                 }
