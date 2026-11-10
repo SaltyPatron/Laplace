@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { changeWorld } from '../../world/context';
 import { SearchBar } from '../components/SearchBar';
 import { useExploreStore } from '../store';
@@ -10,6 +10,8 @@ export function MeshLanding() {
   const resetMeshTrail = useExploreStore((s) => s.resetMeshTrail);
   const [params] = useSearchParams();
   useEffect(() => resetMeshTrail(), [resetMeshTrail]);
+  // A subject in the address goes straight to the shared search with the related-structure view.
+  if (params.get('q')?.trim()) return <Navigate to={`/explore?${changeWorld(params, { presentation: 'mesh' })}`} replace />;
 
   return (
     <div className={styles.landing}>

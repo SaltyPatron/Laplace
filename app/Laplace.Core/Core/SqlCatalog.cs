@@ -42,26 +42,24 @@ public static partial class SqlCatalog
 
     private static IReadOnlyDictionary<string, NativeSqlQuery> LoadEmbeddedCatalog()
     {
-        // sql_catalog.def only #includes the sql_catalog/*.def files that hold the queries,
-        // so the fallback reads the root and every embedded part.
         var assembly = typeof(SqlCatalog).Assembly;
-        var source = new System.Text.StringBuilder();
-        foreach (var resource in assembly.GetManifestResourceNames()
-                     .Where(static name => name.StartsWith("Laplace.SqlCatalog.", StringComparison.Ordinal)
-                         && name.EndsWith(".def", StringComparison.Ordinal))
-                     .OrderBy(static name => name, StringComparer.Ordinal))
+        string Read(string resource)
         {
-            using var stream = assembly.GetManifestResourceStream(resource)!;
+            using var stream = assembly.GetManifestResourceStream(resource)
+                ?? throw new InvalidOperationException($"Missing embedded {resource} resource.");
             using var reader = new StreamReader(stream);
-            source.AppendLine(reader.ReadToEnd());
+            return reader.ReadToEnd();
         }
-        if (source.Length == 0) throw new InvalidOperationException("Missing embedded Laplace.SqlCatalog.def resource.");
+        // Resolve the root's #include lines against the embedded parts, exactly as the C preprocessor does.
+        var include = new Regex("^\\s*#include\\s+\"sql_catalog/(?<file>[^\"]+)\"\\s*$", RegexOptions.Multiline);
+        var source = include.Replace(Read("Laplace.SqlCatalog.def"),
+            m => Read("Laplace.SqlCatalog.parts." + m.Groups["file"].Value));
         var literal = new Regex("\"(?:\\\\.|[^\"\\\\])*\"", RegexOptions.Compiled);
         var pattern = new Regex(
             "SQL_QUERY\\(\\s*\"(?<name>[^\"]+)\"\\s*,\\s*\"(?<parameters>[^\"]*)\"\\s*,\\s*(?<text>(?:\"(?:\\\\.|[^\"\\\\])*\"\\s*)+)\\)",
             RegexOptions.Compiled);
         var map = new Dictionary<string, NativeSqlQuery>(StringComparer.Ordinal);
-        foreach (Match match in pattern.Matches(source.ToString()))
+        foreach (Match match in pattern.Matches(source))
         {
             var qName = match.Groups["name"].Value;
             var qParams = match.Groups["parameters"].Value;

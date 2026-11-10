@@ -163,6 +163,10 @@
   .assistant { min-width: min(20rem, 88%); }
 }
 
+.outcome { display: grid; gap: var(--space-1); justify-items: start; }
+.outcome[data-turn-state='failed'] strong { color: var(--color-error); }
+.trace { margin-top: var(--space-2); font-size: var(--text-sm); }
+.trace > summary { cursor: pointer; color: var(--color-text-muted); }
 .forwardProofLink {
   display: inline-block;
   margin-top: var(--space-2);
