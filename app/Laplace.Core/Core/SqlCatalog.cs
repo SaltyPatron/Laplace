@@ -42,10 +42,18 @@ public static partial class SqlCatalog
 
     private static IReadOnlyDictionary<string, NativeSqlQuery> LoadEmbeddedCatalog()
     {
-        using var stream = typeof(SqlCatalog).Assembly.GetManifestResourceStream("Laplace.SqlCatalog.def")
-            ?? throw new InvalidOperationException("Missing embedded Laplace.SqlCatalog.def resource.");
-        using var reader = new StreamReader(stream);
-        var source = reader.ReadToEnd();
+        var assembly = typeof(SqlCatalog).Assembly;
+        string Read(string resource)
+        {
+            using var stream = assembly.GetManifestResourceStream(resource)
+                ?? throw new InvalidOperationException($"Missing embedded {resource} resource.");
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        // Resolve the root's #include lines against the embedded parts, exactly as the C preprocessor does.
+        var include = new Regex("^\\s*#include\\s+\"sql_catalog/(?<file>[^\"]+)\"\\s*$", RegexOptions.Multiline);
+        var source = include.Replace(Read("Laplace.SqlCatalog.def"),
+            m => Read("Laplace.SqlCatalog.parts." + m.Groups["file"].Value));
         var literal = new Regex("\"(?:\\\\.|[^\"\\\\])*\"", RegexOptions.Compiled);
         var pattern = new Regex(
             "SQL_QUERY\\(\\s*\"(?<name>[^\"]+)\"\\s*,\\s*\"(?<parameters>[^\"]*)\"\\s*,\\s*(?<text>(?:\"(?:\\\\.|[^\"\\\\])*\"\\s*)+)\\)",
