@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION ops.native_source_completed(p_source text)
 AS $$
 DECLARE complete boolean;
 BEGIN
-    IF to_regclass('public.witness') IS NULL THEN RETURN false; END IF;
+    IF to_regclass('public.attestation') IS NULL THEN RETURN false; END IF;
     EXECUTE $read$
         WITH latest AS (
             SELECT * FROM laplace.ingest_run_journal
@@ -19,10 +19,9 @@ BEGIN
         )
         SELECT EXISTS (
             SELECT FROM latest j
-            JOIN public.witness w ON w.id::text = encode(j.source_id, 'hex')
-            JOIN public.physicality p ON p.entity = w.id
+            JOIN public.physicality p ON p.entity::text = encode(j.source_id, 'hex')
             WHERE j.status = 'ok'
-              AND (NOT j.attestations_measured OR w.attestations IS NOT NULL)
+              AND EXISTS (SELECT 1 FROM public.attestation a WHERE a.witness = p.entity)
               AND j.ended_at IS NOT NULL
               AND j.files_total > 0 AND j.files_done = j.files_total
         )

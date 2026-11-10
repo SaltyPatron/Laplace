@@ -85,7 +85,7 @@ SQL_QUERY("verify.canonical_staged_root", "public.blake3",
 SQL_QUERY("verify.canonical_readonly", "", "SET TRANSACTION READ ONLY")
 SQL_QUERY("verify.unseeded_scalar_floor", "", "SELECT count(*) FROM public.entity WHERE tier=0")
 SQL_QUERY("verify.native_source_witness", "text",
-    "SELECT w.id::text FROM public.witness w JOIN public.physicality p ON p.entity=w.id "
+    "SELECT w.id::text FROM (SELECT DISTINCT witness AS id FROM public.attestation) w JOIN public.physicality p ON p.entity=w.id "
     "WHERE public.laplace_path_starts(p.path,public.laplace_text_id($1)) ORDER BY w.id")
 SQL_QUERY("verify.native_claim", "text[],text,text[],text",
     "WITH parts AS (SELECT "
