@@ -11,6 +11,7 @@ LAPLACE_DBNAME=declared_fixture
 mkdir -p "$EXT_SHARE/extension"
 printf 'geom bridge\n' > "$EXT_SHARE/extension/laplace_geom_upgrade.sql"
 printf 'substrate bridge\n' > "$EXT_SHARE/extension/laplace_substrate_upgrade.sql"
+printf "default_version = '1.26'\nmodule_pathname = '\$libdir/laplace_fixture'\n" > "$EXT_SHARE/extension/laplace.control"
 need_pg(){ :; }
 say(){ :; }
 fail(){ echo "$*" >&2; exit 1; }
@@ -21,6 +22,7 @@ sql(){
     *"default_version"*) echo new_hash;;
     *"extversion"*) echo old_hash;;
     *"ALTER EXTENSION"*) printf '%s\n' "$*" >> "$work/applied";;
+    *"laplace_restore_function_bindings"*) printf '%s\n' "$*" >> "$work/rebound";;
     *) fail "unexpected SQL operation: $*";;
   esac
 }
@@ -30,4 +32,7 @@ grep -q "ALTER EXTENSION laplace UPDATE TO '1.26'" "$work/applied"
 cmp "$EXT_SHARE/extension/laplace_geom_upgrade.sql" "$EXT_SHARE/extension/laplace_geom--old_hash--new_hash.sql"
 cmp "$EXT_SHARE/extension/laplace_substrate_upgrade.sql" "$EXT_SHARE/extension/laplace_substrate--old_hash--new_hash.sql"
 [[ $(wc -l < "$work/applied") == 3 ]]
+# The content-addressed Native module is rebound from the installed control file, once.
+grep -qF "AS '\$libdir/laplace_fixture', 'laplace_restore_function_bindings'" "$work/rebound"
+[[ $(wc -l < "$work/rebound") == 1 ]]
 echo 'PASS Native uses its version chain; monorepo extensions retain their hash bridges'

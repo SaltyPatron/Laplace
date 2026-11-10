@@ -142,7 +142,7 @@ class SeedRoleAnalyzes(unittest.TestCase):
                 body.index("AnalyzeOrThrowAsync(command,"))
         self.assertLess(body.index("AnalyzeOrThrowAsync(command,"), body.index("public sealed record GinMaintenance"))
         self.assertIn('InvariantSeverity, "WARNING"', ops)
-        cli = (ROOT / "app" / "Laplace.Cli" / "IngestCommands.cs").read_text(encoding="utf-8")
+        cli = (ROOT / "app" / "Laplace.Cli" / "IngestCommands.Runner.cs").read_text(encoding="utf-8")
         catch = cli.index("catch (AnalyzeIncompleteException ex) { analyzeFailure = ex; }")
         self.assertLess(catch, cli.index('warn: ingest validation failed'),
                         "a skipped ANALYZE is caught before the advisory validation warning")
