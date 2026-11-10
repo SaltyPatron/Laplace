@@ -10,12 +10,10 @@ BEGIN
     IF to_regclass('public.entity') IS NOT NULL THEN
         IF p_type IS NULL AND p_object IS NULL THEN
             IF p_source IS NULL THEN RETURN ops.attestation_count(); END IF;
-            IF NOT EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
-                          AND attname='attestations' AND NOT attisdropped) THEN RETURN NULL; END IF;
-            EXECUTE 'SELECT attestations FROM public.witness WHERE id=public.blake3_from_bytea($1)'
+            IF to_regclass('public.attestation') IS NULL THEN RETURN NULL; END IF;
+            EXECUTE 'SELECT count(DISTINCT claim) FROM public.attestation WHERE witness=public.blake3_from_bytea($1)'
                 INTO measured USING p_source;
-            IF NOT EXISTS(SELECT FROM public.witness WHERE id=public.blake3_from_bytea(p_source)) THEN RETURN 0; END IF;
-            RETURN measured;
+            RETURN coalesce(measured, 0);
         END IF;
         -- Filter actual claim endpoints, then count claim/trunk pairs. Repeated
         -- observations and shared dependence roots do not change cardinality.

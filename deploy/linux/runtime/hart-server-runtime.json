@@ -16,6 +16,9 @@
   "database_service": "pgdata",
   "pg_os_user": "postgres",
   "runtime_user": "laplace-api",
+  "data_access": {
+    "write": ["/vault/Data/Games/Chess"]
+  },
   "state": "/hosting/laplace/runtime/api",
   "prefix": "/opt/laplace",
   "machine_file": "/etc/laplace/machine.env",

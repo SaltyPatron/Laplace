@@ -27,13 +27,26 @@ public static partial class ChessGameFetcher
 
     internal static string ArchiveDirectory(string user)
     {
+        string fallback = Path.Combine(ChessLabPaths.LabDir, "chesscom", Sanitize(user));
+        string shared;
         try
         {
-            return Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "chesscom", Sanitize(user));
+            shared = Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "chesscom", Sanitize(user));
         }
         catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
         {
-            return Path.Combine(ChessLabPaths.LabDir, "chesscom", Sanitize(user));
+            return fallback;
+        }
+        // The isolated API runtime identity may not own the shared games corpus; the
+        // monthly cache then lives under the lab directory, which it does own.
+        try
+        {
+            Directory.CreateDirectory(shared);
+            return shared;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return fallback;
         }
     }
 
@@ -108,12 +121,30 @@ public static partial class ChessGameFetcher
         // Route the archive-index request through the same visible provider retry
         // channel as monthly PGNs. A throttle on the very first request must not look
         // like a hung import while later requests report their backoff.
-        var archJson = await GetStringWithRetryAsync(
-            archUrl, ct, retryNotFound: true, log: log);
-        using var doc = JsonDocument.Parse(archJson);
-        var archives = ChronologicalArchiveUrls(
-            doc.RootElement.GetProperty("archives").EnumerateArray()
-                .Select(e => e.GetString()!));
+        IReadOnlyList<string> archives;
+        string? archJson = await GetOptionalStringAsync(archUrl, ct, log);
+        if (archJson is not null)
+        {
+            using var doc = JsonDocument.Parse(archJson);
+            archives = ChronologicalArchiveUrls(
+                doc.RootElement.GetProperty("archives").EnumerateArray()
+                    .Select(e => e.GetString()!));
+        }
+        else
+        {
+            // Chess.com answers 404 ("Data provider not found") on /games/archives for some
+            // existing accounts while every monthly archive stays public (an empty month is
+            // 200 with an empty body). Enumerate the months from the profile's join date.
+            string profileJson = await GetStringWithRetryAsync(ChessComPlayerUrl(user), ct, log: log);
+            using var profile = JsonDocument.Parse(profileJson);
+            if (!profile.RootElement.TryGetProperty("joined", out var joinedValue)
+                || !joinedValue.TryGetInt64(out long joined))
+                throw new HttpRequestException(
+                    $"chess.com has no archive index for '{user}' and its profile has no join date: {archUrl}",
+                    null, HttpStatusCode.NotFound);
+            archives = ChessComMonthUrls(user, DateTimeOffset.FromUnixTimeSeconds(joined).UtcDateTime, DateTime.UtcNow);
+            log?.Invoke($"  archive index 404 on chess.com; enumerating {archives.Count} months since join");
+        }
         // Chess.com's public API is one request at a time. A caller-supplied
         // concurrency does not widen this download.
         _ = concurrency;
@@ -215,6 +246,17 @@ public static partial class ChessGameFetcher
         if (!string.IsNullOrWhiteSpace(response.ETag))
             await File.WriteAllTextAsync(etagPath, response.ETag.Trim(), utf8, ct);
         return response.Body;
+    }
+
+    internal static IReadOnlyList<string> ChessComMonthUrls(string user, DateTime joinedUtc, DateTime utcNow)
+    {
+        var months = new List<string>();
+        string player = ChessComPlayerUrl(user);
+        for (var m = new DateTime(joinedUtc.Year, joinedUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+             m.Year < utcNow.Year || (m.Year == utcNow.Year && m.Month <= utcNow.Month);
+             m = m.AddMonths(1))
+            months.Add($"{player}/games/{m.Year:0000}/{m.Month:00}");
+        return months;
     }
 
     internal static IReadOnlyList<string> ChronologicalArchiveUrls(IEnumerable<string> archives)
@@ -411,7 +453,8 @@ public static partial class ChessGameFetcher
     public static async Task<ChessPlayerProfile> FetchChessComProfileAsync(string user, CancellationToken ct)
     {
         string json = await GetStringWithRetryAsync(ChessComPlayerUrl(user), ct);
-        string statsJson = await GetStringWithRetryAsync(ChessComStatsUrl(user), ct);
+        // Ratings are enrichment: chess.com 404s /stats for some existing accounts.
+        string statsJson = await GetOptionalStringAsync(ChessComStatsUrl(user), ct) ?? "{}";
         return ParseChessComProfile(json, statsJson, user);
     }
 

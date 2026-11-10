@@ -59,6 +59,9 @@ Usage: sudo bash $0
   stripe                   Seed Stripe secrets and install/start the dev webhook listener only.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
+  data-access              Grant the isolated API identity the shared data directories its
+                           runtime manifest declares (data_access.write) as verified ACLs.
+                           Also applied by the default setup's runtime installation.
   cutechess-session        Prepare and start the persistent operator Qt session over SSH.
                           Add --prepare-only to qualify dependencies before starting.
   status / reset           Debug / teardown.
@@ -334,6 +337,9 @@ case "$MODE" in
     migrations)      layer1_up ;;
     managed-services) managed_services_setup "${@:2}" ;;
     managed-services-status) managed_services_status ;;
+    data-access)
+        python3 "$REPO_DIR/deploy/linux/runtime/install.py" --data-access "${@:2}"
+        ;;
     cutechess-session)
         python3 "$REPO_DIR/deploy/linux/laplace-cutechess-bootstrap" \
             --operator "$LAPLACE_OPERATOR" "${@:2}"
@@ -343,7 +349,7 @@ case "$MODE" in
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/storage/shared-workspace/migrations/stripe/managed-services/managed-services-status/cutechess-session/status/reset"
+        red "Unknown mode: $MODE — use setup/storage/shared-workspace/migrations/stripe/managed-services/managed-services-status/data-access/cutechess-session/status/reset"
         usage
         exit 64
         ;;

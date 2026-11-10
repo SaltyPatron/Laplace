@@ -390,7 +390,43 @@ def install(config, lock):
     # Keep it if a later identity activation fails; old serving connections remain valid.
     config['root_certificate'] = config['tls']['root_certificate']
     config['substrate']['root_certificate'] = config['tls']['root_certificate']
-    return install_identities(config, lock)
+    verification = install_identities(config, lock)
+    verification['data_access'] = apply_data_access(config)
+    return verification
+
+
+def data_access_paths(config):
+    """Shared data directories the isolated API identity must write (declared, never inferred)."""
+    paths = []
+    for raw in config.get('data_access', {}).get('write', []):
+        path = Path(raw)
+        if not path.is_absolute() or path == Path('/') or '..' in path.parts:
+            raise ValueError('Invalid declared data access path: ' + raw)
+        if any(p.is_symlink() for p in (path, *path.parents)):
+            raise ValueError('Declared data access must not traverse symbolic links: ' + raw)
+        if not path.is_dir():
+            raise ValueError('Missing declared data access directory: ' + raw)
+        paths.append(path)
+    return paths
+
+
+def apply_data_access(config):
+    """Grant the API runtime identity rwX (plus inherited defaults) on declared shared data.
+
+    The identity keeps its own primary group; it is not added to the runner group.
+    Default ACLs keep the directory's owning group able to read what the API writes,
+    so CI ingest and the operator still see the API's downloads.
+    """
+    user = config['runtime_user']
+    pwd.getpwnam(user)
+    result = []
+    for path in data_access_paths(config):
+        checked(['setfacl', '-R', '-m', f'u:{user}:rwX,d:u:{user}:rwX,d:g::rwX', str(path)], timeout=600)
+        probe = path / f'.laplace-access-{uuid.uuid4().hex[:8]}'
+        checked(['runuser', '-u', user, '--', 'mkdir', str(probe)], timeout=10)
+        checked(['runuser', '-u', user, '--', 'rmdir', str(probe)], timeout=10)
+        result.append({'path': str(path), 'user': user, 'access': 'write', 'verified': True})
+    return result
 
 
 def machine_settings(config):
@@ -579,6 +615,7 @@ def main():
     parser.add_argument('--select', action='store_true', help='Resolve and validate declared topology without changing the installation')
     parser.add_argument('--check', action='store_true', help='Check installed prerequisites; root also verifies the private workload enrollment')
     parser.add_argument('--storage-check', action='store_true', help='Check the filesystems the declared installation will write before changing services')
+    parser.add_argument('--data-access', action='store_true', help='Apply and verify only the declared shared-data ACLs for the API identity (root)')
     args = parser.parse_args()
     manifest = selected_manifest(args.manifest)
     if manifest is None:
@@ -593,6 +630,12 @@ def main():
     if args.storage_check:
         validate_declaration(config)
         print(json.dumps({'storage': storage_preflight(config), 'changed': False}))
+        return
+    if args.data_access:
+        if os.geteuid() != 0:
+            raise ValueError('Apply data access with sudo bash scripts/setup-host.sh data-access')
+        validate_declaration(config)
+        print(json.dumps({'data_access': apply_data_access(config), 'changed': True}))
         return
     if args.check:
         receipt = preflight(config)

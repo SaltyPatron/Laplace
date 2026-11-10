@@ -205,7 +205,7 @@ typedef struct ObservedUpos
 {
     hash128_t form;
     hash128_t upos;
-    __int128 conservative;
+    laplace_standing128 conservative;
 } ObservedUpos;
 
 static void
@@ -214,7 +214,7 @@ receive_observed_upos(const LaplaceClassificationRow *row, void *context)
     HTAB *best = context;
     ObservedUpos *entry;
     bool found;
-    __int128 conservative;
+    laplace_standing128 conservative;
     if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
     conservative = (__int128) row->rating - 2 * (__int128) row->rd;

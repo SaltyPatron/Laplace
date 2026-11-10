@@ -5,14 +5,13 @@ CREATE OR REPLACE FUNCTION ops.source_counts_approx()
 AS $source_counts$
 BEGIN
     IF to_regclass('public.entity') IS NOT NULL THEN
-        RETURN QUERY EXECUTE format(
-            'SELECT coalesce(j.source_name,c.source_label,w.id::text),public.blake3_send(w.id),%s
-             FROM public.witness w LEFT JOIN ops.witness_catalog() c ON c.id=w.id
+        RETURN QUERY EXECUTE
+            'WITH w AS (SELECT witness AS id, count(DISTINCT claim) AS attestations FROM public.attestation GROUP BY witness)
+             SELECT coalesce(j.source_name,c.source_label,w.id::text),public.blake3_send(w.id),w.attestations
+             FROM w LEFT JOIN ops.witness_catalog() c ON c.id=w.id
              LEFT JOIN LATERAL (SELECT source_name FROM laplace.ingest_run_journal
                 WHERE source_id=public.blake3_send(w.id) ORDER BY started_at DESC LIMIT 1) j ON true
-             ORDER BY w.id',
-            CASE WHEN EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
-                 AND attname='attestations' AND NOT attisdropped) THEN 'w.attestations' ELSE 'NULL::bigint' END);
+             ORDER BY w.id';
         RETURN;
     END IF;
     RETURN QUERY

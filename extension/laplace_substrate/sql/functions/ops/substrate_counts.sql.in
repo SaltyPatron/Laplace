@@ -7,12 +7,10 @@ CREATE OR REPLACE FUNCTION ops.attestation_count()
 RETURNS bigint LANGUAGE plpgsql STABLE AS $$
 DECLARE measured bigint;
 BEGIN
-    IF NOT EXISTS(SELECT FROM pg_attribute WHERE attrelid=to_regclass('public.witness')
-                  AND attname='attestations' AND NOT attisdropped) THEN
+    IF to_regclass('public.attestation') IS NULL THEN
         RETURN NULL;
     END IF;
-    EXECUTE 'SELECT CASE WHEN count(*) FILTER (WHERE attestations IS NULL)>0 THEN NULL
-             ELSE coalesce(sum(attestations),0)::bigint END FROM public.witness' INTO measured;
+    EXECUTE 'SELECT count(*) FROM public.attestation' INTO measured;
     RETURN measured;
 END $$;
 
