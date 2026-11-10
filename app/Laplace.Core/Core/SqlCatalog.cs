@@ -42,16 +42,26 @@ public static partial class SqlCatalog
 
     private static IReadOnlyDictionary<string, NativeSqlQuery> LoadEmbeddedCatalog()
     {
-        using var stream = typeof(SqlCatalog).Assembly.GetManifestResourceStream("Laplace.SqlCatalog.def")
-            ?? throw new InvalidOperationException("Missing embedded Laplace.SqlCatalog.def resource.");
-        using var reader = new StreamReader(stream);
-        var source = reader.ReadToEnd();
+        // sql_catalog.def only #includes the sql_catalog/*.def files that hold the queries,
+        // so the fallback reads the root and every embedded part.
+        var assembly = typeof(SqlCatalog).Assembly;
+        var source = new System.Text.StringBuilder();
+        foreach (var resource in assembly.GetManifestResourceNames()
+                     .Where(static name => name.StartsWith("Laplace.SqlCatalog.", StringComparison.Ordinal)
+                         && name.EndsWith(".def", StringComparison.Ordinal))
+                     .OrderBy(static name => name, StringComparer.Ordinal))
+        {
+            using var stream = assembly.GetManifestResourceStream(resource)!;
+            using var reader = new StreamReader(stream);
+            source.AppendLine(reader.ReadToEnd());
+        }
+        if (source.Length == 0) throw new InvalidOperationException("Missing embedded Laplace.SqlCatalog.def resource.");
         var literal = new Regex("\"(?:\\\\.|[^\"\\\\])*\"", RegexOptions.Compiled);
         var pattern = new Regex(
             "SQL_QUERY\\(\\s*\"(?<name>[^\"]+)\"\\s*,\\s*\"(?<parameters>[^\"]*)\"\\s*,\\s*(?<text>(?:\"(?:\\\\.|[^\"\\\\])*\"\\s*)+)\\)",
             RegexOptions.Compiled);
         var map = new Dictionary<string, NativeSqlQuery>(StringComparer.Ordinal);
-        foreach (Match match in pattern.Matches(source))
+        foreach (Match match in pattern.Matches(source.ToString()))
         {
             var qName = match.Groups["name"].Value;
             var qParams = match.Groups["parameters"].Value;

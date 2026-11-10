@@ -186,7 +186,7 @@ function Test-IisPackage([string]$Path) {
     foreach($file in 'migrations/Laplace.Migrations.dll','migrations/Laplace.Migrations.deps.json','migrations/Laplace.Migrations.runtimeconfig.json') {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS migration runtime: $file"}
     }
-    if(-not @(Get-ChildItem -LiteralPath (Join-Path $Path 'migrations/db/migrations') -Filter '*.sql' -File -ErrorAction SilentlyContinue).Count){throw 'The IIS migration runtime has no SQL migrations.'}
+    if(-not @(Get-ChildItem -LiteralPath (Join-Path $Path 'migrations/db/schema') -Filter '*.sql' -File -ErrorAction SilentlyContinue).Count){throw 'The IIS migration runtime has no declared schema (db/schema).'}
     foreach($file in @('Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','Laplace.Endpoints.OpenAICompat.runtimeconfig.json','wwwroot/index.html','laplace_core.dll','laplace_dynamics.dll','laplace_synthesis.dll','laplace_syzygy.dll','cli/Laplace.Cli.exe')) {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS package: $file"}
     }

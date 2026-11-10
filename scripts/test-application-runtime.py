@@ -26,7 +26,7 @@ class RuntimeGuardTests(unittest.TestCase):
         self.staged = base / "staged-install"
         self.database = {"server_version": "180000", "running_ingests": 0,
                          "extension_functions": "fixture-functions", "database": "fixture",
-                         "postmaster_started": "fixture-start", "migrations": ["001.sql"],
+                         "postmaster_started": "fixture-start", "declared_schema": True,
                          "database_oid": 16384, "system_identifier": "9223372036854775807",
                          "extensions": {"laplace_geom": "fixture", "laplace_substrate": "fixture"},
                          "roms": {}}
@@ -35,7 +35,7 @@ class RuntimeGuardTests(unittest.TestCase):
                    "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.root / "build") + "\n"
                    "CMAKE_INSTALL_PREFIX:PATH=" + str(self.prefix) + "\n")
         self.write(self.root / "build/cmake_install.cmake", "# explicit install protocol fixture\n")
-        self.write(self.root / "db/migrations/001.sql", "SELECT 1;")
+        self.write(self.root / "db/schema/001.sql", "SELECT 1;")
         for built, installed in guard.MODULES.items():
             # Build and installed bytes are deliberately different. CMake rewrites ELF
             # runtime paths during installation, so equality must be against the staged
@@ -409,11 +409,11 @@ class RuntimeGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SQL version"):
             self.snapshot()
 
-    def test_pending_migration_or_empty_journal_fails(self):
-        for migrations in ([], None, ["different.sql"]):
-            with self.subTest(migrations=migrations):
-                self.database["migrations"] = migrations
-                with self.assertRaisesRegex(ValueError, "migrations"):
+    def test_unapplied_declared_schema_fails(self):
+        for declared in (False, None):
+            with self.subTest(declared=declared):
+                self.database["declared_schema"] = declared
+                with self.assertRaisesRegex(ValueError, "declared schema"):
                     self.snapshot()
 
     def test_publication_and_recording_retain_journal_progress_without_a_global_gate(self):
@@ -435,7 +435,7 @@ class RuntimeGuardTests(unittest.TestCase):
             ("build", "cacheSha256"), ("artifacts", self.execution_artifact),
             ("database", "database"), ("database", "server_version"),
             ("database", "postmaster_started"), ("database", "extension_functions"),
-            ("database", "extensions"), ("database", "migrations"),
+            ("database", "extensions"), ("database", "declared_schema"),
             ("database", "roms"), ("database", "native_mappings"),
         ]
         for purpose in ("publication", "recording"):

@@ -216,7 +216,7 @@ layer1_up() {
 }
 
 layer1_status() {
-    say "Layer 1 — DbUp status"
+    say "Layer 1 — declared schema drift status"
     layer1_clean_foreign_build_artifacts
     runner_dotnet "run --project '$MIGRATIONS_PROJ' -c Release -- status" \
         || yellow "(database not yet present; run setup)"

@@ -1,3 +1,9 @@
+-- DECLARED SCHEMA, substrate database: extensions, the ops log readers.
+-- Applied in full, in file-name order, on every create and every deploy
+-- (Laplace.Migrations substrate-up / up). There is no journal: every statement here is
+-- idempotent, and re-applying reconciles drift. Grants are declared in
+-- 20_substrate_grants.sql.
+
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 -- The Engine and managed entry points use the same Native substrate contract.
@@ -130,28 +136,3 @@ $$;
 
 -- ops.chess_drops() is owned by the versioned substrate extension.
 
--- =============================================================================
--- Schema & Table Grants
--- =============================================================================
-
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_app') THEN
-        EXECUTE 'GRANT USAGE ON SCHEMA laplace TO laplace_app';
-        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA laplace TO laplace_app';
-        EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA laplace TO laplace_app';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA laplace
-                 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO laplace_app';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA laplace
-                 GRANT USAGE ON SEQUENCES TO laplace_app';
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'laplace_readonly') THEN
-        EXECUTE 'GRANT USAGE ON SCHEMA laplace TO laplace_readonly';
-        EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA laplace TO laplace_readonly';
-        EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA laplace TO laplace_readonly';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA laplace
-                 GRANT SELECT ON TABLES TO laplace_readonly';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA laplace
-                 GRANT USAGE ON SEQUENCES TO laplace_readonly';
-    END IF;
-END $$;

@@ -1,6 +1,6 @@
 @echo off
-rem migrate-db — create + migrate %LAPLACE_DBNAME% on %LAPLACE_PGHOST% via Laplace.Migrations
-rem (EnsureDatabase creates the DB; layer1 migration installs laplace_substrate from the
+rem migrate-db — create + apply the declared schema (db/schema) to %LAPLACE_DBNAME% on %LAPLACE_PGHOST% via Laplace.Migrations
+rem (up creates the DB; the declaration installs laplace_substrate from the
 rem HOST-side available extension). Then gate on schema generation: post-PR#322 substrate
 rem is two-axis partitioned — laplace.entities must be relkind 'p'. A plain 'r' means the
 rem host's installed extension predates the greenfield schema and seeding would target the

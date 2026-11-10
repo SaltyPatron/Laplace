@@ -8,7 +8,7 @@ unset LAPLACE_PLATFORM_OWNER_POLICY_FILE
 export LAPLACE_WORK_ROOT="$work/no-owner-policy"
 trap 'rm -rf "$work"' EXIT
 sed -n '/^revision() {/,/^}/p; /^phase_migrate_app() {/,/^}/p' "$root/deploy/linux/site.sh" > "$work/functions.sh"
-mkdir -p "$work/stage/app/wwwroot" "$work/stage/app/migrations/db/migrations"
+mkdir -p "$work/stage/app/wwwroot" "$work/stage/app/migrations/db/schema"
 revision=1111111111111111111111111111111111111111
 printf '%s\n' "$revision" > "$work/stage/app/.laplace-source-revision"
 printf '%s\n' "$revision" > "$work/stage/app/wwwroot/.laplace-web-source-revision"

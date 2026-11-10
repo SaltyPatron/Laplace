@@ -328,7 +328,7 @@ phase_migrate() {
   say "migrate $LAPLACE_DBNAME"
   local out="$SITE_WORK/migrations"
   dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$out" -v minimal --nologo
-  ( cd "$ROOT" && LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" dotnet "$out/Laplace.Migrations.dll" up )   # db/migrations is read from the checkout
+  ( cd "$ROOT" && LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" dotnet "$out/Laplace.Migrations.dll" up )   # the declared schema (db/schema) is read from the checkout and applied on every deploy
   [[ "$(sql -c "SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'laplace' AND c.relname = 'entities'")" == p ]] \
     || fail "laplace.entities is not the partitioned generation: the extension installed predates the schema"
 }
@@ -374,8 +374,8 @@ phase_app() {
   rm -rf "$stage"; mkdir -p "$stage"
   dotnet_app publish "$ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" -c Release --no-self-contained -o "$stage/app" -v minimal --nologo
   dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$stage/app/migrations" -v minimal --nologo
-  mkdir -p "$stage/app/migrations/db/migrations"
-  cp -a "$ROOT/db/migrations/." "$stage/app/migrations/db/migrations/"
+  mkdir -p "$stage/app/migrations/db/schema"
+  cp -a "$ROOT/db/schema/." "$stage/app/migrations/db/schema/"
   # Runtime verification travels with the release; an installed host needs no
   # source checkout or build workspace to prove its authenticated native path.
   mkdir -p "$stage/app/operations/scripts/lib" "$stage/app/operations/deploy/linux"
@@ -823,7 +823,7 @@ phase_migrate_app() {
   [[ -n "${LAPLACE_APP_DB:-}" ]] || fail "migrate_app requires the declared application database"
   local app="$SITE_WORK/stage/app"
   revision "$app" >/dev/null
-  [[ -d "$app/migrations/db/migrations" ]] || fail "staged migration scripts are missing"
+  [[ -d "$app/migrations/db/schema" ]] || fail "staged migration scripts are missing"
   LAPLACE_OPS_LOG_DIR="$SITE_WORK/logs" python3 "$ROOT/deploy/linux/platform-owner-policy.py" -- dotnet "$app/migrations/Laplace.Migrations.dll" app-up
 }
 

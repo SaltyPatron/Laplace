@@ -1,6 +1,4 @@
 using System.Linq;
-using DbUp;
-using DbUp.Engine;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
@@ -11,7 +9,7 @@ namespace Laplace.Migrations;
 
 internal static class Program
 {
-    // Spectre.Console.Cli entrypoint routes verbs to the DbUp helpers. The connection string and --yes are resolved from the raw
+    // Spectre.Console.Cli entrypoint routes verbs to the declared-schema helpers. The connection string and --yes are resolved from the raw
     // process args, independent of Spectre parsing. The CommandApp has no registrar because no
     // command takes constructor dependencies.
     public static int Main(string[] args)
@@ -117,27 +115,27 @@ internal static class Program
         public bool Yes { get; init; }
     }
 
-    [System.ComponentModel.Description("EnsureDatabase + apply all pending migrations (default).")]
+    [System.ComponentModel.Description("Create the database if missing and apply the declared schema, roles and grants (default).")]
     internal sealed class UpCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("up", RunUp);
     }
 
-    [System.ComponentModel.Description("Apply application migrations to LAPLACE_APP_DB only.")]
+    [System.ComponentModel.Description("Apply the declared application schema to LAPLACE_APP_DB only.")]
     internal sealed class AppUpCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
             => Dispatch("app-up", _ => RunAppUp());
     }
 
-    [System.ComponentModel.Description("Show pending and applied application migrations only.")]
+    [System.ComponentModel.Description("Report drift between the declared application schema and the live catalog.")]
     internal sealed class AppStatusCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
             => Dispatch("app-status", connection => RunStatusTargets(new[] { (connection, (Func<string, bool>)IsAppScript, "application database") }));
     }
 
-    [System.ComponentModel.Description("Verify application tables and pending migrations without changing data.")]
+    [System.ComponentModel.Description("Verify the application database matches its declaration without changing data.")]
     internal sealed class AppCheckCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
@@ -155,18 +153,22 @@ internal static class Program
     private static int RunAppCheck(string connectionString)
     {
         var owners = PlatformOwnerPolicy.Load();
-        if (BuildEngine(connectionString, IsAppScript).GetScriptsToExecute().Count != 0)
-            throw new InvalidOperationException("Application migrations are pending; run app-up.");
+        var drift = DeclaredSchema.Drift(connectionString, DeclaredSchema.Files(IsAppScript));
+        if (drift.Count != 0)
+        {
+            DeclaredSchema.Report("application database", drift);
+            throw new InvalidOperationException("The application database drifts from the declared schema; run app-up.");
+        }
         if (!HasAllAppTables(connectionString))
             throw new InvalidOperationException("The application database is missing required identity or billing tables.");
         using var database = NpgsqlDataSource.Create(connectionString);
         new PlatformOwnerReconciler(database, owners).VerifyAsync().GetAwaiter().GetResult();
-        Console.WriteLine("Application migrations and identity/billing tables verified.");
+        Console.WriteLine("Declared application schema and identity/billing tables verified.");
         ReportOwners(owners);
         return 0;
     }
 
-    [System.ComponentModel.Description("Clear the application migration journal; preserves application data.")]
+    [System.ComponentModel.Description("Re-apply the declared application schema (there is no journal to clear); preserves application data.")]
     internal sealed class AppResetCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
@@ -180,19 +182,19 @@ internal static class Program
             => Dispatch("app-nuke", connection => RunNuke(connection, applicationOnly: true));
     }
 
-    [System.ComponentModel.Description("Show applied vs pending migrations.")]
+    [System.ComponentModel.Description("Report drift between the declared schema and the live catalog.")]
     internal sealed class StatusCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("status", RunStatus);
     }
 
-    [System.ComponentModel.Description("Drop SchemaVersions (re-applies migrations; preserves DB data).")]
+    [System.ComponentModel.Description("Re-apply the declared schema (there is no journal to clear); preserves DB data.")]
     internal sealed class ResetCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("reset", RunReset);
     }
 
-    [System.ComponentModel.Description("Recreate from installed migrations, preserving configuration and access; deletes data.")]
+    [System.ComponentModel.Description("Recreate from the declared schema, preserving configuration and access; deletes data.")]
     internal sealed class NukeCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct) => Dispatch("nuke", RunNuke);
@@ -201,14 +203,14 @@ internal static class Program
     private static int RunUp(string connectionString)
         => RunUpTargets(Targets(connectionString));
 
-    [System.ComponentModel.Description("Create and migrate only the selected substrate database.")]
+    [System.ComponentModel.Description("Create and apply the declared schema to only the selected substrate database.")]
     internal sealed class SubstrateUpCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
             => Dispatch("substrate-up", connection => RunUpTargets(new[] { (connection, (Func<string, bool>)(path => !IsAppScript(path)), "substrate database") }));
     }
 
-    [System.ComponentModel.Description("Show pending and applied substrate migrations only.")]
+    [System.ComponentModel.Description("Report drift between the declared substrate schema and the live catalog.")]
     internal sealed class SubstrateStatusCommand : Command<MigrateSettings>
     {
         protected override int Execute(CommandContext ctx, MigrateSettings s, CancellationToken ct)
@@ -227,58 +229,30 @@ internal static class Program
         var selected = targets.ToArray();
         var owners = selected.Any(item => IncludesApplication(item.filter)) ? PlatformOwnerPolicy.Load() : null;
         // File sink only: the human-facing report goes to stdout below; this is the
-        // queryable record of which migration applied when, read through ops.app_log.
+        // queryable record of what was applied when, read through ops.app_log.
         var log = Laplace.Ops.LaplaceLogging.CreateLogger("migrations.up");
 
-        var applied = new List<DbUp.Engine.SqlScript>();
-
         // The app schema (accounts, sessions, keys, billing) has a database of its own when LAPLACE_APP_DB is set:
-        // its scripts go there and nowhere else; the substrate database takes the rest. One database takes all.
+        // its declaration goes there and nowhere else; the substrate database takes the rest. One database takes all.
         foreach (var (target, filter, label) in selected)
         {
-            EnsureDatabase.For.PostgresqlDatabase(target, new LiteralSafeUpgradeLog());
-            var engine = BuildEngine(target, filter);
-            var result = engine.PerformUpgrade();
-            if (!result.Successful)
+            DeclaredSchema.EnsureDatabase(target);
+            IReadOnlyList<string> applied;
+            try
             {
-                Console.Error.WriteLine($"[migrate up FAILED] {label}: {result.Error?.Message}");
-                log.LogError(result.Error, "migration upgrade failed ({Target})", label);
+                applied = DeclaredSchema.Apply(target, DeclaredSchema.Files(filter));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[apply FAILED] {label}: {ex.Message}");
+                log.LogError(ex, "declared schema apply failed ({Target})", label);
                 return 1;
             }
-            applied.AddRange(result.Scripts);
-            // Reconcile the Native substrate on every substrate upgrade, never on app-up.
-            if (filter("20260606000000_layer1_database.sql"))
+            Console.WriteLine($"[apply] {label}: declared schema applied ({applied.Count} file(s)); every statement is idempotent, so objects and grants are reconciled.");
+            foreach (var name in applied)
             {
-                using var connection = new NpgsqlConnection(target);
-                connection.Open();
-                using var transaction = connection.BeginTransaction();
-                using var command = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate");
-                command.CommandTimeout = 0;
-                command.ExecuteNonQuery();
-                using var status = NpgsqlCatalog.Command(connection, transaction, "migration.canonical_substrate_status");
-                using var receipt = status.ExecuteReader();
-                if (!receipt.Read())
-                    throw new InvalidOperationException("Canonical Native substrate verification returned no receipt.");
-                var databaseName = receipt.GetString(0);
-                var extensionVersion = receipt.GetString(1);
-                var tier0Fingerprint = receipt.GetString(2);
-                var highwayFingerprint = receipt.GetString(3);
-                receipt.Close();
-                transaction.Commit();
-                Console.WriteLine($"Canonical Native substrate verified: database={databaseName} extension={extensionVersion} " +
-                    $"tier0={tier0Fingerprint} highway={highwayFingerprint}");
-            }
-            const string runtimeGrants = "20261015000000_substrate_runtime_grants.sql";
-            if (filter(runtimeGrants) && !result.Scripts.Any(s => string.Equals(s.Name, runtimeGrants, StringComparison.Ordinal)))
-            {
-                using var connection = new NpgsqlConnection(target);
-                connection.Open();
-                using var transaction = connection.BeginTransaction();
-                using var command = new NpgsqlCommand(
-                    File.ReadAllText(Path.Combine(LocateMigrationsDir(), runtimeGrants)), connection, transaction)
-                    { CommandTimeout = 0 };
-                command.ExecuteNonQuery();
-                transaction.Commit();
+                Spectre.Console.AnsiConsole.MarkupLine($"  [green]✓[/] {Spectre.Console.Markup.Escape(name)}");
+                log.LogInformation("applied declared schema file {File}", name);
             }
             if (IncludesApplication(filter))
             {
@@ -289,25 +263,11 @@ internal static class Program
                 ReportOwners(owners!);
             }
         }
-
-        if (applied.Count == 0)
-        {
-            Console.WriteLine("[migrate up] No pending migrations. Database is current.");
-        }
-        else
-        {
-            Console.WriteLine($"[migrate up] Applied {applied.Count} migration(s):");
-            foreach (var script in applied)
-            {
-                Spectre.Console.AnsiConsole.MarkupLine($"  [green]✓[/] {Spectre.Console.Markup.Escape(script.Name)}");
-                log.LogInformation("applied migration {Migration}", script.Name);
-            }
-        }
         return 0;
     }
 
     private static bool IncludesApplication(Func<string, bool> filter)
-        => filter("20260611000000_app_billing.sql");
+        => filter("30_app.sql");
 
     private static void ReportOwners(PlatformOwnerPolicy owners)
         => Console.WriteLine(owners.Owners.Count == 0
@@ -319,31 +279,18 @@ internal static class Program
 
     private static int RunStatusTargets(IEnumerable<(string target, Func<string, bool> filter, string label)> targets)
     {
-        var pending = new List<DbUp.Engine.SqlScript>();
-        var applied = new List<string>();
-        foreach (var (target, filter, _) in targets)
+        bool inSync = true;
+        foreach (var (target, filter, label) in targets)
         {
-            var engine = BuildEngine(target, filter);
-            pending.AddRange(engine.GetScriptsToExecute());
-            applied.AddRange(engine.GetExecutedScripts());
+            if (!DeclaredSchema.DatabaseExists(target))
+            {
+                Console.WriteLine($"[status] {label}: DRIFT, the database does not exist; the up command creates it from the declaration.");
+                inSync = false;
+                continue;
+            }
+            inSync &= DeclaredSchema.Report(label, DeclaredSchema.Drift(target, DeclaredSchema.Files(filter)));
         }
-
-        Console.WriteLine($"[migrate status] applied: {applied.Count}, pending: {pending.Count}");
-        Console.WriteLine();
-        if (applied.Count > 0)
-        {
-            Console.WriteLine("Applied:");
-            foreach (var name in applied)
-                Spectre.Console.AnsiConsole.MarkupLine($"  [green]✓[/] {Spectre.Console.Markup.Escape(name)}");
-            Console.WriteLine();
-        }
-        if (pending.Count > 0)
-        {
-            Console.WriteLine("Pending:");
-            foreach (var script in pending)
-                Spectre.Console.AnsiConsole.MarkupLine($"  [grey]·[/] {Spectre.Console.Markup.Escape(script.Name)}");
-        }
-        return 0;
+        return inSync ? 0 : 1;
     }
 
     private static bool Confirmed(string token)
@@ -353,31 +300,17 @@ internal static class Program
         return Console.ReadLine() == token;
     }
 
+    // There is no journal to clear: the declaration is applied in full every time. The reset verbs
+    // remain so operator tooling keeps working; they apply the declaration and keep the data.
     private static int RunReset(string connectionString)
         => RunReset(connectionString, applicationOnly: false);
 
     private static int RunReset(string connectionString, bool applicationOnly)
     {
-        Console.WriteLine("Clears the selected database's migration journal while preserving its data and extensions.");
-        Console.WriteLine("Run the matching up command to reapply migrations.");
-        if (!Confirmed("RESET"))
-        {
-            Console.WriteLine("Aborted.");
-            return 1;
-        }
-        using var conn = new NpgsqlConnection(connectionString);
-        conn.Open();
-        if (applicationOnly && IsCoLocatedApplication(connectionString))
-        {
-            using var cmd = NpgsqlCatalog.Command(conn, null, "migration.reset_application_journal");
-            cmd.ExecuteNonQuery();
-            Console.WriteLine("[migrate reset] application schemaversions entries cleared. Run 'app-up' to re-apply.");
-            return 0;
-        }
-        using (var cmd = NpgsqlCatalog.Command(conn, null, "migration.reset_journal"))
-            cmd.ExecuteNonQuery();
-        Console.WriteLine("[migrate reset] schemaversions dropped. Run 'up' to re-apply.");
-        return 0;
+        Console.WriteLine("There is no migration journal: re-applying the declared schema, roles and grants (data is preserved).");
+        return RunUpTargets(applicationOnly
+            ? new[] { (connectionString, (Func<string, bool>)IsAppScript, "application database") }
+            : Targets(connectionString));
     }
 
     private static int RunNuke(string connectionString)
@@ -397,11 +330,11 @@ internal static class Program
         var targetDb = b.Database
             ?? throw new InvalidOperationException("Target database name missing from connection string.");
 
-        Console.WriteLine($"[migrate nuke] Re-create \"{targetDb}\" using its installed configuration and migrations.");
+        Console.WriteLine($"[migrate nuke] Re-create \"{targetDb}\" using its installed configuration and the declared schema.");
         Console.WriteLine(applicationOnly
             ? "Deletes application accounts, sessions, API keys and billing data."
             : "Loses ALL substrate data: entities, physicalities, attestations.");
-        Console.WriteLine("Rebuilds extensions from installed migrations; preserves database configuration and access.");
+        Console.WriteLine("Rebuilds extensions and applies the declared schema; preserves database configuration and access.");
         if (!Confirmed("NUKE"))
         {
             Console.WriteLine("Aborted.");
@@ -425,7 +358,7 @@ internal static class Program
                 (replacement, (Func<string, bool>)(path => applicationOnly ? IsAppScript(path) : includesApp || !IsAppScript(path)), "replacement database")
             }));
         }
-        Console.WriteLine("[migrate nuke] Re-created with migrations, database settings and existing access grants.");
+        Console.WriteLine("[migrate nuke] Re-created from the declared schema, database settings and existing access grants.");
         return 0;
     }
 
@@ -436,7 +369,7 @@ internal static class Program
         var separator = name.IndexOf('_');
         if (separator < 0) return false;
         var scope = name[(separator + 1)..];
-        return scope.StartsWith("app_", StringComparison.Ordinal);
+        return scope.StartsWith("app.", StringComparison.Ordinal) || scope.StartsWith("app_", StringComparison.Ordinal);
     }
 
     // Where the scripts go: the substrate database and, when LAPLACE_APP_DB names one, the application database.
@@ -451,42 +384,6 @@ internal static class Program
         Console.WriteLine($"Application database connection: {LaplaceInstall.RedactConnectionString(app)}");
         yield return (connectionString, path => !IsAppScript(path), "substrate database");
         yield return (app, IsAppScript, "application database");
-    }
-
-    private static UpgradeEngine BuildEngine(string connectionString) => BuildEngine(connectionString, _ => true);
-
-    private static UpgradeEngine BuildEngine(string connectionString, Func<string, bool> filter)
-    {
-        var migrationsDir = LocateMigrationsDir();
-        Console.WriteLine($"Migrations directory: {migrationsDir}");
-
-        // DbUp parses Search Path= from the connection string as the executor schema.
-        // Multi-schema paths (laplace,public) become invalid SQL in VerifySchema:
-        //   CREATE SCHEMA IF NOT EXISTS laplace,public  → syntax error at ","
-        // Journal lives in public; pass it explicitly and keep Search Path for scripts.
-        return DeployChanges.To
-            .PostgresqlDatabase(connectionString, "public")
-            .WithScriptsFromFileSystem(migrationsDir, filter)
-            .JournalToPostgresqlTable("public", "schemaversions")
-            .WithVariablesDisabled()
-            .WithExecutionTimeout(TimeSpan.FromHours(4))
-            .LogTo(new LiteralSafeUpgradeLog())
-            .Build();
-    }
-
-    private static string LocateMigrationsDir()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            var candidate = Path.Combine(dir.FullName, "db", "migrations");
-            if (Directory.Exists(candidate)) return candidate;
-            dir = dir.Parent;
-        }
-        var cwdCandidate = Path.Combine(Directory.GetCurrentDirectory(), "db", "migrations");
-        if (Directory.Exists(cwdCandidate)) return cwdCandidate;
-        throw new DirectoryNotFoundException(
-            "Could not locate db/migrations/ — run from repo root or pass --migrations-dir.");
     }
 
     private static string ResolveConnectionString(string[] args)

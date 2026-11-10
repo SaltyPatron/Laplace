@@ -41,10 +41,11 @@ dotnet "$runtime" app-up
 owners
 
 # Co-located application/substrate topology (where LAPLACE_DB and LAPLACE_APP_DB name the same database)
-# recreates only SCHEMA app while preserving public/substrate tables, non-app schemaversions, and app schema grants.
+# recreates only SCHEMA app while preserving public/substrate tables and app schema grants. There is no migration
+# journal: no verb creates public.schemaversions, and re-applying the declaration is the only way to repair.
 export LAPLACE_DB="$LAPLACE_APP_DB"
 query "CREATE ROLE platform_owner_app_runtime NOLOGIN; GRANT USAGE ON SCHEMA app TO platform_owner_app_runtime; GRANT SELECT ON ALL TABLES IN SCHEMA app TO platform_owner_app_runtime; ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO platform_owner_app_runtime" >/dev/null
-query "CREATE TABLE public.colocated_substrate_sentinel(value integer); INSERT INTO public.colocated_substrate_sentinel VALUES(42); INSERT INTO public.schemaversions(scriptname,applied) VALUES('20260606000000_layer1_database.sql',now())" >/dev/null
+query "CREATE TABLE public.colocated_substrate_sentinel(value integer); INSERT INTO public.colocated_substrate_sentinel VALUES(42)" >/dev/null
 colocated_before=$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")
 query "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,expires_at) SELECT 'colocated-ticket',m.user_id,m.tenant_id,decode('00','hex'),now()+interval '1 day' FROM app.tenant_memberships m LIMIT 1" >/dev/null
 dotnet "$runtime" app-nuke --yes
@@ -52,13 +53,25 @@ dotnet "$runtime" app-check
 owners
 [[ $colocated_before != "$(query "SELECT string_agg(user_id::text,',' ORDER BY provider) FROM app.external_identities WHERE subject IN ('fixture-owner-google','fixture-owner-microsoft')")" ]]
 query 'SELECT count(*)=1 AND max(value)=42 FROM public.colocated_substrate_sentinel' | grep -qx t
-query "SELECT count(*)=1 FROM public.schemaversions WHERE scriptname='20260606000000_layer1_database.sql'" | grep -qx t
+query "SELECT to_regclass('public.schemaversions') IS NULL" | grep -qx t
 query "SELECT has_schema_privilege('platform_owner_app_runtime','app','USAGE') AND has_table_privilege('platform_owner_app_runtime','app.users','SELECT')" | grep -qx t
+# app-reset keeps no journal to clear: it re-applies the declaration, restoring a dropped grant and keeping data.
+# laplace_readonly is a declared role (db/schema/40_app_grants.sql): a grant lost on it is drift, and applying repairs it.
+query "CREATE ROLE laplace_readonly NOLOGIN" >/dev/null
+dotnet "$runtime" app-up
+query "SELECT has_schema_privilege('laplace_readonly','app','USAGE') AND has_table_privilege('laplace_readonly','app.users','SELECT')" | grep -qx t
+dotnet "$runtime" app-status
+query "REVOKE SELECT ON app.users FROM laplace_readonly" >/dev/null
+query "SELECT NOT has_table_privilege('laplace_readonly','app.users','SELECT')" | grep -qx t
+if dotnet "$runtime" app-status; then echo 'FAIL status did not report a stale grant as drift' >&2; exit 1; fi
+if dotnet "$runtime" app-check; then echo 'FAIL app-check accepted a stale grant' >&2; exit 1; fi
 dotnet "$runtime" app-reset --yes
-query "SELECT count(*)=1 FROM public.schemaversions WHERE scriptname='20260606000000_layer1_database.sql'" | grep -qx t
-query "SELECT count(*)=0 FROM public.schemaversions WHERE scriptname ~ '^[0-9]+_(app_|browser_)'" | grep -qx t
+query "SELECT has_table_privilege('laplace_readonly','app.users','SELECT')" | grep -qx t
+query "SELECT to_regclass('public.schemaversions') IS NULL" | grep -qx t
+query 'SELECT count(*)=1 AND max(value)=42 FROM public.colocated_substrate_sentinel' | grep -qx t
 dotnet "$runtime" app-up
 dotnet "$runtime" app-check
+dotnet "$runtime" app-status
 owners
-query "DROP OWNED BY platform_owner_app_runtime; DROP ROLE platform_owner_app_runtime" >/dev/null
+query "DROP OWNED BY platform_owner_app_runtime; DROP ROLE platform_owner_app_runtime; DROP OWNED BY laplace_readonly; DROP ROLE laplace_readonly" >/dev/null
 echo 'PASS real app-up, app-check and app-nuke restore both verified owners without sessions, duplicate grants or historical local UUIDs'

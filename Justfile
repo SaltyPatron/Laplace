@@ -87,18 +87,6 @@ db-reset:
 db-nuke:
     scripts/db-migrations.sh nuke
 
-migrate-new name:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ ! "{{name}}" =~ ^[a-z][a-z0-9_]*$ ]]; then
-        echo "Migration name must be snake_case (a-z0-9_), starting with a letter."
-        exit 1
-    fi
-    stamp=$(date -u +%Y%m%d%H%M%S)
-    file="db/migrations/${stamp}_{{name}}.sql"
-    : > "$file"
-    echo "Created $file"
-
 seed-t0: build
     scripts/ingest-source.sh unicode
 

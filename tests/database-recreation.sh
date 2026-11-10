@@ -27,6 +27,28 @@ copy_settings
 connection="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$name;Search Path=laplace,public"
 migrate(){ LAPLACE_DB="$connection" LAPLACE_APP_DB="$connection" dotnet "$runtime" "$@"; }
 migrate up
+# The schema, roles and grants are one declaration applied in full every time, with no journal: applying
+# again changes nothing, status reports no drift, and a lost declared grant is drift that the next apply restores.
+migrate up
+migrate status
+[[ "$(printf "SELECT to_regclass('public.schemaversions') IS NULL;" | P "$name")" == t ]]
+lichess="laplace_mono_lichess_check$$"
+printf 'CREATE ROLE "%s" NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;\n' "$lichess" | P postgres
+drop_lichess(){ printf 'DROP OWNED BY "%s";\nDROP ROLE IF EXISTS "%s";\n' "$lichess" "$lichess" | P "$name" || true
+  printf 'DROP ROLE IF EXISTS "%s";\n' "$lichess" | P postgres || true; }
+trap 'drop_lichess; cleanup' EXIT
+if migrate status; then echo 'FAIL status did not report a new runtime role as drift'; exit 1; fi
+migrate up
+migrate status
+printf "SELECT has_table_privilege('%s','public.attestation','INSERT') AND has_table_privilege('%s','public.entity','INSERT') AND has_table_privilege('%s','public.consensus','UPDATE');" "$lichess" "$lichess" "$lichess" | P "$name" | grep -qx t
+printf 'REVOKE INSERT ON public.attestation FROM "%s";\n' "$lichess" | P "$name"
+if migrate status; then echo 'FAIL status did not report a stale grant as drift'; exit 1; fi
+migrate up
+printf "SELECT has_table_privilege('%s','public.attestation','INSERT');" "$lichess" | P "$name" | grep -qx t
+migrate status
+drop_lichess
+trap cleanup EXIT
+echo 'PASS the declared schema applies twice, status reports drift and a dropped grant is restored on reapply'
 psql -X -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$name" \
   -v target="$name" -v reader="$reader" -v owner="$PGUSER" <<'SQL'
 CREATE TABLE public.recreate_sentinel(value integer);

@@ -8,7 +8,7 @@ namespace Laplace.Migrations;
 /// <summary>Prepare a migrated database before replacing the selected database's name.</summary>
 internal static class DatabaseRecreation
 {
-    private static string Identifier(string value) => '"' + value.Replace("\"", "\"\"") + '"';
+    internal static string Identifier(string value) => '"' + value.Replace("\"", "\"\"") + '"';
 
     public static void Run(string connectionString, Func<string, int> migrate)
     {
@@ -145,7 +145,7 @@ internal static class DatabaseRecreation
         }
     }
 
-    private static string Statement(string queryName, params (string Name, string Value)[] substitutions)
+    internal static string Statement(string queryName, params (string Name, string Value)[] substitutions)
     {
         var fields = substitutions.ToDictionary(item => item.Name, item => item.Value, StringComparer.Ordinal);
         string template = SqlCatalog.Get(queryName).Text;

@@ -32,7 +32,7 @@ Laplace is a deterministic, content-addressed, recursively compositional substra
 | `Laplace-postgres` | `CREATE EXTENSION laplace` | Version: `laplace.control` `default_version`. Schema/DDL: `sql/laplace.sql.in`. Indexes, staging, consensus SQL: `sql/operations.sql`, `sql/api.sql`. C: `laplace_pg.c`, `couple.c`, `provenance.c`, `attribution.c`, `gin_path.c`, `gin_mask.c`, `gist4d.c`, `realize.c`, `walk.c` |
 | `Laplace-Engine` | `laplace` CLI, recipe compiler, record VM, ingest/loader, native reader | Command table `src/op.c`; recipes `recipes/` (`.recipe`, `.format`, `formats/grammars/`); firmware `firmware/` |
 | `Laplace-MCP` | Native `lpm` MCP/HTTP server + `Laplace.Modular.Web` IIS host | MCP tool list: `native/api_mcp.c` (`TOOLS`); routes: `web/Program.cs` |
-| `Laplace` (monorepo) | C# app, OpenAI-compat API, `/mcp`, Recipe Studio, Chess Lab, Foundry, billing, web UI | SQL: `engine/core/src/sql_catalog.def` → `sql_catalog/*.def`; migrations: `db/migrations/`; MCP tools: `app/Laplace.Endpoints.Mcp/SubstrateTools.cs` |
+| `Laplace` (monorepo) | C# app, OpenAI-compat API, `/mcp`, Recipe Studio, Chess Lab, Foundry, billing, web UI | SQL: `engine/core/src/sql_catalog.def` → `sql_catalog/*.def`; declared schema: `db/schema/`; MCP tools: `app/Laplace.Endpoints.Mcp/SubstrateTools.cs` |
 | `Laplace-Operations` | Host setup, `laplace.env`, `laplace-ops` controller, CI ingest | `laplace.ps1` (Windows ops), `laplace-ops` (Linux bash), `ingest.sh`/`ingest.ps1`, `installation/*.json`, `.github/workflows/ingest.yml`, `agents/` (these files) |
 | `Laplace-UCI` | UCI WebSocket relay / Lichess connector | `configuration.example.json`, `installations/*.json` |
 | `Laplace-Prototype` | Native proofs bench | `tests/proof_native.c`, `run-proofs.ps1` |
@@ -81,7 +81,7 @@ Build order: PostgreSQL → `Laplace-Native` → `Laplace-postgres` → `Laplace
   - Persistent tables: `entity`, `physicality`, `attestation`, `consensus`.
 - Database crossings are $O(\text{tiers})$, never $O(\text{rows})$. Standings update **inside PostgreSQL**. Never pull `consensus` rows to the client to update them.
 - Never `DROP EXTENSION laplace CASCADE`. Never reset or reseed shared databases (`laplace`, `laplace-mono`) without explicit instruction.
-- Monorepo: 100% of SQL lives in `engine/core/src/sql_catalog.def` (+ `sql_catalog/*.def`) and runs via `NpgsqlCatalog.Command(...)`. `ReadPathArchitectureGateTests` enforces zero hand-written SQL. Schema = the migrations in `db/migrations/` (consolidated; do not add ad-hoc ones without being asked).
+- Monorepo: 100% of SQL lives in `engine/core/src/sql_catalog.def` (+ `sql_catalog/*.def`) and runs via `NpgsqlCatalog.Command(...)`. `ReadPathArchitectureGateTests` enforces zero hand-written SQL. Schema = ONE declaration in `db/schema/*.sql` (idempotent `CREATE ... IF NOT EXISTS`, `CREATE OR REPLACE`, reconciling grants), applied in full on every create and every deploy by `Laplace.Migrations`; there is no run-once migration journal (`schemaversions` is gone). Change the declaration in place; never add a per-change file. `status` reports drift between the declaration and the live catalog.
 
 ---
 
@@ -123,7 +123,7 @@ Bytes → chained Tree-sitter AST → compiled recipe bytecode → record VM →
 
 - **Elevated ACL scripts on HART-DESKTOP** must grant `HART-DESKTOP\ahart` (SID `S-1-5-21-1955383224-1799969050-1119319971-1001`) FullControl alongside SYSTEM, Administrators, and service/AppPool SIDs (`Repair-DesktopPermissions.ps1`).
 - **HART-DESKTOP is on metered 5G:** never download bulk corpora or model checkpoints there.
-- The 3 owner OAuth bindings are seeded as `installation-owner` admins by `20260611000000_app_billing.sql`.
+- The 3 owner OAuth bindings are seeded as `installation-owner` admins by `db/schema/30_app.sql`.
 
 ---
 

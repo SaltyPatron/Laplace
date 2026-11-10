@@ -3,7 +3,7 @@
 
 Observes the existing CMake configuration, a temporary DESTDIR CMake install for
 exact installed-form native comparisons, raw ROM comparisons, actual PostgreSQL native file mappings, live extension
-versions and the migration journal. Build execution and source provenance belong
+versions and the declared schema. Build execution and source provenance belong
 to the build/install owner; configuration observation is not a substitute for them.
 No bootstrap, installation into the live prefix, SQL writes, service action,
 network DB auth or secret output.
@@ -53,7 +53,8 @@ SELECT json_build_object(
  'postmaster_started',pg_postmaster_start_time(),
  'extensions',(SELECT json_object_agg(extname,extversion) FROM pg_extension
      WHERE extname IN ('laplace_geom','laplace_substrate')),
- 'migrations',(SELECT json_agg(scriptname ORDER BY scriptname) FROM public.schemaversions),
+ 'declared_schema',(to_regclass('ops.pg_log') IS NOT NULL AND to_regprocedure('ops.repoint_pg_log()') IS NOT NULL
+     AND to_regclass('public.attestation') IS NOT NULL AND to_regclass('public.consensus') IS NOT NULL),
  'running_ingests',(SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'),
  'roms',(SELECT json_object_agg(name,setting) FROM pg_settings
      WHERE name IN ('laplace_substrate.perfcache_path','laplace_substrate.highway_perfcache_path',
@@ -283,9 +284,8 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         raise ValueError("invalid ingest journal observation")
     if not database["extension_functions"]:
         raise ValueError("live extension function contract is missing")
-    migrations = {p.name for p in (root / "db/migrations").glob("*.sql")}
-    if not migrations or not migrations.issubset(set(database["migrations"] or [])):
-        raise ValueError("pending/unknown migrations; use the full database pipeline")
+    if not any((root / "db/schema").glob("*.sql")) or database["declared_schema"] is not True:
+        raise ValueError("the declared schema (db/schema) is not applied; use the full database pipeline")
 
     hashes = installed_native_hashes(root, prefix)
     mapped = mapped_native_identities(prefix, database, hashes)
@@ -344,9 +344,8 @@ def installed_runtime_snapshot(root, prefix, database):
         raise ValueError("invalid ingest journal observation")
     if not database["extension_functions"]:
         raise ValueError("live extension function contract is missing")
-    migrations = {path.name for path in (root / "db/migrations").glob("*.sql")}
-    if not migrations or not migrations.issubset(set(database["migrations"] or [])):
-        raise ValueError("pending/unknown migrations; use the full database pipeline")
+    if not any((root / "db/schema").glob("*.sql")) or database["declared_schema"] is not True:
+        raise ValueError("the declared schema (db/schema) is not applied; use the full database pipeline")
 
     manifest = prefix / "share/postgresql/18/extension/laplace_execution_module.txt"
     execution = manifest.read_text().strip()
@@ -431,7 +430,7 @@ def main():
         with args.snapshot.open("x") as output:
             json.dump(state, output, sort_keys=True)
     scope = state.get("scope", "configured-build")
-    print(f"PASS: installed-form and mapped native artifacts, installed SQL versions and applied migrations match; "
+    print(f"PASS: installed-form and mapped native artifacts, installed SQL versions and the declared schema match; "
           f"scope={scope}; purpose={args.purpose}; observed_running_ingests={state['database']['running_ingests']}")
 
 

@@ -85,7 +85,7 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
             receipt["cases"].append({"name": "native_load_lifecycle", "exit_code": result,
                 "elapsed_ms": round((time.monotonic() - started) * 1000)})
             print(f"native_load_lifecycle: {'passed' if result == 0 else 'FAILED'}", flush=True)
-            grants = ROOT / "db/migrations/20261015000000_substrate_runtime_grants.sql"
+            grants = ROOT / "db/schema/20_substrate_grants.sql"
             options = ["-X", "--no-password", "--dbname=" + database, "--set=ON_ERROR_STOP=1"]
             result = run("psql", [*options, "--file=" + str(grants)], args.results / "runtime_grants.log")
             receipt["cases"].append({"name": "runtime_grants", "exit_code": result})
