@@ -4,7 +4,7 @@ import { Icon } from '../ui/icons';
 import { useEntityLabels, useInspector } from './inspector';
 import styles from './InspectorDrawer.module.css';
 
-const EntityDetail = lazy(() => import('../explore/entity/EntityDetail').then((m) => ({ default: m.EntityDetail })));
+const SubjectView = lazy(() => import('../lenses/SubjectView').then((m) => ({ default: m.SubjectView })));
 
 /** Right-hand drawer: the subject under inspection, from anywhere, without leaving the page. */
 export function InspectorDrawer() {
@@ -33,7 +33,7 @@ export function InspectorDrawer() {
       </header>
       <div className={styles.body}>
         <Suspense fallback={<LoadingText>Opening…</LoadingText>}>
-          <EntityDetail key={current} selectedId={current} selectedLabel={label} />
+          <SubjectView key={current} id={current} />
         </Suspense>
       </div>
     </aside>

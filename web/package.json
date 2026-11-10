@@ -17,7 +17,7 @@
     "test:e2e": "playwright test",
     "test:architecture": "node scripts/test-architecture.mjs",
     "pretest:architecture": "npm run gen:architecture",
-    "test:ui": "npm run test:read-resource && npm run test:workspace-ui && npm run test:data-ui && node scripts/test-chess-ui.mjs && npm run test:architecture",
+    "test:ui": "npm run test:read-resource && npm run test:workspace-ui && npm run test:data-ui && node scripts/test-chess-ui.mjs && npm run test:architecture && node scripts/test-lenses.mjs",
     "test:read-resource": "node --test scripts/test-read-resource.mjs scripts/test-data-workspace.mjs scripts/test-glome-projection.mjs scripts/test-route-text.mjs scripts/test-decompose-surface.mjs",
     "test:workspace-ui": "node scripts/test-workspace-ui.mjs && node scripts/test-library-ui.mjs",
     "test:data-ui": "node scripts/test-data-ui.mjs",

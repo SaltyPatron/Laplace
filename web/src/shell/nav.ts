@@ -36,12 +36,14 @@ export const NAV: NavItem[] = [
   {
     id: 'explore', label: 'Explore', path: '/explore/constellation', icon: 'globe',
     description: 'Maps of the substrate and the proofs behind it.',
-    owns: ['/explore/constellation', '/unicode', '/proof', '/explore/walk', '/forward-proof'],
+    owns: ['/explore/constellation', '/unicode', '/proof', '/explore/walk', '/forward-proof', '/explore/audit', '/explore/architecture'],
     children: [
       { id: 'constellation', label: 'Map', path: '/explore/constellation', owns: ['/explore/constellation'] },
       { id: 'unicode', label: 'Characters', path: '/unicode', owns: ['/unicode'] },
       { id: 'proof', label: 'Storage proof', path: '/proof', owns: ['/proof'] },
       { id: 'walk', label: 'Reasoning trace', path: '/explore/walk', owns: ['/explore/walk', '/forward-proof'] },
+      { id: 'audit', label: 'Counts', path: '/explore/audit', owns: ['/explore/audit'] },
+      { id: 'architecture', label: 'Architecture', path: '/explore/architecture', owns: ['/explore/architecture'] },
     ],
   },
   { id: 'ask', label: 'Ask', path: '/chat', icon: 'chat', description: 'Ask a question; every answer cites its sources.', owns: ['/chat'] },
@@ -60,12 +62,7 @@ export const NAV: NavItem[] = [
   {
     id: 'admin', label: 'Admin', path: '/operator', icon: 'settings', admin: true,
     description: 'Workspace, people, ingestion and platform operations.',
-    owns: ['/operator', '/explore/audit', '/explore/architecture'],
-    children: [
-      { id: 'operator', label: 'Administration', path: '/operator', owns: ['/operator'] },
-      { id: 'audit', label: 'Counts', path: '/explore/audit', owns: ['/explore/audit'] },
-      { id: 'architecture', label: 'Architecture', path: '/explore/architecture', owns: ['/explore/architecture'] },
-    ],
+    owns: ['/operator'],
   },
 ];
 

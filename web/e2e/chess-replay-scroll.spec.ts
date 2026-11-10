@@ -65,19 +65,15 @@ test.describe('chess UI', () => {
     await page.goto(`/chess/games/${GAME_ID}`);
     await expect(page.getByText('Starting position')).toBeVisible();
 
-    const scrollRoot = page.locator('[data-chess-scroll-root]');
-    await expect(scrollRoot).toBeVisible();
-    const maxScroll = await scrollRoot.evaluate((element) =>
-      element.scrollHeight - element.clientHeight,
-    );
+    await expect(page.locator('[data-chess-scroll-root]')).toBeVisible();
+    // The application shell scrolls the document; that is the scroll position the replay must not reclaim.
+    const scrollTop = () => page.evaluate(() => document.scrollingElement!.scrollTop);
+    const maxScroll = await page.evaluate(() => document.scrollingElement!.scrollHeight - document.scrollingElement!.clientHeight);
     expect(maxScroll).toBeGreaterThan(100);
 
-    await scrollRoot.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
-    await expect.poll(() => scrollRoot.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(100);
-    const before = await scrollRoot.evaluate((element) => element.scrollTop);
+    await page.evaluate(() => { document.scrollingElement!.scrollTop = document.scrollingElement!.scrollHeight; });
+    await expect.poll(scrollTop).toBeGreaterThan(100);
+    const before = await scrollTop();
 
     // GameBoard owns ArrowRight even while its replay is off-screen. Advancing a
     // ply may scroll the move-list viewport, but must not reclaim the application
@@ -86,7 +82,6 @@ test.describe('chess UI', () => {
     await expect(page.getByText('White played e4')).toBeAttached();
     await page.waitForTimeout(50);
 
-    const after = await scrollRoot.evaluate((element) => element.scrollTop);
-    expect(after).toBe(before);
+    expect(await scrollTop()).toBe(before);
   });
 });

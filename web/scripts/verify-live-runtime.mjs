@@ -77,10 +77,11 @@ try {
       await Promise.all(reads);
       if (scenario.heading) {
         await expect(page.getByRole('heading', { name: scenario.heading, exact: true })).toBeVisible();
-        const sections = page.getByRole('navigation', { name: 'Knowledge sections', exact: true });
-        for (const label of ['Search', 'Sources', 'Highway', 'Constellation', 'Unicode Glome', 'Storage Proof', 'Forward Trace', 'Mesh', 'Matchup', 'Audit', 'Architecture']) {
-          await expect(sections.getByRole('link', { name: label, exact: true })).toBeVisible();
+        const rail = page.getByRole('navigation', { name: 'Primary navigation', exact: true });
+        for (const label of ['Look up', 'Compare', 'Explore', 'Ask', 'My data', 'Chess', 'Search', 'Sources', 'Identifiers']) {
+          await expect(rail.getByRole('link', { name: label, exact: true })).toBeVisible();
         }
+        await expect(page.getByRole('button', { name: 'Search (Ctrl+K)', exact: true })).toBeVisible();
         const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
         await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
         await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
