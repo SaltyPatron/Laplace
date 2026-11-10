@@ -41,7 +41,7 @@ BEGIN ATOMIC
             UNION ALL
             SELECT co.entity_id,
                    GREATEST(COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)),
-                                     consensus.glicko2_neutral_mu()), 0),
+                                     0.5::double precision), 0),
                    false
             FROM structural.containers_of(el.topic_word, 1, p_corpus_limit) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
@@ -87,7 +87,7 @@ BEGIN ATOMIC
         GROUP BY e.id
     ),
     seq AS MATERIALIZED (
-        SELECT k.gid, k.is_core, GREATEST(COALESCE(q.mu, 0), 0) AS wt, k.entity_id AS id, k.rn
+        SELECT k.gid, k.is_core, round(GREATEST(COALESCE(q.mu, 0), 0) * 1e9)::bigint AS wt, k.entity_id AS id, k.rn
         FROM kept k LEFT JOIN qk q ON q.id = k.entity_id
         UNION ALL
         SELECT DISTINCT k.gid, k.is_core, 0::bigint, '\x00'::bytea, 2147483647::bigint

@@ -54,13 +54,8 @@ SELECT realize.is_all_whitespace('   ')        AS ascii_spaces_ws,
 
 
 
-SELECT bool_and(consensus.eff_mu(r, d) = consensus.effective_mu(r, d)) AS eff_mu_matches_engine
-FROM (VALUES
-    (1500000000000::bigint, 350000000000::bigint),
-    (1600000000000::bigint,  80000000000::bigint),
-    (2010500000000::bigint,  12000000000::bigint),
-    (0::bigint, 0::bigint),
-    (-5::bigint, 7::bigint)
-) v(r, d);
+-- One standing algebra: eff_mu is Laplace-Native's conservative confidence.
+SELECT bool_and(consensus.eff_mu(r, d) = public.laplace_confidence(r, d, 2)) AS eff_mu_matches_engine
+FROM (VALUES (1500.0::float8, 350.0::float8), (1600, 80), (2010.5, 12), (0, 0), (-5, 7)) v(r, d);
 
 COMMIT;

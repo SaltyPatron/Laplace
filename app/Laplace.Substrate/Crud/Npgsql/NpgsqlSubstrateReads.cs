@@ -54,21 +54,6 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? 0d : rows[0];
     }
 
-    /// <summary><c>consensus.effective_mu(rating, rd)</c> — integer μ−2·RD.</summary>
-    public static async Task<long> EffectiveMuAsync(
-        NpgsqlDataSource dataSource, long rating, long rd, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("consensus.effective_mu"),
-            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
-            p =>
-            {
-                p.AddWithValue("rating", rating);
-                p.AddWithValue("rd", rd);
-            }, ct: ct, label: "effective_mu", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? 0L : rows[0];
-    }
-
     /// <summary><c>consensus.relation_type_resolve(surface)</c> — name/alias → type id.</summary>
     public static async Task<byte[]?> RelationTypeResolveAsync(
         NpgsqlDataSource dataSource, string surface, CancellationToken ct,

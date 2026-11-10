@@ -12,8 +12,11 @@ static HTAB *evidence_write_plans = NULL;
 static const char *EVIDENCE_LOCK_SQL =
     "INSERT INTO laplace.consensus AS c "
     " (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
-    "SELECT b.id,b.s,'\\x%s'::bytea,b.o,consensus.glicko2_neutral_mu(),"
-    " consensus.glicko2_initial_rd(),consensus.glicko2_initial_volatility(),0,b.ts "
+    /* Legacy fp1e9 fold (laplace.consensus): a new cell is seeded at the fp1e9
+     * neutral 1500, rd 350, volatility 0.06. The SQL standing functions are on
+     * the Native float8 scale and are not used to write this legacy table. */
+    "SELECT b.id,b.s,'\\x%s'::bytea,b.o,1500000000000::bigint,"
+    " 350000000000::bigint,60000000::bigint,0,b.ts "
     "FROM unnest($1::bytea[],$2::bytea[],$3::bytea[],$4::timestamptz[]) AS b(id,s,o,ts) "
     "ORDER BY b.id,b.s "
     "ON CONFLICT (id,type_id,subject_id) DO UPDATE SET rating=c.rating WHERE false";

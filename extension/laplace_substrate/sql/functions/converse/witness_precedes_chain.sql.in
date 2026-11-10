@@ -51,7 +51,7 @@ BEGIN ATOMIC
                        r.precedes,
                        b.subs,
                        b.objs,
-                       array_fill(consensus.glicko2_initial_rd(), ARRAY[cardinality(b.subs)]),
+                       array_fill(350000000000::bigint, ARRAY[cardinality(b.subs)]),
                        b.games,
                        b.sums,
                        array_fill(now(), ARRAY[cardinality(b.subs)]))

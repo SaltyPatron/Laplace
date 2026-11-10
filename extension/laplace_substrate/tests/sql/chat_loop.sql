@@ -150,7 +150,7 @@ SELECT consensus.upsert(
     ARRAY[public.laplace_hash128_blake3('test/chat_loop/synset1')],
     ARRAY[laplace.relation_type_id('HAS_DEFINITION')],
     ARRAY[laplace.word_id('G')],
-    ARRAY[consensus.glicko2_initial_rd()],
+    ARRAY[350000000000::bigint],
     ARRAY[200::bigint],
     ARRAY[0::bigint],
     ARRAY[now()]) AS refute_folded;

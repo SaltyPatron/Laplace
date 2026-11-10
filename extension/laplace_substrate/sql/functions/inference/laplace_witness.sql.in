@@ -10,7 +10,7 @@ BEGIN ATOMIC
         p_type,
         ARRAY[p_subject]::bytea[],
         ARRAY[p_object]::bytea[],
-        ARRAY[consensus.glicko2_initial_rd()]::bigint[],
+        ARRAY[350000000000]::bigint[],
         ARRAY[1::bigint],
         ARRAY[p_score_fp1e9]::bigint[],
         ARRAY[now()]::timestamptz[]);
