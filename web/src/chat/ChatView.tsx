@@ -18,6 +18,7 @@ import type { ForwardPassProof } from '../api/forwardProof';
 
 import { ReceiptPanel } from './ReceiptPanel';
 import { ForwardPassProofPanel } from './ForwardPassProofPanel';
+import { classifyTurn, lastStage } from './turnState';
 
 import styles from './ChatView.module.css';
 
@@ -406,9 +407,9 @@ export function ChatView() {
 
             <div className={styles.empty}>
 
-              <h2>Ask the substrate.</h2>
+              <h2>Ask a question.</h2>
 
-              <p>Every reply is grounded in witnessed consensus — μ and witness counts attached, evidence one click away.</p>
+              <p>Answers are composed only from what sources have attested. Each answer shows how well supported it is, and you can open the evidence behind it.</p>
 
             </div>
 
@@ -418,15 +419,16 @@ export function ChatView() {
 
             <div key={i} className={`${styles.message} ${m.role === 'user' ? styles.user : styles.assistant}`}>
 
-              <div>
-
-                {/* A finished empty turn says so; an empty string would render an
-                    invisible bubble. */}
-                {m.content || (m.streaming ? '…' : m.error ? '' : <span className={styles.messageEmpty}>no reply — the substrate returned nothing for this turn</span>)}
-
-                {m.error && <span className={styles.messageError}> [{m.error}]</span>}
-
-              </div>
+              {m.role === 'user' ? <div>{m.content}</div> : (() => {
+                const outcome = classifyTurn(m);
+                if (outcome.state === 'pending') return <div className={styles.messageEmpty} role="status">Working on an answer…</div>;
+                if (outcome.state === 'answered') return <div>{m.content}</div>;
+                return <div className={styles.outcome} data-turn-state={outcome.state} role="status">
+                  <strong>{outcome.state === 'abstained' ? 'No answer: not enough evidence.' : outcome.stage ? `Couldn’t answer: stopped at the ${outcome.stage} step.` : 'Couldn’t answer this one.'}</strong>
+                  <span className={styles.messageEmpty}>{outcome.state === 'abstained' ? outcome.reason : outcome.message}</span>
+                  {i === messages.length - 1 && !busy && <Button size="sm" variant="ghost" onClick={() => void retryWithQuote()}>Try again</Button>}
+                </div>;
+              })()}
 
               {m.provenance.length > 0 && (
 
@@ -468,12 +470,11 @@ export function ChatView() {
               )}
 
               {m.forwardProof && (
-                <>
-                  <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>
-                    Open full Forward Pass Proof for this exact Chat turn
-                  </Link>
+                <details className={styles.trace}>
+                  <summary>Reasoning trace{lastStage(m.forwardProof) ? ` · reached ${lastStage(m.forwardProof)}` : ''}</summary>
+                  <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>Open the full trace page</Link>
                   <ForwardPassProofPanel proof={m.forwardProof} />
-                </>
+                </details>
               )}
 
               {m.performance && (
