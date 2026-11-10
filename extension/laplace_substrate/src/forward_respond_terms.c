@@ -14,7 +14,7 @@ typedef struct
     bool has_meaning;
     bool has_upos;
     hash128_t upos;
-    __int128 upos_standing;
+    laplace_standing128 upos_standing;
 } TermEvidence;
 
 typedef struct

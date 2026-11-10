@@ -5,6 +5,12 @@
 #include "utils/array.h"
 #include "laplace/core/hash128.h"
 
+/* A conservative standing (rating - 2 rd, exact in 128 bits) kept in palloc or
+ * dynahash memory. PostgreSQL aligns those to MAXALIGN (8), not the 16 a plain
+ * __int128 promises the compiler, which then emits aligned SSE moves that fault
+ * and take down the cluster. Stack locals may stay plain __int128. */
+typedef __int128 laplace_standing128 __attribute__((aligned(8)));
+
 typedef struct LaplaceConsensusRow
 {
     hash128_t subject;

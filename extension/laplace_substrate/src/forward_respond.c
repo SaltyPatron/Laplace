@@ -45,7 +45,7 @@ typedef struct
     hash128_t type;        /* relation of the last step */
     hash128_t via;         /* the node the last step came from */
     int64 rating, rd, volatility, witnesses;   /* last step's standing */
-    __int128 weakest;      /* weakest conservative standing along the path */
+    laplace_standing128 weakest;   /* weakest conservative standing along the path */
     double salience;       /* least salient relation along the path */
     int hops;
     bool outbound;
@@ -67,7 +67,7 @@ typedef struct
     int covered;
     double salience;
     int hops;
-    __int128 weakest;
+    laplace_standing128 weakest;
 } Ranked;
 
 ArrayType *
