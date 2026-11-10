@@ -1,11 +1,13 @@
--- One registered witness catalog supplies actual trunk identities and labels.
+-- The witnesses are the source trunks that attest: each one's trust and lineage are those
+-- its attestations carry (the declared class and lineage), labelled from its trunk.
 CREATE OR REPLACE FUNCTION ops.witness_catalog(p_ids @extschema:laplace@.blake3[] DEFAULT NULL)
 RETURNS TABLE(id @extschema:laplace@.blake3,source_label text,trust double precision,lineage @extschema:laplace@.blake3)
 LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH sources AS MATERIALIZED (
- SELECT w.id,w.trust,w.lineage FROM @extschema:laplace@.witness w
- WHERE p_ids IS NULL OR w.id OPERATOR(@extschema:laplace@.=) ANY(p_ids)
+ SELECT DISTINCT ON (a.witness) a.witness AS id,a.trust,a.lineage FROM @extschema:laplace@.attestation a
+ WHERE p_ids IS NULL OR a.witness OPERATOR(@extschema:laplace@.=) ANY(p_ids)
+ ORDER BY a.witness,a.lineage NULLS FIRST
 ), names AS MATERIALIZED (
  SELECT r.entity,(@extschema:laplace@.laplace_vertex_ids(@extschema:postgis@.ST_PointN(r.path,1)))[1] AS child
  FROM @extschema:laplace@.laplace_physicalities(ARRAY(SELECT id FROM sources ORDER BY id)) r

@@ -82,7 +82,7 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
             await using var transaction = await blocker.BeginTransactionAsync(token);
             // SHARE permits the reader's SELECTs but holds source publication at
             // its INSERT. The real parser/COPY/receipt pipeline runs before signal.
-            await using (var command = new NpgsqlCommand("LOCK TABLE public.witness IN SHARE MODE", blocker, transaction))
+            await using (var command = new NpgsqlCommand("LOCK TABLE public.attestation IN SHARE MODE", blocker, transaction))
                 await command.ExecuteNonQueryAsync(token);
             string receipt = Path.Combine(scratch, "run.json");
             var start = new ProcessStartInfo("dotnet")
@@ -165,7 +165,7 @@ public sealed class NativeIngestCancellationTests(ITestOutputHelper output)
                 command.Parameters.AddWithValue(nativePid);
                 return (bool)(await command.ExecuteScalarAsync(token))!;
             }, null, token);
-            await using (var witnesses = new NpgsqlCommand("SELECT count(*) FROM public.witness", connection))
+            await using (var witnesses = new NpgsqlCommand("SELECT count(DISTINCT witness) FROM public.attestation", connection))
                 Assert.Equal(0L, await witnesses.ExecuteScalarAsync(token));
             output.WriteLine("signal={0}; run={1}; retained={2}; Native backend stopped; run/files cancelled",
                 signal, run, committed.Count);

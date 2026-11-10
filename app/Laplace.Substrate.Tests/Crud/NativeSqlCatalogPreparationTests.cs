@@ -160,7 +160,11 @@ public sealed partial class NativeSqlCatalogPreparationTests : IAsyncLifetime
         var root = window.Compose(children, checked((byte)(children.Max(x => x.Tier) + 1)), 0, 0);
         var writer = new NpgsqlSubstrateWriter(_source);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [root.Id]);
-        await using (var register = new NpgsqlCommand("INSERT INTO public.witness(id,trust) VALUES($1,1)", connection, transaction))
+        // A witness root is a trunk with attestations; one fixture claim makes this root walkable.
+        await using (var register = new NpgsqlCommand("""
+            INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+            VALUES(md5('trajectory-witness-'||$1::text)::public.blake3,$1,NULL,1,1,1.0,NULL,1.0)
+            """, connection, transaction))
         {
             register.Parameters.AddWithValue(root.Id);
             await register.ExecuteNonQueryAsync();
