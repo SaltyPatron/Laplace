@@ -339,6 +339,21 @@ public static partial class ChessGameFetcher
         return response.Body;
     }
 
+    /// <summary>A provider resource that may legitimately be absent: 404 yields null, without retries.</summary>
+    private static async Task<string?> GetOptionalStringAsync(
+        string url, CancellationToken ct, Action<string>? log = null)
+    {
+        try
+        {
+            return await GetStringWithRetryAsync(url, ct, retryNotFound: false, log);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            log?.Invoke($"  provider HTTP 404: {url}");
+            return null;
+        }
+    }
+
     private static async Task<ProviderResponse> GetResponseWithRetryAsync(
         string url, CancellationToken ct, bool retryNotFound = false, Action<string>? log = null,
         string? ifNoneMatch = null)
@@ -362,7 +377,10 @@ public static partial class ChessGameFetcher
                 }
                 else
                 {
-                    resp.EnsureSuccessStatusCode();
+                    if (!resp.IsSuccessStatusCode)
+                        throw new HttpRequestException(
+                            $"provider HTTP {(int)resp.StatusCode} ({resp.ReasonPhrase}): {url}",
+                            null, resp.StatusCode);
                     return new ProviderResponse(
                         await resp.Content.ReadAsStringAsync(ct), resp.Headers.ETag?.Tag, NotModified: false);
                 }

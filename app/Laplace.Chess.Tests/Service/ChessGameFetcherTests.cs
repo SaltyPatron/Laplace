@@ -225,6 +225,23 @@ public sealed class ChessGameFetcherTests
     }
 
     [Fact]
+    public void ChessComMonthUrls_EnumerateJoinMonthThroughCurrentMonth()
+    {
+        // Used when chess.com 404s /games/archives for an existing account.
+        var actual = ChessGameFetcher.ChessComMonthUrls("MagnusCarlsen",
+            new DateTime(2025, 11, 30, 23, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(new[]
+        {
+            "https://api.chess.com/pub/player/magnuscarlsen/games/2025/11",
+            "https://api.chess.com/pub/player/magnuscarlsen/games/2025/12",
+            "https://api.chess.com/pub/player/magnuscarlsen/games/2026/01",
+            "https://api.chess.com/pub/player/magnuscarlsen/games/2026/02",
+        }, actual);
+    }
+
+    [Fact]
     public void ChessComArchives_AreOldestFirst()
     {
         var actual = ChessGameFetcher.ChronologicalArchiveUrls(new[]
