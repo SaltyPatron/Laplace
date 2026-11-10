@@ -94,7 +94,7 @@ export function Activity({ canManage = false }: { canManage?: boolean }) {
             <summary><code className={styles.queryCell}>{row.query.length > 90 ? `${row.query.slice(0, 89)}…` : row.query}</code></summary>
             <pre className={styles.sig}>{row.query}</pre>
           </details> : '—'}</td>
-          <td>{row.is_self ? <Muted>—</Muted> : <div className={styles.rowActions}>
+          <td>{row.is_self || row.state === 'idle' || row.restricted ? <Muted>—</Muted> : <div className={styles.rowActions}>
             {canManage && <><Button variant="ghost" size="sm" disabled={busyPid != null} loading={busyPid === row.pid} onClick={() => void signal(row, 'cancel')}>Cancel</Button>
             <Button variant="ghost" size="sm" disabled={busyPid != null} onClick={() => setConfirmKill(row)}>Terminate</Button></>}
           </div>}</td>

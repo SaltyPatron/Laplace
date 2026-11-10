@@ -1,0 +1,27 @@
+@layer components {
+  .chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    max-width: 100%;
+    padding: 0 var(--space-1);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-accent);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+    text-underline-offset: 0.2em;
+  }
+  .chip:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); text-decoration-color: currentColor; }
+  .active { background: color-mix(in srgb, var(--color-accent) 16%, transparent); }
+  .label { overflow-wrap: anywhere; }
+  .tier {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+}

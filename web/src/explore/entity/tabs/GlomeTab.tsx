@@ -61,22 +61,6 @@ export function GlomeTab({
     setSelectedOrdinal(null);
   }, [entity.id_hex]);
 
-  const packedNodes = useMemo((): GlomeNode[] => {
-    return packed.map((v) => ({
-      id: `packed-${v.ordinal}-${v.child_id_hex}`,
-      label: constituentLabels.get(v.child_id_hex) ?? identityLabel(v.child_id_hex),
-      x: v.x,
-      y: v.y,
-      z: v.z,
-      m: v.m,
-      radius: 1,
-      ordinal: v.ordinal,
-      runLength: v.run_length,
-      kind: 'constituent' as const,
-      color: ordinalColor(v.ordinal, maxOrd),
-    }));
-  }, [packed, maxOrd, constituentLabels]);
-
   const placementPrimary = useMemo(
     () => physicalitiesToNodes(entity.physicalities, entity.label, entity.id_hex),
     [entity.physicalities, entity.label, entity.id_hex],
@@ -122,15 +106,6 @@ export function GlomeTab({
     };
   }, [selectedOrdinal, realized, packed, constituentLabels, entity.id_hex]);
 
-  // Packed highlight: RLE vertex covering the expanded ordinal.
-  const packedHighlightOrdinal = useMemo(() => {
-    if (selectedOrdinal == null) return null;
-    const hit = packed.find((v) => {
-      const end = v.ordinal + Math.max(v.run_length, 1) - 1;
-      return selectedOrdinal >= v.ordinal && selectedOrdinal <= end;
-    });
-    return hit?.ordinal ?? selectedOrdinal;
-  }, [selectedOrdinal, packed]);
 
   return (
     <Panel title="Physicality trajectory" fill>
@@ -143,27 +118,7 @@ export function GlomeTab({
           setSelectedOrdinal((previous) => Math.max(1, Math.min(maxOrd, (previous ?? (direction > 0 ? 0 : 1)) + direction)));
         }}>
         <div className={styles.panes}>
-          <section className={styles.pane}>
-            <header className={styles.paneHead}>
-              <h3 className={styles.paneTitle}>Packed</h3>
-              <p className={styles.paneCaption}>BLAKE3 ID unpacked from XYZ mantissas (43/43/42 bits) · M = RLE</p>
-            </header>
-            {packedNodes.length === 0 ? (
-              <div className={styles.emptyPane}>
-                No trajectory — this entity is a leaf or has no witnessed path.
-              </div>
-            ) : (
-              <GlomeCanvas
-                nodes={packedNodes}
-                projection="packed"
-                highlightOrdinal={packedHighlightOrdinal}
-                onSelectOrdinal={setSelectedOrdinal}
-                fill
-                note="Mantissa-unpacked BLAKE3 hash trajectory (43/43/42-bit slices in [-1,1]³). Not S³ placement."
-              />
-            )}
-          </section>
-
+          {/* Packed path vertices carry ID bits, not geometry; drawing them as coordinates is meaningless. Only real placement is shown. */}
           <section className={styles.pane}>
             <header className={styles.paneHead}>
               <h3 className={styles.paneTitle}>Placement</h3>

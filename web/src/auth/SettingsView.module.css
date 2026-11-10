@@ -5,6 +5,7 @@
   margin-inline: auto;
   padding: clamp(1rem, 3vw, 2rem);
   display: grid;
+  align-content: start;
   gap: 1.25rem;
 }
 .root h1 { margin: 0 0 .4rem; font-size: clamp(1.4rem, 3vw, 2rem); }
@@ -48,7 +49,7 @@
 .configuration dt { font-weight: 600; }
 .configuration dd { margin: 0; overflow-wrap: anywhere; }
 .root code { overflow-wrap: anywhere; }
-.sections { display: flex; gap: .4rem; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-default); padding-bottom: .8rem; }
+.sections { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-default); padding-bottom: .8rem; }
 .sections button { padding: .6rem .9rem; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
 .sections [aria-current="page"] { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); font-weight: 600; }
 .mobileSections { display: none; }

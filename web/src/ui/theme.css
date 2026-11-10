@@ -23,12 +23,15 @@
     --primitive-text-100: #142c3b;
     --primitive-text-400: #526879;
 
+    /* 4px spacing scale. space-N is the only spacing vocabulary; literals are linted out. */
     --primitive-space-1: 0.25rem;
-    --primitive-space-2: 0.45rem;
-    --primitive-space-3: 0.6rem;
-    --primitive-space-4: 0.75rem;
-    --primitive-space-5: 1rem;
-    --primitive-space-6: 1.5rem;
+    --primitive-space-2: 0.5rem;
+    --primitive-space-3: 0.75rem;
+    --primitive-space-4: 1rem;
+    --primitive-space-5: 1.5rem;
+    --primitive-space-6: 2rem;
+    --primitive-space-7: 3rem;
+    --primitive-space-8: 4rem;
 
     /* Tier B — Semantic */
     --color-bg-surface: var(--primitive-neutral-900);
@@ -82,6 +85,18 @@
     --space-4: var(--primitive-space-4);
     --space-5: var(--primitive-space-5);
     --space-6: var(--primitive-space-6);
+    --space-7: var(--primitive-space-7);
+    --space-8: var(--primitive-space-8);
+
+    /* Layout. Breakpoints (not usable in @media as vars; use these literals only):
+       compact < 40rem (640px) · medium < 64rem (1024px) · wide ≥ 64rem. */
+    --rail-width: 15rem;
+    --rail-width-collapsed: 4rem;
+    --topbar-height: 3.5rem;
+    --drawer-width: min(34rem, 100vw);
+    --page-width-document: 52rem;
+    --page-width-workspace: 96rem;
+    --page-gutter: clamp(var(--space-4), 3vw, var(--space-6));
 
     --radius-sm: 6px;
     --radius-md: 10px;
@@ -92,10 +107,26 @@
     --font-display: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
     --font-mono: ui-monospace, 'Cascadia Code', monospace;
 
+    /* Type scale (1.2 ratio from 1rem). Headings use --heading-*; nothing else sets font-size. */
     --text-xs: 0.75rem;
     --text-sm: 0.875rem;
-    --text-base: 0.95rem;
+    --text-base: 1rem;
     --text-lg: 1.2rem;
+    --text-xl: 1.44rem;
+    --text-2xl: 1.728rem;
+    --text-3xl: 2.074rem;
+    --heading-1: var(--text-2xl);
+    --heading-2: var(--text-xl);
+    --heading-3: var(--text-lg);
+    --leading-tight: 1.2;
+    --leading-normal: 1.5;
+    --weight-regular: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+    --weight-bold: 700;
+    --z-rail: 50;
+    --z-drawer: 900;
+    --z-palette: 1050;
 
     --duration-fast: 150ms;
     --duration-engage: 260ms;

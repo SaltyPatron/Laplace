@@ -22,7 +22,9 @@
     "test:workspace-ui": "node scripts/test-workspace-ui.mjs && node scripts/test-library-ui.mjs",
     "test:data-ui": "node scripts/test-data-ui.mjs",
     "test:chess-ui": "npm run test:ui",
-    "gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts"
+    "gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts",
+    "audit": "pwsh audit/run.ps1",
+    "audit:static": "node audit/static.mjs && node audit/report.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",

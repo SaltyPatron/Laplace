@@ -77,7 +77,7 @@ try {
   const search = await searchResponse.json();
   if (!search.hits.length) throw new Error('The live dog search returned no entities.');
   await expect.poll(() => page.locator('[data-collection-master] tbody tr').count()).toBeGreaterThanOrEqual(search.hits.length);
-  await expect(page.getByRole('button', { name: 'Refresh search', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled();
   const first = search.hits[0];
   const meaningRead = page.waitForResponse(response => {
     const url = new URL(response.url());

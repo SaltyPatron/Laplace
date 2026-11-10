@@ -73,6 +73,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     aria-disabled={isDisabled || ariaDisabled || undefined}
     aria-busy={loading || undefined}
     aria-current={variant === 'nav' && active ? 'page' : ariaCurrent}
+    data-variant={variant ?? 'primary'}
     onClickCapture={(event) => { if (isDisabled) stop(event); else onClickCapture?.(event); }}
     onAuxClickCapture={(event) => { if (isDisabled) stop(event); else onAuxClickCapture?.(event); }}
     onKeyDownCapture={(event) => {

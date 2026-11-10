@@ -16,13 +16,23 @@ internal static class IdentityEndpoints
             .WithTags("identity")
             .Produces<AuthConfigResponse>();
 
-        app.MapGet("/v1/auth/me", (HttpContext context, BrowserAuthSettings settings, IOptions<LaplaceAuthOptions> auth) =>
+        app.MapGet("/v1/auth/me", async (HttpContext context, BrowserAuthSettings settings, IOptions<LaplaceAuthOptions> auth,
+            ITenantResolver resolver, CancellationToken ct) =>
         {
             var principal = context.User;
             var devPrincipal = auth.Value.DevPrincipalActive ? auth.Value.DevPrincipal!.Trim() : null;
+            var providers = settings.Providers.Select(ProviderView).ToArray();
             if (!TryIdentity(principal, out var userId, out var tenantId))
-                return Results.Json(new AuthMeResponse(
-                    false, null, settings.Providers.Select(ProviderView).ToArray(), devPrincipal));
+            {
+                // Service principals (workload API keys, the installation operator credential)
+                // are real identities: report them so clients and tests are not shown as signed out.
+                var resolved = await resolver.ResolveAsync(context, ct);
+                var operatorCredential = OperatorAuth.HasCredential(context.Request, auth.Value) && !auth.Value.DevPrincipalActive;
+                AuthPrincipalView? service = resolved.AuthKind == "api_key"
+                    ? new AuthPrincipalView("api_key", resolved.TenantId, resolved.Claims.GetValueOrDefault("key_prefix"))
+                    : operatorCredential ? new AuthPrincipalView("operator", resolved.TenantId, null) : null;
+                return Results.Json(new AuthMeResponse(service is not null, null, providers, devPrincipal, service));
+            }
 
             return Results.Json(new AuthMeResponse(
                 true,
@@ -32,7 +42,7 @@ internal static class IdentityEndpoints
                     principal.FindFirstValue(ClaimTypes.Name),
                     principal.FindFirstValue(ClaimTypes.Email),
                     principal.FindFirstValue(LaplaceClaimTypes.Provider)),
-                settings.Providers.Select(ProviderView).ToArray(), devPrincipal));
+                providers, devPrincipal, new AuthPrincipalView("browser", tenantId, null)));
         })
         .WithTags("identity")
         .Produces<AuthMeResponse>();
@@ -159,8 +169,12 @@ internal static class IdentityEndpoints
     internal sealed record AuthUserView(
         Guid Id, string TenantId, string? DisplayName, string? Email, string? Provider);
     /// <param name="DevPrincipal">The sandbox workspace an uncredentialed request acts as, when configured.</param>
+    /// <param name="Kind">browser | api_key | operator.</param>
+    /// <param name="Label">Key prefix for an API key; null otherwise. Never the secret.</param>
+    internal sealed record AuthPrincipalView(string Kind, string TenantId, string? Label);
     internal sealed record AuthMeResponse(
-        bool Authenticated, AuthUserView? User, IReadOnlyList<AuthProviderView> Providers, string? DevPrincipal = null);
+        bool Authenticated, AuthUserView? User, IReadOnlyList<AuthProviderView> Providers, string? DevPrincipal = null,
+        AuthPrincipalView? Principal = null);
     internal sealed record WebSessionsResponse(IReadOnlyList<WebSessionView> Sessions);
     internal sealed record ConversationSessionsResponse(IReadOnlyList<ConversationSessionView> Conversations);
 }

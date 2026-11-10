@@ -161,7 +161,7 @@ function Cloud({
   </>;
 }
 export function UnicodeGlomeView(){
- const [cloud,setCloud]=useState<UnicodeCloudResponse|null>(null),[buffer,setBuffer]=useState<ArrayBuffer|null>(null),[err,setErr]=useState<string|null>(null),[mode,setMode]=useState<'real'|'hash'>('real'),[point,setPoint]=useState<UnicodePointResponse|null>(null);
+ const [cloud,setCloud]=useState<UnicodeCloudResponse|null>(null),[buffer,setBuffer]=useState<ArrayBuffer|null>(null),[err,setErr]=useState<string|null>(null),[mode]=useState<'real'|'hash'>('real'),[point,setPoint]=useState<UnicodePointResponse|null>(null);
  const [cacheState,setCacheState]=useState<'checking'|'hit'|'stored'|'unavailable'>('checking');
  const [storage,setStorage]=useState<{usage:number;quota:number}|null>(null);
  useEffect(()=>{const controller=new AbortController();void (async()=>{try{
@@ -178,7 +178,7 @@ export function UnicodeGlomeView(){
  const pick=useMemo(() => (cp:number) => {
    void exploreUnicodePoint(cp).then(setPoint).catch(e=>setErr(e instanceof Error?e.message:String(e)));
  }, []);
- return <div className={styles.root}><header><div><span>Tier-0 instrument</span><h2>Unicode Glome</h2><p>Every position in the active Unicode T0 ROM. The physicality view projects the real 4-D open Super-Fibonacci S³ placement into the 3-D unit ball; the hash / mantissa view unpacks the canonical 128-bit BLAKE3 ID into its 43/43/42-bit X/Y/Z mantissa coordinates in [-1, 1]³.</p></div><div className={styles.controls}><button className={mode==='real'?styles.active:''} onClick={()=>setMode('real')}>Physicality</button><button className={mode==='hash'?styles.active:''} onClick={()=>setMode('hash')}>Hash / mantissa</button></div></header>{err?<ErrorText>{err}</ErrorText>:null}{!pos?<LoadingText>Loading the complete T0 ROM GPU buffers…</LoadingText>:<div className={styles.layout}><div className={styles.canvas}><Canvas
+ return <div className={styles.root}><header><div><span>Tier-0 instrument</span><h2>Unicode Glome</h2><p>Every position in the active Unicode T0 ROM. The view projects each codepoint's real 4-D Super-Fibonacci S³ placement into the 3-D unit ball.</p></div><div className={styles.controls}></div></header>{err?<ErrorText>{err}</ErrorText>:null}{!pos?<LoadingText>Loading the complete T0 ROM GPU buffers…</LoadingText>:<div className={styles.layout}><div className={styles.canvas}><Canvas
   frameloop="demand"
   dpr={1}
   camera={{position:[0,0,2.35],fov:48}}

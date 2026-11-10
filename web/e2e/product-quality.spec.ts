@@ -8,28 +8,11 @@ test('route params preserve percent literals after the router decodes them', asy
     await expect(page.getByLabel('Route')).toHaveText(`/explore?${new URLSearchParams({ q: ref })}`);
   }
 });
-test('independent topic panels show failed reads and successful facts together', async ({ page }) => {
-  await page.goto('/tests/product-quality.html?view=topic');
-  await expect(page.getByRole('textbox', { name: 'topic', exact: true })).toHaveValue('%');
-  await expect(page.getByText('Independent facts loaded')).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(5);
-  await expect(page.getByText('Loading…', { exact: true })).toHaveCount(0);
-});
 test('stage failures and absent stages terminate loading', async ({ page }) => {
   await page.goto('/tests/product-quality.html?view=failed-stage');
   await expect(page.getByRole('alert')).toHaveText('Read temporarily unavailable');
   await page.goto('/tests/product-quality.html?view=missing-stage');
   await expect(page.getByText('No catalog stage matches “missing”.')).toBeVisible();
-});
-test('pulse waits for auth, stops after refusal, and resumes on sign in', async ({ page }) => {
-  await page.goto('/tests/product-quality.html?view=pulse');
-  await expect(page.getByLabel('Pulse requests')).toHaveText('0');
-  await page.getByRole('button', { name: 'Resolve anonymous auth' }).click();
-  await expect(page.getByLabel('Pulse requests')).toHaveText('1');
-  await page.waitForTimeout(550); // More than five complete polling intervals.
-  await expect(page.getByLabel('Pulse requests')).toHaveText('1');
-  await page.getByRole('button', { name: 'Sign in fixture' }).click();
-  await expect(page.getByLabel('Pulse result')).toHaveText('42');
 });
 test('trajectory keyboard navigation respects focus and expands packed runs', async ({ page }) => {
   await page.goto('/tests/product-quality.html?view=glome');

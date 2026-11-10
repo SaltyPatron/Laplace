@@ -1,9 +1,9 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { decodeRouteText } from '../layout/useRouteText';
 import { changeWorld } from '../world/context';
 import { Breadcrumb } from './components/Breadcrumb';
-import { LoadingText, NavTabs } from '@ui';
+import { LoadingText } from '@ui';
 import { useExploreStore } from './store';
 import styles from './ExploreView.module.css';
 
@@ -106,87 +106,10 @@ function ExploreBreadcrumb() {
   return <Breadcrumb segments={segments} />;
 }
 
-const EXPLORE_SECTIONS = [
-  { id: 'search', label: 'Search', path: '/explore', load: loadBrowse, match: (p: string) => p === '/explore' || p === '/query' || p.startsWith('/topic') || p.startsWith('/explore/entity/') || p.startsWith('/explore/notfound/') || p.startsWith('/explore/resolve/') },
-  { id: 'sources', label: 'Sources', path: '/explore/sources', load: loadWarehouse, match: (p: string) => p === '/explore/sources' || p === '/explore/warehouse' || p.startsWith('/explore/source/') || p.startsWith('/explore/stage/') },
-  { id: 'highway', label: 'Highway', path: '/explore/highway', load: loadHighway, match: (p: string) => p === '/explore/highway' || p.startsWith('/explore/highway/') },
-  { id: 'constellation', label: 'Constellation', path: '/explore/constellation', load: loadConstellation, match: (p: string) => p.startsWith('/explore/constellation') },
-  { id: 'unicode', label: 'Unicode Glome', path: '/unicode', load: loadUnicode, match: (p: string) => p.startsWith('/unicode') },
-  { id: 'proof', label: 'Storage Proof', path: '/proof', load: loadProof, match: (p: string) => p.startsWith('/proof') },
-  { id: 'walk', label: 'Forward Trace', path: '/explore/walk', load: loadWalk, match: (p: string) => p.startsWith('/explore/walk') },
-  { id: 'mesh', label: 'Mesh', path: '/explore/mesh', load: loadMesh, match: (p: string) => p === '/explore/mesh' || p.startsWith('/explore/mesh/') },
-  { id: 'matchup', label: 'Matchup', path: '/explore/matchup', load: loadMatchup, match: (p: string) => p === '/explore/matchup' || p.startsWith('/explore/matchup/') },
-  { id: 'audit', label: 'Audit', path: '/explore/audit', load: loadAudit, match: (p: string) => p.startsWith('/explore/audit') },
-  { id: 'architecture', label: 'Architecture', path: '/explore/architecture', load: loadArchitecture, match: (p: string) => p.startsWith('/explore/architecture') },
-] as const;
-
-function sectionDestination(sectionId: (typeof EXPLORE_SECTIONS)[number]['id'], basePath: string, pathname: string, search: string, crumb: { entityLabel?: string; entityId?: string }): string {
-  const params = new URLSearchParams(search);
-  const entityMatch = pathname.match(/^\/explore\/(?:entity|mesh)\/([0-9a-f]{32})$/i);
-  const matchupMatch = pathname.match(/^\/explore\/matchup\/([^/]+)\/([^/]+)$/);
-  const activeEntityId = params.get('selected') ?? entityMatch?.[1] ?? null;
-  const activeSubject = (entityMatch && crumb.entityId === entityMatch[1] && crumb.entityLabel ? crumb.entityLabel : null)
-    ?? params.get('q')
-    ?? params.get('x')
-    ?? (matchupMatch ? decodeRouteText(matchupMatch[1]) : null)
-    ?? activeEntityId;
-  const secondSubject = params.get('other') ?? params.get('y') ?? (matchupMatch ? decodeRouteText(matchupMatch[2]) : null);
-
-  if (sectionId === 'search') {
-    const next = new URLSearchParams();
-    for (const [k, v] of params.entries()) {
-      if (!['x', 'y', 'source', 'sources', 'entity', 'diagram', 'operation', 'section', 'file', 'expected'].includes(k)) next.append(k, v);
-    }
-    if (!next.has('q') && activeSubject && !pathname.startsWith('/explore/architecture')) next.set('q', activeSubject);
-    if (!next.has('selected') && activeEntityId) next.set('selected', activeEntityId);
-    return next.size ? `/explore?${next}` : '/explore';
-  }
-  if (sectionId === 'proof') {
-    return activeSubject && !pathname.startsWith('/explore/architecture') ? `/proof?q=${encodeURIComponent(activeSubject)}` : '/proof';
-  }
-  if (sectionId === 'mesh') {
-    if (activeEntityId) return `/explore/mesh/${activeEntityId}`;
-    return params.get('q') && !pathname.startsWith('/explore/architecture') ? `/explore/mesh?q=${encodeURIComponent(params.get('q')!)}` : '/explore/mesh';
-  }
-  if (sectionId === 'matchup') {
-    if (activeSubject && secondSubject && !pathname.startsWith('/explore/architecture')) {
-      return `/explore/matchup/${encodeURIComponent(activeSubject)}/${encodeURIComponent(secondSubject)}`;
-    }
-    if (activeSubject && !pathname.startsWith('/explore/architecture')) {
-      return `/explore/matchup?x=${encodeURIComponent(activeSubject)}`;
-    }
-    return '/explore/matchup';
-  }
-  return basePath;
-}
-
-function ExploreSubnav() {
-  const { pathname, search } = useLocation();
-  const navigate = useNavigate();
-  const crumb = useExploreStore((s) => s.breadcrumb);
-  return (
-    <NavTabs
-      label="Knowledge sections"
-      tabs={EXPLORE_SECTIONS.map((section) => {
-        const target = sectionDestination(section.id, section.path, pathname, search, crumb);
-        return {
-          id: section.id,
-          label: section.label,
-          href: target,
-          active: section.match(pathname),
-          onIntent: () => { void section.load(); },
-          onClick: () => navigate(target),
-        };
-      })}
-    />
-  );
-}
-
 export function ExploreView({ page }: { page?: ExplorePage }) {
   return (
     <div className={styles.layout}>
       <div className={styles.content}>
-        <ExploreSubnav />
         <ExploreBreadcrumb />
         <Suspense fallback={<LoadingText>Loading knowledge workspace…</LoadingText>}>
         {page === 'topic' ? <TopicWorkspace /> : page === 'query' ? <QueryConsole /> : page === 'proof' ? <StorageProofView /> : page === 'unicode' ? <UnicodeGlomeView /> : <Routes>
