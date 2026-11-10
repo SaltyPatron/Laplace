@@ -642,6 +642,25 @@
         "VerbNet-GL",
         "3.4"
       ]
+    },
+    "predicate-matrix": {
+      "native": true,
+      "layer": 3
+    },
+    "verbatlas": {
+      "native": true
+    },
+    "universal-dependencies-tools": {
+      "native": true
+    },
+    "brown": {
+      "native": true
+    },
+    "framebase": {
+      "native": true
+    },
+    "atomic-10x": {
+      "native": true
     }
   }
 }
