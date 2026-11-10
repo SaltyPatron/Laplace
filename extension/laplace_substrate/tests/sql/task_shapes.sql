@@ -56,7 +56,7 @@ $cell$;
 -- Same tier, physicality identity and packed carrier as the source codec.
 CREATE FUNCTION pg_temp.shape_projection(p_flat bytea[],p_type text,p_source bytea)
 RETURNS bytea LANGUAGE plpgsql AS $projection$
-DECLARE v_id bytea := public.laplace_hash128_merkle(4::smallint,p_flat);
+DECLARE v_id bytea := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(p_flat) WITH ORDINALITY u(c, o) ORDER BY o)));
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(v_id,4,laplace.entity_type_id(p_type))
@@ -126,8 +126,7 @@ DECLARE
     v_shape bytea;
 BEGIN
     FOR i IN 1..cardinality(p_ordinals) LOOP
-        v_slot := public.laplace_hash128_merkle(4::smallint,
-            ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i]]);
+        v_slot := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i]]) WITH ORDINALITY u(c, o) ORDER BY o)));
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i]];
         INSERT INTO laplace.entities(id,tier,type_id)
@@ -159,8 +158,7 @@ DECLARE
     v_shape bytea;
 BEGIN
     FOR i IN 1..cardinality(p_ordinals) LOOP
-        v_slot := public.laplace_hash128_merkle(4::smallint,
-            ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]]);
+        v_slot := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]]) WITH ORDINALITY u(c, o) ORDER BY o)));
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]];
         INSERT INTO laplace.entities(id,tier,type_id)
@@ -416,8 +414,8 @@ BEGIN
     PERFORM pg_temp.shape_cell(v_input,v_predicate,v_answer,v_source,v_context);
     PERFORM pg_temp.shape_reject('available result without task shape',v_prompt);
     v_shape := pg_temp.declare_shape(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_concept],v_source,v_context);
-    v_slot := public.laplace_hash128_merkle(4::smallint,ARRAY[
-        public.laplace_hash128_blake3('laplace/task-shape/token-slot/v1'),pg_temp.shape_ref(2),v_concept]);
+    v_slot := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[
+        public.laplace_hash128_blake3('laplace/task-shape/token-slot/v1'),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
     IF EXISTS (SELECT 1 FROM laplace.attestations
                 WHERE subject_id=v_root AND type_id IN (v_calls,v_inputs,v_has_parse))
        OR EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_exemplar,8::smallint) p

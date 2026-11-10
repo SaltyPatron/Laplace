@@ -1,5 +1,6 @@
 CREATE OR REPLACE FUNCTION realize.canonical_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'));
+    -- A name's ID is its text's Native ID (lp_text_id), as everywhere else.
+    SELECT public.blake3_send(public.laplace_text_id(p_name));
 END;

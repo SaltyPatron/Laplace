@@ -12,7 +12,7 @@ DECLARE root bytea; expanded bytea[]; logical integer;
 BEGIN
     SELECT array_agg(children[i] ORDER BY i,n),count(*)::integer INTO expanded,logical
     FROM generate_subscripts(children,1) i CROSS JOIN LATERAL generate_series(1,runs[i]) n;
-    root:=coalesce(forced_id,public.laplace_hash128_merkle(255::smallint,expanded));
+    root:=coalesce(forced_id,public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(expanded) WITH ORDINALITY u(c, o) ORDER BY o))));
     INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(root,255,laplace.entity_type_id('Text')) ON CONFLICT DO NOTHING;
     INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)

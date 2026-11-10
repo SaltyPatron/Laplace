@@ -496,7 +496,7 @@ BEGIN
         ref_one,cue,cue,pos_id,none_id,features_end,root_marker,dep_id,enhanced_end,misc_end,
         ref_two,surface,lemma,pos_id,none_id,features_end,ref_one,dep_id,enhanced_end,misc_end,
         tokens_end];
-    parse_id := public.laplace_hash128_merkle(4::smallint,manifest);
+    parse_id := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(manifest) WITH ORDINALITY u(c, o) ORDER BY o)));
     INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'));
     INSERT INTO laplace.physicalities

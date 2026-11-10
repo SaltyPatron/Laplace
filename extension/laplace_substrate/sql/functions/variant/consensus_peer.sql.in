@@ -48,7 +48,7 @@ BEGIN ATOMIC
             ORDER BY score DESC
             LIMIT GREATEST(p_k, 0)
         ) z
-        ORDER BY public.laplace_hash128_blake3(z.id || p_id)
+        ORDER BY public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(z.id), public.blake3_from_bytea(p_id)]))
         LIMIT 1
     ),
     anchor AS MATERIALIZED (
@@ -73,7 +73,7 @@ BEGIN ATOMIC
             ORDER BY public.laplace_frechet_4d(knn.curve, an.v_curve) ASC
             LIMIT GREATEST(p_k, 0)
         ) z
-        ORDER BY public.laplace_hash128_blake3(z.id || p_id)
+        ORDER BY public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(z.id), public.blake3_from_bytea(p_id)]))
         LIMIT 1
     )
     SELECT COALESCE(

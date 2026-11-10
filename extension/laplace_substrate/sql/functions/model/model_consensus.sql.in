@@ -86,8 +86,7 @@ BEGIN ATOMIC
     SELECT CASE
              WHEN p_head IS NOT NULL AND p_layer IS NULL
                THEN NULL::bytea
-             ELSE public.laplace_hash128_merkle(
-                 0::smallint, path.ids)
+             ELSE public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(path.ids) WITH ORDINALITY u(c, o) ORDER BY o)))
            END
     FROM path;
 END;
@@ -129,7 +128,7 @@ BEGIN ATOMIC
              WHEN p_source IS NULL OR p_plane IS NULL OR btrim(p_plane) = ''
                OR (p_head >= 0 AND COALESCE(p_layer, -1) < 0)
                THEN NULL::bytea
-             ELSE public.laplace_hash128_merkle(0::smallint, path.ids)
+             ELSE public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(path.ids) WITH ORDINALITY u(c, o) ORDER BY o)))
            END
     FROM path;
 END;
