@@ -30,6 +30,7 @@ import { WorldLink as RouterLink, WorldProjection } from '../../world/WorldLink'
 import { presentations } from '../../world/presentations';
 import { type GlomeNode } from '../glome/GlomeCanvas';
 import { useAppStore } from '../../store';
+import { useEntityLabels } from '../../shell/inspector';
 import { useExploreStore } from '../store';
 import type { BillingReceipt, ExploreEntityPreviewResponse, ExploreEntityResponse } from '../types';
 import styles from './EntityDetail.module.css';
@@ -80,6 +81,9 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
   const setTab = (value: EntityTab) => setParams(changeWorld(params, { detail: value === 'overview' ? null : value, inspect: '1' }), { preventScrollReset: true });
   const [preview, setPreview] = useState<ExploreEntityPreviewResponse | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // A label already seen anywhere (search result, chip, palette) titles the page before its own read returns.
+  const knownLabel = useEntityLabels((s) => s.labels[idHex.toLowerCase()]);
+  const rememberLabel = useEntityLabels((s) => s.remember);
   const [entity, setEntity] = useState<ExploreEntityResponse | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [inspectReceipt, setInspectReceipt] = useState<BillingReceipt | null>(null);
@@ -153,12 +157,13 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
     explorePreview(idHex, { tenant, signal: controller.signal }).then(p => {
       if (controller.signal.aborted) return;
       setPreview(p);
+      if (p.label) rememberLabel(p.id_hex, p.label);
       setBreadcrumb({ entityLabel: p.label, entityId: p.id_hex });
     }).catch(error => {
       if (!controller.signal.aborted) setPreviewError(error instanceof Error ? error.message : String(error));
     });
     return () => controller.abort();
-  }, [idHex, selectedLabel, inspectOpen, preview, tenant, setBreadcrumb]);
+  }, [idHex, selectedLabel, inspectOpen, preview, tenant, setBreadcrumb, rememberLabel]);
 
   useEffect(() => {
     if (!inspectOpen || unlocked || detailLoading || needsGate || err) return;
@@ -323,7 +328,7 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
         onCopyId={copyId}
         onExport={() => void downloadExport()}
         onAskSubstrate={askSubstrate}
-      /> : <header className={styles.header}><div><h2>{selectedLabel ?? idHex}</h2><Button variant="ghost" size="sm" onClick={copyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button></div><div className={styles.actions}><Button asChild variant="ghost" size="sm"><RouterLink to={`/explore/entity/${idHex}`}>Full entity</RouterLink></Button><Button asChild variant="ghost" size="sm"><RouterLink to={`/proof?q=${encodeURIComponent(selectedLabel ?? idHex)}`}>Prove storage</RouterLink></Button><Button variant="ghost" onClick={askSubstrate}>Ask substrate</Button></div></header>}
+      /> : <header className={styles.header}><div><h2 title={idHex}>{selectedLabel ?? knownLabel ?? entity?.label ?? (previewError ? idHex : 'Loading…')}</h2><Button variant="ghost" size="sm" onClick={copyId}>{copied ? 'Reference copied' : 'Copy reference'}</Button></div><div className={styles.actions}><Button asChild variant="ghost" size="sm"><RouterLink to={`/explore/entity/${idHex}`}>Full entity</RouterLink></Button><Button asChild variant="ghost" size="sm"><RouterLink to={`/proof?q=${encodeURIComponent(selectedLabel ?? idHex)}`}>Prove storage</RouterLink></Button><Button variant="ghost" onClick={askSubstrate}>Ask substrate</Button></div></header>}
 
       <NavTabs label="Subject presentations" tabs={availablePresentations.map(item => ({ id: item.id, label: item.label, active: item.id === presentation.id,
         href: `${location.pathname}?${changeWorld(params, { presentation: item.id })}`,
