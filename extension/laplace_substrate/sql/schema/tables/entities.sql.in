@@ -19,7 +19,9 @@ DECLARE
     b int;
     suffix text;
     strategy "char";
-    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+    -- Per partition: 1000 + 2% of its rows. A fixed 100000 exceeded every partition's
+    -- size, so autoanalyze never ran and the planner chose type btrees over the GIN probes.
+    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 1000)';
 BEGIN
     IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname = 'entities') <> 'p' THEN

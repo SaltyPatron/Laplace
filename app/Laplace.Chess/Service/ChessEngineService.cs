@@ -345,7 +345,8 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        var search = BuildEngine(substrate, continuations: ContinuationsFor(fen, moves, substrate, movesIgnoreFen: true));
+        bool reads = substrate && !HasImmediateMate(_modality, state);
+        var search = BuildEngine(reads, continuations: ContinuationsFor(fen, moves, reads, movesIgnoreFen: true));
         var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 
@@ -356,9 +357,24 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
 
-        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
+        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, reads,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
+    }
+
+    /// <summary>
+    /// Whether the side to move has a legal move that ends the game in its favour. No
+    /// substrate evidence can outrank a mate, so selection skips its substrate reads here
+    /// (continuation seed, root bias, board evaluator); the search still makes the choice
+    /// and finds the mate at depth one. Move generation only, no database read.
+    /// </summary>
+    internal static bool HasImmediateMate(ChessModality modality, ChessState state)
+    {
+        int mover = state.Board.WhiteToMove ? 0 : 1;
+        foreach (var move in MoveGen.Legal(state.Board))
+            if (modality.Terminal(modality.Apply(state, move)) is { IsDraw: false } end && end.Winner == mover)
+                return true;
+        return false;
     }
 
     private SearchContinuationTable ContinuationsFor(
