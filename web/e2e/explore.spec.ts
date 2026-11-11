@@ -97,6 +97,30 @@ test('Browse returns a canonical result set instead of silently choosing one ent
   await expect(page).toHaveURL(`/explore/entity/${WHALE_ID}`);
 });
 
+test('Results and detail take turns when the workspace is too narrow for two panes', async ({ page }) => {
+  // 868px is a laptop window beside the rail: two panes there left the results about 230px wide.
+  await page.setViewportSize({ width: 868, height: 1000 });
+  await page.route('**/v1/explore/browse?**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(browseResponse('Hikaru', [{
+      id_hex: WHALE_ID, label: 'Nakamura, Hikaru', tier: 2, type: 'Chess_Player',
+      matched_name_id_hex: '22222222222222222222222222222222', match_kind: 'name',
+      rating: 1500, rd: 120, eff_mu: 1260, witnesses: 42,
+    }])),
+  }));
+  await page.goto('/explore?q=Hikaru');
+  const results = page.locator('[data-collection-master]');
+  await expect(page.getByRole('link', { name: 'Nakamura, Hikaru' })).toBeVisible();
+  const workspace = await page.getByRole('region', { name: 'Knowledge results and detail' }).boundingBox();
+  expect((await results.boundingBox())!.width).toBeGreaterThan(workspace!.width * 0.9);
+  await expect(page.locator('[data-collection-detail]')).toBeHidden();
+
+  await page.getByRole('link', { name: 'Nakamura, Hikaru' }).click();
+  await expect(results).toBeHidden();
+  await page.getByRole('button', { name: 'Back to results' }).click();
+  await expect(page.getByRole('link', { name: 'Nakamura, Hikaru' })).toBeVisible();
+});
+
 test('Browse exposes capacity truncation as an execution bound the user can expand', async ({ page }) => {
   let seenCapacity = '';
   await page.route('**/v1/explore/browse?**', async (route) => {
