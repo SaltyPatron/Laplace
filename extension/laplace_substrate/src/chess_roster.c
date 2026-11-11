@@ -43,6 +43,10 @@ compare_rows(const void *a, const void *b, void *arg)
 {
     const RosterRow *x = a, *y = b;
     bool ascending = *(bool *)arg;
+    /* A player with no recorded games holds only the neutral prior, not a standing:
+     * unrated players follow every rated one in either direction. The rule keeps
+     * the two-arm page cover exact because it only reorders within the union. */
+    if ((x->games == 0) != (y->games == 0)) return x->games == 0 ? 1 : -1;
     if (x->key != y->key) return (x->key < y->key) == ascending ? -1 : 1;
     return memcmp(&x->id, &y->id, sizeof(hash128_t));
 }

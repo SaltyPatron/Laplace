@@ -44,7 +44,7 @@
   .historyStatus { color: var(--color-signal); font-size: var(--text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
   .page input, .page select, .page textarea { max-width: 100%; box-sizing: border-box; }
 
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .inputs { grid-template-columns: minmax(0, 1fr); }
     .inputs textarea { height: 9rem; }
   }

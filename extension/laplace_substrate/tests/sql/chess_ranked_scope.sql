@@ -123,10 +123,11 @@ BEGIN
     ) v(player,kind,object,witnesses);
     SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen'],100);
     IF n<>2 THEN RAISE EXCEPTION 'surname did not ascend into both witnessed names: %',n; END IF;
+    -- Unrated (no recorded games) follows every rated player, ascending as well as descending.
     SELECT player_id INTO got FROM chess.player_search_candidates(ARRAY['Carlsen'],1,0,'games','asc');
-    IF got IS DISTINCT FROM b THEN RAISE EXCEPTION 'first ascending games page lost profile-only name'; END IF;
+    IF got IS DISTINCT FROM a THEN RAISE EXCEPTION 'first ascending games page lost the witnessed player'; END IF;
     SELECT player_id INTO got FROM chess.player_search_candidates(ARRAY['Carlsen'],1,1,'games','asc');
-    IF got IS DISTINCT FROM a THEN RAISE EXCEPTION 'second page lost witnessed player'; END IF;
+    IF got IS DISTINCT FROM b THEN RAISE EXCEPTION 'second page lost the unrated profile-only name'; END IF;
     SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen'],1,2,'games','asc');
     IF n<>0 THEN RAISE EXCEPTION 'past-end page was not empty'; END IF;
     SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carls'],100);

@@ -59,7 +59,7 @@
 .roleCards section { padding: var(--space-4); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
 .roleCards h3 { margin: 0 0 var(--space-3); }
 .roleCards ul { padding-left: var(--space-4); line-height: 1.8; }
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .sections { display: none; }
   .mobileSections { display: grid; gap: var(--space-2); }
   .configuration { grid-template-columns: 1fr; }

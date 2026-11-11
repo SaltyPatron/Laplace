@@ -127,7 +127,7 @@
   }
 }
 
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .canvas,
   .canvasFill {
     min-height: 22rem;

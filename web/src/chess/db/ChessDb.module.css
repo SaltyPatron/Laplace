@@ -414,7 +414,7 @@
     align-items: start;
   }
 
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .replay {
       grid-template-columns: 1fr;
     }
@@ -570,7 +570,7 @@
     font-weight: 600;
   }
 
-  @media (max-width: 40rem) {
+  @container page (max-width: 36rem) {
     .heroTitleRow {
       flex-direction: column;
     }

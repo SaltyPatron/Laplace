@@ -119,7 +119,7 @@
     padding: clamp(var(--space-4), 3vw, var(--space-6));
   }
 
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .layout {
       grid-template-columns: minmax(0, 1fr);
       height: auto;

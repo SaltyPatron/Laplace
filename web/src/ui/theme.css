@@ -120,8 +120,9 @@
     --space-7: var(--primitive-space-7);
     --space-8: var(--primitive-space-8);
 
-    /* Layout. Breakpoints (not usable in @media as vars; use these literals only):
-       compact < 40rem (640px) · medium < 64rem (1024px) · wide ≥ 64rem. */
+    /* Layout. Shell breakpoints (viewport @media; not usable as vars):
+       compact < 40rem (640px) · medium < 64rem (1024px) · wide ≥ 64rem.
+       Pages query their column instead: @container page (max-width: 52rem) stacks, 36rem is compact. */
     --rail-width: 15rem;
     --rail-width-collapsed: 4rem;
     --topbar-height: 3.5rem;

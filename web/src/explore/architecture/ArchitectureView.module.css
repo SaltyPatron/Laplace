@@ -15,5 +15,5 @@
   .evidence { overflow-wrap: anywhere; }
   .prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; max-width: 90ch; }
   .source { max-height: 65vh; overflow: auto; font-size: var(--text-sm); }
-  @media (max-width: 40rem) { .filters { grid-template-columns: 1fr; } }
+  @container page (max-width: 36rem) { .filters { grid-template-columns: 1fr; } }
 }

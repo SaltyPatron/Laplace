@@ -90,7 +90,7 @@
   }
 }
 
-@media (max-width: 64rem) {
+@container page (max-width: 52rem) {
   .catalogScroll {
     display: block;
     overflow-x: auto;

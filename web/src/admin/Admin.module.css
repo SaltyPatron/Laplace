@@ -40,7 +40,7 @@
   .clientCard h3 { display: inline; margin-right: var(--space-4); }
   .clientCard dl { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-2); }
   .clientCard dd { margin: 0; overflow-wrap: anywhere; }
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .adminLayout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
     .adminNav { display: none; }
     .mobileNav { display: grid; gap: var(--space-2); font-size: var(--text-sm); }
@@ -281,7 +281,7 @@
 
   .opGrid > * { min-width: 0; }
 
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .opGrid { grid-template-columns: minmax(0, 1fr); }
     .outputCounts { min-width: 15rem; }
   }
@@ -395,7 +395,7 @@
 
   .processReceipt > .progressPct { grid-column: 1 / -1; }
 
-  @media (max-width: 40rem) {
+  @container page (max-width: 36rem) {
     .ingestFormGrid { grid-template-columns: 1fr; }
     .ingestArgs { grid-column: auto; }
     .processReceipt { grid-template-columns: 1fr; }

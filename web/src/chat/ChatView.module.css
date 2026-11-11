@@ -151,7 +151,7 @@
   }
 }
 
-@media (max-width: 64rem) {
+@container page (max-width: 52rem) {
   .layout {
     display: block;
     overflow-y: auto;
