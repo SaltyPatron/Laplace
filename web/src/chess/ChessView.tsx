@@ -26,6 +26,7 @@ import { formatPositionEval, terminalWhiteCp, whiteCpToBarFraction } from './eva
 import {
 
   historyFromPositions,
+  sanFromPositions,
 
   initialPositions,
 
@@ -174,7 +175,7 @@ export function ChessView() {
 
   const liveFen = live.fen;
 
-  const history = useMemo(() => historyFromPositions(positions), [positions]);
+  const history = useMemo(() => sanFromPositions(positions), [positions]);
 
 
 
@@ -914,6 +915,8 @@ export function ChessView() {
         <MoveList
 
           topMoves={topMoves}
+
+          fen={fen}
 
           history={history}
 

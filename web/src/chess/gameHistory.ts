@@ -1,3 +1,5 @@
+import { toSan } from './san';
+
 export interface PositionSnapshot {
   fen: string;
   status: string;
@@ -26,6 +28,16 @@ export function snapshotFromMove(
 
 export function historyFromPositions(positions: PositionSnapshot[]): string[] {
   return positions.slice(1).map((p) => p.uci!).filter(Boolean);
+}
+
+/** The game so far in standard algebraic notation, for display. */
+export function sanFromPositions(positions: PositionSnapshot[]): string[] {
+  const out: string[] = [];
+  for (let i = 1; i < positions.length; i++) {
+    const uci = positions[i].uci;
+    if (uci) out.push(toSan(positions[i - 1].fen, uci, positions[i].status));
+  }
+  return out;
 }
 
 export function plyLabel(ply: number, totalPlies: number): string {

@@ -126,6 +126,8 @@
   }
 
   .board {
+    --square-light: #b6c2da;
+    --square-dark: #5b6b8c;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
@@ -206,12 +208,12 @@
   }
 
   .light {
-    --sqbg: #b6c2da;
+    --sqbg: var(--square-light);
     background: var(--sqbg);
   }
 
   .dark {
-    --sqbg: #5b6b8c;
+    --sqbg: var(--square-dark);
     background: var(--sqbg);
   }
 
@@ -270,6 +272,34 @@
     color: #ffcf3a;
     pointer-events: none;
     text-shadow: 0 0 3px rgba(11, 14, 20, 0.9);
+  }
+
+  .coord {
+    position: absolute;
+    z-index: 1;
+    font-size: clamp(0.5rem, 1.6cqi, 0.75rem);
+    font-weight: 600;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .coordRank {
+    top: 0.15em;
+    left: 0.2em;
+  }
+
+  .coordFile {
+    right: 0.2em;
+    bottom: 0.15em;
+  }
+
+  .light .coord {
+    color: var(--square-dark);
+  }
+
+  .dark .coord {
+    color: var(--square-light);
   }
 
   .piece {
