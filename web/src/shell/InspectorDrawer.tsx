@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { LoadingText } from '../ui/primitives/Text';
 import { Icon } from '../ui/icons';
+import { UnstyledButton } from '../ui/primitives/UnstyledButton';
 import { useEntityLabels, useInspector } from './inspector';
 import styles from './InspectorDrawer.module.css';
 
@@ -28,8 +29,8 @@ export function InspectorDrawer() {
           <span className={styles.eyebrow}>Inspecting</span>
           <h2>{label ?? current.slice(0, 12)}</h2>
         </div>
-        <button type="button" className={styles.iconButton} onClick={pin} title="Open as a full page" aria-label="Open as a full page"><Icon name="external" /></button>
-        <button type="button" className={styles.iconButton} onClick={close} title="Close (Esc)" aria-label="Close inspector"><Icon name="close" /></button>
+        <UnstyledButton type="button" className={styles.iconButton} onClick={pin} title="Open as a full page" aria-label="Open as a full page"><Icon name="external" /></UnstyledButton>
+        <UnstyledButton type="button" className={styles.iconButton} onClick={close} title="Close (Esc)" aria-label="Close inspector"><Icon name="close" /></UnstyledButton>
       </header>
       <div className={styles.body}>
         <Suspense fallback={<LoadingText>Opening…</LoadingText>}>

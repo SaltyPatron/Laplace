@@ -3,85 +3,24 @@ import {
   Alert,
   Button,
   Chip,
-  Field,
-  Input,
   Muted,
   Panel,
-  SegmentedControl,
-  Select,
-  SliderField,
-  Toggle,
+  Table,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  UnstyledButton,
   useVisiblePolling,
 } from '@ui';
 import { apiGet, apiPost } from '../../../api/client';
-import { LiveBoard, type LabBoardState } from '../LiveBoard';
+import { type LabBoardState } from '../LiveBoard';
 import { Terminal } from '../Terminal';
 import { streamLabEvents, type LabCatalog, type LabEvent, type LabJob } from '../sse';
 import { normalizeKind } from '../experiments';
+import { DEFAULT_SETUP, ENGINES, RUNNING, type GameRow, type Preview, type Setup } from './gauntletSetup';
+import { GauntletSetupForm } from './GauntletSetupForm';
+import { GauntletWatch, stateClass } from './GauntletParts';
 import styles from './GauntletView.module.css';
-
-const ENGINES: { key: string; label: string; fix: string }[] = [
-  { key: 'stockfish', label: 'Stockfish', fix: 'LAPLACE_STOCKFISH' },
-  { key: 'laplaceUci', label: 'laplace-uci', fix: 'ships beside the API host — publish it' },
-];
-
-interface Preview {
-  fileName: string;
-  arguments: string[];
-  commandLine: string;
-  workingDirectory: string;
-  games: number;
-  ready: boolean;
-  missing: { name: string; hint: string; looked: string | null; source: string }[];
-}
-
-interface Setup {
-  laplaceProfile: string;
-  stockfishProfile: string;
-  conductor: 'fastchess' | 'cutechess';
-  clock: 'seconds' | 'depth';
-  st: string;
-  depth: string;
-  rounds: string;
-  elo: string;
-  limitStrength: boolean;
-  concurrency: string;
-  stockfishThreads: string;
-  stockfishHashMb: string;
-  stockfishNumaPolicy: string;
-  stockfishSyzygyPath: string;
-  ingest: boolean;
-}
-
-const DEFAULT_SETUP: Setup = {
-  laplaceProfile: '',
-  stockfishProfile: '',
-  conductor: 'fastchess',
-  clock: 'seconds',
-  st: '1',
-  depth: '8',
-  rounds: '10',
-  elo: '2000',
-  limitStrength: true,
-  concurrency: '1',
-  stockfishThreads: '',
-  stockfishHashMb: '',
-  stockfishNumaPolicy: '',
-  stockfishSyzygyPath: '',
-  ingest: true,
-};
-
-interface GameRow {
-  index: number;
-  white: string;
-  black: string;
-  result: string;
-}
-
-const RUNNING = new Set(['Running', 'Pending']);
 
 export function GauntletView() {
   const [engines, setEngines] = useState<LabCatalog['engines']>({});
@@ -335,137 +274,7 @@ export function GauntletView() {
       <div className={styles.columns}>
         <div className={styles.setupCol}>
         <Panel className={styles.setup} title="Match setup">
-          <div className={styles.form}>
-            {(['laplaceProfile', 'stockfishProfile'] as const).map((key) => (
-              <Field key={key} label={key === 'laplaceProfile' ? 'Laplace worker' : 'Stockfish worker'} className={styles.wide}
-                help="Engine execution is separate from this match's recording service. A selected remote connection stays on that worker for the game.">
-                <Select aria-label={key === 'laplaceProfile' ? 'Laplace worker' : 'Stockfish worker'}
-                  value={setup[key]} onChange={(e) => setSetup(s => ({ ...s, [key]: e.target.value,
-                    ...(key === 'stockfishProfile' ? { stockfishSyzygyPath: '' } : {}) }))}>
-                  <option value="">This installation</option>
-                  {connections.filter(p => p.implementation === (key === 'laplaceProfile' ? 'laplace-mono' : 'stockfish'))
-                    .map(p => <option key={p.id} value={p.id}>{p.label} · {p.environment} · {p.knowledge}</option>)}
-                </Select>
-              </Field>
-            ))}
-            <Field label="Match conductor" help="Fastchess runs engine matches. Cutechess provides an alternative conductor. This selection does not change the Lichess bot or the selected database source." className={styles.wide}>
-              <SegmentedControl value={setup.conductor}
-                onValueChange={(v) => setSetup((s) => ({ ...s, conductor: v as Setup['conductor'] }))}
-                options={['fastchess', 'cutechess']} label="Match conductor" />
-            </Field>
-            <Field
-              label="Clock"
-              help="Per-move seconds is watchable. Fixed depth is a matched limit applied to both engines, not unrestricted Stockfish search."
-              className={styles.wide}
-            >
-              <SegmentedControl
-                value={setup.clock}
-                onValueChange={(v) => setSetup((s) => ({ ...s, clock: v as Setup['clock'] }))}
-                options={['seconds', 'depth']}
-                label="Clock"
-              />
-            </Field>
-
-            {setup.clock === 'seconds' ? (
-              <Field label="Seconds per move" valueDisplay={`${setup.st}s`} help="The same per-move time budget and margin are applied to both engines.">
-                <SliderField
-                  min={0.1}
-                  max={10}
-                  step={0.1}
-                  value={setup.st}
-                  label="Seconds per move"
-                  onChange={(v) => setSetup((s) => ({ ...s, st: v }))}
-                />
-              </Field>
-            ) : (
-              <Field label="Search depth" valueDisplay={setup.depth} help="Sent to both engines as go depth N.">
-                <SliderField
-                  min={1}
-                  max={20}
-                  value={setup.depth}
-                  label="Search depth"
-                  onChange={(v) => setSetup((s) => ({ ...s, depth: v }))}
-                />
-              </Field>
-            )}
-
-            <Field label="Games" help="Each opening is played twice with colors swapped. Use an even game count.">
-              <Input
-                type="number"
-                min={2}
-                step={2}
-                value={setup.rounds}
-                aria-label="Games"
-                onChange={(e) => setSetup((s) => ({ ...s, rounds: e.target.value }))}
-              />
-            </Field>
-
-            <Field
-              label="Limit Stockfish by UCI Elo"
-              help="Checked enables UCI_LimitStrength. Unchecked removes only the Elo limiter; the selected shared depth/time budget still limits Stockfish search."
-            >
-              <Toggle
-                checked={setup.limitStrength}
-                onCheckedChange={(value) => setSetup((s) => ({ ...s, limitStrength: value }))}
-                aria-label="Limit Stockfish by UCI Elo"
-              />
-            </Field>
-            <Field label="Stockfish Elo cap" help="2000 is a default, not a fixed level. The installed engine reports its supported range in the transcript.">
-              <Input
-                type="number"
-                min={100}
-                step={50}
-                value={setup.elo}
-                disabled={!setup.limitStrength}
-                aria-label="Stockfish Elo cap"
-                onChange={(e) => setSetup((s) => ({ ...s, elo: e.target.value }))}
-              />
-            </Field>
-
-            <Field label="Games in flight" help="Parallel games share this host. Choose concurrency together with engine threads and memory from a benchmark run in the same environment.">
-              <Input
-                type="number"
-                min={1}
-                value={setup.concurrency}
-                aria-label="Games in flight"
-                onChange={(e) => setSetup((s) => ({ ...s, concurrency: e.target.value }))}
-              />
-            </Field>
-
-            <Field label="Stockfish threads" help="Search threads per Stockfish process. Blank uses the installed engine default; the run records the actual options.">
-              <Input type="number" min={1} step={1} value={setup.stockfishThreads}
-                placeholder="Engine default" aria-label="Stockfish threads"
-                onChange={(e) => setSetup((s) => ({ ...s, stockfishThreads: e.target.value }))} />
-            </Field>
-            <Field label="Stockfish hash (MiB)" help="Transposition-table memory per Stockfish process. Allow additional memory for its network, Laplace, and other services.">
-              <Input type="number" min={1} step={1} value={setup.stockfishHashMb}
-                placeholder="Engine default" aria-label="Stockfish hash (MiB)"
-                onChange={(e) => setSetup((s) => ({ ...s, stockfishHashMb: e.target.value }))} />
-            </Field>
-            <Field label="Stockfish NUMA policy" help="Optional: auto, system, hardware, or none. Use the topology observed by the benchmark on this host.">
-              <Input value={setup.stockfishNumaPolicy} placeholder="Engine default"
-                aria-label="Stockfish NUMA policy"
-                onChange={(e) => setSetup((s) => ({ ...s, stockfishNumaPolicy: e.target.value }))} />
-            </Field>
-            <Field label="Stockfish tablebase paths" help="Optional Syzygy directories on the server. Use colons on Linux or semicolons on Windows; include smaller-piece tables.">
-              <Input value={setup.stockfishSyzygyPath} placeholder={setup.stockfishProfile ? 'Configured on the worker' : 'Engine default'} disabled={!!setup.stockfishProfile}
-                aria-label="Stockfish tablebase paths"
-                onChange={(e) => setSetup((s) => ({ ...s, stockfishSyzygyPath: e.target.value }))} />
-            </Field>
-
-            <Field
-              label="Ingest to substrate"
-              help="laplace-uci cannot record its own plies, so the PGN is re-ingested when the run completes."
-              layout="row"
-              className={styles.wide}
-            >
-              <Toggle
-                checked={setup.ingest}
-                onCheckedChange={(v) => setSetup((s) => ({ ...s, ingest: v }))}
-                aria-label="Ingest to substrate"
-              />
-            </Field>
-          </div>
+          <GauntletSetupForm setup={setup} setSetup={setSetup} connections={connections} />
 
           <div className={styles.commandBlock}>
             <div className={styles.commandHead}>
@@ -493,7 +302,7 @@ export function GauntletView() {
             <Muted>Finished games appear here as the match conductor reports them.</Muted>
           ) : (
             <div className={styles.tableScroll}>
-              <table className={styles.table}>
+              <Table className={styles.table}>
                 <thead>
                   <tr><th>#</th><th>White</th><th>Black</th><th>Result</th></tr>
                 </thead>
@@ -504,7 +313,7 @@ export function GauntletView() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
           {logs.length > 0 && (
@@ -519,64 +328,16 @@ export function GauntletView() {
         </Panel>
         </div>
 
-        <div className={styles.watch}>
-          <Panel title="Score">
-            <div className={styles.scoreboard}>
-              <Stat label="Laplace wins" value={metrics.wins} tone="win" />
-              <Stat label="Draws" value={metrics.draws} />
-              <Stat label="Losses" value={metrics.losses} tone="loss" />
-              <Stat
-                label="Elo diff"
-                value={metrics.elo_diff}
-                // cutechess prints "inf"/"nan" until each side has won at least once, and a
-                // non-finite Elo is not a number to render as one.
-                title="Undefined until both engines have won a game"
-                format={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(0)}`}
-              />
-            </div>
-            <div className={styles.progressWrap} aria-label="Games played">
-              <div className={styles.progressBar} style={{ width: `${pct}%` }} />
-              <span className={styles.progressLabel}>
-                {done} / {total} games{active?.summary.message ? ` · ${active.summary.message}` : ''}
-              </span>
-            </div>
-            {active?.artifacts?.['games.pgn'] && (
-              <div className={styles.artifact}>
-                <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>games.pgn</a>
-                <Muted>
-                  {metrics.games_ingested !== undefined
-                    ? `${metrics.games_ingested} games ingested to substrate`
-                    : 'not yet ingested'}
-                </Muted>
-              </div>
-            )}
-          </Panel>
-
-          <Panel title="Laplace substrate proof">
-            <div className={styles.scoreboard}>
-              <Stat label="Games ingested" value={metrics.games_ingested} />
-              <Stat label="Games read back" value={metrics.games_committed_readback} />
-              <Stat label="Plies read back" value={metrics.plies_committed_readback} />
-              <Stat label="Readback seconds" value={metrics.readback_seconds} format={(v) => v.toFixed(3)} />
-            </div>
-            <section className={styles.readiness} aria-label="Substrate persistence proof">
-              <Chip variant={readbackVerified ? 'engineOk' : 'engineMissing'}>
-                persisted database readback {readbackVerified ? '✓' : 'not demonstrated'}
-              </Chip>
-            </section>
-            <Muted>
-              This proof comes from the completed gauntlet's ingest commit followed by PostgreSQL
-              readback. The transcript below is the spawned engines' real UCI traffic; filter it for
-              “providers” to see Laplace's per-search substrate-provider receipt.
-            </Muted>
-          </Panel>
-
-          <Panel title="Live board" className={styles.boardPanel}>
-            {lastGame !== null
-              ? <LiveBoard boards={boards} lastGame={lastGame} />
-              : <Muted>The board fills in from the engines' own UCI traffic once a game starts.</Muted>}
-          </Panel>
-        </div>
+        <GauntletWatch
+          metrics={metrics}
+          pct={pct}
+          done={done}
+          total={total}
+          active={active}
+          readbackVerified={readbackVerified}
+          boards={boards}
+          lastGame={lastGame}
+        />
       </div>
 
       <Panel title="Transcript" className={styles.terminalPanel} fill>
@@ -590,7 +351,7 @@ export function GauntletView() {
             <ul className={styles.history}>
               {gauntlets.map((j) => (
                 <li key={j.id}>
-                  <button
+                  <UnstyledButton
                     type="button"
                     className={[styles.historyItem, j.id === activeId && styles.historyItemActive]
                       .filter(Boolean).join(' ')}
@@ -601,7 +362,7 @@ export function GauntletView() {
                     <Muted className={styles.historySummary}>
                       {j.summary.message ?? `${j.summary.done}/${j.summary.total}`}
                     </Muted>
-                  </button>
+                  </UnstyledButton>
                 </li>
               ))}
             </ul>
@@ -609,40 +370,4 @@ export function GauntletView() {
       </Panel>
     </div>
   );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  title,
-  format,
-}: {
-  label: string;
-  value: number | undefined;
-  tone?: 'win' | 'loss';
-  title?: string;
-  format?: (v: number) => string;
-}) {
-  return (
-    <div className={styles.stat} title={value === undefined ? title : undefined}>
-      <span className={styles.statLabel}>{label}</span>
-      <b className={[styles.statValue, tone === 'win' && styles.statWin, tone === 'loss' && styles.statLoss]
-        .filter(Boolean).join(' ')}>
-        {value === undefined ? '—' : format ? format(value) : value}
-      </b>
-    </div>
-  );
-}
-
-const STATE_CLASS: Record<string, string> = {
-  Running: styles.stateRunning,
-  Pending: styles.stateRunning,
-  Completed: styles.stateCompleted,
-  Failed: styles.stateFailed,
-  Cancelled: styles.stateCancelled,
-};
-
-function stateClass(state: string): string {
-  return [styles.state, STATE_CLASS[state]].filter(Boolean).join(' ');
 }

@@ -6,44 +6,44 @@
     width: min(100%, 1800px);
     min-width: 0;
     margin: 0 auto;
-    padding: clamp(1rem, 2.5vw, 2rem);
+    padding: clamp(var(--space-4), 2.5vw, var(--space-6));
     overflow-y: auto;
     overflow-x: hidden;
   }
 
   .eyebrow, .navGroup { font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
-  .eyebrow { display: block; margin-bottom: .5rem; }
-  .accessSummary { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
-  .adminLayout { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 2rem; align-items: start; }
-  .adminNav { display: flex; flex-direction: column; gap: .25rem; position: sticky; top: 1rem; }
+  .eyebrow { display: block; margin-bottom: var(--space-2); }
+  .accessSummary { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+  .adminLayout { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+  .adminNav { display: flex; flex-direction: column; gap: var(--space-1); position: sticky; top: 1rem; }
   .mobileNav { display: none; }
-  .adminNav > a, .adminNav > button { padding: .65rem .8rem; text-align: left; background: none; border: 0; color: var(--color-text-primary); font: inherit; text-decoration: none; border-radius: var(--radius-sm); cursor: pointer; }
+  .adminNav > a, .adminNav > button { padding: var(--space-3) var(--space-3); text-align: left; background: none; border: 0; color: var(--color-text-primary); font: inherit; text-decoration: none; border-radius: var(--radius-sm); cursor: pointer; }
   .adminNav > [aria-current="page"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); font-weight: 600; }
   .adminNav > a:hover, .adminNav > button:hover { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
-  .navGroup { padding: 1rem .8rem .3rem; }
-  .adminContent { min-width: 0; display: grid; gap: 1.2rem; }
-  .sectionTitle { margin: 0 0 .35rem; font-size: 1.3rem; }
-  .advanced { margin: .3rem 0 1.2rem; }
-  .advanced > summary { cursor: pointer; padding-block: .5rem; color: var(--color-text-muted); }
-  .reviewDetails { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .6rem 1rem; }
+  .navGroup { padding: var(--space-4) var(--space-3) var(--space-1); }
+  .adminContent { min-width: 0; display: grid; gap: var(--space-4); }
+  .sectionTitle { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+  .advanced { margin: var(--space-1) 0 var(--space-4); }
+  .advanced > summary { cursor: pointer; padding-block: var(--space-2); color: var(--color-text-muted); }
+  .reviewDetails { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-2) var(--space-4); }
   .reviewDetails dd { margin: 0; overflow-wrap: anywhere; }
-  .taskCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .9rem; }
-  .taskCards > * { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; padding: 1.2rem; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--color-bg-panel); text-decoration: none; text-align: left; font: inherit; min-width: 0; }
+  .taskCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-4); }
+  .taskCards > * { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--color-bg-panel); text-decoration: none; text-align: left; font: inherit; min-width: 0; }
   .taskCards > button, .taskCards > a { cursor: pointer; }
   .taskCards > button:hover, .taskCards > a:hover { border-color: var(--color-accent); }
   .taskCards span, .taskCards p { color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.5; margin: 0; }
-  .taskCards ul { margin: 0; padding-left: 1.1rem; font-size: var(--text-sm); line-height: 1.7; }
-  .directory { display: grid; margin-block: 1rem; }
-  .directoryRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .7rem 1rem; padding: 1rem 0; border-bottom: 1px solid var(--color-border-default); overflow-wrap: anywhere; }
-  .directoryRow > div { display: grid; gap: .35rem; min-width: 0; flex: 1 1 15rem; }
-  .clientCard { padding: 1.2rem; margin-top: 1rem; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
-  .clientCard h3 { display: inline; margin-right: 1rem; }
-  .clientCard dl { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .5rem; }
+  .taskCards ul { margin: 0; padding-left: var(--space-4); font-size: var(--text-sm); line-height: 1.7; }
+  .directory { display: grid; margin-block: var(--space-4); }
+  .directoryRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3) var(--space-4); padding: var(--space-4) 0; border-bottom: 1px solid var(--color-border-default); overflow-wrap: anywhere; }
+  .directoryRow > div { display: grid; gap: var(--space-1); min-width: 0; flex: 1 1 15rem; }
+  .clientCard { padding: var(--space-4); margin-top: var(--space-4); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
+  .clientCard h3 { display: inline; margin-right: var(--space-4); }
+  .clientCard dl { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-2); }
   .clientCard dd { margin: 0; overflow-wrap: anywhere; }
-  @media (max-width: 850px) {
-    .adminLayout { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  @media (max-width: 64rem) {
+    .adminLayout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
     .adminNav { display: none; }
-    .mobileNav { display: grid; gap: .5rem; font-size: var(--text-sm); }
+    .mobileNav { display: grid; gap: var(--space-2); font-size: var(--text-sm); }
   }
 
   .header {
@@ -54,7 +54,7 @@
     flex-wrap: wrap;
   }
 
-  .title { margin: 0; font-size: 1.5rem; letter-spacing: -0.02em; }
+  .title { margin: 0; font-size: var(--text-xl); letter-spacing: -0.02em; }
 
   .toolbar,
   .panelToolbar {
@@ -82,7 +82,7 @@
     color: var(--color-text-primary);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-sm);
-    padding: 2px var(--space-1);
+    padding: var(--space-half) var(--space-1);
   }
 
   .gateNote { margin: 0; font-size: var(--text-sm); }
@@ -144,7 +144,7 @@
     white-space: nowrap;
   }
 
-  .ok { color: var(--color-confirm, #3ecf8e); }
+  .ok { color: var(--color-confirm, var(--color-go)); }
   .running { color: var(--color-accent); }
   .cancelled { color: var(--color-text-muted); }
   .failed { color: var(--color-error); }
@@ -171,7 +171,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: .3rem;
+    gap: var(--space-1);
     min-width: 0;
   }
 
@@ -208,7 +208,7 @@
   .outputCounts > span {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: var(--space-hair);
   }
 
   .outputCounts small,
@@ -222,7 +222,7 @@
 
   .fileToggle {
     display: block;
-    margin-top: 2px;
+    margin-top: var(--space-half);
     padding: 0;
     border: 0;
     background: none;
@@ -281,7 +281,7 @@
 
   .opGrid > * { min-width: 0; }
 
-  @media (max-width: 1180px) {
+  @media (max-width: 64rem) {
     .opGrid { grid-template-columns: minmax(0, 1fr); }
     .outputCounts { min-width: 15rem; }
   }
@@ -299,7 +299,7 @@
   .opItem {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 2px var(--space-2);
+    gap: var(--space-half) var(--space-2);
     width: 100%;
     text-align: left;
     background: none;
@@ -309,7 +309,7 @@
     cursor: pointer;
     color: inherit;
   }
-  .opItem:hover { background: var(--color-surface-hover, rgba(255, 255, 255, 0.04)); }
+  .opItem:hover { background: var(--color-surface-hover, color-mix(in srgb, white 4%, transparent)); }
   .opItemOn { background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
 
   .opName { min-width: 0; font-weight: 600; font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -324,10 +324,10 @@
   .writeTag {
     align-self: start;
     font-size: var(--text-xs);
-    color: var(--color-draw, #e8b339);
+    color: var(--color-draw, var(--color-gold));
     border: 1px solid currentColor;
     border-radius: var(--radius-sm);
-    padding: 0 4px;
+    padding: 0 var(--space-1);
     white-space: nowrap;
   }
 
@@ -395,7 +395,7 @@
 
   .processReceipt > .progressPct { grid-column: 1 / -1; }
 
-  @media (max-width: 720px) {
+  @media (max-width: 40rem) {
     .ingestFormGrid { grid-template-columns: 1fr; }
     .ingestArgs { grid-column: auto; }
     .processReceipt { grid-template-columns: 1fr; }
@@ -425,30 +425,30 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.85em;
+  font-size: var(--text-sm);
   opacity: 0.85;
 }
 
 .rowActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: var(--space-1);
   white-space: nowrap;
 }
 
 /* The variable a credential comes from, under its resolved/missing verdict. */
 .credSource {
   display: block;
-  font-size: 0.78em;
+  font-size: var(--text-xs);
   opacity: 0.7;
   overflow-wrap: anywhere;
 }
 
 .replyBox {
-  margin: 0.5rem 0 0;
-  padding: 0.6rem 0.75rem;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
   border-radius: 6px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  background: var(--surface-2, color-mix(in srgb, var(--color-neutral-mid) 8%, transparent));
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 22rem;
@@ -464,23 +464,23 @@
 /* Distinct from .writeTag: a write is reversible in principle, this is not. */
 .destructiveTag {
   align-self: start;
-  padding: 0 0.35rem;
+  padding: 0 var(--space-1);
   border-radius: 4px;
-  font-size: 0.72em;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--danger-bg, rgba(220, 70, 70, 0.16));
-  color: var(--danger-fg, #d24444);
+  background: var(--danger-bg, color-mix(in srgb, var(--color-danger-soft) 16%, transparent));
+  color: var(--danger-fg, var(--color-danger-soft));
   white-space: nowrap;
 }
 
 .procTag {
   align-self: start;
-  padding: 0 0.35rem;
+  padding: 0 var(--space-1);
   border-radius: 4px;
-  font-size: 0.72em;
+  font-size: var(--text-xs);
   letter-spacing: 0.04em;
-  background: rgba(127, 127, 127, 0.14);
+  background: color-mix(in srgb, var(--color-neutral-mid) 14%, transparent);
   opacity: 0.85;
   white-space: nowrap;
 }

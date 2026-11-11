@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WorldLink as Link } from '../../world/WorldLink';
-import { Button, Muted, SegmentedControl } from '@ui';
+import { Button, Muted, Range, SegmentedControl, UnstyledButton } from '@ui';
 import { Board } from '../play/Board';
 import type { ChessGamePliesResponse, ChessPlyRow } from './types';
 import styles from './ChessDb.module.css';
@@ -179,9 +179,8 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
           <Button variant="ghost" onClick={() => setFlip((f) => !f)} aria-label="Flip board">⇅</Button>
         </div>
 
-        <input
+        <Range
           className={styles.scrub}
-          type="range"
           min={0}
           max={plies.length}
           value={ply}
@@ -217,7 +216,7 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
           {plies.map((p, i) => (
             <li key={p.ply}>
               {p.white_moved ? <span className={styles.moveNo}>{Math.floor(i / 2) + 1}.</span> : null}
-              <button
+              <UnstyledButton
                 type="button"
                 data-active={ply === i + 1}
                 className={styles.moveBtn}
@@ -225,7 +224,7 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
               >
                 {p.san}
                 {hasClocks ? <span className={styles.moveClock}>{mmss(p.clock_seconds)}</span> : null}
-              </button>
+              </UnstyledButton>
             </li>
           ))}
         </ol>

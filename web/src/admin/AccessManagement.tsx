@@ -77,20 +77,36 @@ export function AccessManagement({ roles, onChanged }: { roles: PlatformRole[]; 
   </>;
 }
 
-interface Workspace { tenantId: string; displayName: string; kind: string; members: number }
+interface Workspace { tenantId: string | null; displayName: string | null; kind: string; members: number | null }
+/** One row per workspace id; rows without an id are kept (shown with a placeholder) but never duplicated by name. */
+function uniqueWorkspaces(workspaces: Workspace[] | undefined): Workspace[] {
+  const seen = new Set<string>();
+  return (workspaces ?? []).filter((workspace) => {
+    const id = workspace.tenantId?.trim();
+    const key = id ? `id:${id}` : `unnamed:${workspace.displayName ?? ''}:${workspace.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 interface Client { provider: string; displayName: string; clientId: string; authority: string; callbackPath: string }
 export function PlatformDirectory({ section }: { section: 'workspaces' | 'clients' }) {
   const { tenant, authUser } = useAppStore();
   const read = useReadResource({ key: JSON.stringify(['platform-directory', tenant, authUser?.id, section]),
     read: (signal) => apiGet<{ workspaces?: Workspace[]; clients?: Client[]; limit?: number }>(`/v1/admin/access/${section}`, { signal }) });
+  const workspaces = uniqueWorkspaces(read.data?.workspaces);
   return <Panel title={section === 'workspaces' ? 'Workspace directory' : 'Connected sign-in providers'}>
     <Button variant="ghost" onClick={() => void read.refresh()}>Refresh directory</Button><ReadStatus label="Directory" resource={read} />
     {section === 'workspaces' ? <>
-      <Muted>These are account and billing workspaces. Membership does not create a private copy of the shared substrate.</Muted>
-      <div className={styles.directory}>{read.data?.workspaces?.map((workspace) => <div className={styles.directoryRow} key={workspace.tenantId}>
-        <div><strong>{workspace.displayName}</strong><Muted>{workspace.kind === 'organization' ? 'Organization' : 'Personal'} · {workspace.members} members</Muted></div>
-        <details><summary>Workspace ID</summary><code>{workspace.tenantId}</code></details>
-      </div>)}</div><Muted>Up to {read.data?.limit ?? 200} workspaces. <Link to="/settings?section=workspace">Manage your current workspace</Link>.</Muted>
+      <Muted>These are account and billing workspaces. Joining a workspace does not create a private copy of the shared knowledge base.</Muted>
+      {read.data && workspaces.length === 0 && <Muted>No workspaces have been created yet.</Muted>}
+      <div className={styles.directory}>{read.data && workspaces.map((workspace, index) => {
+        const id = workspace.tenantId?.trim();
+        return <div className={styles.directoryRow} key={id || `missing-${index}`}>
+          <div><strong>{workspace.displayName?.trim() || 'Unnamed workspace'}</strong><Muted>{workspace.kind === 'organization' ? 'Organization' : 'Personal'} · {workspace.members === 1 ? '1 member' : `${workspace.members ?? 0} members`}</Muted></div>
+          <div><Muted>Workspace ID</Muted>{id ? <code>{id}</code> : <Muted>(no id recorded)</Muted>}</div>
+        </div>;
+      })}</div><Muted>Up to {read.data?.limit ?? 200} workspaces. <Link to="/settings?section=workspace">Manage your current workspace</Link>.</Muted>
     </> : <>
       <p>These clients enable browser sign-in. Application integrations use <Link to="/settings?section=clients">workspace API keys</Link>.</p>
       {read.data?.clients?.length === 0 && <Muted>No browser sign-in clients are configured on this host.</Muted>}

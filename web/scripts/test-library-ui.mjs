@@ -81,8 +81,10 @@ try {
       return route.fulfill({ json: { id_hex: id, label: index < 0 ? id : `Entity ${index + 1}`, tier: 2, type: 'noun', exists: id !== unresolvedId, evidence_count: 2, preview_facts: [] } });
     }
     if (/^\/v1\/explore\/entities\/[a-f0-9]{32}$/.test(path)) { entityReads++; return route.fulfill({ json: { entity: {
-      id_hex: path.split('/').at(-1), label: 'Fixture entity detail', type: 'noun', exists: true, tier: 2,
-      physicalities: [], salient_facts: [], consensus_out: [], consensus_in: [], senses: [], constituents: [], packed_vertices: [], realized_vertices: [], evidence: [],
+      id_hex: path.split('/').at(-1), label: 'Fixture entity detail', type: 'noun', exists: path.split('/').at(-1) !== unresolvedId, tier: 2,
+      physicalities: [], salient_facts: [], senses: [], constituents: [], packed_vertices: [], realized_vertices: [],
+      consensus_out: [{ direction: 'out', type: 'IsA', entity_id_hex: ids[1], entity_label: 'Entity 2', eff_mu: 1600, witnesses: 2 }], consensus_in: [],
+      evidence: [{ type_id: null, type_label: 'IsA', object_id: ids[1], object_label: 'Entity 2', source_id: ids[3], source_label: 'Fixture source', outcome: 1, observation_count: 1, games: 2, trust: 0.9, score: 1 }],
     } } }); }
     if (path === '/v1/explore/lexicon' && url.searchParams.get('x') === unresolvedId) return route.fulfill({ json: { readings: [], connections: [] } });
     if (path === '/v1/explore/lexicon') return route.fulfill({ json: {
@@ -158,25 +160,32 @@ try {
   await page.getByRole('button', { name: 'Inspect related subject' }).click();
   mark('Knowledge opens with claims; applicable methods combine; duplicate answers preserve measurements; failures preserve results');
   await page.locator('[data-collection-master]').getByRole('link', { name: 'Entity 1', exact: true }).click();
-  await expect(page.locator('[data-collection-detail]').getByRole('heading', { name: 'Entity 1', exact: true })).toBeVisible();
-  await expect(page.locator('[data-collection-detail]')).toContainText('Related information');
+  const detail = page.locator('[data-collection-detail]');
+  await expect(detail.getByRole('heading', { name: 'Entity 1', exact: true })).toBeVisible();
+  // The selected result is shown through the standard lenses: one row, Means first, with sources.
+  await expect(detail.getByRole('tablist', { name: 'Views of this subject' })).toHaveCount(1);
+  await expect(detail.getByRole('tab', { name: 'Means', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(detail.getByRole('heading', { name: /is a …/ })).toBeVisible();
+  await detail.getByRole('button', { name: /1 source · 2 games/ }).click();
+  await expect(detail.getByText('Fixture source')).toBeVisible();
   assert.equal(previewReads, metadataBefore, 'knowledge must not wait for evidence-count previews');
-  assert.equal(entityReads, detailBefore, 'inspection is an explicit request, not an automatic dependency of meanings');
-  await page.getByText('Structure, standing and evidence', { exact: true }).click();
-  await expect(page.locator('[data-collection-detail]')).toContainText('Recorded relations');
-  assert.ok(entityReads > detailBefore);
-  await page.getByText('Structure, standing and evidence', { exact: true }).click();
-  mark('Known labels and meanings open without preview/evidence reads; explicit inspection loads structural detail');
+  assert.ok(entityReads > detailBefore, 'meanings and sources come from one inspection read');
+  await expect(detail.getByText('Structure, standing and evidence', { exact: true })).toHaveCount(0);
+  mark('Selected result opens through the standard lenses (one row, Means first, sources per strand); no hidden inspector');
   const reads = browseReads;
-  await page.locator('[data-collection-detail]').getByRole('link', { name: 'Entity 2', exact: true }).click();
-  await expect(page.locator('[data-collection-detail]').getByRole('heading', { name: 'Entity 2', exact: true })).toBeVisible();
-  assert.equal(browseReads, reads, 'selecting a record must retain the search read');
+  // Related subjects open in the inspector drawer; the search and its selection stay put.
+  await detail.getByRole('button', { name: 'Entity 2', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: /Inspector: Entity 2/ })).toBeVisible();
+  assert.equal(browseReads, reads, 'opening a related subject must retain the search read');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
+  await expect(detail.getByRole('heading', { name: 'Entity 1', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.locator('[data-collection-detail]').getByRole('heading', { name: 'Entity 2', exact: true })).toBeVisible();
-  await expect(page.locator('[data-collection-detail]')).toContainText('Related information');
+  await expect(page.getByRole('complementary', { name: /Inspector: / })).toBeVisible();
+  await expect(detail.getByRole('heading', { name: 'Entity 1', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('complementary', { name: /Inspector: / })).toHaveCount(0);
   await page.screenshot({ path: resolve(output, 'mono-library-fixture.png'), fullPage: true });
-  mark('Entity and relation navigation retain the source/result collection; selection does not rerun search and survives reload');
+  mark('Related subjects open in the inspector without losing the collection; selection and inspector survive reload');
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `overflow at ${width}`);
@@ -228,25 +237,20 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('epoch'), '2026');
   assert.equal(new URL(page.url()).searchParams.get('world'), 'language');
   await page.locator('[data-collection-master]').getByRole('link', { name: 'Entity 1', exact: true }).click();
-  const presentations = page.getByRole('navigation', { name: 'Subject presentations', exact: true });
-  await presentations.getByRole('link', { name: 'Classification', exact: true }).click();
+  const presentations = page.locator('[data-collection-detail]').getByRole('tablist', { name: 'Views of this subject' });
+  await presentations.getByRole('tab', { name: 'Classification', exact: true }).click();
   await page.getByRole('link', { name: 'Broader fixture class', exact: true }).click();
   assert.equal(new URL(page.url()).searchParams.get('selected'), ids[1]);
   assert.equal(new URL(page.url()).searchParams.get('presentation'), 'classification');
   assert.equal(new URL(page.url()).searchParams.get('rank'), 'confidence');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
-  const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
-  await expect(inspectionViews.getByRole('link', { name: 'overview', exact: true })).not.toHaveAttribute('aria-current', 'page');
-  await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
-  await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
-  await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Full entity', exact: true })).toBeVisible();
-  await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Prove storage', exact: true })).toBeVisible();
-  await page.getByText('Structure, standing and evidence', { exact: true }).click();
-  await expect(inspectionViews.getByRole('link', { name: 'overview', exact: true })).toHaveAttribute('aria-current', 'page');
-  await inspectionViews.getByRole('link', { name: 'structure', exact: true }).click();
+  for (const label of ['Web', 'Placement', 'Made of', 'Appears in']) await expect(presentations.getByRole('tab', { name: label, exact: true })).toBeVisible();
+  await expect(page.locator('[data-collection-detail]').getByRole('link', { name: 'Open as a page', exact: true })).toBeVisible();
+  await presentations.getByRole('tab', { name: 'Made of', exact: true }).click();
+  assert.equal(new URL(page.url()).searchParams.get('presentation'), 'made-of');
   await page.reload();
-  await expect(inspectionViews.getByRole('link', { name: 'structure', exact: true })).toHaveAttribute('aria-current', 'page');
-  mark('Band and execution controls reach native query bodies; peer coordinates, classification pivots and inspection view survive reload');
+  await expect(presentations.getByRole('tab', { name: 'Made of', exact: true })).toHaveAttribute('aria-selected', 'true');
+  mark('Band and execution controls reach native query bodies; peer coordinates, classification pivots and the selected lens survive reload');
 
   await page.goto(base + scopeAddress + `&selected=${ids[0]}&presentation=comparison&other=second`);
   await expect(page.getByRole('textbox', { name: 'first entity', exact: true })).toHaveValue(ids[0]);
@@ -322,8 +326,9 @@ try {
     await page.setViewportSize({ width, height: 1000 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `game overflow at ${width}`);
     const title = page.locator('[data-collection-detail] header h2').first();
-    await expect(title).toHaveText(gameId);
-    assert.ok(await title.evaluate(element => element.scrollWidth <= element.clientWidth + 1), 'Canonical reference title must wrap within the detail pane');
+    // The pane titles itself with the recorded label when one is known, else the canonical reference.
+    await expect(title).toHaveText(/^(Fixture entity detail|[a-f0-9]{32})$/);
+    assert.ok(await title.evaluate(element => element.scrollWidth <= element.clientWidth + 1), 'The title must wrap within the detail pane');
     const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
     accessibility.push({ view: 'embedded-game', width, violations: result.violations.map(item => ({ id: item.id, nodes: item.nodes.map(node => node.target) })) });
   }
@@ -353,7 +358,7 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('epoch'), '2026');
   assert.equal(resolveReads, 0, 'Legacy search entry must not turn a calculated identity into a resolved subject');
   await page.goto(base + `explore/resolve/${unresolvedId}?epoch=2026`);
-  await expect(page.getByText('This preview did not report the addressed content as present.', { exact: false })).toBeVisible();
+  await expect(page.getByText('This address is not recorded as present.', { exact: false })).toBeVisible();
   assert.equal(new URL(page.url()).searchParams.get('selected'), unresolvedId);
   assert.equal(new URL(page.url()).searchParams.get('epoch'), '2026');
   mark('Calculated geometry is explicit; legacy search preserves the whole observation and scope; an unreported direct address is retained without an admission claim');

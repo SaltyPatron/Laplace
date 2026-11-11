@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Link as RouterLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { Button, LoadingText, Panel, TenantField } from '@ui';
+import { Button, ErrorText, LoadingText, Panel, TenantField } from '@ui';
 import { AppShell } from './shell/AppShell';
 import { ChessSection } from './chess/ChessSection';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
@@ -71,7 +71,7 @@ function Shell() {
     </>}
     banners={<>
       {authError && <Panel title="Account information could not be loaded">
-        <p role="alert">{authError}</p>
+        <ErrorText>{authError}</ErrorText>
         <Button onClick={() => setAuthAttempt((attempt) => attempt + 1)}>Retry account information</Button>
       </Panel>}
       <SubstrateStatusBanner />

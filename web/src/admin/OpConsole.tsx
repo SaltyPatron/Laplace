@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, TextArea, useReadResource } from '@ui';
+import { Button, Checkbox, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, TextArea, UnstyledButton, useReadResource } from '@ui';
 import { OperationFields } from '../ui/composites/OperationFields/OperationFields';
 import { ResultWorkspace } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows, type RowSnapshot } from '../ui/lib/resultRows';
@@ -86,11 +86,11 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
         <Muted>{operations.length} signatures received{catalog.data.truncated_at != null ? '; more exist — narrow the search' : ''}. Page {currentPage + 1} of {pageCount} in this response.</Muted>
         {operations.length === 0 ? <Muted>No installed operations matched this search.</Muted> : <ul className={styles.opList}>
           {shown.map((operation, index) => <li key={`${operation.name}-${operation.args}-${index}`}>
-            <button type="button" className={`${styles.opItem} ${selected?.name === operation.name && selected.args === operation.args ? styles.opItemOn : ''}`} onClick={() => choose(operation)}>
+            <UnstyledButton type="button" className={`${styles.opItem} ${selected?.name === operation.name && selected.args === operation.args ? styles.opItemOn : ''}`} onClick={() => choose(operation)}>
               <span className={styles.opName}>{operation.name}</span><span className={styles.opArgs}>{operation.args || 'No arguments'}</span>
               {operation.destructive ? <span className={styles.destructiveTag}>destroys data</span> : operation.writable ? <span className={styles.writeTag}>write</span> : null}
               {operation.kind === 'procedure' && <span className={styles.procTag}>CALL</span>}
-            </button>
+            </UnstyledButton>
           </li>)}
         </ul>}
         <div className={styles.rowActions}><Button variant="ghost" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous signatures</Button><Button variant="ghost" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next signatures</Button></div>
@@ -100,7 +100,7 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
       {!selected ? <Muted>Select an installed operation to inspect its inputs and run it.</Muted> : <form onSubmit={(event) => { event.preventDefault(); prepare(); }}>
         <details><summary>Installed signature and return type</summary><pre className={styles.sig}>{selected.name}({selected.args}){'\n'}{selected.returns ?? 'No row return type'}</pre></details>
         <Muted>{selected.destructive ? 'This operation destroys stored testimony. Review its exact inputs before confirming.' : selected.writable ? 'This operation may change stored state.' : 'The endpoint uses its read-only connection for this operation.'}</Muted>
-        <label className={styles.field}><span>Advanced JSON arguments</span><input type="checkbox" checked={advanced} onChange={(event) => {
+        <label className={styles.field}><span>Advanced JSON arguments</span><Checkbox checked={advanced} onChange={(event) => {
           if (event.target.checked && !advancedInitialized) {
             try { setArgsText(JSON.stringify(operationArguments(selected.parameters, draft), null, 2)); } catch { setArgsText('{}'); }
             setAdvancedInitialized(true);

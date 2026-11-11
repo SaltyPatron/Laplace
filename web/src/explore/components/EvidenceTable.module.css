@@ -7,55 +7,55 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 0.75rem;
-    margin: 0.8rem 0 0.6rem;
-    padding-bottom: 0.6rem;
+    gap: var(--space-3);
+    margin: var(--space-3) 0 var(--space-2);
+    padding-bottom: var(--space-2);
     border-bottom: 1px solid var(--color-border-default);
   }
 
   .headerActions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-shrink: 0;
   }
 
   .entityId {
     display: block;
     color: var(--color-text-muted);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     font-family: var(--font-mono);
     font-weight: 400;
     overflow-wrap: anywhere;
-    margin-top: 0.2rem;
+    margin-top: var(--space-1);
     cursor: default;
   }
 
   .group {
-    margin-top: 1rem;
+    margin-top: var(--space-4);
   }
 
   .groupTitle {
-    margin: 0 0 0.35rem;
-    font-size: 0.8rem;
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-xs);
     color: var(--color-accent);
     font-family: var(--font-mono);
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-2);
   }
 
   .groupCount {
-    font-size: 0.68rem;
+    font-size: var(--text-2xs);
     color: var(--color-text-muted);
     background: var(--color-bg-panel-2);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-pill);
-    padding: 0 0.4rem;
+    padding: 0 var(--space-2);
   }
 
   .table {
     table-layout: fixed;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
   }
 
   .table th:nth-child(2),
@@ -79,6 +79,6 @@
   .sources {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.2rem;
+    gap: var(--space-1);
   }
 }

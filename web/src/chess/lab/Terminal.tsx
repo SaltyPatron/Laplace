@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Input, Muted, cn } from '@ui';
+import { Button, Input, Muted, ToggleButton, UnstyledButton, cn } from '@ui';
 import {
   clockOf,
   defaultFilter,
@@ -158,9 +158,9 @@ export function Terminal({ jobId, command, className }: TerminalProps) {
       </div>
 
       {!follow && (
-        <button type="button" className={styles.jump} onClick={resume}>
+        <UnstyledButton className={styles.jump} onClick={resume}>
           Jump to latest ↓
-        </button>
+        </UnstyledButton>
       )}
     </div>
   );
@@ -208,15 +208,14 @@ function FilterChip({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <ToggleButton
       title={title}
-      aria-pressed={on}
+      pressed={on}
       className={cn(styles.chip, on && styles.chipOn, tone === 'error' && styles.chipError)}
       onClick={onToggle}
     >
       {label}
-    </button>
+    </ToggleButton>
   );
 }
 

@@ -25,7 +25,7 @@
   }
 
   .on {
-    background: rgba(79, 140, 255, 0.35);
+    background: color-mix(in srgb, var(--chess-target) 35%, transparent);
     border-color: var(--color-accent);
   }
 

@@ -35,17 +35,22 @@ const record = (id, hits, limit = 0) => { out[id] = { pass: hits.length <= limit
 
 record('DS-1', [
   ...count(css, /#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d|hsla?\(\s*\d/, (f) => rel(f) === 'ui/theme.css'),
-  ...count(code, /['"`]#[0-9a-fA-F]{3,8}['"`]/),
+  // visualizationPalette.ts mirrors the --viz-* tokens as fallbacks for non-DOM renderer contexts.
+  ...count(code, /['"`]#[0-9a-fA-F]{3,8}['"`]/, (f) => rel(f) === 'explore/visualizationPalette.ts'),
 ]);
-record('DS-2', count(css, /font-size:\s*(?!var\()[^;]*\d/));
-record('DS-3', count(css, /(?:^|[\s;{])(padding|margin|gap)[a-z-]*:\s*[^;]*\d(rem|px)/, (f) => rel(f) === 'ui/theme.css'));
+// Container-relative glyph sizes (cqw/cqi: chess pieces scale with their board) are geometry, not type.
+record('DS-2', count(css, /font-size:(?!\s*var\()(?![^;}]*cq[wi])[^;}]*\d/, (f) => rel(f) === 'ui/theme.css'));
+record('DS-3', count(css, /(?:^|[\s;{])(padding|margin|gap)[a-z-]*:\s*[^;}]*\d(rem|px)/, (f) => rel(f) === 'ui/theme.css'));
 {
   const bps = new Set();
-  for (const f of css) for (const m of read(f).matchAll(/@media[^{]*?(\d+)px/g)) bps.add(m[1]);
+  for (const f of css) for (const m of read(f).matchAll(/@media[^{]*?width:\s*(\d+(?:\.\d+)?)(px|rem)/g)) bps.add(m[2] === 'rem' ? Number(m[1]) * 16 : Number(m[1]));
   out['DS-4'] = { pass: bps.size <= 3, value: bps.size, detail: [...bps].sort((a, b) => a - b) };
 }
 record('DS-5', count(features, /<(button|input|select|table)\b/));
-record('DS-6', [...count(code, /style=\{\{/), ...count(css, /!important/)]);
+// Static inline styles only: a literal value ('0.5rem', 0, 'grid'). Data-bound values (bar widths, rating
+// hues, drag positions) are computed per render and belong inline. The reduced-motion override in the
+// theme is the one sanctioned !important.
+record('DS-6', [...count(code, /style=\{\{\s*[A-Za-z]+:\s*(['"][^'"]*['"]|\d)/), ...count(css, /!important/, (f) => rel(f) === 'ui/theme.css')]);
 {
   const dead = ['home/HomeView.tsx', 'home/Scoreboard.tsx', 'home/Leaderboards.tsx', 'topic/TopicView.tsx'].filter((p) => existsSync(join(src, p)));
   out['CODE-1'] = { pass: dead.length === 0, value: dead.length, detail: dead };
@@ -55,9 +60,9 @@ record('DS-6', [...count(code, /style=\{\{/), ...count(css, /!important/)]);
   out['CODE-2'] = { pass: big.length === 0, value: big.length, detail: big.map(([f, n]) => `${f} ${n}`) };
 }
 {
-  const p = join(src, 'explore/glome/GlomeCanvas.tsx');
+  const p = join(src, 'explore/glome/glomeProjection.ts');
   const bad = existsSync(p) && /51-bit/.test(read(p));
-  out['CODE-3'] = { pass: !bad, value: bad ? 1 : 0, detail: bad ? ['explore/glome/GlomeCanvas.tsx still decodes a 51-bit run count'] : [] };
+  out['CODE-3'] = { pass: !bad, value: bad ? 1 : 0, detail: bad ? ['explore/glome/glomeProjection.ts still decodes a 51-bit run count'] : [] };
 }
 
 mkdirSync(join(web, 'audit/results'), { recursive: true });

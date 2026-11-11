@@ -3,7 +3,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.35rem;
+    gap: var(--space-1);
     flex-wrap: wrap;
     width: 100%;
     max-width: 100%;
@@ -12,13 +12,13 @@
   .controls {
     display: flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: var(--space-half);
   }
 
   .label {
     min-width: 7rem;
     text-align: center;
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     color: var(--color-text-muted);
   }
 

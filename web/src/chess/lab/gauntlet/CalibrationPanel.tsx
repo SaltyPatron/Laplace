@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Muted, Panel } from '@ui';
+import { Alert, Button, Muted, Panel, Table } from '@ui';
 import { apiGet } from '../../../api/client';
 import styles from './CalibrationPanel.module.css';
 
@@ -94,7 +94,7 @@ export function CalibrationPanel() {
             with the first warm-up sample excluded. Search work can vary with threads and hash.
           </Muted>
           <div className={styles.scroll}>
-            <table className={styles.measurements}>
+            <Table className={styles.measurements}>
               <caption>Stockfish search calibration</caption>
               <thead><tr><th>Threads</th><th>Hash (MiB)</th><th>Engine seconds (median)</th><th>Nodes/s (median)</th><th>Result</th></tr></thead>
               <tbody>{report.stockfish_bench?.map((row, i) => (
@@ -102,7 +102,7 @@ export function CalibrationPanel() {
                   <td>{numeric(row.steady_engine_seconds?.median, 3)}</td>
                   <td>{numeric(row.steady_nodes_per_second?.median)}</td><td>{row.status}</td></tr>
               ))}</tbody>
-            </table>
+            </Table>
           </div>
           <Muted>
             CuteChess Stockfish self-play at depth {numeric(report.parameters?.match_depth)},
@@ -113,7 +113,7 @@ export function CalibrationPanel() {
             {' '}Games may repeat. Database recording throughput and playing strength were not measured by this calibration.
           </Muted>
           <div className={styles.scroll}>
-            <table className={styles.measurements}>
+            <Table className={styles.measurements}>
               <caption>{fullGames ? 'Generated self-play throughput' : 'Move-limited self-play diagnostic'}</caption>
               <thead><tr><th>Concurrent games</th><th>Generated games/s (median)</th><th>Plies/s (median)</th><th>Result</th></tr></thead>
               <tbody>{report.cutechess_matches?.map((row, i) => (
@@ -121,7 +121,7 @@ export function CalibrationPanel() {
                   <td>{fullGames ? numeric(row.steady_games_per_second?.median, 3) : 'Not measured'}</td>
                   <td>{numeric(row.steady_plies_per_second?.median, 3)}</td><td>{row.status}</td></tr>
               ))}</tbody>
-            </table>
+            </Table>
           </div>
           <details className={styles.identity}>
             <summary>Measured engine and report identity</summary>

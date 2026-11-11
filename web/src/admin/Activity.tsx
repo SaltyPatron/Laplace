@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Badge, Banner, Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource } from '@ui';
+import { Badge, Banner, Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource, Select, Table } from '@ui';
 import { useAppStore } from '../store';
 import { activity, cancelBackend, terminateBackend, type ActivityRow, type SignalResult } from './api';
 import styles from './Admin.module.css';
@@ -64,9 +64,9 @@ export function Activity({ canManage = false }: { canManage?: boolean }) {
   return <Panel title={`Activity${rows ? ` — ${rows.length} backend${rows.length === 1 ? '' : 's'}` : ''}`} expandable label="Activity"
     actions={<div className={styles.panelToolbar}>
       <label className={styles.limitLabel}>Age
-        <select className={styles.limitSelect} value={minSeconds} onChange={(event) => setMinSeconds(Number(event.target.value))}>
+        <Select className={styles.limitSelect} value={minSeconds} onChange={(event) => setMinSeconds(Number(event.target.value))}>
           {AGE_FILTERS.map((filter) => <option key={filter.seconds} value={filter.seconds}>{filter.label}</option>)}
-        </select>
+        </Select>
       </label>
       <label className={styles.liveLabel}><Toggle checked={includeIdle} onCheckedChange={setIncludeIdle} aria-label="Include idle backends" />Idle</label>
       <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />Live · {REFRESH_MS / 1000}s</label>
@@ -82,7 +82,7 @@ export function Activity({ canManage = false }: { canManage?: boolean }) {
     </Banner>}
     {masked > 0 && <Muted>{masked} backend{masked === 1 ? '' : 's'} report no state or query: this role lacks pg_read_all_stats. That is not the same as idle.</Muted>}
     {rows && (ordered.length === 0 ? <Muted>No backend matches this filter.</Muted> : <div className={styles.tableWrap}>
-      <table className={styles.table}>
+      <Table className={styles.table}>
         <thead><tr><th scope="col">PID</th><th scope="col">State</th><th scope="col">Running</th><th scope="col">Wait</th><th scope="col">Client</th><th scope="col">Query</th><th scope="col">Stop</th></tr></thead>
         <tbody>{ordered.map((row) => <tr key={row.pid}>
           <td className={styles.num}>{row.pid}{row.is_self && <Badge className={styles.badge}>this console</Badge>}</td>
@@ -99,7 +99,7 @@ export function Activity({ canManage = false }: { canManage?: boolean }) {
             <Button variant="ghost" size="sm" disabled={busyPid != null} onClick={() => setConfirmKill(row)}>Terminate</Button></>}
           </div>}</td>
         </tr>)}</tbody>
-      </table>
+      </Table>
     </div>)}
     <Modal open={confirmKill != null} onClose={() => setConfirmKill(null)} title={`Terminate pid ${confirmKill?.pid ?? ''}?`}
       actions={<><Button variant="ghost" onClick={() => setConfirmKill(null)}>Keep it</Button>

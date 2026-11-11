@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, ErrorText, Input, LoadingText, Muted, Panel, Table, Td, Th } from '@ui';
+import { Button, ErrorText, Input, LoadingText, Muted, Panel, Table, Td, Th, Select } from '@ui';
 import { StatCard } from '../../explore/components/StatCard';
 import { chessLaplaceGames } from './api';
 import { OutcomeChip } from './RecordBar';
@@ -97,20 +97,20 @@ export function LaplaceGames() {
           </label>
           <label className={styles.filterField}>
             <span>Outcome</span>
-            <select value={outcome} onChange={(event) => update('outcome', event.target.value === 'all' ? null : event.target.value)}>
+            <Select value={outcome} onChange={(event) => update('outcome', event.target.value === 'all' ? null : event.target.value)}>
               <option value="all">All outcomes</option>
               <option value="win">Wins</option>
               <option value="draw">Draws</option>
               <option value="loss">Losses</option>
-            </select>
+            </Select>
           </label>
           <label className={styles.filterField}>
             <span>Side</span>
-            <select value={side} onChange={(event) => update('side', event.target.value === 'all' ? null : event.target.value)}>
+            <Select value={side} onChange={(event) => update('side', event.target.value === 'all' ? null : event.target.value)}>
               <option value="all">Either side</option>
               <option value="white">White</option>
               <option value="black">Black</option>
-            </select>
+            </Select>
           </label>
         </div>
       </Panel>

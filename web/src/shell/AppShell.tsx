@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { Icon } from '../ui/icons';
 import { cn } from '../ui/lib/cn';
+import { Checkbox } from '../ui/primitives/Checkbox';
+import { UnstyledButton } from '../ui/primitives/UnstyledButton';
 import { CommandPalette, usePalette } from './CommandPalette';
 import { InspectorDrawer } from './InspectorDrawer';
 import { useInspector } from './inspector';
@@ -66,7 +68,7 @@ export function AppShell({ account, banners, showAdmin, familiar, children }: Ap
         <div className={styles.railFoot}>
           <RouterLink to="/settings" className={cn(styles.navItem, pathname.startsWith('/settings') && styles.navActive)} aria-label="Settings & billing"><Icon name="settings" /><span className={styles.navLabel}>Settings &amp; billing</span></RouterLink>
           <label className={styles.familiarToggle}>
-            <input type="checkbox" aria-label="Show familiar" checked={familiarOn} onChange={(event) => {
+            <Checkbox aria-label="Show familiar" checked={familiarOn} onChange={(event) => {
               setFamiliarOn(event.target.checked);
               try { localStorage.setItem(FAMILIAR_KEY, event.target.checked ? 'on' : 'off'); } catch { /* storage unavailable */ }
             }} />
@@ -77,10 +79,10 @@ export function AppShell({ account, banners, showAdmin, familiar, children }: Ap
       {menuOpen && <div className={styles.scrim} onClick={() => setMenuOpen(false)} aria-hidden="true" />}
       <div className={styles.column}>
         <header className={styles.topbar}>
-          <button type="button" className={styles.menuButton} aria-label="Open navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Icon name="menu" /></button>
-          <button type="button" className={styles.searchTrigger} onClick={() => showPalette()} aria-label="Search (Ctrl+K)">
+          <UnstyledButton type="button" className={styles.menuButton} aria-label="Open navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Icon name="menu" /></UnstyledButton>
+          <UnstyledButton type="button" className={styles.searchTrigger} onClick={() => showPalette()} aria-label="Search (Ctrl+K)">
             <Icon name="search" /><span>Search anything…</span><kbd>Ctrl K</kbd>
-          </button>
+          </UnstyledButton>
           <div className={styles.account}>{account}</div>
         </header>
         {banners && <div className={styles.banners}>{banners}</div>}

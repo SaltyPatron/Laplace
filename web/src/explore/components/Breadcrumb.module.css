@@ -2,7 +2,7 @@
   .breadcrumb {
     font-size: var(--text-sm);
     color: var(--color-text-muted);
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-3);
   }
 
   .crumb {
@@ -10,7 +10,7 @@
   }
 
   .sep {
-    margin: 0 0.35rem;
+    margin: 0 var(--space-1);
   }
 
   .link {

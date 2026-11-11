@@ -1,0 +1,14 @@
+@layer components {
+  .fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
+
+  .parameter {
+    display: grid;
+    gap: var(--space-1);
+    margin-block: var(--space-3);
+  }
+}

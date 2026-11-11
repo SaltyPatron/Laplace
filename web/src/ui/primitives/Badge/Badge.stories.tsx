@@ -3,6 +3,7 @@ import { Badge } from '../Badge';
 import { Chip } from '../Chip';
 import { Input } from '../Input';
 import { Muted } from '../Text';
+import styles from './Badge.stories.module.css';
 
 const meta: Meta = {
   title: 'Tier1/Primitives',
@@ -12,7 +13,7 @@ export default meta;
 
 export const Badges: StoryObj = {
   render: () => (
-    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+    <div className={styles.row}>
       <Badge>default</Badge>
       <Badge variant="mu">μ 1420</Badge>
       <Badge variant="ord">ord 3</Badge>
@@ -25,7 +26,7 @@ export const Badges: StoryObj = {
 
 export const Inputs: StoryObj = {
   render: () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '16rem' }}>
+    <div className={styles.column}>
       <Input placeholder="entity id" />
       <Input invalid defaultValue="bad" />
       <Muted>Muted helper text</Muted>

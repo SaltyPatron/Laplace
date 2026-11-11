@@ -23,8 +23,6 @@
   }
 
   .main > * { flex: 1; min-height: 0; min-width: 0; }
-  .title { color: #f7fbfd !important; text-decoration: none; font-weight: inherit; }
-  .title:hover { color: #ffffff !important; }
   .skipLink {
     position: fixed; inset-block-start: var(--space-2); inset-inline-start: var(--space-2);
     z-index: var(--z-modal, 1000); transform: translateY(-200%);
@@ -41,15 +39,15 @@
   }
   .search { width: clamp(12rem, 24vw, 22rem); }
   .devPrincipal {
-    padding: 0.15rem 0.5rem;
+    padding: var(--space-half) var(--space-2);
     border: 1px solid var(--color-copper);
     border-radius: 999px;
-    color: #f7fbfd;
+    color: var(--color-on-navy);
     font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     white-space: nowrap;
   }
   .accountLinks { display: flex; gap: var(--space-3); font-size: var(--text-sm); }
-  .accountLinks a { color: #f7fbfd; }
-  @media (max-width: 720px) { .search { width: 100%; } }
+  .accountLinks a { color: var(--color-on-navy); }
+  @media (max-width: 40rem) { .search { width: 100%; } }
 }

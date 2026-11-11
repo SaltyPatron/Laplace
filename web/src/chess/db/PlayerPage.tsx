@@ -96,13 +96,11 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
                 <div className={styles.profileBody}>
                   <div className={styles.profileHeading}>
                     <strong>{profile.display_name}</strong>
-                    <span>{profile.provider}</span>
+                    <span>{providerName(profile.provider)}</span>
                   </div>
-                  <Muted>
-                    {profile.title ? `${profile.title} · ` : ''}
-                    {profile.federation ? `${profile.federation} · ` : ''}
-                    {profile.provider_id}
-                  </Muted>
+                  {profile.title || profile.federation ? (
+                    <Muted>{[profile.title, profile.federation].filter(Boolean).join(' · ')}</Muted>
+                  ) : null}
                   {profile.biography ? <p>{profile.biography}</p> : null}
                   {profile.aliases.filter((alias) =>
                     alias.localeCompare(profile.display_name, undefined, { sensitivity: 'accent' }) !== 0
@@ -117,21 +115,21 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
                   ) : null}
                   {Object.keys(profile.ratings).length > 0 ? (
                     <p className={styles.profileFacts}>
-                      {Object.entries(profile.ratings).map(([kind, rating]) => `${kind} ${rating}`).join(' · ')}
+                      {Object.entries(profile.ratings).map(([kind, rating]) => `${words(kind)} ${rating}`).join(' · ')}
                     </p>
                   ) : null}
-                  {Object.keys(profile.facts).length > 0 ? (
+                  {profileFacts(profile.facts).length > 0 ? (
                     <dl className={styles.profileFacts}>
-                      {Object.entries(profile.facts).map(([kind, value]) => (
-                        <div key={kind}><dt>{kind.replaceAll('_', ' ')}</dt><dd>{value}</dd></div>
+                      {profileFacts(profile.facts).map(([kind, value]) => (
+                        <div key={kind}><dt>{kind}</dt><dd>{value}</dd></div>
                       ))}
                     </dl>
                   ) : null}
-                  {profile.links.length > 0 ? (
+                  {pageLinks(profile.links).length > 0 ? (
                     <div className={styles.profileLinks}>
-                      {profile.links.map((link, i) => (
+                      {pageLinks(profile.links).map((link) => (
                         <a href={link} key={link} target="_blank" rel="noreferrer">
-                          {i === 0 ? 'Official profile' : `Link ${i + 1}`} ↗
+                          {linkLabel(link)} ↗
                         </a>
                       ))}
                     </div>
@@ -260,18 +258,18 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
 
       {player.opponents.length > 0 ? (
         <Panel title="Head to head">
-          <Muted style={{ marginBottom: '0.5rem' }}>
-            One folded cell per pairing — every meeting between the two lands on the same
-            cell, so the games count IS its witness count. Ranked by eff_mu, so a long even
-            series against a strong rival outranks a short lopsided one.
+          <Muted className={styles.lede}>
+            Every meeting between the two players adds to one shared record. Opponents are ranked
+            by the cautious standing of that record (rating minus twice its uncertainty), so a long
+            even series against a strong rival ranks above a short lopsided one.
           </Muted>
           <Table>
             <thead>
               <tr>
                 <Th>Opponent</Th>
                 <Th>Games</Th>
-                <Th>Rating</Th>
-                <Th>±RD</Th>
+                <Th>Standing</Th>
+                <Th>Uncertainty</Th>
               </tr>
             </thead>
             <tbody>
@@ -281,7 +279,7 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
                     <Link className={styles.playerLink} to={`/chess/players/${o.id}`}>{o.name}</Link>
                   </Td>
                   <Td>{o.games.toLocaleString()}</Td>
-                  <Td title={`eff_mu ${o.eff_mu.toFixed(0)} = rating − 2·RD`}>
+                  <Td title="rating minus twice its uncertainty">
                     {o.eff_mu.toFixed(0)}
                   </Td>
                   <Td>±{o.rd.toFixed(0)}</Td>
@@ -294,9 +292,9 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
 
       {player.ratings.length > 0 ? (
         <Panel title="Ratings witnessed">
-          <Muted style={{ marginBottom: '0.5rem' }}>
-            Elo as the sources tagged it, per game — a distribution, not a single number.
-            This is someone else's rating of him, kept apart from the substrate's own.
+          <Muted className={styles.lede}>
+            Elo as the sources recorded it on each game: a spread, not a single number.
+            These are other organisations' ratings of this player, kept apart from Laplace's own standing.
           </Muted>
           <Table>
             <thead>
@@ -326,4 +324,33 @@ function ColourRow({ side, record }: { side: string; record: ChessRecord }) {
       <Td>{scoreText(record)}</Td>
     </tr>
   );
+}
+
+const PROVIDERS: Record<string, string> = { chesscom: 'Chess.com', 'chess.com': 'Chess.com', lichess: 'Lichess', fide: 'FIDE' };
+const providerName = (provider: string) => PROVIDERS[provider.toLowerCase()] ?? provider;
+const words = (key: string) => {
+  const text = key.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+/** API endpoints are how a profile was fetched, not something a person can open. */
+const isApiUrl = (value: string) => /^https?:\/\/api\./i.test(value) || /\/pub\//.test(value) || /\/api\//.test(value);
+const pageLinks = (links: string[]) => links.filter((link) => /^https?:\/\//i.test(link) && !isApiUrl(link));
+function linkLabel(link: string): string {
+  try { return `Profile on ${new URL(link).hostname.replace(/^www\./, '')}`; } catch { return 'Profile'; }
+}
+/** A plausible Unix time in seconds (2001–2286) or milliseconds. */
+function asDate(value: string): string | null {
+  if (!/^\d{10}(\d{3})?$/.test(value)) return null;
+  const ms = value.length === 13 ? Number(value) : Number(value) * 1000;
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+function profileFacts(facts: Record<string, string>): [string, string][] {
+  const out: [string, string][] = [];
+  for (const [key, raw] of Object.entries(facts)) {
+    const value = String(raw).trim();
+    if (!value || /^https?:\/\//i.test(value)) continue;
+    out.push([words(key), asDate(value) ?? value]);
+  }
+  return out;
 }

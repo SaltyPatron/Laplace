@@ -1,5 +1,6 @@
 import type { ForwardPassProof } from '../api/forwardProof';
 import styles from './ForwardPassProofPanel.module.css';
+import { Table } from '@ui';
 
 function compact(value: string | undefined): string {
   if (!value) return '—';
@@ -56,7 +57,7 @@ export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
         <section>
           <h4>Exact producing lifecycle receipts</h4>
           <div className={styles.tableWrap}>
-            <table>
+            <Table>
               <thead>
                 <tr>
                   <th>step</th><th>stage</th><th>entity</th><th>candidates</th>
@@ -89,7 +90,7 @@ export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         </section>
       </div>

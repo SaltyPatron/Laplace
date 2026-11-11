@@ -129,7 +129,7 @@ try {
       assert.ok(tenantId, 'workspace permissions must be scoped to the selected tenant');
       return route.fulfill({ json: {
         tenantId,
-        workspaces: [{ tenantId, role: 'owner' }],
+        workspaces: [{ tenantId, displayName: tenantId === 'other-scope' ? 'Other fixture workspace' : 'Fixture workspace', role: 'owner' }],
         configuration: {
           billingEnforced: false,
           stripeConfigured: true,
@@ -217,18 +217,18 @@ try {
   await expect(page.getByRole('heading', { name: 'Fixture plan', exact: true })).toBeVisible();
   await expect(page.getByText('$12.55/mo', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('Fixture catalog unavailable');
-  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('No usage recorded for this workspace.', { exact: true })).toHaveCount(0);
   await expect.poll(() => heldUsage !== undefined).toBe(true);
   await heldUsage.fulfill({ json: { entries: [], total_amount_cents: 0 } });
-  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toBeVisible();
+  await expect(page.getByText('No usage recorded for this workspace.', { exact: true })).toBeVisible();
   heldUsage = undefined;
   await page.getByRole('button', { name: 'Change tenant', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Usage — other-scope', exact: true })).toBeVisible();
-  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Usage — Other fixture workspace', exact: true })).toBeVisible();
+  await expect(page.getByText('No usage recorded for this workspace.', { exact: true })).toHaveCount(0);
   await expect.poll(() => heldUsage !== undefined).toBe(true);
   await heldUsage.fulfill({ status: 503, json: { error: { message: 'Fixture usage unavailable' } } });
   await expect(page.getByRole('alert').filter({ hasText: 'Fixture usage unavailable' })).toBeVisible();
-  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('No usage recorded for this workspace.', { exact: true })).toHaveCount(0);
   await page.goto(`${base}/__workspace_test?view=operations`);
   await page.getByRole('button', { name: /^ops\.fixture_read/ }).click();
   await page.getByRole('textbox', { name: 'p_id', exact: true }).fill('9223372036854775807');

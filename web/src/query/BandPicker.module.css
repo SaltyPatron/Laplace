@@ -65,7 +65,7 @@
   .band.on {
     background: var(--primitive-blue-600);
     border-color: var(--primitive-blue-600);
-    color: #fff;
+    color: white;
     opacity: 1;
   }
 

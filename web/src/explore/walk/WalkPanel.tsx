@@ -4,6 +4,7 @@ import { apiPost, type ApiOptions } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
 import { GatePrompt } from '../components/GatePrompt';
+import { relationWords } from '../../domain/Strand/StrandList';
 import styles from './WalkPanel.module.css';
 
 /** Exact receipt shape emitted by /v1/explain/report's canonical forward pass. */
@@ -48,11 +49,14 @@ export function WalkPanel() {
   const [trace, setTrace] = useState<ForwardTraceStep[]>([]);
   const [unlocked, setUnlocked] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [ran, setRan] = useState(false);
 
   const quote = exploreQuote || quoteId;
 
   async function run() {
     setErr(null);
+    setBusy(true);
     const opts: ApiOptions = { tenant, quoteId: quote };
     try {
       const res = await apiPost<{ trace: ForwardTraceStep[] }>(
@@ -78,67 +82,78 @@ export function WalkPanel() {
       })));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setRan(true);
     }
   }
 
+  const emitted = trace.filter((s) => s.event === 'emit');
   return (
-    <Panel title="Forward execution">
+    <Panel title="Reasoning trace">
       {!unlocked ? (
         <GatePrompt
           serviceId="explain.trace"
-          label="Receipts from the same query-relative forward execution used by conversation."
+          label="Step-by-step receipts from the same forward pass the conversation uses."
           onReady={() => setUnlocked(true)}
         />
       ) : (
         <Stack gap={4}>
-          <div className={styles.controls}>
-            <Field label="prompt" layout="row" htmlFor="walk-prompt">
-              <Input id="walk-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Prompt" />
+          <form className={styles.controls} onSubmit={(e) => { e.preventDefault(); void run(); }}>
+            <Field label="Prompt" layout="row" htmlFor="walk-prompt">
+              <Input id="walk-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
             </Field>
-            <Field label="max selections" layout="row" htmlFor="walk-steps">
-              <Input id="walk-steps" type="number" min={1} max={256} value={steps} onChange={(e) => setSteps(Number(e.target.value))} />
-            </Field>
-            <Field label="semantic hops" layout="row" htmlFor="walk-depth">
-              <Input id="walk-depth" type="number" min={1} max={32} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
-            </Field>
-            <Field label="typed fan-out" layout="row" htmlFor="walk-fanout">
-              <Input id="walk-fanout" type="number" min={1} max={128} value={fanout} onChange={(e) => setFanout(Number(e.target.value))} />
-            </Field>
-            <Field label="election top-k" layout="row" htmlFor="walk-topk">
-              <Input id="walk-topk" type="number" min={1} max={128} value={topK} onChange={(e) => setTopK(Number(e.target.value))} />
-            </Field>
-            <Button type="button" onClick={() => void run()}>Run forward trace</Button>
-          </div>
-          <Muted>
-            Route and emit rows are receipts from the live election. Emitted selections overlay Graph and Glome tabs.
-          </Muted>
-          <ol className={styles.trace}>
-            {trace.map((s, i) => {
-              const support = s.support_relation
-                ? ` · ${s.support_outbound === false ? '←' : '→'} ${s.support_relation}`
-                : s.sequence_occurrences > 0
-                  ? ' · trajectory'
-                  : '';
-              const standing = s.support_rating != null && s.support_rd != null
-                ? ` μ ${s.support_rating} RD ${s.support_rd}`
-                : '';
-              const witnesses = s.support_witnesses != null
-                ? ` · ${s.support_witnesses} witnesses / ${s.support_sources} sources`
-                : '';
-              return (
-                <li key={`${s.step}-${s.routing_round}-${s.event}-${i}`}>
-                  #{s.step} {s.event} r{s.routing_round} {s.entity || 'Unrealized entity'}
-                  {' · '}candidates {s.candidate_count}
-                  {' · '}Q→K {s.proposal_channel_count}
-                  {' · '}exact {s.exact_channel_count}
-                  {' · '}context {s.ordered_context_count}
-                  {support}{standing}{witnesses}
-                  {s.opposed_occurrences > 0 ? ` · opposed ${s.opposed_occurrences}` : ''}
-                  {s.declared_result ? ' · declared result' : ''}
-                </li>
-              );
-            })}
-          </ol>
+            <details className={styles.limits}>
+              <summary>Limits</summary>
+              <div className={styles.controls}>
+                <Field label="Most words to choose" layout="row" htmlFor="walk-steps">
+                  <Input id="walk-steps" type="number" min={1} max={256} value={steps} onChange={(e) => setSteps(Number(e.target.value))} />
+                </Field>
+                <Field label="Hops per choice" layout="row" htmlFor="walk-depth">
+                  <Input id="walk-depth" type="number" min={1} max={32} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
+                </Field>
+                <Field label="Strands followed per hop" layout="row" htmlFor="walk-fanout">
+                  <Input id="walk-fanout" type="number" min={1} max={128} value={fanout} onChange={(e) => setFanout(Number(e.target.value))} />
+                </Field>
+                <Field label="Candidates compared" layout="row" htmlFor="walk-topk">
+                  <Input id="walk-topk" type="number" min={1} max={128} value={topK} onChange={(e) => setTopK(Number(e.target.value))} />
+                </Field>
+              </div>
+            </details>
+            <Button type="submit" disabled={busy || !prompt.trim()}>{busy ? 'Tracing…' : 'Trace'}</Button>
+          </form>
+          {ran && trace.length === 0 && !err ? (
+            <Muted role="status">The forward pass returned no steps for this prompt: nothing recorded connects to it strongly enough to choose a word.</Muted>
+          ) : null}
+          {trace.length > 0 ? (
+            <>
+              <Muted>
+                {emitted.length > 0
+                  ? `Chose ${emitted.length} ${emitted.length === 1 ? 'word' : 'words'}: ${emitted.map((s) => s.entity || '(unrealised)').join(' ')}. Chosen words are also drawn on the Web and Placement views.`
+                  : 'Routed but chose no words.'}
+              </Muted>
+              <ol className={styles.trace}>
+                {trace.map((s, i) => (
+                  <li key={`${s.step}-${s.routing_round}-${s.event}-${i}`}>
+                    <strong>{s.event === 'emit' ? 'Chose' : 'Considered'} {s.entity || 'an unrealised entity'}</strong>
+                    <span className={styles.detail}>
+                      {[
+                        `step ${s.step}${s.routing_round ? `, round ${s.routing_round + 1}` : ''}`,
+                        `${s.candidate_count.toLocaleString()} ${s.candidate_count === 1 ? 'candidate' : 'candidates'}`,
+                        s.support_relation
+                          ? `${s.support_outbound === false ? 'reached from' : 'via'} ${relationWords(s.support_relation)}${s.support_anchor ? ` (${s.support_anchor})` : ''}`
+                          : s.sequence_occurrences > 0 ? `follows recorded text ${s.sequence_occurrences.toLocaleString()} ${s.sequence_occurrences === 1 ? 'time' : 'times'}` : null,
+                        s.support_witnesses != null ? `${s.support_witnesses.toLocaleString()} witnesses from ${s.support_sources.toLocaleString()} ${s.support_sources === 1 ? 'source' : 'sources'}` : null,
+                        s.support_rating != null && s.support_rd != null ? `standing ${Math.round(s.support_rating)} ± ${Math.round(2 * s.support_rd)}` : null,
+                        s.opposed_occurrences > 0 ? `opposed ${s.opposed_occurrences.toLocaleString()} ${s.opposed_occurrences === 1 ? 'time' : 'times'}` : null,
+                        s.declared_result ? 'declared result' : null,
+                      ].filter(Boolean).join(' · ')}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : null}
         </Stack>
       )}
       {err ? <ErrorText>{err}</ErrorText> : null}

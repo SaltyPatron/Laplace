@@ -8,6 +8,7 @@ import {
 import { AccountControls } from '../auth/AccountControls';
 import { useAppStore } from '../store';
 import { formatCents, formatCurrencyCents as amount } from './amounts';
+import { humanizeIdentifier, serviceLabel, workspaceLabel } from './labels';
 import styles from './BillingView.module.css';
 
 export function BillingView() {
@@ -43,7 +44,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     enabled: signedIn,
     read: (signal) => apiGet<{
       tenantId: string;
-      workspaces: { tenantId: string; role: string }[];
+      workspaces: { tenantId: string; displayName?: string | null; role: string }[];
       configuration?: { billingEnforced: boolean; stripeConfigured: boolean; stripeMode: string; commercialCatalogApproved: boolean };
     }>(
       '/v1/account', { tenant, signal }),
@@ -65,6 +66,9 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     ...plans.map((plan) => plan.currency), ...services.map((service) => service.currency),
   ].filter(Boolean))];
   const usageCurrency = catalogCurrencies.length === 1 ? catalogCurrencies[0] : null;
+  const workspaceName = workspaceLabel(current?.displayName);
+  const serviceName = (id: string) => serviceLabel(id, services.find((service) => service.service_id === id)?.display_name);
+  const planName = (id: string) => plans.find((plan) => plan.plan_id === id)?.name?.trim() || humanizeIdentifier(id);
   const checkoutEnabled = accountRead.data?.configuration?.stripeMode !== 'live'
     || accountRead.data.configuration?.commercialCatalogApproved === true;
 
@@ -116,7 +120,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
       <AccountControls user={null} providers={authProviders} returnUrl="/billing" />
       {authProviders.length === 0 && <ErrorText>No browser sign-in provider is configured on this host.</ErrorText>}
     </Banner> : <>
-      <p>Billing workspace: <strong>{tenant}</strong>. {!canManage && accountRead.status === 'ready'
+      <p>Billing workspace: <strong title={tenant}>{workspaceName}</strong>. {!canManage && accountRead.status === 'ready'
         && 'Only workspace owners and administrators can purchase or change subscriptions.'}</p>
       <ReadStatus label="Workspace permissions" resource={accountRead} />
     </>}
@@ -129,7 +133,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     {accountRead.data?.configuration?.stripeMode === 'live' && !accountRead.data.configuration.commercialCatalogApproved && <Banner>
       <strong>Live checkout is intentionally disabled.</strong> The operator must approve the measured commercial catalog before Laplace can accept real payments; development and existing account access remain available.
     </Banner>}
-    <p className={styles.principle}>Every plan addresses the same witnessed Laplace content world. Plans may change declared service allowances, execution depth and breadth, concurrency, and support—not what Laplace is permitted to know.</p>
+    <p className={styles.principle}>Every plan works with the same shared Laplace knowledge. Plans differ in included service allowances, how deep and broad each request can go, how many requests run at once, and support—not in what Laplace can know.</p>
     {signedIn && <section className={styles.current} aria-labelledby="current-subscription">
       <div className={styles.sectionHead}>
         <h2 id="current-subscription">Current subscription</h2>
@@ -139,12 +143,12 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
       <ReadStatus label="Subscription" resource={entitlementsRead} />
       {entitlementsRead.data && entitlements.length === 0 && <Muted>No subscription is recorded for this workspace.</Muted>}
       {entitlements.map((entry) => <div className={styles.entitlement} key={`${entry.plan_id}:${entry.stripe_subscription_id ?? 'none'}`}>
-        <div><strong>{entry.plan_id}</strong> · {entry.status}</div>
+        <div><strong title={entry.plan_id}>{planName(entry.plan_id)}</strong> · {humanizeIdentifier(entry.status)}</div>
         <Muted>{new Date(entry.period_start).toLocaleDateString()} through {new Date(entry.period_end).toLocaleDateString()}</Muted>
         {Object.keys(entry.monthly_credits ?? {}).length > 0 && <ul className={styles.credits} aria-label="Remaining included service allowances">
           {Object.entries(entry.monthly_credits).map(([service, allowance]) => {
             const used = entry.used_credits?.[service] ?? 0;
-            return <li key={service}><span>{service}</span><span>{remaining(allowance, used)} remaining</span></li>;
+            return <li key={service}><span title={service}>{serviceName(service)}</span><span>{remaining(allowance, used)} remaining</span></li>;
           })}
         </ul>}
       </div>)}
@@ -160,7 +164,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
         <strong className={styles.allowanceTitle}>Included monthly service allowances</strong>
         <ul className={styles.credits}>
           {Object.entries(plan.monthly_credits ?? {}).map(([service, credits]) => <li key={service}>
-            <span>{service}</span><span>{credits.toLocaleString()}</span>
+            <span title={service}>{serviceName(service)}</span><span>{credits.toLocaleString()}</span>
           </li>)}
         </ul>
         <Muted>Renews monthly until canceled. Changes, invoices, payment methods, and cancellation are available in Stripe's customer portal.</Muted>
@@ -171,7 +175,7 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
       </div>)}
     </div>
     {checkout && <Banner>
-      <strong>{checkout.plan_id}</strong> — {amount(checkout.amount_cents, checkout.currency)}, status {checkout.status}.{' '}
+      <strong title={checkout.plan_id}>{planName(checkout.plan_id)}</strong> — {amount(checkout.amount_cents, checkout.currency)}, status: {humanizeIdentifier(checkout.status).toLowerCase()}.{' '}
       {checkout.stripe_checkout_url ? <a href={checkout.stripe_checkout_url} target="_blank" rel="noreferrer">Continue to secure checkout</a>
         : <span>Checkout is unavailable. No subscription has been activated by this request.</span>}
     </Banner>}
@@ -182,13 +186,13 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
       <Table className={styles.catalog}>
         <thead><tr><Th>Service</Th><Th>Unit</Th><Th>Unit price</Th><Th>Base fee</Th></tr></thead>
         <tbody>{services.map((service) => <tr key={service.service_id}>
-          <Td>{service.display_name}</Td><Td>{service.unit}</Td>
+          <Td title={service.service_id}>{serviceLabel(service.service_id, service.display_name)}</Td><Td>{service.unit}</Td>
           <Td>{amount(service.unit_price_cents, service.currency)}</Td>
           <Td>{amount(service.base_fee_cents, service.currency)}</Td>
         </tr>)}</tbody>
       </Table>
     </TableScroll>}
-    <h2>Usage — {tenant}</h2>
+    <h2>Usage — <span title={tenant}>{signedIn ? workspaceName : 'this workspace'}</span></h2>
     {!signedIn ? <Muted>Sign in to view workspace usage.</Muted> : <ReadStatus label="Usage" resource={usageRead} />}
     {usage && (usage.entries?.length ? <>
       <p>Recorded total: {usageCurrency ? amount(usage.total_amount_cents, usageCurrency) : formatCents(usage.total_amount_cents)}</p>
@@ -196,14 +200,14 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
         <Table className={styles.catalog}>
           <thead><tr><Th>Service</Th><Th>Units</Th><Th>Recorded amount</Th><Th>Executed</Th></tr></thead>
           <tbody>{usage.entries.map((entry, index) => <tr key={index}>
-            <Td>{entry.serviceId}</Td><Td>{entry.units}</Td>
+            <Td title={entry.serviceId}>{serviceName(entry.serviceId)}</Td><Td>{entry.units}</Td>
             <Td>{amount(entry.amountCents, services.find((service) => service.service_id === entry.serviceId)?.currency ?? usageCurrency ?? 'usd')}</Td>
             <Td>{entry.executedAt ? new Date(entry.executedAt).toLocaleString() : 'Not reported'}</Td>
           </tr>)}</tbody>
         </Table>
       </TableScroll>
       <Muted>Laplace records admitted work and its quoted amount. Stripe invoices remain the authoritative paid total.</Muted>
-    </> : <Muted>No usage recorded for this tenant.</Muted>)}
+    </> : <Muted>No usage recorded for this workspace.</Muted>)}
   </div>;
 }
 

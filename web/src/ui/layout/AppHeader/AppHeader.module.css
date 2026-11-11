@@ -8,14 +8,14 @@
       "nav nav";
     align-items: center;
     column-gap: var(--space-6);
-    row-gap: 0.5rem;
+    row-gap: var(--space-2);
     min-height: 4.25rem;
-    padding: 0.7rem clamp(1rem, 3vw, 2.5rem);
+    padding: var(--space-3) clamp(var(--space-4), 3vw, var(--space-6));
     background: var(--color-navy);
     border-bottom: 1px solid color-mix(in srgb, white 14%, transparent);
     box-shadow: 0 3px 14px color-mix(in srgb, var(--color-navy) 22%, transparent);
-    color: #f7fbfd;
-    --color-text-primary: #f7fbfd;
+    color: var(--color-on-navy);
+    --color-text-primary: var(--color-on-navy);
     --color-text-muted: var(--color-navy-muted);
     --color-bg-panel: var(--color-navy);
     --color-bg-panel-2: var(--color-navy-raised);
@@ -37,18 +37,18 @@
     display: flex;
     align-items: center;
     font-family: var(--font-display);
-    font-size: 1.22rem;
+    font-size: var(--text-lg);
     margin: 0;
     letter-spacing: -0.015em;
     min-width: 0;
   }
 
   .title a {
-    color: #f7fbfd;
+    color: var(--color-on-navy);
   }
 
   .title a:hover {
-    color: #ffffff;
+    color: white;
   }
 
   .title::before {
@@ -56,7 +56,7 @@
     width: 11px;
     height: 11px;
     margin-right: var(--space-3);
-    border: 2px solid #f7fbfd;
+    border: 2px solid var(--color-on-navy);
     background: var(--color-signal);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-signal) 18%, transparent);
     transform: rotate(45deg);
@@ -64,7 +64,7 @@
   }
 
   .tagline {
-    font-size: 0.66rem;
+    font-size: var(--text-2xs);
     color: var(--color-text-muted);
     margin-left: var(--space-3);
     font-weight: 400;
@@ -77,7 +77,7 @@
     grid-area: nav;
     min-width: 0;
     width: 100%;
-    padding: 3px;
+    padding: var(--space-half);
     border: 1px solid color-mix(in srgb, white 11%, transparent);
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, black 12%, transparent);
@@ -90,7 +90,7 @@
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 40rem) {
   .header {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -98,7 +98,7 @@
       "tenant"
       "nav";
     gap: var(--space-3);
-    padding: 0.55rem 0.85rem;
+    padding: var(--space-2) var(--space-3);
   }
 
   .tagline {

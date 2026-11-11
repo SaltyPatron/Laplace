@@ -132,6 +132,6 @@
   @keyframes familiar-swim-bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-9px) rotate(2deg); } }
 }
 
-@media (max-width: 959px), (pointer: coarse), (prefers-reduced-motion: reduce) {
+@media (max-width: 64rem), (pointer: coarse), (prefers-reduced-motion: reduce) {
   .layer { display: none; }
 }

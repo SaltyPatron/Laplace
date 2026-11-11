@@ -11,7 +11,7 @@
 
   .root h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-base);
     flex: 0 0 auto;
   }
 

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button, LoadingText, Muted, Panel, ReadStatus, Select } from '@ui';
+import { Button, LoadingText, Muted, Panel, ReadStatus, Select, UnstyledButton } from '@ui';
 import { useSectionParam } from '../layout/useSectionParam';
 import { useAppStore } from '../store';
 import { AccountControls } from '../auth/AccountControls';
@@ -58,12 +58,12 @@ export function AdminView() {
     </optgroup>{available.length > 0 && <optgroup label="Platform">{available.map((tool) => <option key={tool.id} value={tool.id}>{tool.label}</option>)}</optgroup>}</Select></label>
     <div className={styles.adminLayout}>
       <nav className={styles.adminNav} aria-label="Administration sections">
-        <button aria-current={section === 'overview' ? 'page' : undefined} onClick={() => setSection('overview')}>Overview</button>
+        <UnstyledButton aria-current={section === 'overview' ? 'page' : undefined} onClick={() => setSection('overview')}>Overview</UnstyledButton>
         <span className={styles.navGroup}>Your workspace</span>
         <Link to="/settings?section=workspace">Workspace settings</Link><Link to="/settings?section=members">Members & invitations</Link>
         <Link to="/settings?section=clients">API clients</Link><Link to="/settings?section=permissions">Roles & permissions</Link>
         {available.length > 0 && <span className={styles.navGroup}>Platform</span>}
-        {available.map((tool) => <button key={tool.id} aria-current={section === tool.id ? 'page' : undefined} onClick={() => setSection(tool.id)}>{tool.label}</button>)}
+        {available.map((tool) => <UnstyledButton key={tool.id} aria-current={section === tool.id ? 'page' : undefined} onClick={() => setSection(tool.id)}>{tool.label}</UnstyledButton>)}
       </nav>
       <section className={styles.adminContent} aria-label={selected?.label ?? 'Administration overview'}>
         {!access.data || access.error ? <Panel title="Checking your access"><p>{access.error ? 'Your permissions could not be loaded. Retry the access check above to open platform tools.' : 'Loading the tools assigned to your account…'}</p></Panel>
@@ -75,7 +75,7 @@ export function AdminView() {
               <Link to="/data"><strong>Add data</strong><span>Upload local files and inspect admitted content.</span></Link>
               <Link to="/settings?section=billing"><strong>Plans & billing</strong><span>Review your subscription and billing access.</span></Link>
             </div></Panel>
-            <Panel title="Platform tools">{available.length ? <div className={styles.taskCards}>{available.map((tool) => <button key={tool.id} onClick={() => setSection(tool.id)}><strong>{tool.label}</strong><span>{tool.description}</span></button>)}</div>
+            <Panel title="Platform tools">{available.length ? <div className={styles.taskCards}>{available.map((tool) => <UnstyledButton key={tool.id} onClick={() => setSection(tool.id)}><strong>{tool.label}</strong><span>{tool.description}</span></UnstyledButton>)}</div>
               : <p>Your account has no platform role. You can use your workspace tools above. A platform administrator can find your sign-in email in People & roles to assign access.</p>}</Panel>
           </> : <>
             <div><h2 className={styles.sectionTitle}>{selected?.label}</h2><Muted>{selected?.description}</Muted></div>

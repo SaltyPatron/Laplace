@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { stubApi } from './fixtures/api';
+import { entityResponse } from './fixtures/entity';
 
 const WHALE_ID = '11111111111111111111111111111111';
 
@@ -22,17 +24,24 @@ function browseResponse(query: string, hits: unknown[]) {
   };
 }
 
-test('Explore tab opens the substrate browser and keeps Warehouse addressable', async ({ page }) => {
-  await page.goto('/explore');
-  await expect(page.getByRole('heading', { name: 'Browse Laplace like a reference site' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Find a starting point in the substrate' })).toBeVisible();
-  const exploreNav = page.locator('aside');
-  await expect(exploreNav.getByRole('link', { name: 'Browse', exact: true })).toBeVisible();
-  await expect(exploreNav.getByRole('link', { name: 'Warehouse', exact: true })).toBeVisible();
+test.beforeEach(async ({ page }) => { await stubApi(page); });
 
-  await exploreNav.getByRole('link', { name: 'Warehouse', exact: true }).click();
-  await expect(page).toHaveURL('/explore/warehouse');
-  await expect(page.getByRole('heading', { name: 'Substrate warehouse' })).toBeVisible();
+test('Look up opens knowledge search, with Sources one rail link away and old warehouse links kept', async ({ page }) => {
+  await page.goto('/explore');
+  await expect(page.getByRole('heading', { name: 'Knowledge', level: 2 })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('textbox', { name: 'Search knowledge' })).toBeVisible();
+  const rail = page.getByRole('navigation', { name: 'Primary navigation' }).first();
+  await expect(rail.getByRole('link', { name: 'Search', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(rail.getByRole('link', { name: 'Identifiers', exact: true })).toBeVisible();
+
+  await rail.getByRole('link', { name: 'Sources', exact: true }).click();
+  await expect(page).toHaveURL('/explore/sources');
+  await expect(page.getByRole('heading', { name: 'Sources', level: 2 })).toBeVisible();
+  await expect(rail.getByRole('link', { name: 'Sources', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  // A saved warehouse address that names a source opens the same source in Sources.
+  await page.goto('/explore/warehouse?source=wordnet');
+  await expect(page).toHaveURL('/explore/sources?source=wordnet');
 });
 
 test('Browse returns a canonical result set instead of silently choosing one entity', async ({ page }) => {
@@ -69,15 +78,22 @@ test('Browse returns a canonical result set instead of silently choosing one ent
   });
 
   await page.goto('/explore');
-  await page.getByRole('textbox', { name: 'Find a starting point in the substrate' }).fill('Hikaru');
-  await page.getByRole('button', { name: 'Browse' }).click();
+  await page.getByRole('textbox', { name: 'Search knowledge' }).fill('Hikaru');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page).toHaveURL(/[?&]q=Hikaru/);
 
   await expect(page.getByRole('link', { name: 'Nakamura, Hikaru' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Hikaru', exact: true })).toBeVisible();
-  await expect(page.getByText('2 canonical results')).toBeVisible();
-  await expect(page.getByText('731 μs')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '2 results for “Hikaru”' })).toBeVisible();
+  // The browse receipt (timing and bounds) stays available under the read scope.
+  await page.getByText('Search read scope', { exact: true }).click();
+  await expect(page.getByText('"elapsed_us": 731')).toBeVisible();
 
+  // Selecting a result keeps the collection and shows the subject beside it; it opens as a page on request.
   await page.getByRole('link', { name: 'Nakamura, Hikaru' }).click();
+  await expect(page).toHaveURL(new RegExp(`[?&]selected=${WHALE_ID}`));
+  await expect(page.getByRole('link', { name: 'Hikaru', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Open as a page' }).click();
   await expect(page).toHaveURL(`/explore/entity/${WHALE_ID}`);
 });
 
@@ -105,8 +121,8 @@ test('Browse exposes capacity truncation as an execution bound the user can expa
   });
 
   await page.goto('/explore?q=Hikaru');
-  await expect(page.getByRole('button', { name: 'Expand frontier to 4,096' })).toBeVisible();
-  await page.getByRole('button', { name: 'Expand frontier to 4,096' }).click();
+  await expect(page.getByRole('button', { name: 'Expand entity frontier' })).toBeVisible();
+  await page.getByRole('button', { name: 'Expand entity frontier' }).click();
   await expect(page).toHaveURL(/capacity=4096/);
   await expect.poll(() => seenCapacity).toBe('4096');
 });
@@ -120,8 +136,9 @@ test('Browse does not promote an absent surface to an entity result', async ({ p
   });
 
   await page.goto('/explore?q=unheld');
-  await expect(page.getByText('No admitted entity or containing structure was reached by this browse program.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open its structural neighborhood ›' })).toHaveCount(0);
+  await expect(page.getByText('Nothing recorded matches “unheld”.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'unheld' })).toHaveCount(0);
+  await expect(page.locator('[data-claim-id]')).toHaveCount(0);
 });
 
 test('legacy free-form resolve routes through Browse', async ({ page }) => {
@@ -159,15 +176,22 @@ test('Not-found decomposition keeps tier-2 word constituents visible', async ({ 
   await expect(page.getByRole('link', { name: 'Sodium Chloride', exact: true })).toHaveCount(0);
 });
 
-test('Glome canvas mounts after unlock', async ({ page }) => {
-  await page.goto(`/explore/entity/${WHALE_ID}`);
-  await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'glome' }).click();
-  await page.getByRole('button', { name: /Unlock \(nn\)/ }).click();
-  const panes = page.locator('canvas');
-  await expect(panes).toHaveCount(2, { timeout: 15_000 });
+test('Placement lens mounts the glome canvas, and old ?detail=glome links open it', async ({ page }) => {
+  const childId = '55555555555555555555555555555555';
+  const whale = entityResponse({ id_hex: WHALE_ID, label: 'whale', tier: 1,
+    constituents: [{ ordinal: 1, child_id_hex: childId, child_label: 'w', run_length: 1, flags: 0 }] });
+  Object.assign(whale.entity, {
+    physicalities: [{ type: 1, x: 0.2, y: 0.3, z: 0.4, m: 0.5, radius: 0.8, n_constituents: 1 }],
+    realized_vertices: [{ ordinal: 1, child_id_hex: childId, child_label: 'w', child_tier: 0, x: 0.6, y: 0.2, z: 0.3, m: 0.71, radius: 1 }],
+  });
+  await page.route(`**/v1/explore/entities/${WHALE_ID}`, (route) => route.fulfill({ json: whale }));
+
+  await page.goto(`/explore/entity/${WHALE_ID}?detail=glome`);
+  await expect(page.getByRole('heading', { name: 'whale', level: 1 })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('tab', { name: 'Placement', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const panes = page.getByRole('tabpanel', { name: 'Placement' }).locator('canvas');
+  await expect(panes).toHaveCount(1, { timeout: 15_000 });
   await expect(panes.first()).toBeVisible();
-  await expect(panes.nth(1)).toBeVisible();
 });
 
 test('Gated expand shows GatePrompt when billing bypass is off', async ({ page }) => {
@@ -198,6 +222,9 @@ test('Storage Proof selects the emitted root and renders its exact packed compos
         database_perfcache_receipt_hex: null,
         database_perfcache_error: 'database receipt probe unavailable in fixture',
         perfcache_aligned: null,
+        invariants: [
+          { key: 'root', label: 'Root is the emitted composition', passed: true, observed: rootId },
+        ],
         nodes: [
           {
             ordinal: 1, parent_ordinal: 7, id_hex: aId, label: 'a', tier: 0,
@@ -264,7 +291,7 @@ test('Storage Proof selects the emitted root and renders its exact packed compos
   await expect(page.getByRole('heading', { name: 'Selected storage address' })).toBeVisible();
   await expect(page.getByTitle(rootId).first()).toBeVisible();
   await expect(page.getByText('Select a node from the composition walk.')).toHaveCount(0);
-  await expect(page.getByText('212-bit carrier projection')).toBeVisible();
+  await expect(page.getByText('212-bit carrier inspection')).toBeVisible();
   await expect(page.getByText('Realized constituent curve')).toBeVisible();
   await expect(page.getByText('UNVERIFIED — database ROM receipt unavailable')).toBeVisible();
   await expect(page.getByText('database receipt probe unavailable in fixture')).toBeVisible();

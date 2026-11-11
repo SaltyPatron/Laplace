@@ -2,11 +2,11 @@
   .page {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3, .75rem);
+    gap: var(--space-3);
     width: min(100%, 1680px);
     min-width: 0;
     margin: 0 auto;
-    padding: clamp(.85rem, 2vw, 1.5rem);
+    padding: clamp(var(--space-3), 2vw, var(--space-5));
     overflow-y: auto;
   }
 
@@ -14,7 +14,7 @@
     display: grid;
     grid-template-columns: minmax(320px, .78fr) minmax(440px, 1.22fr);
     align-items: start;
-    gap: var(--space-3, .75rem);
+    gap: var(--space-3);
   }
 
   .inputs > * { min-width: 0; }
@@ -22,7 +22,7 @@
   .stack {
     display: flex;
     flex-direction: column;
-    gap: .6rem;
+    gap: var(--space-2);
     min-width: 0;
   }
 
@@ -35,12 +35,16 @@
     resize: vertical;
   }
 
-  .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
   .receipt { display: block; overflow-wrap: anywhere; }
   .preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; }
+  .history { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-2); min-width: 0; }
+  .history li { display: grid; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); overflow-wrap: anywhere; }
+  .historyHead { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; justify-content: space-between; }
+  .historyStatus { color: var(--color-signal); font-size: var(--text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
   .page input, .page select, .page textarea { max-width: 100%; box-sizing: border-box; }
 
-  @media (max-width: 1080px) {
+  @media (max-width: 64rem) {
     .inputs { grid-template-columns: minmax(0, 1fr); }
     .inputs textarea { height: 9rem; }
   }

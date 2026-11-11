@@ -82,7 +82,7 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
       </Panel>
 
       <Panel title="Reconstructed movetext">
-        <Muted style={{ marginBottom: '0.5rem' }}>
+        <Muted className={styles.lede}>
           Generated from the recorded typed move trajectory used by the replay above.
           Source headers are shown separately and are not inferred from this rendering.
         </Muted>

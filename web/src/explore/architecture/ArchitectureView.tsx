@@ -46,7 +46,7 @@ function Architecture({ catalog }: { catalog: Catalog }) {
   const sections = [['diagrams', 'System & flows'], ['operations', 'Operation contracts'], ['registrations', 'Code registrations'], ['conflicts', 'Conflicts'], ['sources', 'Source inspection']];
   return <Stack className={styles.workspace} gap={4}>
     <header><h2>Architecture & operations</h2><p>Follow Laplace from source admission through cognition, effects and learning. Compare the contract with each implementation and inspect the evidence behind the diagram.</p></header>
-    <NavTabs tabs={sections.map(([id, label]) => ({ id, label, active: section === id, href: address({ section: id }), onClick: () => setParams({ section: id }) }))} />
+    <NavTabs label="Architecture sections" tabs={sections.map(([id, label]) => ({ id, label, active: section === id, href: address({ section: id }), onClick: () => setParams({ section: id }) }))} />
     <Muted>{catalog.coverage.operations} specification operations · {catalog.coverage.registrations} source registrations · {catalog.coverage.diagrams} diagrams and figures.</Muted>
     {section === 'diagrams' ? <DiagramBrowser catalog={catalog} /> : section === 'sources' ? <SourceBrowser /> : <>
       <Field label="Search this inventory"><Input value={q} onChange={(e) => set({ q: e.target.value })} type="search" /></Field>

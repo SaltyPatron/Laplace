@@ -12,30 +12,30 @@
   .facets { display: flex; flex-wrap: wrap; gap: var(--space-3); }
   .facets > * { flex: 1 1 14rem; }
   .facets:empty { display: none; }
-  .sourceId { display: block; max-width: 15rem; overflow-wrap: anywhere; color: var(--color-text-muted); margin-top: 0.35rem; }
+  .sourceId { display: block; max-width: 15rem; overflow-wrap: anywhere; color: var(--color-text-muted); margin-top: var(--space-1); }
   .sourceFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .sourceFacts dt { color: var(--color-text-muted); font-size: var(--text-sm); }
-  .sourceFacts dd { margin: 0.2rem 0 0; }
+  .sourceFacts dd { margin: var(--space-1) 0 0; }
   .selected { background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-panel)); }
   .selected a { font-weight: 700; }
 
   .statGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-3);
   }
 
   .stageGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-    gap: 0.6rem;
+    gap: var(--space-2);
   }
 
   .stageCard {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.75rem;
+    gap: var(--space-1);
+    padding: var(--space-3);
     background: var(--color-bg-panel);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
@@ -50,11 +50,11 @@
   .chipRow {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45rem;
+    gap: var(--space-2);
   }
 
   .chip {
-    padding: 0.3rem 0.75rem;
+    padding: var(--space-1) var(--space-3);
     border-radius: 99px;
     background: var(--color-bg-panel-2);
     border: 1px solid var(--color-border-default);
@@ -65,7 +65,7 @@
 
   .sectionTitle {
     margin: 0 0 var(--space-3);
-    font-size: 0.95rem;
+    font-size: var(--text-base);
   }
 
   .tableTools {
@@ -81,12 +81,12 @@
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 40rem) {
   .tableTools {
     align-items: stretch;
     flex-direction: column;
   }
 }
-@media (max-width: 700px) {
+@media (max-width: 40rem) {
   .hasSelection > .hero, .hasSelection > .tableTools, .hasSelection > .facets { display: none; }
 }

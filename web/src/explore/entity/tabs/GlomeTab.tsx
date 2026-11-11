@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Panel, SegmentedControl, Stack } from '@ui';
+import { Panel, Range, SegmentedControl, Stack } from '@ui';
 import { GatePrompt } from '../../components/GatePrompt';
 import {
   GlomeCanvas,
@@ -145,10 +145,9 @@ export function GlomeTab({
           <label className={styles.scrubLabel} htmlFor="fold-ordinal">
             Ordinal
           </label>
-          <input
+          <Range
             id="fold-ordinal"
             className={styles.scrubRange}
-            type="range"
             min={1}
             max={Math.max(1, maxOrd)}
             value={selectedOrdinal ?? 1}

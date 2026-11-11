@@ -1,47 +1,50 @@
 import { test, expect } from '@playwright/test';
+import { stubApi } from './fixtures/api';
+import { entityResponse } from './fixtures/entity';
 
 const id = '11111111111111111111111111111111';
-const claim = '22222222222222222222222222222222';
 const target = '33333333333333333333333333333333';
+const kind = '44444444444444444444444444444444';
 
-test('entity browse leads with meanings and readable facts and fetches inspection on demand', async ({ page }) => {
+const sediment = entityResponse({
+  id_hex: id, label: 'sediment', tier: 1,
+  consensus_out: [
+    { type: 'AtLocation', entity_id_hex: target, entity_label: 'bottom of sea', eff_mu: 1620, witnesses: 3 },
+    { type: 'IsA', entity_id_hex: kind, entity_label: 'matter', eff_mu: 1710, witnesses: 5 },
+  ],
+});
+
+test('entity page leads with meanings, with relations in words and subjects that open in the inspector', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 700 });
-  const inspection: string[] = [];
-  await page.route('**/v1/auth/me', route => route.fulfill({ json: { authenticated: false, user: null, providers: [], devPrincipal: 'test' } }));
-  await page.route(`**/v1/explore/entities/${id}/preview`, route => route.fulfill({ json: {
-    id_hex: id, label: 'sediment', type: '', tier: 1, exists: true, evidence_count: 21, preview_facts: [],
-  } }));
-  await page.route('**/v1/explore/lexicon?*', route => route.fulfill({ json: {
-    object: 'lexicon', rounds: 2, fanout: 0, nearest: 0,
-    readings: [{ side: 1, text: 'matter that has been deposited by some natural process', relation: 'definition', via: 'sediment', claim_ids: [claim], witnesses: null, standing: 1087 }],
-    connections: [
-      { relation: 'at location', claim_id: claim, from: 'sediment', to: 'bottom of sea', from_id: id, to_id: target, witnesses: null },
-      ...Array.from({ length: 7 }, (_, index) => ({
-        relation: 'is a', claim_id: '4'.repeat(31) + index.toString(16),
-        from: `Related deposited material ${index + 1}, carried by a natural process and left where the movement slows down`,
-        to: 'matter that has been deposited by some natural process', from_id: target, to_id: id, witnesses: null,
-      })),
-    ],
-    rows: [{ claim_id: claim, outbound: true }],
-  } }));
-  await page.route(`**/v1/explore/entities/${id}`, route => {
-    inspection.push(route.request().url());
-    return route.fulfill({ status: 503, json: { error: { message: 'Inspection temporarily unavailable' } } });
-  });
-  const standing: string[] = [];
-  page.on('request', request => { if (request.url().endsWith('/record')) standing.push(request.url()); });
+  await stubApi(page);
+  await page.route(`**/v1/explore/entities/${id}`, (route) => route.fulfill({ json: sediment }));
   await page.goto(`/explore/entity/${id}`);
-  await expect(page.getByRole('heading', { name: 'sediment', exact: true })).toBeVisible();
-  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('at location', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'bottom of sea', exact: true })).toHaveAttribute('href', `/explore/entity/${target}`);
-  await expect(page.getByRole('heading', { name: 'Salient facts', exact: true })).toHaveCount(0);
-  await expect(page.getByText('Composition tier 1', { exact: true })).not.toBeVisible();
-  await expect(page.getByRole('button', { name: 'overview', exact: true })).not.toBeVisible();
-  expect(inspection).toHaveLength(0);
-  expect(standing).toHaveLength(0);
-  await page.getByText('Inspect source records', { exact: true }).click();
-  await expect.poll(() => inspection.length).toBe(1);
-  // A failed inspection must not replace the readable primary answer.
-  await expect(page.getByText('matter that has been deposited by some natural process', { exact: true }).first()).toBeVisible();
+
+  await expect(page.getByRole('heading', { name: 'sediment', exact: true, level: 1 })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('tab', { name: 'Means', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const means = page.getByRole('tabpanel', { name: 'Means' });
+  // Relation names read as words, not identifiers.
+  await expect(means.getByText('sediment at location …')).toBeVisible();
+  await expect(means.getByText('sediment is a …')).toBeVisible();
+  await expect(means.getByText(/AtLocation|IsA/)).toHaveCount(0);
+
+  // A related subject opens in the inspector without leaving the page.
+  await means.getByRole('button', { name: 'bottom of sea', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/explore/entity/${id}\\?.*peek=${target}`));
+});
+
+test('a failed entity read keeps the page and offers a retry', async ({ page }) => {
+  await stubApi(page);
+  let fail = true;
+  await page.route(`**/v1/explore/entities/${id}`, (route) => fail
+    ? route.fulfill({ status: 503, json: { error: { message: 'Inspection temporarily unavailable' } } })
+    : route.fulfill({ json: sediment }));
+  await page.goto(`/explore/entity/${id}`);
+
+  const means = page.getByRole('tabpanel', { name: 'Means' });
+  await expect(means.getByText('Inspection temporarily unavailable', { exact: false })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('tab', { name: 'Made of', exact: true })).toBeVisible();
+  fail = false;
+  await means.getByRole('button', { name: 'Try again' }).click();
+  await expect(means.getByText('sediment at location …')).toBeVisible();
 });

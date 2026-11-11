@@ -1,0 +1,11 @@
+@layer components {
+  /* Zero specificity: a feature class can size and place the track freely. */
+  :where(.range) {
+    accent-color: var(--color-accent);
+    cursor: pointer;
+  }
+
+  :where(.range:disabled) {
+    cursor: default;
+  }
+}

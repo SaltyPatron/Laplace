@@ -4,7 +4,7 @@
   }
 
   .intro {
-    margin: 0 0 0.75rem;
+    margin: 0 0 var(--space-3);
     font-size: var(--text-sm);
     line-height: 1.45;
     max-width: none;
@@ -12,15 +12,15 @@
   }
 
   .intro code {
-    font-size: 0.85em;
+    font-size: var(--text-sm);
   }
 
   .statusRow {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.45rem 0.65rem;
-    margin-bottom: 0.75rem;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-3);
   }
 
   .profileLink {
@@ -31,38 +31,38 @@
   .controls {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-    gap: 0.65rem 0.9rem;
-    margin: 0.75rem 0;
+    gap: var(--space-3) var(--space-4);
+    margin: var(--space-3) 0;
   }
 
   .playHint {
-    padding: 0.65rem 0.75rem;
+    padding: var(--space-3) var(--space-3);
     border-radius: var(--radius-md, 8px);
     border: 1px solid var(--color-confirm);
     background: color-mix(in srgb, var(--color-confirm) 8%, transparent);
     font-size: var(--text-sm);
     line-height: 1.45;
-    margin-bottom: 0.65rem;
+    margin-bottom: var(--space-3);
   }
 
   .log ul {
     list-style: none;
-    margin: 0.35rem 0 0;
+    margin: var(--space-1) 0 0;
     padding: 0;
     font-family: ui-monospace, monospace;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     max-height: 6rem;
     overflow-y: auto;
   }
 
   .log li {
-    padding: 0.1rem 0;
+    padding: var(--space-half) 0;
     color: var(--color-text-muted);
   }
 
   .foot {
     display: block;
-    margin-top: 0.5rem;
-    font-size: 0.78rem;
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
   }
 }

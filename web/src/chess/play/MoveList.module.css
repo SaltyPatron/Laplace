@@ -5,16 +5,16 @@
     padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
-    gap: 0.1rem 0.6rem;
+    gap: var(--space-half) var(--space-2);
     max-height: 12rem;
     overflow-y: auto;
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
   }
 
   .moveHistory li {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-2);
     align-items: baseline;
   }
 
@@ -32,19 +32,19 @@
     color: inherit;
     background: none;
     border: none;
-    padding: 0.05rem 0.2rem;
+    padding: var(--space-hair) var(--space-1);
     border-radius: 3px;
     cursor: pointer;
     text-align: left;
   }
 
   .ply:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, white 6%, transparent);
   }
 
   .plyActive {
-    background: rgba(255, 207, 58, 0.22);
-    box-shadow: inset 0 0 0 1px rgba(255, 207, 58, 0.45);
+    background: color-mix(in srgb, var(--chess-highlight) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chess-highlight) 45%, transparent);
   }
 
   .moves {
@@ -52,20 +52,20 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-half);
   }
 
   .moves li {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     font-variant-numeric: tabular-nums;
-    padding: 0.1rem 0.3rem;
+    padding: var(--space-half) var(--space-1);
     border-radius: 4px;
   }
 
   .moves li:first-child {
-    background: rgba(255, 207, 58, 0.1);
+    background: color-mix(in srgb, var(--chess-highlight) 10%, transparent);
   }
 
   .dot {
@@ -90,13 +90,13 @@
   }
 
   .pickstar {
-    color: #ffcf3a;
+    color: var(--chess-highlight);
     margin-left: auto;
   }
 
   .tag {
     color: var(--color-text-muted);
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
     margin-left: auto;
   }
 }

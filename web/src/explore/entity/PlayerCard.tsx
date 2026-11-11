@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
+import { Button, ErrorText, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
 import { describeFailure } from '../../api/client';
 import { chessPlayer } from '../../chess/db/api';
 import type { ChessPlayerResponse } from '../../chess/db/types';
@@ -41,8 +41,8 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
     return () => { stale = true; };
   }, [preview.id_hex, preview.type, attempt]);
 
-  if (error) return <div role="alert">
-    <p>Standing could not be loaded: {error}</p>
+  if (error) return <div>
+    <ErrorText>Standing could not be loaded: {error}</ErrorText>
     <Button onClick={() => setAttempt((value) => value + 1)}>Retry standing</Button>
   </div>;
 

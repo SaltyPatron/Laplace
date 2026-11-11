@@ -3,6 +3,7 @@ import type { Strand, StrandState } from '../../data/contract';
 import { relationOf } from '../../data/contract';
 import { EntityChip } from '../EntityChip/EntityChip';
 import styles from './Strand.module.css';
+import { UnstyledButton } from '@ui';
 
 const STATE_LABEL: Record<StrandState, string> = {
   confirmed: 'Confirmed', contested: 'Contested', refuted: 'Refuted', thin: 'Thin evidence', prior: 'Unconfirmed', structural: '',
@@ -37,9 +38,9 @@ function StrandRow({ strand, side }: { strand: Strand; side: 'to' | 'from' }) {
     <div className={styles.side}>
       {STATE_LABEL[strand.state] && <span className={styles.state} data-state={strand.state}>{STATE_LABEL[strand.state]}</span>}
       <StandingMeter strength={strand.strength} state={strand.state} />
-      {strand.spiders.length > 0 && <button type="button" className={styles.witnessButton} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      {strand.spiders.length > 0 && <UnstyledButton type="button" className={styles.witnessButton} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {strand.spiders.length} {strand.spiders.length === 1 ? 'source' : 'sources'}{games ? ` · ${games} ${games === 1 ? 'game' : 'games'}` : ''}
-      </button>}
+      </UnstyledButton>}
     </div>
     {open && <ul className={styles.spiders}>{strand.spiders.map((s) => <li key={s.witness.id}>
       <EntityChip id={s.witness.id} label={s.witness.label} />

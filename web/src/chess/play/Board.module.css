@@ -4,7 +4,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.6rem;
+    gap: var(--space-2);
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
@@ -14,7 +14,7 @@
 
   .area {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     align-items: center;
     justify-content: center;
     flex: 1 1 auto;
@@ -33,7 +33,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-1);
     /* Match the board's computed square size — not the full flex area. */
     height: min(100cqh, calc(100cqw - 4.2rem));
     flex: 0 0 auto;
@@ -51,7 +51,7 @@
     width: 3.4rem;
     text-align: center;
     line-height: 1.2;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     color: var(--color-text-muted);
     flex: 0 0 auto;
   }
@@ -59,7 +59,7 @@
   .evalReadout b {
     display: block;
     color: var(--color-text-primary);
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
   }
 
   .evalBar {
@@ -69,7 +69,7 @@
     height: 100%;
     position: relative;
     border-radius: 3px;
-    background: #1b2436;
+    background: var(--chess-frame);
     border: 1px solid var(--color-border-default);
     overflow: hidden;
   }
@@ -83,20 +83,20 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: #e9eef9;
+    background: var(--chess-frame-light);
     transition: height 0.25s ease, top 0.25s ease, bottom 0.25s ease;
   }
 
   .legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem 1rem;
+    gap: var(--space-1) var(--space-4);
     justify-content: center;
     flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
     color: var(--color-text-muted);
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
   }
 
   .footer {
@@ -114,7 +114,7 @@
   .lgScale {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-2);
   }
 
   .lgScale i {
@@ -122,10 +122,12 @@
     height: 0.6rem;
     border-radius: var(--radius-pill);
     display: inline-block;
-    background: linear-gradient(90deg, hsl(0 70% 55%), hsl(65 72% 52%), hsl(130 70% 48%));
+    background: linear-gradient(90deg, var(--scale-bad), var(--scale-mid), var(--scale-good));
   }
 
   .board {
+    --square-light: var(--chess-square-light);
+    --square-dark: var(--chess-square-dark);
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
@@ -157,7 +159,7 @@
   }
 
   .uarrow {
-    stroke: #27c07a;
+    stroke: var(--chess-arrow);
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -166,7 +168,7 @@
   }
 
   .overlay :global(#uarrowhead path) {
-    fill: #27c07a;
+    fill: var(--chess-arrow);
   }
 
   .targetMu {
@@ -176,11 +178,11 @@
     font-size: 2.7cqw;
     line-height: 1;
     z-index: 3;
-    color: #0b0e14;
+    color: var(--chess-ink);
     opacity: 0.85;
     font-variant-numeric: tabular-nums;
     pointer-events: none;
-    text-shadow: 0 0 2px rgba(255, 255, 255, 0.7);
+    text-shadow: 0 0 2px color-mix(in srgb, white 70%, transparent);
   }
 
   .dragGhost {
@@ -188,8 +190,8 @@
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 60;
-    color: #0b0e14;
-    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.45);
+    color: var(--chess-ink);
+    text-shadow: 0 1px 3px color-mix(in srgb, white 45%, transparent);
   }
 
   .boardRow {
@@ -206,12 +208,12 @@
   }
 
   .light {
-    --sqbg: #b6c2da;
+    --sqbg: var(--square-light);
     background: var(--sqbg);
   }
 
   .dark {
-    --sqbg: #5b6b8c;
+    --sqbg: var(--square-dark);
     background: var(--sqbg);
   }
 
@@ -236,8 +238,8 @@
     height: 30%;
     border-radius: 50%;
     z-index: 1;
-    background: var(--teval, rgba(79, 140, 255, 0.55));
-    box-shadow: 0 0 0 1.5px rgba(11, 14, 20, 0.55);
+    background: var(--teval, color-mix(in srgb, var(--chess-target) 55%, transparent));
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--chess-ink) 55%, transparent);
   }
 
   .marked::before {
@@ -246,7 +248,7 @@
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background: hsla(22, 95%, 52%, 0.62);
+    background: color-mix(in srgb, var(--chess-hint) 62%, transparent);
   }
 
   .dragging .piece {
@@ -255,9 +257,9 @@
 
   .pick {
     box-shadow:
-      inset 0 0 0 4px #ffcf3a,
-      inset 0 0 0 5.5px rgba(11, 14, 20, 0.6),
-      inset 0 0 16px rgba(255, 207, 58, 0.45);
+      inset 0 0 0 4px var(--chess-highlight),
+      inset 0 0 0 5.5px color-mix(in srgb, var(--chess-ink) 60%, transparent),
+      inset 0 0 16px color-mix(in srgb, var(--chess-highlight) 45%, transparent);
   }
 
   .botpick {
@@ -267,9 +269,37 @@
     z-index: 3;
     font-size: 3.4cqw;
     line-height: 1;
-    color: #ffcf3a;
+    color: var(--chess-highlight);
     pointer-events: none;
-    text-shadow: 0 0 3px rgba(11, 14, 20, 0.9);
+    text-shadow: 0 0 3px color-mix(in srgb, var(--chess-ink) 90%, transparent);
+  }
+
+  .coord {
+    position: absolute;
+    z-index: 1;
+    font-size: clamp(0.5rem, 1.6cqi, 0.75rem);
+    font-weight: 600;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .coordRank {
+    top: 0.15em;
+    left: 0.2em;
+  }
+
+  .coordFile {
+    right: 0.2em;
+    bottom: 0.15em;
+  }
+
+  .light .coord {
+    color: var(--square-dark);
+  }
+
+  .dark .coord {
+    color: var(--square-light);
   }
 
   .piece {
@@ -277,8 +307,8 @@
     z-index: 2;
     font-size: 10cqw;
     line-height: 1;
-    color: #0b0e14;
-    text-shadow: 0 1px 1px rgba(255, 255, 255, 0.35);
+    color: var(--chess-ink);
+    text-shadow: 0 1px 1px color-mix(in srgb, white 35%, transparent);
   }
 
   .lastMove::after {
@@ -287,12 +317,12 @@
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background: rgba(255, 207, 58, 0.28);
-    box-shadow: inset 0 0 0 2px rgba(255, 207, 58, 0.55);
+    background: color-mix(in srgb, var(--chess-highlight) 28%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--chess-highlight) 55%, transparent);
   }
 
   .inCheck {
-    background: radial-gradient(circle at center, hsla(28, 90%, 55%, 0.75), hsla(28, 80%, 45%, 0.25) 70%);
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--chess-pick) 75%, transparent), color-mix(in srgb, var(--chess-pick) 25%, transparent) 70%);
   }
 
   .readOnly {
@@ -300,11 +330,11 @@
   }
 
   .mated {
-    background: radial-gradient(circle at center, hsla(0, 85%, 55%, 0.85), hsla(0, 80%, 45%, 0.35) 70%);
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--scale-bad) 85%, transparent), color-mix(in srgb, var(--scale-bad) 35%, transparent) 70%);
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 64rem) {
   .board,
   .evalCol {
     height: min(100cqh, calc(100cqw - 4.2rem), 92vw);

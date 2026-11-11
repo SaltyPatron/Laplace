@@ -6,9 +6,9 @@
     color: var(--color-text-primary);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
-    padding: 0.55rem 0.75rem;
+    padding: var(--space-2) var(--space-3);
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: var(--text-base);
     min-width: 0;
     width: 100%;
   }

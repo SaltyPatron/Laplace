@@ -5,6 +5,7 @@ import { Select } from '../../primitives/Select';
 import { TextArea } from '../../primitives/TextArea';
 import { Muted } from '../../primitives/Text';
 import type { OperationDraft, OperationParameter } from '../../lib/operationFields';
+import styles from './OperationFields.module.css';
 
 export interface OperationFieldsProps {
   parameters: readonly OperationParameter[];
@@ -16,7 +17,7 @@ export interface OperationFieldsProps {
 /** Reusable declared-type input controls; never infer an operation from its name. */
 export function OperationFields({ parameters, value, onChange, disabled = false }: OperationFieldsProps) {
   const prefix = useId();
-  return <fieldset disabled={disabled} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+  return <fieldset disabled={disabled} className={styles.fieldset}>
     <legend>Arguments</legend>
     {parameters.length === 0 && <Muted>This signature takes no arguments.</Muted>}
     {parameters.map((parameter, index) => {
@@ -25,7 +26,7 @@ export function OperationFields({ parameters, value, onChange, disabled = false 
       const update = (change: Partial<typeof field>) => onChange({ ...value, [parameter.name]: { ...field, ...change } });
       const type = parameter.type.toLowerCase();
       const help = `${parameter.type}; ${parameter.optional ? 'omission uses the server default' : 'argument must be supplied'}.`;
-      return <div key={`${parameter.name}-${index}`} style={{ display: 'grid', gap: '0.35rem', marginBlock: '0.7rem' }}>
+      return <div key={`${parameter.name}-${index}`} className={styles.parameter}>
         <Field label={`${parameter.name || '(unnamed)'} — input mode`} htmlFor={`${id}-mode`} help={help}>
           <Select id={`${id}-mode`} value={field.mode} onChange={(event) => update({ mode: event.target.value as typeof field.mode })}>
             {parameter.optional && <option value="omit">Use server default</option>}

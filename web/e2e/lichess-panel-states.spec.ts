@@ -1,71 +1,58 @@
 import { test, expect, type Page } from '@playwright/test';
+import { stubApi } from './fixtures/api';
 
-// The Lichess panel shows the API's one state and never flips between "unconfigured" and "running" while
-// the managed service crash-loops, and a start holds the toggle until the service reaches it.
+// The Lichess routing panel reports the controller's one state. A crash-looping bot shows its
+// error and keeps the requested destination; it never claims the bot is unconfigured. A viewer
+// without permission sees the configuration but cannot change it.
 
-const base = {
-  depth: 6, maxConcurrent: 2, substrate: true, gamesRecorded: 0, recentLog: [], connected: false,
-  username: 'SaltyPatron', account: null, lastSeenAt: null,
+const profile = {
+  id: 'desktop', label: 'Desktop', environment: 'development', implementation: 'laplace-uci',
+  database: 'laplace', maxConcurrent: 2, rated: false,
 };
-const restarting = {
-  ...base, state: 'restarting', reachable: false, desired: true, configured: null, running: false,
-  error: 'The managed Lichess service (LaplaceLichess) exited and is restarting. Last error: No password has been provided',
-  service: { unit: 'LaplaceLichess', loadState: 'loaded', activeState: 'activating', subState: 'auto-restart', enabled: 'enabled', operatorStopped: false },
-};
-const failed = {
-  ...base, state: 'failed', reachable: true, desired: true, configured: true, running: false,
-  error: 'No password has been provided', service: null,
-};
-const stopped = {
-  ...base, state: 'stopped', reachable: false, desired: false, configured: null, running: false, error: 'Stopped by an operator.',
-  service: { unit: 'LaplaceLichess', loadState: 'loaded', activeState: 'inactive', subState: 'dead', enabled: 'enabled', operatorStopped: true },
-};
-const listening = { ...base, state: 'listening', reachable: true, desired: true, configured: true, running: true, connected: true, error: null, service: null };
+const control = (phase: string, extra: Record<string, unknown> = {}) => ({
+  controller: 'fixture', phase, activeProfile: null,
+  selection: { profile: 'desktop', revision: 7, changedUtc: '2026-11-10T00:00:00Z' },
+  profiles: [profile],
+  bot: { connected: false, username: 'SaltyPatron', gamesRecorded: 0, recentLog: [] },
+  ...extra,
+});
 
-async function serve(page: Page, next: () => object, onStart?: () => void) {
-  await page.route('**/chess/lichess/**', async (route) => {
+async function serve(page: Page, next: () => object) {
+  await stubApi(page);
+  await page.route((url) => url.pathname.startsWith('/chess/lichess/'), async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/chess/lichess/status') {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(next()) });
-    } else if (path === '/chess/lichess/start' && route.request().method() === 'POST') {
-      onStart?.();
-      await route.fulfill({ status: 202, contentType: 'application/json', body: '{}' });
-    } else {
-      await route.fulfill({ status: 404, body: '' });
-    }
+    if (path === '/chess/lichess/control') await route.fulfill({ json: next() });
+    else await route.fulfill({ status: 404, json: {} });
   });
 }
 
-test('a crash loop keeps the toggle on and never claims the token is unconfigured', async ({ page }) => {
+test('a crash loop keeps the requested destination and never claims the bot is unconfigured', async ({ page }) => {
   let i = 0;
-  await serve(page, () => (i++ % 2 === 0 ? restarting : failed));
+  await serve(page, () => ({
+    available: true, canControl: true,
+    control: i++ % 2 === 0
+      ? control('restarting', { error: 'The managed Lichess service exited and is restarting. Last error: No password has been provided' })
+      : control('failed', { error: 'No password has been provided' }),
+  }));
   await page.goto('/lab/lichess');
-  const listen = page.getByRole('switch', { name: 'Listen on Lichess' });
-  const state = page.getByLabel('Lichess service state');
+  const location = page.getByRole('combobox', { name: 'Lichess execution location' });
+  await expect(location).toHaveValue('desktop', { timeout: 15_000 });
   for (let k = 0; k < 3; k++) {
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await expect(listen).toBeChecked();
-    await expect(state).toHaveText(/Restarting after failure|Failed/);
+    await expect(location).toHaveValue('desktop');
+    await expect(page.getByText(/State: (restarting|failed)/)).toBeVisible();
     await expect(page.getByText(/second bot|not configured/i)).toHaveCount(0);
     await expect(page.getByText(/No password has been provided/).first()).toBeVisible();
   }
 });
 
-test('start holds the toggle until the service is listening', async ({ page }) => {
-  let started = false;
-  let polls = 0;
-  await serve(page, () => {
-    if (!started) return stopped;
-    polls += 1;
-    return polls < 3 ? stopped : listening;
-  }, () => { started = true; });
+test('a viewer without permission sees the routing but cannot change it', async ({ page }) => {
+  await serve(page, () => ({ available: true, canControl: false, control: control('listening', { activeProfile: 'desktop' }) }));
   await page.goto('/lab/lichess');
-  const listen = page.getByRole('switch', { name: 'Listen on Lichess' });
-  await expect(listen).not.toBeChecked();
-  await expect(page.getByText('stopped by an operator', { exact: false })).toBeVisible();
-  await listen.click();
-  await expect(listen).toBeChecked();
-  await expect(page.getByLabel('Lichess service state')).toHaveText(/Starting…|Listening/);
-  await expect(page.getByLabel('Lichess service state')).toHaveText(/Listening/, { timeout: 15_000 });
-  await expect(listen).toBeChecked();
+  const location = page.getByRole('combobox', { name: 'Lichess execution location' });
+  await expect(location).toHaveValue('desktop', { timeout: 15_000 });
+  await expect(location).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Apply routing', exact: true })).toBeDisabled();
+  await expect(page.getByText('does not have permission to change the bot destination', { exact: false })).toBeVisible();
+  await expect(page.getByText(/State: listening/)).toBeVisible();
 });

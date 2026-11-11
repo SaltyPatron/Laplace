@@ -203,6 +203,11 @@ export type FailureKind = 'auth' | 'forbidden' | 'payment' | 'missing' | 'unavai
  * absence are different answers: a refused read never says "nothing witnessed",
  * and an unreachable host never says "sign in".
  */
+/** The request id of a failed API call, for the error Details disclosure. */
+export const requestIdOf = (error: unknown) => (error instanceof ApiError ? error.requestId : undefined);
+/** describeFailure's message without the "(request …)" suffix; the id goes to Details. */
+export const plainMessage = (error: unknown) => describeFailure(error).message.replace(/\s*\(request [^)]+\)\s*$/, '');
+
 export function describeFailure(error: unknown): { kind: FailureKind; message: string } {
   if (error instanceof PaymentRequiredError) return { kind: 'payment', message: error.message };
   if (error instanceof ApiError) {

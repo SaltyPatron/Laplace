@@ -15,6 +15,8 @@ export { Text, Muted, ErrorText, LoadingText } from './primitives/Text';
 export { Badge, badgeVariants, type BadgeProps } from './primitives/Badge';
 export { Chip, chipVariants, type ChipProps } from './primitives/Chip';
 export { Link, type LinkProps } from './primitives/Link';
+export { UnstyledButton, type UnstyledButtonProps } from './primitives/UnstyledButton';
+export { Range, type RangeProps } from './primitives/Range';
 
 // Tier 2 — Interaction
 export {
@@ -28,6 +30,8 @@ export {
 } from './primitives/Tooltip';
 export { Popover, PopoverTrigger, PopoverContent, type PopoverProps } from './primitives/Popover';
 export { Toggle, type ToggleProps } from './primitives/Toggle';
+export { ToggleButton, type ToggleButtonProps } from './primitives/ToggleButton';
+export { Tab, TabList, type TabProps, type TabListProps } from './primitives/Tabs';
 export { SegmentedControl, type SegmentedControlProps } from './primitives/SegmentedControl';
 export { Checkbox, type CheckboxProps } from './primitives/Checkbox';
 export { SliderField, type SliderFieldProps } from './primitives/SliderField';

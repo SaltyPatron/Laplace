@@ -33,9 +33,8 @@ try {
     } else await route.continue();
   });
   for (const scenario of [
-    { name: 'entity', path: '/explore/entity/a929c9834b79516e7c85fa83e7dac137?inspect=1',
-      requests: ['/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137/preview',
-        '/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137'], heading: 'Argentina' },
+    { name: 'entity', path: '/explore/entity/a929c9834b79516e7c85fa83e7dac137',
+      requests: ['/v1/capabilities', '/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137'], heading: 'Argentina' },
     { name: 'matchup', path: '/explore/matchup/pancake/quark',
       requests: ['/v1/explore/matchup', '/v1/explore/matchup/verdict'] },
   ]) {
@@ -82,11 +81,15 @@ try {
           await expect(rail.getByRole('link', { name: label, exact: true })).toBeVisible();
         }
         await expect(page.getByRole('button', { name: 'Search (Ctrl+K)', exact: true })).toBeVisible();
-        const inspectionViews = page.getByRole('navigation', { name: 'Entity inspection views', exact: true });
-        await expect(inspectionViews.getByRole('link', { name: 'graph', exact: true })).toBeVisible();
-        await expect(inspectionViews.getByRole('link', { name: 'glome', exact: true })).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Meanings and usage', exact: true })).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Recorded relations', exact: true })).toBeVisible();
+        // One row of lenses; Means renders real strands, Appears in is reachable without any gate.
+        const lenses = page.getByRole('tablist', { name: 'Views of this subject', exact: true });
+        for (const label of ['Means', 'Appears in', 'Made of', 'Web', 'Placement']) {
+          await expect(lenses.getByRole('tab', { name: label, exact: true })).toBeVisible();
+        }
+        await expect(page.getByRole('tabpanel', { name: 'Means' }).getByText(/\d[\d,]*\+? results?/)).toBeVisible();
+        await lenses.getByRole('tab', { name: 'Appears in', exact: true }).click();
+        await expect(page.getByRole('tabpanel', { name: 'Appears in' }).getByText(/\d[\d,]*\+? results?|Nothing recorded contains this yet/)).toBeVisible();
+        await expect(page.getByText(/Payment required/i)).toHaveCount(0);
       }
       else {
         await expect(page.getByRole('textbox', { name: 'first entity', exact: true })).toHaveValue('pancake');

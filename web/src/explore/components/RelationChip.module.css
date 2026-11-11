@@ -2,7 +2,7 @@
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-1);
     flex-wrap: wrap;
   }
 }

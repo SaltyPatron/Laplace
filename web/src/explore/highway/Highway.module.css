@@ -84,9 +84,9 @@
   .blurb { color: var(--color-text-muted); font-size: var(--text-xs); }
   .relCell { color: var(--color-text-muted); white-space: nowrap; }
 
-  .live { color: var(--color-confirm, #3ecf8e); }
+  .live { color: var(--color-confirm, var(--color-go)); }
   .empty { color: var(--color-text-muted); }
-  .missing { color: var(--color-draw, #e8b339); }
+  .missing { color: var(--color-draw, var(--color-gold)); }
 
   .entLink { color: var(--color-accent); text-decoration: none; }
   .entLink:hover { text-decoration: underline; }
@@ -109,7 +109,7 @@
     font-size: var(--text-xs);
     padding: var(--space-2);
     border-radius: var(--radius-sm);
-    background: var(--color-surface-sunken, rgba(0, 0, 0, 0.25));
+    background: var(--color-surface-sunken, color-mix(in srgb, black 25%, transparent));
     overflow-x: auto;
   }
 

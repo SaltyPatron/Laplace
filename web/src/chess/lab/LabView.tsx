@@ -67,7 +67,7 @@ export function LabView() {
           <h3>Chess Lab</h3>
           <Muted>{activeTab.blurb}</Muted>
         </div>
-        <NavTabs
+        <NavTabs label="Lab sections"
           className={styles.subnav}
           tabs={TABS.map((t) => ({
             id: t.id,

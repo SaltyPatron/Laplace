@@ -30,7 +30,7 @@ function nodesFromGraph(
     const painted = lerpColor(palette.steel, palette.signal, evidenceT);
     return {
       id: n.idHex ?? '',
-      label: n.label ?? n.idHex ?? '',
+      label: n.label ?? '',
       x: Number(n.x),
       y: Number(n.y),
       z: Number(n.z),

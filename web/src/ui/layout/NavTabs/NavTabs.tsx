@@ -20,7 +20,7 @@ export interface NavTabsProps {
   label?: string;
 }
 
-export function NavTabs({ tabs, className, label = 'Primary navigation' }: NavTabsProps) {
+export function NavTabs({ tabs, className, label = 'Sections' }: NavTabsProps) {
   return (
     <nav className={cn(styles.tabs, className)} aria-label={label}>
       {tabs.map((tab) => tab.href ? (

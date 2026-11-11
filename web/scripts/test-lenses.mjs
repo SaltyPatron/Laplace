@@ -74,6 +74,25 @@ await check('chip re-centres drawer', async () => {
   await page.waitForURL(/peek=0+c9/, { timeout: 5000 });
 });
 await check('escape closes drawer', async () => { await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('[data-inspector]'), null, { timeout: 3000 }); });
+// Entity page: one header, one lens row, nothing gated or hidden; lens kept in the address.
+await page.goto(`${base}/explore/entity/${DOG}`);
+await check('entity page title is the label', async () => { await page.getByRole('heading', { level: 1, name: 'dog' }).waitFor({ timeout: 5000 }); });
+await check('entity page has exactly one lens row', async () => {
+  const rows = await page.getByRole('tablist').count();
+  if (rows !== 1) throw new Error(`${rows} tab bars`);
+  for (const label of ['Means', 'Appears in', 'Made of', 'Web', 'Shape', 'Placement']) await page.getByRole('tab', { name: label, exact: true }).waitFor({ timeout: 3000 });
+  if (await page.locator('main details:has([role=tablist])').count()) throw new Error('lenses hidden inside a disclosure');
+});
+await check('appears-in needs no gate and updates the address', async () => {
+  await page.getByRole('tab', { name: 'Appears in', exact: true }).click();
+  await page.getByText('PersonX tries to save a dog').waitFor({ timeout: 5000 });
+  if (!new URL(page.url()).searchParams.get('lens')?.includes('appears-in')) throw new Error('lens not in URL');
+  if (await page.getByText(/Payment required/i).count()) throw new Error('gate shown');
+});
+await check('old ?detail= addresses open the matching lens', async () => {
+  await page.goto(`${base}/explore/entity/${DOG}?inspect=1&detail=structure`);
+  await page.getByRole('tab', { name: 'Made of', exact: true, selected: true }).waitFor({ timeout: 5000 });
+});
 await browser.close();
 await server.close();
 console.log(results.join('\n'));

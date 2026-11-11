@@ -20,8 +20,10 @@ try {
   });
   process.exitCode = result;
 } finally {
-  await server.close();
+  // Vite's close can wait indefinitely on a held proxy socket or watcher; the result is already known.
+  await Promise.race([server.close(), new Promise((resolve) => setTimeout(resolve, 5000).unref())]);
   // Keep failed traces for diagnosis; no output is written inside the checkout.
   if (process.exitCode === 0) await rm(output, { recursive: true, force: true });
   else console.error(`Browser failure artifacts retained at ${output}`);
 }
+process.exit(process.exitCode ?? 1);

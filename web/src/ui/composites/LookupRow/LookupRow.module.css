@@ -20,7 +20,7 @@
     padding-left: var(--space-1);
   }
 
-  @media (max-width: 520px) {
+  @media (max-width: 40rem) {
     .controls {
       flex-wrap: wrap;
     }

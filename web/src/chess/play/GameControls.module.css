@@ -2,7 +2,7 @@
   .panel {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
 
@@ -10,15 +10,15 @@
     flex-basis: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--space-1);
   }
 
   .status {
     text-align: center;
     font-weight: 700;
-    font-size: 1.05rem;
+    font-size: var(--text-base);
     letter-spacing: 0.01em;
-    padding: 0.5rem 0.9rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border-default);
     background: var(--color-bg-panel-2);
@@ -31,19 +31,19 @@
 
   .over {
     border: none;
-    color: #fff;
+    color: white;
     animation: status-pop 0.25s ease-out;
   }
 
   .overWin {
-    background: linear-gradient(90deg, #2f9e54, #3ecf8e);
-    box-shadow: 0 0 0 1px #3ecf8e, 0 6px 22px rgba(62, 207, 142, 0.35);
+    background: linear-gradient(90deg, var(--color-go-deep), var(--color-go));
+    box-shadow: 0 0 0 1px var(--color-go), 0 6px 22px color-mix(in srgb, var(--color-go) 35%, transparent);
   }
 
   .overDraw {
-    color: #1a1304;
-    background: linear-gradient(90deg, #c8962d, #e8b339);
-    box-shadow: 0 0 0 1px #e8b339, 0 6px 22px rgba(232, 179, 57, 0.3);
+    color: var(--color-gold-ink);
+    background: linear-gradient(90deg, var(--color-gold-deep), var(--color-gold));
+    box-shadow: 0 0 0 1px var(--color-gold), 0 6px 22px color-mix(in srgb, var(--color-gold) 30%, transparent);
   }
 
   @keyframes status-pop {
@@ -76,26 +76,26 @@
   .motifs {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-1);
     justify-content: center;
     align-items: center;
     width: 100%;
   }
 
   .motifChip {
-    font-size: 0.72rem;
-    padding: 0.1rem 0.55rem;
+    font-size: var(--text-xs);
+    padding: var(--space-half) var(--space-2);
     border-radius: var(--radius-pill);
-    background: hsla(22, 95%, 52%, 0.18);
-    color: #ff9d4d;
-    border: 1px solid hsla(22, 95%, 52%, 0.4);
+    background: color-mix(in srgb, var(--chess-hint) 18%, transparent);
+    color: var(--chess-hint);
+    border: 1px solid color-mix(in srgb, var(--chess-hint) 40%, transparent);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
 
   .fen {
     color: var(--color-text-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     flex-basis: 100%;
     max-width: 100%;
     overflow-wrap: anywhere;
