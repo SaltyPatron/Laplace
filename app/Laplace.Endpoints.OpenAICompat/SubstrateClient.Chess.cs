@@ -261,12 +261,57 @@ internal sealed partial class SubstrateClient
         if (TryParseIdHex(idHex) is not { } id) return null;
         var games = await NpgsqlSubstrateReads.ChessPlayerGamesAsync(
             _dataSource, id, limit, offset, ct, TranslateReadError);
-        var rows = games.Select(static r => new ChessGameRow(
+        var movetexts = await PageMovetextAsync(games, ct).ConfigureAwait(false);
+        var rows = games.Select((r, i) => new ChessGameRow(
             r.EventIdHex, r.PlayedOn, r.Event, r.Eco, r.AsWhite,
-            r.OpponentIdHex, r.Opponent, r.Result, r.Outcome)).ToList();
+            r.OpponentIdHex, r.Opponent, r.Result, r.Outcome, movetexts[i])).ToList();
 
         return new ChessGamesResponse("chess.games", idHex.ToLowerInvariant(),
             Math.Max(0, offset), rows);
+    }
+
+    /// <summary>
+    /// Each row's movetext, realized from its stored line as one game's PGN is (ReplayStoredLine,
+    /// ChessReplay.ToMovetext): the page's lines and setups in one statement, their trajectories in
+    /// one, their setup boards in one; nothing per row crosses to the database. Null where a game's
+    /// line is unrecorded or does not replay from its setup.
+    /// </summary>
+    private async Task<string?[]> PageMovetextAsync(
+        IReadOnlyList<NpgsqlSubstrateReads.ChessPlayerGameRow> games, CancellationToken ct)
+    {
+        var movetexts = new string?[games.Count];
+        if (games.Count == 0) return movetexts;
+        var playings = games.Select(static g => Convert.FromHexString(g.EventIdHex)).ToArray();
+        var lines = await NpgsqlSubstrateReads.ChessLinesForPlayingsAsync(
+            _dataSource, playings, ct, TranslateReadError).ConfigureAwait(false);
+        var byPlaying = new Dictionary<string, NpgsqlSubstrateReads.ChessPlayingLineRow>(StringComparer.Ordinal);
+        foreach (var row in lines) byPlaying[Convert.ToHexString(row.PlayingId)] = row;
+        var lineIds = lines.Where(static l => l.LineId is not null).Select(static l => l.LineId!)
+            .DistinctBy(Convert.ToHexString).ToArray();
+        var setupIds = lines.Where(static l => l.SetupId is not null).Select(static l => l.SetupId!)
+            .DistinctBy(Convert.ToHexString).ToArray();
+        if (lineIds.Length == 0) return movetexts;
+        var contentTask = NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+            _dataSource, lineIds, [PhysicalityType.Content], ct, TranslateReadError);
+        Task<IReadOnlyList<NpgsqlSubstrateReads.NestedTrajectoryConstituentRow>>? setupTask = setupIds.Length == 0 ? null
+            : NpgsqlSubstrateReads.NestedTrajectoryConstituentsAsync(_dataSource, setupIds, ct, TranslateReadError);
+        var content = await contentTask.ConfigureAwait(false);
+        var boards = setupTask is null ? null
+            : Laplace.Chess.Service.ChessPositionTrajectory.Decode(await setupTask.ConfigureAwait(false));
+        for (int i = 0; i < games.Count; i++)
+        {
+            if (!byPlaying.TryGetValue(Convert.ToHexString(playings[i]), out var row) || row.LineId is null) continue;
+            string? setup = null;
+            if (row.SetupId is not null)
+            {
+                if (boards is not null && boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(row.SetupId), out var board))
+                    setup = board.ToFen();
+            }
+            var (replay, replayed) = ReplayStoredLine(row.LineId, LineContent(content, row.LineId), setup);
+            if (replayed)
+                movetexts[i] = Laplace.Chess.Service.ChessReplay.ToMovetext(replay, games[i].Result);
+        }
+        return movetexts;
     }
 
     /// <summary>
@@ -322,13 +367,7 @@ internal sealed partial class SubstrateClient
         await Task.WhenAll(rowsTask, setupIdTask).ConfigureAwait(false);
 
         var rows = rowsTask.Result;
-        // The line's Content trajectory is [start-position, move-1, ... move-N]; only the
-        // tail is replayed as moves, and the head is checked against the setup.
-        var content = rows.Where(r => r.Type == PhysicalityType.Content
-                                    && r.ParentId.AsSpan().SequenceEqual(lineId))
-            .OrderBy(static r => r.Ordinal)
-            .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
-        var moves = content.Length <= 1 ? Array.Empty<Laplace.Engine.Core.Hash128>() : content[1..];
+        var content = LineContent(rows, lineId);
         byte[]? setupId = setupIdTask.Result;
         string? setup = null;
         if (setupId is not null)
@@ -339,35 +378,13 @@ internal sealed partial class SubstrateClient
             if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
                 setup = board.ToFen();
         }
-        var startFen = setup ?? Laplace.Modality.Chess.ChessModality.StartFen;
-        if (!Laplace.Chess.Service.ChessPositionRef.TryComposeId(startFen, out var expectedStart))
-            return Laplace.Chess.Service.ChessReplay.Replay(
-                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
-                with { Truncated = "recorded replay setup does not resolve to a canonical start position" };
-
-        if (content.Length == 0)
-        {
-            // A zero-ply line is the one-child composition, so its id equals the start
-            // position. Any other line id with no Content trajectory is missing structure,
-            // not an empty game.
-            var storedLine = Laplace.Engine.Core.Hash128.FromBytes(lineId);
-            if (storedLine != expectedStart)
-                return Laplace.Chess.Service.ChessReplay.Replay(
-                    Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
-                    with { Truncated = "stored line move trajectory is missing" };
-        }
-        else if (expectedStart != content[0])
-        {
-            return Laplace.Chess.Service.ChessReplay.Replay(
-                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
-                with { Truncated = "stored line start position does not match its replay setup" };
-        }
-
-        var replay = Laplace.Chess.Service.ChessReplay.Replay(moves, setup);
+        var (replay, replayed) = ReplayStoredLine(lineId, content, setup);
+        if (!replayed) return replay;
+        var moveCount = content.Length <= 1 ? 0 : content.Length - 1;
         var commentRows = rows.Where(r => r.Type == PhysicalityType.ChessComment
                                          && r.ParentId.AsSpan().SequenceEqual(playingId))
             .OrderBy(static r => r.Ordinal).ToArray();
-        if (commentRows.Length == moves.Length && commentRows.Length > 0)
+        if (commentRows.Length == moveCount && commentRows.Length > 0)
         {
             var commentIds = commentRows.Select(static r => r.EntityId).ToArray();
             var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
@@ -376,5 +393,50 @@ internal sealed partial class SubstrateClient
                 replay = Laplace.Chess.Service.ChessReplay.ApplyClockComments(replay, rendered);
         }
         return replay;
+    }
+
+    /// <summary>
+    /// A stored line's Content trajectory, [start-position, move-1, ... move-N], in order.
+    /// </summary>
+    private static Laplace.Engine.Core.Hash128[] LineContent(
+        IEnumerable<NpgsqlSubstrateReads.TypedTrajectoryConstituentRow> rows, byte[] lineId)
+        => rows.Where(r => r.Type == PhysicalityType.Content
+                           && r.ParentId.AsSpan().SequenceEqual(lineId))
+            .OrderBy(static r => r.Ordinal)
+            .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
+
+    /// <summary>
+    /// The replay of a stored line: only the trajectory's tail is replayed as moves, and its
+    /// head is checked against the setup (or the standard start). One law for one game and a page.
+    /// </summary>
+    private static (Laplace.Chess.Service.ChessReplayResult Replay, bool Replayed) ReplayStoredLine(
+        byte[] lineId, Laplace.Engine.Core.Hash128[] content, string? setup)
+    {
+        var moves = content.Length <= 1 ? Array.Empty<Laplace.Engine.Core.Hash128>() : content[1..];
+        var startFen = setup ?? Laplace.Modality.Chess.ChessModality.StartFen;
+        if (!Laplace.Chess.Service.ChessPositionRef.TryComposeId(startFen, out var expectedStart))
+            return (Laplace.Chess.Service.ChessReplay.Replay(
+                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                with { Truncated = "recorded replay setup does not resolve to a canonical start position" }, false);
+
+        if (content.Length == 0)
+        {
+            // A zero-ply line is the one-child composition, so its id equals the start
+            // position. Any other line id with no Content trajectory is missing structure,
+            // not an empty game.
+            var storedLine = Laplace.Engine.Core.Hash128.FromBytes(lineId);
+            if (storedLine != expectedStart)
+                return (Laplace.Chess.Service.ChessReplay.Replay(
+                    Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                    with { Truncated = "stored line move trajectory is missing" }, false);
+        }
+        else if (expectedStart != content[0])
+        {
+            return (Laplace.Chess.Service.ChessReplay.Replay(
+                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                with { Truncated = "stored line start position does not match its replay setup" }, false);
+        }
+
+        return (Laplace.Chess.Service.ChessReplay.Replay(moves, setup), true);
     }
 }

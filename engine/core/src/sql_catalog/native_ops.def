@@ -67,6 +67,9 @@ SQL_QUERY("chess.setup_position", "bytea",
 SQL_QUERY("chess.line_for_playing", "bytea",
     "SELECT object_id\nFROM laplace.attestations\nWHERE subject_id = $1\n  AND type_id = laplace.relation_type_id('PLAYS_LINE')\nORDER BY id\nLIMIT 1")
 
+SQL_QUERY("chess.lines_for_playings", "bytea[]",
+    "SELECT p.id, l.line, s.setup\nFROM unnest($1) AS p(id)\nLEFT JOIN LATERAL (\n    SELECT object_id AS line FROM laplace.attestations\n    WHERE subject_id = p.id AND type_id = laplace.relation_type_id('PLAYS_LINE')\n    ORDER BY id LIMIT 1) l ON true\nLEFT JOIN LATERAL (\n    SELECT a.object_id AS setup FROM laplace.attestations a\n    WHERE a.subject_id = l.line AND a.context_id = p.id\n      AND a.type_id = laplace.relation_type_id('HAS_SETUP')\n    ORDER BY a.id LIMIT 1) s ON true")
+
 SQL_QUERY("evidence.first_subject", "bytea,bytea",
     "SELECT subject_id FROM laplace.attestations\nWHERE object_id = $1 AND type_id = $2\nLIMIT 1")
 

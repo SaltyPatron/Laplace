@@ -91,7 +91,8 @@ public sealed record ChessPlayerResponse(
 /// <summary>
 /// One line of a game log. <c>Outcome</c> is this player's result in the substrate's
 /// outcome encoding (2 win, 1 draw, 0 loss, same values as PlyOutcome); null when the
-/// source did not score the game.
+/// source did not score the game. <c>Movetext</c> is the game realized from its stored line, as
+/// the one-game read writes it; null where the line is unrecorded or does not replay.
 /// </summary>
 public sealed record ChessGameRow(
     [property: JsonPropertyName("id")] string IdHex,
@@ -102,7 +103,8 @@ public sealed record ChessGameRow(
     [property: JsonPropertyName("opponent_id")] string? OpponentId,
     [property: JsonPropertyName("opponent")] string Opponent,
     [property: JsonPropertyName("result")] string? Result,
-    [property: JsonPropertyName("outcome")] short? Outcome);
+    [property: JsonPropertyName("outcome")] short? Outcome,
+    [property: JsonPropertyName("movetext")] string? Movetext = null);
 
 public sealed record ChessGamesResponse(
     [property: JsonPropertyName("object")] string Object,
