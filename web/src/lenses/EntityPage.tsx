@@ -1,5 +1,6 @@
 import { useParams, useSearchParams, Link as RouterLink } from 'react-router-dom';
-import { describeFailure } from '../api/client';
+import { plainMessage, requestIdOf } from '../api/client';
+import { ErrorText } from '../ui/primitives/Text';
 import { readIdentity } from '../data/facets';
 import { useEntityLabels } from '../shell/inspector';
 import { useAppStore } from '../store';
@@ -37,7 +38,7 @@ export function EntityPage() {
         <RouterLink to="/chat" onClick={() => setExploreSeedPrompt(`What is "${label ?? id}"?`)}>Ask about it</RouterLink>
       </nav>
     </header>
-    {identity.error && !label && <p role="alert">{describeFailure(identity.error).message}</p>}
+    {identity.error && !label && <ErrorText requestId={requestIdOf(identity.error)}>{plainMessage(identity.error)}</ErrorText>}
     <SubjectView id={id} lens={lens} onLensChange={(next) => {
       const nextParams = new URLSearchParams(params);
       nextParams.delete('detail'); nextParams.delete('inspect');

@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportClientFailure } from '../diagnostics/client';
 import { Link } from 'react-router-dom';
-import { Button, Panel } from '@ui';
+import { Button, ErrorText, Panel } from '@ui';
 
 interface Props { resetKey: string; children: ReactNode }
 interface State { error: Error | null; resetKey: string }
@@ -19,10 +19,10 @@ export class ViewErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children;
     return <Panel title="This view could not be displayed">
-      <p role="alert">The rest of Laplace is still available. Retry this view or use the navigation to open another workspace.</p>
+      <ErrorText>The rest of Laplace is still available. Retry this view or use the navigation to open another workspace.</ErrorText>
       <details><summary>Error details</summary><pre>{this.state.error.message}</pre></details>
       <Button onClick={() => this.setState({ error: null })}>Retry view</Button>{' '}
-      <Link to="/">Return Home</Link>
+      <Link to="/explore">Go to search</Link>
     </Panel>;
   }
 }

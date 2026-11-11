@@ -17,6 +17,15 @@
     font-size: var(--text-sm);
   }
 
+  .errorDetails {
+    margin-top: var(--space-1);
+    color: var(--color-text-muted);
+  }
+
+  .errorDetails summary {
+    cursor: pointer;
+  }
+
   .loading {
     margin: 0;
     color: var(--color-text-muted);
