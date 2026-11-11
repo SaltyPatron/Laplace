@@ -20,6 +20,7 @@ const entity = {
     { direction: 'out', type: '', entity_id_hex: id(14), entity_label: 'packaging-empty-relation', eff_mu: 1406.04, witnesses: 1 },
     { direction: 'out', type: 'upos', entity_id_hex: id(15), entity_label: 'packaging-upos', eff_mu: 1177.35, witnesses: 1 },
     { direction: 'out', type: 'type of pointer that lemma has in all synsets containing it', entity_id_hex: id(16), entity_label: 'packaging-pointer', eff_mu: 1177.35, witnesses: 1 },
+    { direction: 'out', type: 'part of speech annotation', entity_id_hex: id(17), entity_label: 'packaging-pos-tag', eff_mu: 1484.08, witnesses: 1 },
   ],
   consensus_in: [{ direction: 'in', type: 'IsA', entity_id_hex: id(13), entity_label: 'puppy', eff_mu: 1210.5, witnesses: 2 }],
   evidence: [
@@ -62,7 +63,7 @@ await check('witnesses expand with sources', async () => {
 });
 await check('packaging relations are not shown', async () => {
   const text = await page.locator('[data-inspector]').innerText();
-  for (const junk of ['packaging-empty-relation', 'packaging-upos', 'packaging-pointer']) if (text.includes(junk)) throw new Error(`${junk} shown`);
+  for (const junk of ['packaging-empty-relation', 'packaging-upos', 'packaging-pointer', 'packaging-pos-tag']) if (text.includes(junk)) throw new Error(`${junk} shown`);
 });
 await check('thin vs confirmed states', async () => { await page.getByText('Confirmed').first().waitFor(); await page.getByText('Thin evidence').first().waitFor(); });
 await check('appears-in lens lists sentences', async () => { await page.getByRole('tab', { name: 'Appears in' }).click(); await page.getByText('PersonX tries to save a dog').waitFor({ timeout: 5000 }); });

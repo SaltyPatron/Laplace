@@ -18,10 +18,11 @@ export class FacetUnavailable extends Error {
 const NEUTRAL = 1500;
 /**
  * Relations that are source packaging or bank values, not meaning (recording law). Observed on staging for
- * "dog": an empty relation name, upos, WordNet pointer symbols, sense frequency. Fixed at ingest by the backend;
- * filtered here so no lens ever presents them as knowledge.
+ * "dog": an empty relation name, upos, WordNet pointer symbols, sense frequency; on dev for "water": Brown
+ * part-of-speech tags ("part of speech annotation" -> nn, nn-nc). Banks filter; they are never meanings. Fixed
+ * at ingest by the backend; filtered here so no lens ever presents them as knowledge.
  */
-const PACKAGING_RELATION = /^\s*$|^upos$|^lexfile$|^deprel$|type of pointer that lemma|^HAS[ _]SENSE[ _]FREQUENCY$|^sense[ _]key$/i;
+const PACKAGING_RELATION = /^\s*$|^upos$|^xpos$|^lexfile$|^deprel$|^part[ _]of[ _]speech( annotation)?$|type of pointer that lemma|^HAS[ _]SENSE[ _]FREQUENCY$|^sense[ _]key$/i;
 export const isPackagingRelation = (relation: string) => PACKAGING_RELATION.test(relation);
 const ref = (id: string, label: string, tier = 0, kind?: string | null): EntityRef => ({ id: id.toLowerCase(), label: label || id.slice(0, 8), tier, kind: kind ?? undefined });
 
