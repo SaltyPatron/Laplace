@@ -132,8 +132,8 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             """
             SELECT p.id,p.type,p.n_constituents,
                    (SELECT count(*) FROM laplace.physicalities WHERE entity_id=$1 AND type=1),
-                   (SELECT public.laplace_hash128_merkle(0::smallint,
-                       array_agg(c.entity_id ORDER BY c.ordinal))
+                   (SELECT public.blake3_send(public.laplace_compose(
+                       array_agg(public.blake3_from_bytea(c.entity_id) ORDER BY c.ordinal)))
                     FROM laplace.physicalities content,
                          public.laplace_trajectory_expanded_constituents(content.trajectory) c
                     WHERE content.entity_id=$2 AND content.type=1),

@@ -1,5 +1,10 @@
-CREATE OR REPLACE FUNCTION consensus.eff_mu(p_rating bigint, p_rd bigint)
-    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE
+-- consensus.eff_mu(rating, deviation): a standing read conservatively, two
+-- deviations below its rating, as Laplace-Native reads it: public.laplace_confidence,
+-- the chance the strand beats the anchor (0..1). The standing is public.consensus's
+-- float8 rating and deviation, keyed by the strand's entity id. Monotone in
+-- rating - 2*deviation, so it is also the ranking key.
+CREATE OR REPLACE FUNCTION consensus.eff_mu(p_rating double precision, p_deviation double precision)
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC
-    SELECT p_rating - 2 * p_rd;
+    SELECT public.laplace_confidence(p_rating, p_deviation, 2);
 END;

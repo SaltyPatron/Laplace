@@ -8,6 +8,6 @@ BEGIN ATOMIC
     JOIN laplace.entities e ON e.type_id = n.id
     JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL
     WHERE n.name = 'substrate/type/grammar/' || p_modality || '/' || p_node_type || '/v1'
-    ORDER BY public.laplace_hash128_blake3(e.id || convert_to(p_modality || '/' || p_node_type, 'UTF8'))
+    ORDER BY public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(e.id), public.laplace_text_id(p_modality || '/' || p_node_type)]))
     LIMIT 1;
 END;

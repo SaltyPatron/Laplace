@@ -161,7 +161,7 @@ BEGIN
                 RAISE EXCEPTION 'tree composition requires every child before its parent';
             END IF;
             expected_id := CASE WHEN cardinality(child_ids)=1 THEN child_ids[1]
-                ELSE public.laplace_hash128_merkle(node.tier,child_ids) END;
+                ELSE public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(child_ids) WITH ORDINALITY u(c, o) ORDER BY o))) END;
             IF expected_id IS DISTINCT FROM node.id THEN
                 RAISE EXCEPTION 'complete tree child sequence does not reproduce node identity';
             END IF;

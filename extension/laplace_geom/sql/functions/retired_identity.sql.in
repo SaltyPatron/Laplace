@@ -1,0 +1,4 @@
+-- Identity is Laplace-Native's alone: a composition's ID is public.laplace_compose
+-- (lp_id_compose) and text's is public.laplace_text_id (lp_text_id). The duplicate
+-- composition hasher this extension once carried is retired on upgrade.
+DROP FUNCTION IF EXISTS laplace_hash128_merkle(smallint, bytea[]);

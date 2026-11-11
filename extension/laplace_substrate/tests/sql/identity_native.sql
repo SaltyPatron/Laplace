@@ -1,0 +1,38 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate CASCADE;
+
+-- One identity: every monorepo hasher returns Laplace-Native's ID, byte for byte.
+-- Text is public.laplace_text_id (lp_text_id, the Engine's UAX #29 tree); a
+-- composition is public.laplace_compose (lp_id_compose). No salt, no domain tag.
+CREATE TEMP TABLE identity_texts(t text) ON COMMIT PRESERVE ROWS;
+INSERT INTO identity_texts VALUES
+  ('a'), ('dog'), ('Hello'), ('banana'), ('3.14'), ('a_b'), ('255'),
+  ('The quick brown fox jumps over the lazy dog.'),
+  ('First sentence. Second one!  Third?'),
+  (E'line one\nline two\n\nnext paragraph'),
+  ('naïve café'), (E'é'), ('日本語のテキスト'), ('👩‍👩‍👧 family'), ('Ελληνικά'),
+  ('noun'), ('HAS_SENSE');
+
+SELECT count(*) AS texts,
+       bool_and(laplace.word_id(t) = public.blake3_send(public.laplace_text_id(t))) AS word_id_is_native,
+       bool_and(laplace.content_id(convert_to(t, 'UTF8')) = public.blake3_send(public.laplace_text_id(t))) AS content_id_is_native
+FROM identity_texts;
+
+-- A composition of any arity: the Native compose of its parts' Native IDs.
+WITH ids AS (SELECT laplace.word_id('dog') AS s, laplace.word_id('noun') AS r, laplace.word_id('i46360') AS o)
+SELECT laplace.consensus_id(s, r, o)
+         = public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(s), public.blake3_from_bytea(r), public.blake3_from_bytea(o)])) AS three_parts_compose,
+       laplace.consensus_id(s, r, NULL)
+         = public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(s), public.blake3_from_bytea(r)])) AS two_parts_compose_without_padding,
+       laplace.property_value_id('language', 'eng')
+         = public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id('language'), public.laplace_text_id('eng')])) AS property_value_composes,
+       laplace.witness_id('Princeton', '3.1')
+         = public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id('Princeton'), public.laplace_text_id('3.1')])) AS witness_id_composes
+FROM ids;
+
+-- Relation and entity-type labels are the Native text IDs of the labels.
+SELECT bool_and(r.type_id = public.blake3_send(public.laplace_text_id(r.canonical))) AS relation_ids_are_native_text
+FROM laplace.relation_registry() r;
+SELECT bool_and(e.type_id = public.blake3_send(public.laplace_text_id(e.canonical))) AS entity_type_ids_are_native_text
+FROM laplace.entity_type_registry() e;

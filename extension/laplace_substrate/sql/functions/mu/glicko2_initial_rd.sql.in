@@ -1,6 +1,5 @@
+-- The unrated deviation on Laplace-Native's standing scale (LP_GLICKO_DEVIATION).
 DROP FUNCTION IF EXISTS laplace.glicko2_initial_rd();
-CREATE OR REPLACE FUNCTION consensus.glicko2_initial_rd() RETURNS bigint
-    LANGUAGE sql LAPLACE_IMMUTABLE
-BEGIN ATOMIC
- SELECT 350000000000::bigint;
-END;
+CREATE OR REPLACE FUNCTION consensus.glicko2_initial_rd() RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_standing_deviation'
+    LANGUAGE C LAPLACE_IMMUTABLE;

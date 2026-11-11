@@ -145,60 +145,6 @@ pg_laplace_hash128_blake3(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_hash128_merkle);
-
-Datum
-pg_laplace_hash128_merkle(PG_FUNCTION_ARGS)
-{
-    int16      tier_arg     = PG_GETARG_INT16(0);
-    ArrayType *children_arr = PG_GETARG_ARRAYTYPE_P(1);
-
-    if (tier_arg < 0 || tier_arg > 255)
-        ereport(ERROR,
-                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                 errmsg("hash128_merkle: tier %d out of range [0, 255]", tier_arg)));
-
-    if (ARR_NDIM(children_arr) != 1)
-        ereport(ERROR,
-                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-                 errmsg("hash128_merkle: children must be a one-dimensional array")));
-    if (ARR_ELEMTYPE(children_arr) != BYTEAOID)
-        ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                 errmsg("hash128_merkle: children must be bytea[]")));
-
-    Datum *elems;
-    bool  *nulls;
-    int    n_elems;
-
-    deconstruct_array(children_arr, BYTEAOID, -1, false, 'i',
-                      &elems, &nulls, &n_elems);
-
-    hash128_t *children = (hash128_t *) palloc(sizeof(hash128_t) * (Size) n_elems);
-    for (int i = 0; i < n_elems; i++)
-    {
-        if (nulls[i])
-            ereport(ERROR,
-                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                     errmsg("hash128_merkle: child hash at index %d is NULL", i)));
-        bytea *child = DatumGetByteaPP(elems[i]);
-        Size child_len = VARSIZE_ANY_EXHDR(child);
-        if (child_len != sizeof(hash128_t))
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                     errmsg("hash128_merkle: child hash at index %d has length %zu, expected %zu",
-                            i, child_len, sizeof(hash128_t))));
-        memcpy(&children[i], VARDATA_ANY(child), sizeof(hash128_t));
-    }
-
-    bytea *result = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(result, VARHDRSZ + sizeof(hash128_t));
-    hash128_merkle((uint8_t) tier_arg, children, (size_t) n_elems,
-                   (hash128_t *) VARDATA(result));
-
-    PG_RETURN_BYTEA_P(result);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_distance_4d);
 
 Datum

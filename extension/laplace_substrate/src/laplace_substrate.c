@@ -14,6 +14,7 @@
 #include "laplace/core/glicko2.h"
 #include "laplace/core/score.h"
 #include "laplace/core/hash128.h"
+#include "laplace/laplace.h"
 
 #include "descent_probe.h"
 #include "perfcache_native.h"
@@ -151,53 +152,29 @@ pg_laplace_score(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_score_fp(PG_GETARG_FLOAT8(0), PG_GETARG_FLOAT8(1)));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_effective_mu);
-
+/* The standing scale is Laplace-Native's: the anchor a strand enters at and
+ * plays against, and the unrated deviation and volatility (laplace.h). SQL reads
+ * these instead of restating them, and reads a standing through the Native
+ * extension's laplace_confidence, so there is one standing algebra. */
+PG_FUNCTION_INFO_V1(pg_laplace_standing_anchor);
 Datum
-pg_laplace_effective_mu(PG_FUNCTION_ARGS)
+pg_laplace_standing_anchor(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_INT64(laplace_effective_mu_fp(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+    PG_RETURN_FLOAT8(LP_GLICKO_RATING);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_refuted);
+PG_FUNCTION_INFO_V1(pg_laplace_standing_deviation);
 Datum
-pg_laplace_refuted(PG_FUNCTION_ARGS)
+pg_laplace_standing_deviation(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_BOOL(laplace_glicko2_refuted(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+    PG_RETURN_FLOAT8(LP_GLICKO_DEVIATION);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_glicko2_neutral_mu);
-
+PG_FUNCTION_INFO_V1(pg_laplace_standing_volatility);
 Datum
-pg_laplace_glicko2_neutral_mu(PG_FUNCTION_ARGS)
+pg_laplace_standing_volatility(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_INT64(laplace_glicko2_neutral_mu_fp());
-}
-
-/* Signed Glicko-2 expectation of one consensus cell around neutral: the edge
- * weight every native walk and SQL read scores with. Reads only the folded
- * (rating, rd) standing. */
-PG_FUNCTION_INFO_V1(pg_laplace_walk_edge_weight);
-
-Datum
-pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
-{
-    PG_RETURN_FLOAT8(laplace_walk_edge_weight(PG_GETARG_INT64(0),
-                                              PG_GETARG_INT64(1)));
-}
-
-/*
- * Edge strength in [0, 1]: the Glicko expectation of one consensus cell against
- * neutral. SQL weight reads dispatch to the same laplace_edge_strength() body
- * the native traversals call, so there is one strength algebra.
- */
-PG_FUNCTION_INFO_V1(pg_laplace_edge_strength);
-
-Datum
-pg_laplace_edge_strength(PG_FUNCTION_ARGS)
-{
-    PG_RETURN_FLOAT8(laplace_edge_strength(PG_GETARG_INT64(0),
-                                           PG_GETARG_INT64(1)));
+    PG_RETURN_FLOAT8(LP_GLICKO_VOLATILITY);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_score_inverse);

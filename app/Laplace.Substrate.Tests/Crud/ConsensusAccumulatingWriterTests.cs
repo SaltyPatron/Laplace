@@ -300,8 +300,7 @@ public class ConsensusAccumulatingWriterTests
         await using var expectedCmd = _pg.DataSource.CreateCommand("""
             SELECT (r).rating, (r).rd, (r).volatility
             FROM (SELECT laplace.laplace_glicko2_accumulate_period(
-                consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(),
-                consensus.glicko2_initial_volatility(),
+                1500000000000::bigint, 350000000000::bigint, 60000000::bigint,
                 ARRAY[1600000000000, 1800000000000]::bigint[],
                 ARRAY[40000000000, 70000000000]::bigint[],
                 ARRAY[1, 3]::bigint[], ARRAY[1000000000, 0]::bigint[],

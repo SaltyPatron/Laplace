@@ -44,7 +44,7 @@ public class ConsensusClientFoldTests
     {
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT (r).rating, (r).rd, (r).volatility FROM (SELECT laplace.laplace_glicko2_accumulate_period("
-            + "$1, $2, $3, ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[$4]::bigint[], "
+            + "$1, $2, $3, ARRAY[1500000000000]::bigint[], ARRAY[$4]::bigint[], "
             + "ARRAY[$5]::bigint[], ARRAY[$6]::bigint[], consensus.glicko2_tau()) AS r) s");
         cmd.Parameters.AddWithValue(priorRating);
         cmd.Parameters.AddWithValue(priorRd);
@@ -60,7 +60,7 @@ public class ConsensusClientFoldTests
     private async Task<(long NeutralMu, long InitRd, long InitVol)> SeedsAsync()
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility()");
+            "SELECT 1500000000000::bigint, 350000000000::bigint, 60000000::bigint" /* the legacy fp1e9 fold's seeds; the SQL standing functions are on the Native float8 scale */);
         await using var rd = await cmd.ExecuteReaderAsync();
         Assert.True(await rd.ReadAsync());
         return (rd.GetInt64(0), rd.GetInt64(1), rd.GetInt64(2));

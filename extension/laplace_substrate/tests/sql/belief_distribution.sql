@@ -6,25 +6,25 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 -- truth, not a self-consistency check: r = 1500 + (400/ln 10)*mu is the scale that makes the
 -- underlying logistic a base-10 400-point curve, so a rating exactly 400 points of belief
 -- above neutral MUST be ln(10) in log-odds, and one 400 below MUST be -ln(10). If the neutral
--- constant or the scale drifts, these move. rating and rd are fp1e9.
-SELECT round(consensus.belief_logit(1900000000000, 0)::numeric, 6) = round(ln(10)::numeric, 6)
+-- constant or the scale drifts, these move. rating and deviation are on the Native scale.
+SELECT round(consensus.belief_logit(1900, 0)::numeric, 6) = round(ln(10)::numeric, 6)
          AS plus_400_is_ln10,
-       round(consensus.belief_logit(1100000000000, 0)::numeric, 6) = round((-ln(10))::numeric, 6)
+       round(consensus.belief_logit(1100, 0)::numeric, 6) = round((-ln(10))::numeric, 6)
          AS minus_400_is_neg_ln10,
        consensus.belief_logit(consensus.glicko2_neutral_mu(), 0) = 0.0
          AS neutral_is_zero;
 
 -- rd is subtracted at 2x and without bound, which is what makes this BELIEF and not rating:
 -- 200 points of deviation costs 400 points of belief, exactly one ln(10).
-SELECT round((consensus.belief_logit(1900000000000, 0)
-            - consensus.belief_logit(1900000000000, 200000000000))::numeric, 6)
+SELECT round((consensus.belief_logit(1900, 0)
+            - consensus.belief_logit(1900, 200))::numeric, 6)
        = round(ln(10)::numeric, 6) AS rd_200_costs_one_ln10;
 
 -- Monotone in rating at fixed rd, and decreasing in rd at fixed rating.
-SELECT consensus.belief_logit(2000000000000, 100000000000)
-     > consensus.belief_logit(1800000000000, 100000000000) AS rises_with_rating,
-       consensus.belief_logit(2000000000000, 100000000000)
-     > consensus.belief_logit(2000000000000, 300000000000) AS falls_with_rd;
+SELECT consensus.belief_logit(2000, 100)
+     > consensus.belief_logit(1800, 100) AS rises_with_rating,
+       consensus.belief_logit(2000, 100)
+     > consensus.belief_logit(2000, 300) AS falls_with_rd;
 
 -- Abstention: a subject that couples to nothing under the relation yields no
 -- rows. A softmax cannot express this; the empty set is the point.
@@ -44,10 +44,10 @@ INSERT INTO laplace.consensus
 VALUES
  ('\x11111111111111111111111111111111', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000a',
-  2000000000000, 100000000000, 60000000, 5, now()),
+  2000, 100, 1, 5, now()),
  ('\x22222222222222222222222222222222', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000b',
-  2100000000000, 200000000000, 60000000, 5, now());
+  2100, 200, 1, 5, now());
 
 SELECT encode(object_id, 'hex') AS obj, round(p::numeric, 6) AS p, eff_mu
 FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);

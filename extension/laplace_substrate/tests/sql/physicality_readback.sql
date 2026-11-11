@@ -118,7 +118,7 @@ $rollback$;
 -- A declared typed observation may reference an opaque named anchor with no
 -- Content placement, as ParseStructure does.
 CREATE TABLE physicality_readback_fixture.unavailable_source AS
-SELECT public.laplace_hash128_merkle(4::smallint,ARRAY[n.anchor_id,s.entity_id]) AS entity_id,
+SELECT public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[n.anchor_id,s.entity_id]) WITH ORDINALITY u(c, o) ORDER BY o))) AS entity_id,
        n.anchor_id,s.entity_id AS ab_id,s.coord,
        public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(n.anchor_id,1,1,0),
                                public.laplace_mantissa_pack(s.entity_id,2,1,0)]) AS trajectory,

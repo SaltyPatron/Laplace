@@ -24,8 +24,7 @@ DECLARE
 BEGIN
     -- The writer and SQL must compose exactly the existing strand vertices.
     -- A missing object is absent, and is distinct from an explicit zero ID.
-    IF laplace.consensus_id(subj,rel_a,NULL) <> public.laplace_hash128_merkle(
-            0::smallint,ARRAY[subj,rel_a])
+    IF laplace.consensus_id(subj,rel_a,NULL) <> public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[subj,rel_a]) WITH ORDINALITY u(c, o) ORDER BY o)))
        OR laplace.consensus_id(subj,rel_a,NULL) = laplace.consensus_id(
             subj,rel_a,decode(repeat('00',16),'hex')) THEN
         RAISE EXCEPTION 'FAIL: consensus identity invents a missing object vertex';
@@ -48,7 +47,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: fresh upsert affected % rows, expected 3', affected;
     END IF;
     IF NOT EXISTS (SELECT FROM laplace.consensus
-            WHERE id = public.laplace_hash128_merkle(0::smallint,ARRAY[subj,rel_a])
+            WHERE id = public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[subj,rel_a]) WITH ORDINALITY u(c, o) ORDER BY o)))
               AND subject_id=subj AND type_id=rel_a AND object_id IS NULL) THEN
         RAISE EXCEPTION 'FAIL: native fold writer diverges from actual-arity consensus identity';
     END IF;
@@ -63,8 +62,8 @@ BEGIN
         RAISE EXCEPTION 'FAIL: confirming evidence must lift rating above neutral';
     END IF;
     expect := laplace.laplace_glicko2_accumulate_period(
-        consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi]::bigint[],
+        1500000000000::bigint, 350000000000::bigint, 60000000::bigint,
+        ARRAY[1500000000000]::bigint[], ARRAY[phi]::bigint[],
         ARRAY[2]::bigint[], ARRAY[2 * s_conf]::bigint[], consensus.glicko2_tau());
     IF row1.rating <> expect.rating OR row1.rd <> expect.rd
        OR row1.volatility <> expect.volatility THEN
@@ -89,7 +88,7 @@ BEGIN
     --    witness accumulation, GREATEST timestamp.
     expect := laplace.laplace_glicko2_accumulate_period(
         row1.rating, row1.rd, row1.volatility,
-        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi]::bigint[],
+        ARRAY[1500000000000]::bigint[], ARRAY[phi]::bigint[],
         ARRAY[5]::bigint[], ARRAY[5 * s_conf]::bigint[], consensus.glicko2_tau());
     affected := consensus.upsert(
         ARRAY[subj], ARRAY[rel_hot], ARRAY[o1],
@@ -170,9 +169,9 @@ BEGIN
             JOIN laplace.consensus c ON c.id=laplace.consensus_id(f.s,t,f.o)
                 AND c.type_id=t AND c.subject_id=f.s
             CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_period(
-                CASE WHEN phase=0 THEN consensus.glicko2_neutral_mu() ELSE f.r END,
-                CASE WHEN phase=0 THEN consensus.glicko2_initial_rd() ELSE f.rd END,
-                CASE WHEN phase=0 THEN consensus.glicko2_initial_volatility() ELSE f.vol END,
+                CASE WHEN phase=0 THEN 1500000000000::bigint ELSE f.r END,
+                CASE WHEN phase=0 THEN 350000000000::bigint ELSE f.rd END,
+                CASE WHEN phase=0 THEN 60000000::bigint ELSE f.vol END,
                 ARRAY[f.opp]::bigint[], ARRAY[f.phi]::bigint[],
                 ARRAY[f.games]::bigint[], ARRAY[f.score]::bigint[],
                 consensus.glicko2_tau()) expected
