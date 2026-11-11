@@ -17,10 +17,16 @@ Laplace is a deterministic, content-addressed, recursively compositional substra
    - `search`, `hop`, `translate`, `degrees`, `pull`, `forward`, `turn`, `shape`, `provenance`, `library`, `catalog` → exercise the actual read path (doubles as a smoke test).
    - `code_search` takes a few seconds; batch queries, keep `limit` small. `code_where` / `code_callers` / `code_callees` / `file_outline` read the `workspace-code` ingest in the database and return nothing until that source is ingested. Fall back to `Select-String` / `git grep` for exact symbol lookups.
    - The `laplace` (monorepo) MCP server is for `api` / `op` (SQL catalog discovery), `health`, `source_status`, `pipeline`, `facts`, `taxonomy`, `walk`. Do not use its `code_search`.
-2. **Truth order:** code (`laplace.h`, `sql/*.sql.in`, Engine `src/`) > Wiki `Reference/` (as-built) > Wiki `Sequence/` (spec & build order) > Wiki `Sequence/Conflicts.md` (decided disagreements) > everything under `Laplace-Wiki/Repositories/` (moved, often historical).
+2. **Truth order:** code (`laplace.h`, `sql/*.sql.in`, Engine `src/`) > the engineering standard (`Laplace-Wiki/Engineering/Standards.md`, `Boundaries.md`; binding law for how code is written, see item 6) > Wiki `Reference/` (as-built) > Wiki `Sequence/` (spec & build order) > Wiki `Sequence/Conflicts.md` (decided disagreements) > everything under `Laplace-Wiki/Repositories/` (moved, often historical).
 3. **Check repo state before editing.** Several repos routinely carry large uncommitted WIP (`git -C <repo> status --short`). Never revert, stash, or "clean up" changes you did not make.
-4. **Ignore** `Laplace-Refactor` (frozen), `Laplace-Wiki/Repositories/**/archive/`, dated `2026-*` audit/handoff/verification notes, and `Workspace/` scratchpads unless investigating history.
+4. **Ignore** `Laplace-Refactor` as a code repository: it is frozen, so never build, modify or run CI in it. Its architecture docs promoted to the Wiki `Engineering/` section are binding (item 6); everything else there is history. Also ignore `Laplace-Wiki/Repositories/**/archive/`, dated `2026-*` audit/handoff/verification notes, and `Workspace/` scratchpads unless investigating history.
 5. **Verify claims you write down.** Every path, symbol, flag, or number you put in a doc or agent file must be confirmed in code in the same session.
+6. **Read the engineering standard before writing or reviewing code:** `Laplace-Wiki/Engineering/Standards.md` and `Engineering/Boundaries.md` (mandatory, every language). Core laws:
+   - One semantic implementation, in Native C and the PostgreSQL integration; SQL and C# only orchestrate generated typed surfaces and never hold a second copy of identity, composition, evidence, ranking or realization.
+   - Generics: a module supplies only its varying law (metadata, validation, kernel, schema, conformance vectors); source, language and modality names never select another engine branch.
+   - Fixed-width types at every persisted, generated, wire and ABI boundary; ownership, nullability, byte order and overflow are explicit.
+   - No semantic algorithms, recursive search, cursors or RBAR in SQL; set-oriented, prepared, schema-qualified plans only, with no per-row crossings on batch paths.
+   - Contracts generate identifiers, ABI declarations and bindings; nothing repeated is hand-copied.
 
 ---
 
@@ -187,4 +193,4 @@ laplace-ops data staging ...                       # data.sh over SSH to $LAPLAC
 - **Two path-carrier encodings:** Native `lp_id_to_xyz` (exponent 1021, 43/43/42 + 28 spare) versus monorepo `engine/core/src/mantissa.c` `mantissa_pack` / `extension/laplace_geom` (exponent 1023, 53/53/22 + flags). `laplace` and `laplace-mono` paths are not interchangeable. Converge on the Native one.
 - Web glome `Laplace/web/src/explore/glome/GlomeCanvas.tsx` `unpackMantissaCoord` decodes Native M as a "51-bit run count". The real M is run30/said3/outcome2/position18.
 - `laplace-code` MCP still runs on the `workspace.lpm` sidecar with BM25 and a paragraph chunker (§4).
-- `public.attestation` replaced `public.witness` without an extension version bump (both shipped as 1.63). A database created at 1.63 before that change cannot gain `attestation` by `ALTER EXTENSION … UPDATE`; recreate it. Schema changes must bump `laplace.control` `default_version`.
+- `public.attestation` replaced `public.witness` without an extension version bump (both shipped as 1.63). A database created at 1.63 before that change cannot gain `attestation` by `ALTER EXTENSION … UPDATE`; recreate it. Greenfield until a release is deployed: no extension upgrade paths and no version bumps; a schema change recreates the database.
