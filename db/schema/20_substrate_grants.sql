@@ -100,13 +100,18 @@ BEGIN
             IF to_regnamespace('stage') IS NOT NULL AND NOT has_schema_privilege(candidate,'stage','CREATE') THEN
                 EXECUTE format('GRANT CREATE ON SCHEMA stage TO %I',candidate);
             END IF;
+            IF to_regnamespace('stage') IS NOT NULL AND NOT has_schema_privilege(candidate,'stage','USAGE') THEN
+                EXECUTE format('GRANT USAGE ON SCHEMA stage TO %I',candidate);
+            END IF;
         END IF;
         IF NOT has_database_privilege(candidate,current_database(),'CONNECT') THEN
             EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I',current_database(),candidate);
         END IF;
         FOR namespace IN
             SELECT oid, nspname, pg_get_userbyid(nspowner) AS owner FROM pg_namespace
-            WHERE nspname NOT LIKE 'pg_%' AND nspname NOT IN ('information_schema', 'app')
+            -- stage holds per-run tables an ingest creates and locks; runtime roles create their own there
+            -- (CREATE ON SCHEMA stage above), so granting on them would only wait behind a running ingest.
+            WHERE nspname NOT LIKE 'pg_%' AND nspname NOT IN ('information_schema', 'app', 'stage')
         LOOP
             IF NOT has_schema_privilege(candidate,namespace.oid,'USAGE') THEN
                 EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I',namespace.nspname,candidate);
