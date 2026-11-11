@@ -166,8 +166,9 @@ public sealed partial class ChessEngineService
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         string startFen = session.Metadata?.StartFen ?? ChessModality.StartFen;
+        bool reads = substrate && !HasImmediateMate(_modality, state);
         var search = BuildEngine(
-            substrate, continuations: ContinuationsFor(startFen, session.Moves, substrate, movesIgnoreFen: false));
+            reads, continuations: ContinuationsFor(startFen, session.Moves, reads, movesIgnoreFen: false));
         var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 
@@ -195,7 +196,7 @@ public sealed partial class ChessEngineService
         if (status != "ongoing")
             await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
 
-        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
+        return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, reads,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
     }

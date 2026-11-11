@@ -66,8 +66,10 @@ BEGIN
         EXECUTE format('ALTER TABLE physicalities_h%s ALTER COLUMN coord SET STATISTICS 0,'
                        || ' ALTER COLUMN trajectory SET STATISTICS 0',
                        suffix);
+        -- Per partition: 1000 + 2% of its rows (a fixed 100000 exceeded every partition, so
+        -- autoanalyze never ran and containment reads skipped the GIN probes).
         EXECUTE format('ALTER TABLE physicalities_h%s SET (autovacuum_analyze_scale_factor'
-                       || ' = 0.02, autovacuum_analyze_threshold = 100000)',
+                       || ' = 0.02, autovacuum_analyze_threshold = 1000)',
                        suffix);
     END LOOP;
 END $$;
