@@ -374,19 +374,28 @@ phase_extensions() {
 
 # The substrate database recreated from this checkout's declaration (Laplace.Migrations nuke): a replacement made with
 # a fresh CREATE EXTENSION and the declared substrate schema, carrying the database's settings and grants, swapped in
-# by name; the old database is dropped. Only ever the substrate: a database that also holds the application schema
-# (LAPLACE_APP_DBNAME unset or naming it) is refused. The host declares whether a version change may recreate its
-# substrate (LAPLACE_SUBSTRATE_RECREATE=version in machine.env): a substrate another host selects is not dropped by a
-# delivery here. hart-server's laplace-mono is hart-prod's selected substrate, so hart-server does not declare it and
-# refuses; recreate it deliberately (Database maintenance workflow, database=substrate, operation=recreate).
+# by name; the old database is dropped. The deployment declares whether a version change may recreate its substrate
+# (LAPLACE_SUBSTRATE_RECREATE, machine.env or the delivery's environment):
+#   version                          the substrate only; a database that also holds the application schema
+#                                    (LAPLACE_APP_DBNAME unset or naming it) is refused
+#   version-including-application    also a database that still holds the application schema, whose accounts, keys
+#                                    and billing are then made again from the declaration (a host whose application
+#                                    data is disposable, until it has an application database of its own)
+#   unset                            refuse; recreate deliberately (Database maintenance workflow, operation=recreate)
 recreate_substrate() {
   local why
   why="$(printf '%s, ' "$@")"; why="${why%, }"
-  [[ -n "${LAPLACE_APP_DBNAME:-}" && "$LAPLACE_APP_DBNAME" != "$LAPLACE_DBNAME" ]] \
-    || fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path, but it also holds the application schema (LAPLACE_APP_DBNAME=${LAPLACE_APP_DBNAME:-unset}): give the application a database of its own before the substrate is recreated"
-  [[ "${LAPLACE_SUBSTRATE_RECREATE:-}" == version ]] \
-    || fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path; this host does not declare LAPLACE_SUBSTRATE_RECREATE=version (its substrate may serve another host): recreate it deliberately (Database maintenance workflow, database=substrate, operation=recreate)"
-  say "recreate $LAPLACE_DBNAME ($why): substrate only, the application database $LAPLACE_APP_DBNAME is kept"
+  case "${LAPLACE_SUBSTRATE_RECREATE:-}" in
+    version|version-including-application) ;;
+    *) fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path; this host does not declare LAPLACE_SUBSTRATE_RECREATE=version: recreate it deliberately (Database maintenance workflow, database=substrate, operation=recreate)" ;;
+  esac
+  if [[ -z "${LAPLACE_APP_DBNAME:-}" || "$LAPLACE_APP_DBNAME" == "$LAPLACE_DBNAME" ]]; then
+    [[ "$LAPLACE_SUBSTRATE_RECREATE" == version-including-application ]] \
+      || fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path, but it also holds the application schema (LAPLACE_APP_DBNAME=${LAPLACE_APP_DBNAME:-unset}): give the application a database of its own before the substrate is recreated"
+    say "recreate $LAPLACE_DBNAME ($why): substrate and the application schema it still holds"
+  else
+    say "recreate $LAPLACE_DBNAME ($why): substrate only, the application database $LAPLACE_APP_DBNAME is kept"
+  fi
   migrations nuke --yes
 }
 

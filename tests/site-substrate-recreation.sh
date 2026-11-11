@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A delivery recreates only a substrate database whose host declares it may (LAPLACE_SUBSTRATE_RECREATE=version), and
-# never one that also holds the application schema. Runs site.sh's own recreate_substrate with the migrator stubbed.
+# A delivery recreates only a substrate database whose host declares it may (LAPLACE_SUBSTRATE_RECREATE), and one that
+# also holds the application schema only when declared version-including-application. Runs site.sh's own recreate_substrate with the migrator stubbed.
 set -euo pipefail
 : "${TMPDIR:?set TMPDIR to build scratch}"
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,3 +32,7 @@ echo 'PASS an undeclared host refuses and names the deliberate recreation'
 run LAPLACE_APP_DBNAME=laplace-app LAPLACE_SUBSTRATE_RECREATE=version
 [[ "$(cat "$work/migrations")" == 'nuke --yes' ]]
 echo 'PASS a declared host with its own application database recreates the substrate (nuke)'
+
+run LAPLACE_APP_DBNAME=laplace-mono LAPLACE_SUBSTRATE_RECREATE=version-including-application
+[[ "$(cat "$work/migrations")" == 'nuke --yes' ]]
+echo 'PASS a host that declares its application data disposable recreates the database still holding it'
