@@ -50,6 +50,27 @@ public static partial class NpgsqlSubstrateReads
             p => p.Add("id", NpgsqlDbType.Bytea).Value = playingId,
             ct: ct, label: "chess_line_for_playing", onError: onError);
 
+    /// <summary>A playing's line and the line's setup position in that playing, either null when unrecorded.</summary>
+    public readonly record struct ChessPlayingLineRow(byte[] PlayingId, byte[]? LineId, byte[]? SetupId);
+
+    /// <summary>
+    /// <c>chess.lines_for_playings</c>: each playing's line and setup in one statement, so a page of
+    /// games reads its lines as a set (the batch form of <c>chess.line_for_playing</c> and
+    /// <c>chess.setup_position</c>).
+    /// </summary>
+    public static Task<IReadOnlyList<ChessPlayingLineRow>> ChessLinesForPlayingsAsync(
+        NpgsqlDataSource dataSource, byte[][] playingIds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("chess.lines_for_playings"),
+            static r => new ChessPlayingLineRow(
+                (byte[])r[0], r.IsDBNull(1) ? null : (byte[])r[1], r.IsDBNull(2) ? null : (byte[])r[2]),
+            p =>
+            {
+                var ids = p.AddWithValue("ids", playingIds);
+                ids.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            },
+            ct: ct, label: "chess_lines_for_playings", onError: onError, timeoutSeconds: 60);
+
     /// <summary>One stored move entity: its id and its Content constituent ids.</summary>
     public readonly record struct ChessMoveEntityRow(byte[] MoveId, byte[][] Atoms);
 
