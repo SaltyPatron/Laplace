@@ -94,7 +94,40 @@ public sealed partial class ChessLiveGameHost
         _games[session.EventId] = game;
     }
 
+    // One recording per game: a completion still running (started after a move's response)
+    // is awaited by finish and retry rather than recorded a second time beside it.
+    private readonly PlayRecordingCompletions _completions = new();
+
     public async Task FinishPlaySessionAsync(Guid sessionId, GameOutcome outcome, bool adjudicated, CancellationToken ct)
+    {
+        if (_completions.Running(sessionId) is { } running) { await running.WaitAsync(ct); return; }
+        var session = BeginFinish(sessionId, outcome, adjudicated);
+        await CompleteFinishAsync(sessionId, session, outcome, adjudicated, ct);
+    }
+
+    /// <summary>
+    /// Ends a game whose last move is about to be returned. The durable receipt (state
+    /// "recording") is written before this returns, so the reply never outruns it; the game
+    /// is then recorded by the same completion as <see cref="FinishPlaySessionAsync"/>, after
+    /// the response. A failure leaves the receipt "failed" and a lost process leaves it
+    /// "recording": both are retried by /chess/play/{id}/recording/retry, never dropped.
+    /// </summary>
+    public void FinishPlaySessionAfterReply(Guid sessionId, GameOutcome outcome, bool adjudicated)
+        => _completions.Start(sessionId,
+            () => BeginFinish(sessionId, outcome, adjudicated),
+            session => CompleteFinishAsync(sessionId, session, outcome, adjudicated, CancellationToken.None),
+            (failure, ms) =>
+            {
+                // A failure is already the "failed" receipt that retry resumes; it is reported here too.
+                if (failure is null)
+                    System.Diagnostics.Trace.TraceInformation("CHESS_PLAY_RECORDED session={0} ms={1}", sessionId, ms);
+                else
+                    System.Diagnostics.Trace.TraceError(
+                        "CHESS_PLAY_RECORDING_FAILED session={0} ms={1}; retained for retry: {2}", sessionId, ms, failure);
+            });
+
+    /// <summary>Validates the ending and writes the "recording" receipt; no substrate write.</summary>
+    private PlaySession BeginFinish(Guid sessionId, GameOutcome outcome, bool adjudicated)
     {
         var session = GetPlaySession(sessionId, resumeRecording: true)
             ?? throw new InvalidOperationException("The play operation is not available for recording.");
@@ -103,13 +136,22 @@ public sealed partial class ChessLiveGameHost
             if (!retained.CanRetryRecording || retained.Result != outcome.ResultToken || retained.Adjudicated != adjudicated)
                 throw new InvalidOperationException("A recording retry must retain the original result and adjudication.");
         }
+        if (session.RecordToSubstrate)
+        {
+            if (session.Operation is { } pending)
+                session.Operation = pending with { Adjudicated = adjudicated };
+            session.SaveOperation("recording", "in_progress", outcome.ResultToken);
+        }
+        return session;
+    }
+
+    /// <summary>Records the game into the substrate and writes the final receipt.</summary>
+    private async Task CompleteFinishAsync(Guid sessionId, PlaySession session, GameOutcome outcome, bool adjudicated, CancellationToken ct)
+    {
         try
         {
             if (session.RecordToSubstrate)
             {
-                if (session.Operation is { } pending)
-                    session.Operation = pending with { Adjudicated = adjudicated };
-                session.SaveOperation("recording", "in_progress", outcome.ResultToken);
                 if (session.Operation is not null) RestorePlayRecording(session);
                 SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
                     Termination: adjudicated ? "adjudicated" : "normal"));
@@ -130,6 +172,7 @@ public sealed partial class ChessLiveGameHost
 
     public Task RetryPlayRecordingAsync(Guid sessionId, CancellationToken ct)
     {
+        if (_completions.Running(sessionId) is { } running) return running.WaitAsync(ct);
         var operation = GetPlaySession(sessionId, resumeRecording: true)?.Operation;
         if (operation?.CanRetryRecording != true)
             throw new InvalidOperationException("There is no retained recording to retry.");
@@ -159,6 +202,8 @@ public sealed partial class ChessLiveGameHost
 
     public async ValueTask DisposeAsync()
     {
+        // A recording started after a reply finishes before its writer and pool close.
+        try { await _completions.All(); } catch { /* each failure is already a retryable receipt */ }
         _writeGate.Dispose();
         await _writer.DisposeAsync();
         await _ds.DisposeAsync();
