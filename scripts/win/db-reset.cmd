@@ -48,6 +48,15 @@ echo ==== install extensions ====
 echo ==== post-create identity health ====
 "%PGBIN%\psql.exe" -h localhost -U postgres -d "%LAPLACE_DBNAME%" -P pager=off -v ON_ERROR_STOP=1 -c "SET search_path = laplace, public; SELECT * FROM substrate_health();" || exit /b 1
 
+echo ==== declared schema, roles and grants ====
+rem db/schema is ONE declaration applied on every create and every deploy: the app schema, ops log readers and
+rem grants for the roles that exist. It is idempotent, so a reset needs no journal and leaves no object or grant missing.
+set "MIG=%LAPLACE_BUILD_ROOT%\app\bin\Laplace.Migrations\Release\net10.0\Laplace.Migrations.dll"
+if not exist "%MIG%" (
+  dotnet build "%LAPLACE_ROOT%\app\Laplace.Migrations\Laplace.Migrations.csproj" -c Release -v q --nologo || exit /b 1
+)
+dotnet "%MIG%" substrate-up || exit /b 1
+
 echo ==== declared role access ====
 rem a recreated database has none of its roles' declared access: applied here, so a reset leaves it usable
 pwsh -NoProfile -File "%~dp0apply-declared-access.ps1" -Database "%LAPLACE_DBNAME%" || exit /b 1

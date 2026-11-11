@@ -198,7 +198,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["live_suites"], [])
 
     def test_database_migration_applies_and_checks_health_without_all_managed_db_tests(self):
-        value = plan("db/migrations/example.sql")
+        value = plan("db/schema/example.sql")
         self.assertEqual(value["dev_suites"], [])
         self.assertEqual(value["db_suites"], ["db-health"])
         self.assertEqual(value["managed_db_test_projects"], [])

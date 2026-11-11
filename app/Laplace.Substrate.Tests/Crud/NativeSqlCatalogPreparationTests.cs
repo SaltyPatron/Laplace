@@ -257,15 +257,14 @@ public sealed partial class NativeSqlCatalogPreparationTests : IAsyncLifetime
             return;
         }
         // Normal managed-db CI runs this check too. Complete the disposable
-        // fixture with the canonical migrations for both catalog domains.
+        // fixture with the declared schema for both catalog domains.
         _fixture = new LocalPgFixture();
         await _fixture.InitializeAsync();
         _source = _fixture.DataSource;
-        foreach (var name in new[] { "20260606000000_layer1_database.sql", "20260611000000_app_billing.sql",
-                     "20261015000000_substrate_runtime_grants.sql" })
+        foreach (var name in new[] { "10_substrate.sql", "30_app.sql", "20_substrate_grants.sql", "40_app_grants.sql" })
         {
             var migration = Path.Combine(Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic(),
-                "db", "migrations", name);
+                "db", "schema", name);
             await using var command = _source.CreateCommand(await File.ReadAllTextAsync(migration));
             await command.ExecuteNonQueryAsync();
         }
@@ -415,9 +414,17 @@ public sealed partial class NativeSqlCatalogPreparationTests : IAsyncLifetime
     public async Task EveryFixedStatementPreparesAgainstTheInstalledSchema()
     {
         await using var connection = await _source.OpenConnectionAsync();
-        using var resource = typeof(SqlCatalog).Assembly.GetManifestResourceStream("Laplace.SqlCatalog.def")!;
-        using var reader = new StreamReader(resource);
-        var catalog = await reader.ReadToEndAsync();
+        // sql_catalog.def only #includes the sql_catalog/*.def parts that hold the queries.
+        var assembly = typeof(SqlCatalog).Assembly;
+        var parts = new System.Text.StringBuilder();
+        foreach (var part in assembly.GetManifestResourceNames().Where(name =>
+                     name.StartsWith("Laplace.SqlCatalog.", StringComparison.Ordinal) && name.EndsWith(".def", StringComparison.Ordinal)))
+        {
+            using var resource = assembly.GetManifestResourceStream(part)!;
+            using var reader = new StreamReader(resource);
+            parts.AppendLine(await reader.ReadToEndAsync());
+        }
+        var catalog = parts.ToString();
         var names = Regex.Matches(catalog, "SQL_QUERY\\(\\s*\"(?<name>[^\"]+)\"")
             .Select(match => match.Groups["name"].Value).ToArray();
         Assert.NotEmpty(names);

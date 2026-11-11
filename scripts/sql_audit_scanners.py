@@ -299,7 +299,7 @@ def role_for(path: str) -> str:
         return "test"
     if "/generated/" in value:
         return "generated"
-    if value.startswith("/db/migrations/"):
+    if value.startswith("/db/schema/"):
         return "migration"
     if value.startswith("/scripts/"):
         return "script"

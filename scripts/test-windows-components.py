@@ -55,7 +55,7 @@ class Components(unittest.TestCase):
     def test_linked_migration_content_invalidates_only_its_component(self):
         project = self.root / "app/Laplace.Migrations/Laplace.Migrations.csproj"
         project.write_text('<Project><ItemGroup><Content Include="../../db/**/*.sql" /></ItemGroup></Project>')
-        sql = self.root / "db/migrations/one.sql"
+        sql = self.root / "db/schema/one.sql"
         sql.parent.mkdir(parents=True)
         sql.write_text("first migration")
         before = {name: self.inputs(name) for name in COMPONENTS.PROJECTS}

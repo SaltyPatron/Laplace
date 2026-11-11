@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Exercise the migration with an isolated database and unprivileged runtime role.
+# Exercise the declared substrate grants (db/schema/20_substrate_grants.sql) with an isolated database and
+# unprivileged runtime roles. The declaration is applied on every create and deploy, so applying it twice
+# must change nothing and applying it after a lost grant must restore the grant.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 name="laplace_grants_${GITHUB_RUN_ID:-$$}_${RANDOM}"
@@ -33,6 +35,18 @@ CREATE TABLE laplace.attestations(id integer) PARTITION BY HASH (id);
 CREATE TABLE laplace.attestations_h0 PARTITION OF laplace.attestations FOR VALUES WITH (MODULUS 2, REMAINDER 0);
 CREATE TABLE laplace.attestations_h1 PARTITION OF laplace.attestations FOR VALUES WITH (MODULUS 2, REMAINDER 1);
 INSERT INTO laplace.attestations SELECT generate_series(1, 200);
+-- The canonical Native tables in public (laplace.sql.in): entity and physicality are range
+-- partitioned, attestation and consensus hash partitioned. A stale witness table is not canonical.
+CREATE TABLE public.entity(id integer, tier integer) PARTITION BY RANGE (id);
+CREATE TABLE public.entity_p0 PARTITION OF public.entity FOR VALUES FROM (0) TO (100);
+CREATE TABLE public.physicality(entity integer, tier integer) PARTITION BY RANGE (entity);
+CREATE TABLE public.physicality_p0 PARTITION OF public.physicality FOR VALUES FROM (0) TO (100);
+CREATE TABLE public.attestation(claim integer, witness integer, lineage integer) PARTITION BY HASH (claim);
+CREATE TABLE public.attestation_0 PARTITION OF public.attestation FOR VALUES WITH (MODULUS 2, REMAINDER 0);
+CREATE TABLE public.attestation_1 PARTITION OF public.attestation FOR VALUES WITH (MODULUS 2, REMAINDER 1);
+CREATE TABLE public.consensus(claim integer, rating double precision) PARTITION BY HASH (claim);
+CREATE TABLE public.consensus_0 PARTITION OF public.consensus FOR VALUES WITH (MODULUS 1, REMAINDER 0);
+CREATE TABLE public.witness(id integer);
 SQL
 # A substrate table another role owns (db-reset creates the extension's tables as postgres).
 P "$name" -v owner="$owner" <<'SQL'
@@ -43,7 +57,7 @@ CREATE TABLE consensus.cells_h0 PARTITION OF consensus.cells FOR VALUES WITH (MO
 RESET ROLE;
 SQL
 for iteration in 1 2; do
-  sed "s/'laplace_runtime'/'$role'/" "$root/db/migrations/20261015000000_substrate_runtime_grants.sql" | P "$name"
+  sed "s/'laplace_runtime'/'$role'/" "$root/db/schema/20_substrate_grants.sql" | P "$name"
 done
 P "$name" -v role="$role" <<'SQL'
 CREATE TABLE laplace.future_entity(id serial PRIMARY KEY);
@@ -54,6 +68,11 @@ SELECT count(*) FROM laplace.entities;
 INSERT INTO consensus.claims VALUES (1);
 INSERT INTO ops.events VALUES (1);
 INSERT INTO laplace.future_entity DEFAULT VALUES;
+INSERT INTO public.attestation VALUES (1, 2, 3), (2, 2, 3);
+INSERT INTO public.entity VALUES (1, 0);
+INSERT INTO public.physicality VALUES (1, 0);
+INSERT INTO public.consensus VALUES (1, 1500);
+UPDATE public.consensus SET rating = 1600;
 SELECT id FROM public.reference;
 DELETE FROM laplace.entities;
 RESET ROLE;
@@ -61,6 +80,7 @@ SELECT NOT has_schema_privilege(:'role','laplace','CREATE')
    AND NOT has_schema_privilege(:'role','app','USAGE')
    AND NOT has_table_privilege(:'role','app.accounts','SELECT')
    AND NOT has_table_privilege(:'role','public.reference','INSERT')
+   AND NOT has_table_privilege(:'role','public.witness','INSERT')
    AND NOT pg_has_role(:'role',current_user,'MEMBER')
    AND pg_has_role(:'role','pg_read_all_stats','MEMBER')
    AND pg_has_role(:'role','pg_signal_backend','MEMBER') AS restricted \gset
@@ -159,13 +179,21 @@ REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA laplace FROM :"r
 REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA consensus FROM :"recorder";
 REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON ALL TABLES IN SCHEMA ops FROM :"recorder";
 REVOKE pg_signal_backend FROM :"recorder";
+REVOKE INSERT, UPDATE, DELETE, MAINTAIN ON public.attestation, public.attestation_0, public.attestation_1, public.consensus, public.consensus_0, public.entity_p0 FROM :"recorder";
 SQL
-sed "s/'laplace_runtime'/'$role'/" "$root/db/migrations/20261015000000_substrate_runtime_grants.sql" | P "$name"
+sed "s/'laplace_runtime'/'$role'/" "$root/db/schema/20_substrate_grants.sql" | P "$name"
 P "$name" -v recorder="$recorder" -v reader="$reader" <<'SQL'
 SELECT has_table_privilege(:'recorder','laplace.entities','INSERT')
    AND has_table_privilege(:'recorder','laplace.entities','MAINTAIN')
+   AND has_table_privilege(:'recorder','public.attestation','INSERT')
+   AND has_table_privilege(:'recorder','public.attestation_0','INSERT')
+   AND has_table_privilege(:'recorder','public.attestation_1','MAINTAIN')
+   AND has_table_privilege(:'recorder','public.consensus_0','UPDATE')
+   AND has_table_privilege(:'recorder','public.entity_p0','INSERT')
    AND NOT has_table_privilege(:'recorder','public.reference','INSERT')
    AND pg_has_role(:'recorder','pg_signal_backend','MEMBER')
+   AND NOT has_table_privilege(:'reader','public.attestation','INSERT')
+   AND has_table_privilege(:'reader','public.attestation','SELECT')
    AND NOT has_table_privilege(:'reader','laplace.entities','INSERT')
    AND NOT pg_has_role(:'reader','pg_signal_backend','MEMBER')
    AS repaired \gset
@@ -175,4 +203,4 @@ SELECT has_table_privilege(:'recorder','laplace.entities','INSERT')
 \quit 1
 \endif
 SQL
-echo 'PASS reapplying substrate grants restores the Lichess writer and leaves UCI read-only'
+echo 'PASS reapplying substrate grants restores the Lichess writer on the canonical tables and partitions and leaves UCI read-only'

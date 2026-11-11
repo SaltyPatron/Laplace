@@ -16,8 +16,8 @@ try {
     $env:LAPLACE_PG_SERVICE_ACCOUNT=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $env:TEST_EVENTS="$work/events.txt";$env:TEST_DATA=$env:LAPLACE_PGDATA
     'runtime fixture' | Set-Content "$work/site/web/releases/abc1234/migrations/Laplace.Migrations.dll"
-    $null=New-Item -ItemType Directory -Path "$work/site/web/releases/abc1234/migrations/db/migrations"
-    $grantsFile="$work/site/web/releases/abc1234/migrations/db/migrations/20261015000000_substrate_runtime_grants.sql"
+    $null=New-Item -ItemType Directory -Path "$work/site/web/releases/abc1234/migrations/db/schema"
+    $grantsFile="$work/site/web/releases/abc1234/migrations/db/schema/20_substrate_grants.sql"
     '-- canonical runtime grants fixture' | Set-Content $grantsFile
     'certificate fixture' | Set-Content "$work/root.crt"
     '<configuration><system.webServer><aspNetCore processPath=".\releases\abc1234\Laplace.Endpoints.OpenAICompat.exe"/></system.webServer></configuration>' | Set-Content "$work/site/web/web.config"

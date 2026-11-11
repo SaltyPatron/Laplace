@@ -49,7 +49,7 @@ $MigrationRuntime=[IO.Path]::GetFullPath($MigrationRuntime)
 if(-not(Test-Path -LiteralPath $MigrationRuntime -PathType Leaf)){throw "Installed migrations are missing: $MigrationRuntime. Publish a package containing migrations or explicitly supply -MigrationRuntime from the matching release."}
 $runtimeGrants=$null
 if($Database -eq 'substrate' -and $Operation -ne 'status'){
-    $runtimeGrants=Join-Path (Split-Path -Parent $MigrationRuntime) 'db/migrations/20261015000000_substrate_runtime_grants.sql'
+    $runtimeGrants=Join-Path (Split-Path -Parent $MigrationRuntime) 'db/schema/20_substrate_grants.sql'
     if(-not(Test-Path -LiteralPath $runtimeGrants -PathType Leaf)){throw "The selected runtime is missing its canonical substrate grants: $runtimeGrants"}
 }
 $psql=$access.psql
@@ -58,7 +58,7 @@ if(-not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){throw '
 $null=Get-Command dotnet -ErrorAction Stop
 Write-Host "$Operation $Database database $selected on $($access.database_host):$($access.port) as $($access.admin_role)"
 if($Operation -in 'remigrate','recreate' -and -not $Yes){
-    $effect=if($Operation -eq 'recreate'){'delete its data and recreate it'}else{'clear its migration journal and reapply migrations'}
+    $effect=if($Operation -eq 'recreate'){'delete its data and recreate it'}else{'re-apply the declared schema (there is no journal)'}
     if((Read-Host "Type $selected to $effect") -cne $selected){throw 'Operation canceled before database changes.'}
 }
 if(-not $ReceiptDirectory){$ReceiptDirectory=Join-Path $env:LAPLACE_WORK 'operations'}

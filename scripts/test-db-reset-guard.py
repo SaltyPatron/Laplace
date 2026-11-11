@@ -72,6 +72,22 @@ class DeclaredAccess(unittest.TestCase):
         self.assertLess(reset.index("CREATE EXTENSION IF NOT EXISTS laplace_substrate"), apply)
         self.assertLess(apply, reset.index("DB-RESET COMPLETE"))
 
+    def test_reset_applies_the_declared_schema_before_access_and_without_a_journal(self):
+        reset = text("db-reset.cmd")
+        schema = reset.index('dotnet "%MIG%" substrate-up || exit /b 1')
+        access = reset.index('apply-declared-access.ps1" -Database "%LAPLACE_DBNAME%" || exit /b 1')
+        self.assertLess(reset.index("CREATE EXTENSION IF NOT EXISTS laplace_substrate"), schema)
+        self.assertLess(schema, access)
+        self.assertNotRegex(reset, r"(?i)schemaversions|dbup")
+        declared = sorted(p.name for p in (ROOT / "db" / "schema").glob("*.sql"))
+        self.assertEqual(["10_substrate.sql", "20_substrate_grants.sql", "30_app.sql", "40_app_grants.sql"], declared)
+        self.assertFalse((ROOT / "db" / "migrations").exists(), "the run-once migration directory is gone")
+
+    def test_declared_grants_name_the_canonical_substrate_tables(self):
+        grants = (ROOT / "db" / "schema" / "20_substrate_grants.sql").read_text(encoding="utf-8")
+        self.assertIn("c.relname IN ('entity','physicality','attestation','consensus')", grants)
+        self.assertNotIn("'witness'", grants, "a witness is a source trunk id, not a table")
+
     def test_access_goes_through_the_operations_step(self):
         script = text("apply-declared-access.ps1")
         self.assertIn("configure-windows.ps1", script)

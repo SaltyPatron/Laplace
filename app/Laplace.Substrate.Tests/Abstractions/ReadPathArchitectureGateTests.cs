@@ -135,7 +135,7 @@ public sealed class ReadPathArchitectureGateTests
     /// Files building their own datasource, 2026-07-26. THIS LIST MAY ONLY SHRINK.
     /// Route them through <c>LaplaceDataSource.Create(SubstrateAccess.Serving|Ingest)</c>.
     ///
-    /// Laplace.Migrations/Program.cs is a likely PERMANENT exception: DbUp bootstrap runs
+    /// Laplace.Migrations/Program.cs is a likely PERMANENT exception: the declared-schema bootstrap runs
     /// against the maintenance database before the extension exists, so it cannot use a
     /// policy that assumes an installed substrate.
     /// </summary>
@@ -206,7 +206,7 @@ public sealed class ReadPathArchitectureGateTests
             if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
             // The sanctioned home — Npgsql is SUPPOSED to live here.
             if (!includeTransportAndBootstrap && file.Contains(sanctioned, StringComparison.OrdinalIgnoreCase)) continue;
-            // DbUp bootstrap runs before the extension exists.
+            // the declared-schema bootstrap runs before the extension exists.
             if (!includeTransportAndBootstrap && file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
             // Not substrate catalog: a THIRD-PARTY SQLite container the agents lane
             // unpacks (Cursor store.db, Zed threads.db, Crush crush.db, Goose/OpenCode

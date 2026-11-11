@@ -1,9 +1,59 @@
--- The remote runtime login survives database recreation; schema ACLs do not.
--- Restore database-scoped access for roles provisioned outside this database.
--- laplace_runtime and laplace_mono_lichess_* record substrate state and keep the
--- writer contract from runtime/database-role.py. laplace_mono_uci_* only reads.
+-- DECLARED GRANTS, substrate database. Applied on every create and every deploy
+-- (after 10_substrate.sql), so a stale grant or a new object is reconciled every time.
+-- Nothing here is journaled: each block reads the live catalog and grants only what is
+-- missing. Roles that do not exist in this cluster are skipped.
+--
+-- 1. Application roles on schema laplace.
+-- 2. Runtime roles (provisioned outside this database, surviving its recreation).
+--    The writers (the runtime, staging, desktop and MCP logins, and the Lichess recorders)
+--    keep the writer contract from runtime/database-role.py; the UCI roles only read.
+--
 -- Reconcile missing object privileges only: repeating GRANT ON ALL TABLES locks
 -- already-correct ingest tables and makes application activation wait on ingest.
+
+-- 1. laplace_app reads and writes schema laplace; laplace_readonly reads it.
+DO $$
+DECLARE
+    spec record;
+    required text;
+    objects text;
+BEGIN
+    IF to_regnamespace('laplace') IS NULL THEN
+        RETURN;
+    END IF;
+    FOR spec IN
+        SELECT * FROM (VALUES
+            ('laplace_app', ARRAY['SELECT','INSERT','UPDATE','DELETE']),
+            ('laplace_readonly', ARRAY['SELECT'])
+        ) AS roles(rolname, privileges)
+        WHERE EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = roles.rolname)
+    LOOP
+        IF NOT has_schema_privilege(spec.rolname, 'laplace', 'USAGE') THEN
+            EXECUTE format('GRANT USAGE ON SCHEMA laplace TO %I', spec.rolname);
+        END IF;
+        FOREACH required IN ARRAY spec.privileges LOOP
+            SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
+            INTO objects FROM pg_class c
+            WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+              AND NOT has_table_privilege(spec.rolname, c.oid, required);
+            IF objects IS NOT NULL THEN
+                EXECUTE format('GRANT %s ON TABLE %s TO %I', required, objects, spec.rolname);
+            END IF;
+        END LOOP;
+        SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
+        INTO objects FROM pg_class c
+        WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind = 'S'
+          AND NOT has_sequence_privilege(spec.rolname, c.oid, 'USAGE');
+        IF objects IS NOT NULL THEN
+            EXECUTE format('GRANT USAGE ON SEQUENCE %s TO %I', objects, spec.rolname);
+        END IF;
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT %s ON TABLES TO %I',
+            array_to_string(spec.privileges, ','), spec.rolname);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT USAGE ON SEQUENCES TO %I', spec.rolname);
+    END LOOP;
+END $$;
+
+-- 2. Runtime roles.
 DO $$
 DECLARE
     candidate text;
@@ -14,7 +64,9 @@ DECLARE
     required text;
     objects text;
 BEGIN
-    -- Scope public write access to the Native substrate and its partitions.
+    -- Scope public write access to the canonical Native substrate tables and their
+    -- partitions. A witness is a source trunk id, not a table: the persistent tables are
+    -- exactly entity, physicality, attestation and consensus (laplace.sql.in).
     -- Other public extension tables retain their existing read-only grants.
     WITH RECURSIVE substrate(oid) AS (
         SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

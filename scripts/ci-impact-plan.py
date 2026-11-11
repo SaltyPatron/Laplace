@@ -358,12 +358,12 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             managed_build_required.add(API_PUBLISH_PROJECT)
             components.add("database")
             build_components.add("managed")
-            # Versioned migrations are applied by the database delivery action
+            # The declared schema (db/schema) is applied by the database delivery action
             # and then checked by the bounded health suite. They do not change
             # managed test binaries and must not expand into every Tier=db test.
-            # Non-migration database assets retain the conservative managed DB
+            # Other database assets retain the conservative managed DB
             # qualification until they have a narrower owner.
-            if path.startswith("db/migrations/"):
+            if path.startswith("db/schema/"):
                 db_suites.add("db-health")
                 invalidate(("db-health",), path)
             else:
@@ -371,8 +371,8 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 db_suites.update(("db-health", "managed-db"))
                 invalidate(("db-health", "managed-db"), path)
             live_suites.update(STANDARD_LIVE_SUITES)
-            if path.startswith("db/migrations/"):
-                # Versioned migrations apply their own bounded schema/data change
+            if path.startswith("db/schema/"):
+                # The declared schema applies its own bounded, idempotent change
                 # and db-health validates the installed result. Highway-mask estate
                 # reconciliation belongs to native/extension invalidations; running
                 # it after an account, auth, or billing migration turns a small
