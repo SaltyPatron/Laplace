@@ -201,6 +201,39 @@ test.describe('chess UI', () => {
     await expect(page.getByRole('grid')).toBeVisible();
   });
 
+  test('the board is playable from the keyboard: one tab stop, arrows, Enter selects and moves', async ({ page }) => {
+    const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
+    const moves: string[] = [];
+    await page.route(/\/chess\/(legal|eval|new|play\/start|play\/move|play\/bestmove)$/, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const body = route.request().postDataJSON() ?? {};
+      if (path.endsWith('/legal')) return route.fulfill({ json: body.fen === START_FEN
+        ? { moves: [{ uci: 'e2e4', effMu: 1500, rated: false }, { uci: 'e2e3', effMu: 1500, rated: false }], inCheck: false, status: 'ongoing' }
+        : { moves: [], inCheck: false, status: 'ongoing' } });
+      if (path.endsWith('/eval')) return route.fulfill({ json: { whiteScoreCp: 20, depth: 4, nodes: 100 } });
+      if (path.endsWith('/new')) return route.fulfill({ json: { fen: START_FEN } });
+      if (path.endsWith('/move')) { moves.push(body.uci); return route.fulfill({ json: { fen: AFTER_E4, terminal: false, status: 'ongoing', legal: true, ply: 1 } }); }
+      if (path.endsWith('/bestmove')) return route.fulfill({ json: { uci: null, fen: AFTER_E4, effMu: 1500, rated: false, terminal: false, status: 'ongoing', scoreCp: 0, depth: 0, nodes: 0 } });
+      return route.fulfill({ json: { sessionId: 'keyboard-session', fen: START_FEN, status: 'ongoing', ply: 0 } });
+    });
+    await page.goto('/play');
+    await page.getByRole('button', { name: 'New game' }).click();
+    const e2 = page.getByRole('gridcell', { name: /^e2: White pawn/ });
+    await expect(e2).toHaveAttribute('tabindex', '0');
+    await expect(page.locator('[role=gridcell][tabindex="0"]')).toHaveCount(1);
+    await e2.focus();
+    await page.keyboard.press('Enter');
+    await expect(e2).toHaveAttribute('aria-selected', 'true');
+    // Up twice from e2 reaches e4 on a board drawn with White at the bottom.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByRole('gridcell', { name: /^e4: empty/ })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => moves).toEqual(['e2e4']);
+    await expect(page.getByRole('gridcell', { name: /^e4: White pawn/ })).toBeVisible();
+  });
+
   // The preview is the server's command line (CutechessRunner.BuildArguments); the page
   // sends the chosen setup and shows exactly what comes back.
   test('gauntlet previews the server command for the chosen setup', async ({ page }) => {
