@@ -53,7 +53,7 @@ export const NAV: NavItem[] = [
     description: 'Players, games, and playing against Laplace.',
     owns: ['/chess', '/play', '/lab'],
     children: [
-      { id: 'players', label: 'Players', path: '/chess', owns: ['/chess/players'] },
+      { id: 'players', label: 'Players', path: '/chess', owns: ['/chess', '/chess/players'] },
       { id: 'games', label: 'Laplace games', path: '/chess/laplace', owns: ['/chess/laplace', '/chess/games'] },
       { id: 'play', label: 'Play', path: '/play', owns: ['/play'] },
       { id: 'lab', label: 'Lab', path: '/lab', owns: ['/lab'] },

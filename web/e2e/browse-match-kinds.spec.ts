@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { stubApi } from './fixtures/api';
 
+// The "Found as" column and its facet explain browse match kinds in words, never the raw kind ids.
 test('Browse explains constituent and contains-all structural hits', async ({ page }) => {
+  await stubApi(page);
   await page.route('**/v1/explore/browse?**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -68,6 +71,7 @@ test('Browse explains constituent and contains-all structural hits', async ({ pa
 
   await expect(page.getByRole('link', { name: 'Sodium', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Chloride', exact: true })).toBeVisible();
-  await expect(page.getByText('query constituent')).toHaveCount(2);
-  await expect(page.getByText('contains all query words')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'query constituent', exact: true })).toHaveCount(2);
+  await expect(page.getByRole('cell', { name: 'contains all query words', exact: true })).toBeVisible();
+  await expect(page.getByText(/^constituent$|^contains all$/)).toHaveCount(0);
 });

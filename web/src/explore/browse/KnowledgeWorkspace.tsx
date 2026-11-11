@@ -41,6 +41,7 @@ const METHOD_LABELS: Record<string, string> = {
   entities: 'Content match', surface: 'Content match', define: 'Definition', fallback: 'Definition', what_is: 'Classification',
   describe: 'Description', synonyms: 'Synonym', translate: 'Translation', languages: 'Language', examples: 'Example',
   walk: 'Path', path: 'Path', complete: 'Completion', band_facts: 'Related fact', beam: 'Related fact',
+  constituent: 'query constituent', contains_all: 'contains all query words', name: 'name / alias evidence',
 };
 const label = (method: string) => METHOD_LABELS[method] ?? method.replaceAll('_', ' ');
 /** Shape similarity is not meaning: geometric neighbors belong to shape views, never to knowledge answers. */

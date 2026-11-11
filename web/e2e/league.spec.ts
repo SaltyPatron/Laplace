@@ -1,34 +1,74 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import nativeClaims from './fixtures/native-claim-leaders.json' with { type: 'json' };
+import { stubApi } from './fixtures/api';
 
-// Header navigation is shared by all routes, including nested Explore pages.
-test('full nav is present on every surface, including deep inside Explore', async ({ page }) => {
-  await page.goto('/explore/matchup/dog/cat');
-  for (const tab of ['Home', 'Chat', 'Query', 'Explore', 'Play', 'Lab', 'Billing']) {
-    await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
+test.beforeEach(async ({ page }) => { await stubApi(page, { signedIn: true }); });
+
+const rail = (page: Page) => page.getByRole('navigation', { name: 'Primary navigation' }).first();
+const RAIL = ['Look up', 'Compare', 'Explore', 'Ask', 'My data', 'Chess', 'Admin', 'Settings & billing'];
+
+// The left rail is shared by every route, including nested Explore pages.
+test('the rail is present on every surface, including deep inside Explore', async ({ page }) => {
+  test.setTimeout(90_000);
+  for (const path of ['/explore/matchup/dog/cat', '/chat', '/lab/gauntlet', '/proof', '/settings']) {
+    await page.goto(path);
+    for (const name of RAIL) await expect(rail(page).getByRole('link', { name, exact: true })).toBeVisible();
   }
-  // and the nav actually leaves Explore
-  await page.getByRole('button', { name: 'Query', exact: true }).click();
-  await expect(page).toHaveURL(/\/query$/);
+  // and the rail actually leaves Explore
+  await page.goto('/explore/matchup/dog/cat');
+  await expect(rail(page).getByRole('link', { name: 'Compare', exact: true })).toHaveAttribute('aria-current', 'page');
+  await rail(page).getByRole('link', { name: 'Ask', exact: true }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(rail(page).getByRole('link', { name: 'Ask', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
-test('every tab deep-links by URL (refresh-safe, back-button)', async ({ page }) => {
-  await page.goto('/query');
-  await expect(page.getByRole('button', { name: 'Run query' })).toBeVisible({ timeout: 15_000 });
-  await page.goto('/billing');
-  await expect(page.getByRole('heading', { name: 'Plans' })).toBeVisible({ timeout: 15_000 });
+test('every rail destination deep-links by URL (refresh-safe, back-button)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const destinations: [string, string, RegExp][] = [
+    ['Look up', 'Search', /\/explore$/],
+    ['Look up', 'Sources', /\/explore\/sources$/],
+    ['Look up', 'Identifiers', /\/explore\/highway$/],
+    ['Explore', 'Map', /\/explore\/constellation$/],
+    ['Explore', 'Characters', /\/unicode$/],
+    ['Explore', 'Storage proof', /\/proof$/],
+    ['Explore', 'Reasoning trace', /\/explore\/walk$/],
+    ['Explore', 'Counts', /\/explore\/audit$/],
+    ['Explore', 'Architecture', /\/explore\/architecture$/],
+    // Chess > Players (/chess) is covered by its own test below.
+    ['Chess', 'Laplace games', /\/chess\/laplace$/],
+    ['Chess', 'Play', /\/play$/],
+    ['Chess', 'Lab', /\/lab$/],
+  ];
+  for (const [section, child, url] of destinations) {
+    await page.goto('/data');
+    await rail(page).getByRole('link', { name: section, exact: true }).click();
+    await expect(page).not.toHaveURL(/\/data$/);
+    const before = page.url();
+    await rail(page).getByRole('link', { name: child, exact: true }).click();
+    await expect(page).toHaveURL(url);
+    // A link to the page already shown replaces the history entry instead of adding one.
+    const back = page.url() === before ? `${new URL(before).origin}/data` : before;
+    const current = rail(page).getByRole('link', { name: child, exact: true });
+    await expect(current).toHaveAttribute('aria-current', 'page');
+    await page.reload();
+    await expect(page).toHaveURL(url);
+    await expect(rail(page).getByRole('link', { name: child, exact: true })).toHaveAttribute('aria-current', 'page');
+    await page.goBack();
+    await expect(page).toHaveURL(back);
+  }
 });
 
-// Home is the league front page: live scoreboard + per-arena leaderboards.
-test('Home shows the live scoreboard and league leaders', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByLabel('Live substrate scoreboard')).toBeVisible();
-  // the status pill reads one of the real states
-  await expect(page.getByText(/ingesting|idle|unreachable/i).first()).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('League leaders')).toBeVisible();
+// Known product bug: nav.ts gives Players `owns: ['/chess/players']` only, so on the player index
+// (/chess) no Chess child is current. Every other child destination marks itself current.
+test('the player index marks Players as the current rail location', async ({ page }) => {
+  await page.goto('/data');
+  await rail(page).getByRole('link', { name: 'Chess', exact: true }).click();
+  await expect(page).toHaveURL(/\/chess$/);
+  await expect(rail(page).getByRole('link', { name: 'Players', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
-// Generated by the real Native database fixture in native_claim_leaders.sql.
+// Generated by the real Native database fixture in native_claim_leaders.sql. The landing (Look up)
+// samples recorded assertions from consensus.
 test('Home preserves ordered Native claims and counted repeated parts', async ({ page }) => {
   await page.route('**/v1/query/leaders/home', (route) => route.fulfill({ json: nativeClaims }));
   await page.goto('/');
@@ -49,80 +89,107 @@ test('Home preserves ordered Native claims and counted repeated parts', async ({
   await expect(row.locator('code')).toHaveText(four.trajectory);
 });
 
-// Head-to-head: the tale of the tape from contrast() renders both cards.
-test('matchup renders records and the tale of the tape', async ({ page }) => {
+// Head-to-head: both competitors link to their entity pages and the direct claim overlap
+// is split into shared and one-sided claims.
+test('matchup renders both sides and the direct claim overlap', async ({ page }) => {
+  const dog = '0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d';
+  const cat = 'cacacacacacacacacacacacacacacaca';
+  const side = (label: string, id: string) => ({
+    id, label, record: { confirmed: 1, contested: 0, refuted: 0, thin: 2 }, top_facts: [],
+  });
+  await page.route('**/v1/explore/matchup?*', (route) => route.fulfill({ json: {
+    x: side('dog', dog), y: side('cat', cat),
+    tape: [
+      { holder: 'both', type: 'is a', fact: 'domestic animal', eff_mu: 1700 },
+      { holder: 'x-only', type: 'is a', fact: 'canine', eff_mu: 1650 },
+      { holder: 'y-only', type: 'is a', fact: 'feline', eff_mu: 1640 },
+    ],
+  } }));
+  await page.route('**/v1/explore/lexicon?*', (route) => route.fulfill({ json: {
+    object: 'lexicon', rounds: 1, fanout: 0, nearest: 0, readings: [], connections: [], rows: [],
+  } }));
   await page.goto('/explore/matchup/dog/cat');
-  await expect(page.getByText('Tale of the tape')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('shared', { exact: false })).toBeVisible();
-  // both competitor names link to their entity pages
-  await expect(page.getByRole('link', { name: 'dog' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'cat' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'dog', exact: true })).toHaveAttribute('href', `/explore/entity/${dog}`);
+  await expect(page.getByRole('link', { name: 'cat', exact: true })).toHaveAttribute('href', `/explore/entity/${cat}`);
+  await page.locator('summary').filter({ hasText: 'Direct claim overlap' }).click();
+  await expect(page.getByText('shared', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('domestic animal')).toBeVisible();
+  await expect(page.getByText('canine')).toBeVisible();
+  await expect(page.getByText('feline')).toBeVisible();
 });
 
-// Player card: the entity header leads with the rated-competitor stat row.
-test('entity page leads with the player-card stat row', async ({ page }) => {
-  await page.goto('/explore/resolve/whale');
-  await expect(page.getByText('top rating')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('games', { exact: true })).toBeVisible();
-});
+// The mesh drill: parent relations (up) | node with its standing card | members (down),
+// re-centering on click.
+const whale = '014488e93e050f3f0f19ed9847ec5d65';
+const cetacean = 'cececececececececececececececece';
+const bluewhale = 'b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1';
+async function serveMesh(page: Page) {
+  const mesh = (id: string, label: string) => ({
+    id, label, hub_type: null,
+    belongs_to: id === whale ? [{ id: cetacean, label: 'cetacean', relation: 'IS_A', witnesses: 3 }] : [],
+    roster: id === whale ? [{ id: bluewhale, label: 'blue whale', relation: 'IS_A', witnesses: 2 }] : [],
+  });
+  const labels: Record<string, string> = { [whale]: 'whale', [cetacean]: 'cetacean', [bluewhale]: 'blue whale' };
+  await page.route(/\/v1\/explore\/entities\/[0-9a-f]{32}\/(mesh|preview|record)$/, (route) => {
+    const [, id, read] = new URL(route.request().url()).pathname.match(/entities\/([0-9a-f]{32})\/(\w+)$/)!;
+    if (read === 'mesh') return route.fulfill({ json: mesh(id, labels[id]) });
+    if (read === 'preview') return route.fulfill({ json: { id_hex: id, label: labels[id], tier: 1, type: 'Word', exists: true, evidence_count: 21, preview_facts: [] } });
+    return route.fulfill({ json: { id, confirmed: 4, contested: 1, refuted: 0, thin: 6 } });
+  });
+}
 
-// The semantic-mesh drill-down: the tiered master/detail over the factorization
-// of meaning — belongs_to (up) | node | roster (down), re-centering on click.
-test('mesh landing explains the ladder and enters at a node', async ({ page }) => {
+test('mesh landing explains related structure and hands a subject to the knowledge search', async ({ page }) => {
   await page.goto('/explore/mesh');
-  await expect(page.getByRole('heading', { name: 'The mesh' })).toBeVisible();
-  await expect(page.getByText('ILI concept').first()).toBeVisible();
-  await page.getByRole('button', { name: 'whale', exact: true }).click();
-  await expect(page).toHaveURL(/\/explore\/mesh\/[0-9a-f]{32}/i, { timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'Related structure' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('link', { name: 'Return to the knowledge collection' })).toBeVisible();
+  // A subject in the address goes straight to the shared search with the related-structure view.
+  await page.goto('/explore/mesh?q=whale');
+  await expect(page).toHaveURL(/\/explore\?(?=.*q=whale)(?=.*presentation=mesh)/);
 });
 
-test('mesh drill shows belongs-to, roster, and re-centers on a member', async ({ page }) => {
-  await page.goto('/explore/mesh/014488e93e050f3f0f19ed9847ec5d65');
-  await expect(page.getByText('Belongs to')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('Roster')).toBeVisible();
-  // a roster member re-centers the drill (URL changes to that node)
-  const before = page.url();
-  await page.locator('button', { hasText: 'whale' }).first().click();
-  await expect(page).not.toHaveURL(before, { timeout: 15_000 });
-  await expect(page.getByText('Belongs to')).toBeVisible();
+test('mesh drill shows parent relations, the standing card, members, and re-centers on a member', async ({ page }) => {
+  await serveMesh(page);
+  await page.goto(`/explore/mesh/${whale}`);
+  await expect(page.getByText('Parent relations', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Members', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /cetacean/ })).toBeVisible();
+  // The node's standing card: evidence rows and verdict counts from the record read.
+  await expect(page.getByText('evidence rows', { exact: true })).toBeVisible();
+  await expect(page.getByText('confirmed', { exact: true })).toBeVisible();
+  // a member re-centers the drill (URL changes to that node)
+  await page.getByRole('button', { name: /blue whale/ }).click();
+  await expect(page).toHaveURL(`/explore/mesh/${bluewhale}`);
+  await expect(page.getByText('No members were returned.')).toBeVisible();
 });
 
-// Resident modalities use live reads; unseeded modalities display "awaiting ingest".
-test('mesh landing shows modality availability', async ({ page }) => {
-  await page.goto('/explore/mesh');
-  await expect(page.getByText('One law, every modality')).toBeVisible({ timeout: 15_000 });
-  // Text is the resident foundation → live
-  const text = page.locator('section[aria-label="Modalities"]').getByText('Text', { exact: true });
-  await expect(text).toBeVisible();
-  // Unseeded modalities display an availability label.
-  await expect(page.getByText('awaiting ingest').first()).toBeVisible();
-});
+// The provenance tier: stage → source → assertions → entity.
+const catalog = {
+  counts: [], top_relations: [], featured_refs: [],
+  sources: [{ key: 'wordnet', evidence: 1200, content: 800, stage: 'relations', layer: 'lexical', role: 'lexicon', id_hex: 'abababababababababababababababab' }],
+  stages: [{ stage: 'relations', order: 1, law: 'Relations are attested by their sources.', sources: [
+    { cli: 'wordnet', layer: 'lexical', role: 'lexicon', source_key: 'wordnet', evidence: 1200 },
+    { cli: 'cadence', layer: 'lexical', role: 'lexicon', source_key: null, evidence: null },
+  ] }],
+};
 
-// The provenance tier: warehouse → stage → source → roster → entity. The
-// stage→source drill was broken (cli names never matched live keys) and the
-// source page had no roster at all.
-test('stage drills into a live source with a roster', async ({ page }) => {
+test('stage drills into a source with its assertions', async ({ page }) => {
+  await page.route('**/v1/explore/catalog', (route) => route.fulfill({ json: catalog }));
+  await page.route('**/v1/explore/sources/*/roster?**', (route) => route.fulfill({ json: { rows: [
+    { subject_id: whale, subject: 'whale', relation: 'is a', object_id: cetacean, object: 'cetacean', observations: 3 },
+  ] } }));
   await page.goto('/explore/stage/relations');
-  await expect(page.getByText('Stage — relations')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'Stage — relations' })).toBeVisible({ timeout: 15_000 });
   await page.getByText('wordnet', { exact: true }).click();
-  await expect(page).toHaveURL(/\/explore\/source\//, { timeout: 15_000 });
-  await expect(page.getByText('Roster — what this witness asserts')).toBeVisible();
+  await expect(page).toHaveURL(/\/explore\/source\/wordnet$/);
+  await expect(page.getByRole('heading', { name: 'Assertions' })).toBeVisible();
   // the roster samples real testimony rows with entity links
-  await expect(page.locator('a[href*="/explore/entity/"]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('link', { name: 'whale', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'cetacean', exact: true })).toBeVisible();
 });
 
 test('unseeded cadence source has an availability label on the stage page', async ({ page }) => {
+  await page.route('**/v1/explore/catalog', (route) => route.fulfill({ json: catalog }));
   await page.goto('/explore/stage/relations');
   await expect(page.getByText('not yet ingested').first()).toBeVisible({ timeout: 15_000 });
-});
-
-// The topic page: one lookup, every read at once — no shape dropdown to pick,
-// with the IS_A tree drawn as an actual tree.
-test('topic page shows everything at once with the taxonomy tree', async ({ page }) => {
-  await page.goto('/topic/dog');
-  await expect(page.getByText('Taxonomy — the IS_A tree')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Definition', { exact: true })).toBeVisible();
-  await expect(page.getByText('Strongest facts, by band')).toBeVisible();
-  // the tree renders the highlighted topic node and a clickable parent rung
-  await expect(page.getByRole('link', { name: 'animal', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('link', { name: /cadence/ })).toHaveCount(0);
 });
