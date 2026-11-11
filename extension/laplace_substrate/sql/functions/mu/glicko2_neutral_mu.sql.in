@@ -1,35 +1,6 @@
 -- The anchor every strand enters at and plays against, on Laplace-Native's
 -- standing scale (LP_GLICKO_RATING, laplace.h): float8 rating points.
 DROP FUNCTION IF EXISTS laplace.glicko2_neutral_mu();
--- Installed generations returned the fixed-point bigint anchor. A return type
--- cannot be replaced in place, and SQL functions bound to the old one (belief_logit,
--- the walk and epistemic readers, chess.players_by_initial) block a plain DROP.
--- Every one of them is recreated further down this script, so the old shape goes
--- with its dependent functions; anything other than a function depending on it
--- stops the upgrade instead of being dropped.
-DO $upgrade_shape$
-DECLARE
-    anchor regprocedure := to_regprocedure('consensus.glicko2_neutral_mu()');
-    blocking text;
-BEGIN
-    IF anchor IS NULL OR pg_get_function_result(anchor) = 'double precision' THEN
-        RETURN;
-    END IF;
-    WITH RECURSIVE dependent(classid, objid) AS (
-        SELECT classid, objid FROM pg_depend
-         WHERE refclassid = 'pg_proc'::regclass AND refobjid = anchor AND deptype = 'n'
-        UNION
-        SELECT d.classid, d.objid FROM pg_depend d
-          JOIN dependent ON d.refclassid = dependent.classid AND d.refobjid = dependent.objid
-         WHERE d.deptype = 'n')
-    SELECT string_agg(pg_describe_object(classid, objid, 0), ', ')
-      INTO blocking
-      FROM dependent WHERE classid <> 'pg_proc'::regclass;
-    IF blocking IS NOT NULL THEN
-        RAISE EXCEPTION 'consensus.glicko2_neutral_mu() changes return type but non-function objects depend on it: %', blocking;
-    END IF;
-    DROP FUNCTION consensus.glicko2_neutral_mu() CASCADE;
-END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION consensus.glicko2_neutral_mu() RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_standing_anchor'
     LANGUAGE C LAPLACE_IMMUTABLE;

@@ -77,6 +77,7 @@ functions/relation/relation_canonical.sql.in
 functions/relation/relation_rank_resolved.sql.in
 functions/relation/edge_rank.sql.in
 functions/consensus/edges_raw.sql.in
+functions/mu/reshape_standing_anchors.sql.in
 functions/mu/glicko2_neutral_mu.sql.in
 functions/mu/glicko2_initial_rd.sql.in
 functions/mu/glicko2_initial_volatility.sql.in
@@ -479,3 +480,4 @@ views/v_entities_highway.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 
 functions/query/declared_paths.sql.in
+functions/mu/drop_retired_fixed_point_standing.sql.in
