@@ -348,6 +348,8 @@ extension/regression.out
 extension/tmp_check/
 
 data/
+# Source folders named data/ are code, not datasets.
+!web/src/data/
 *.perfcache
 
 *.dump
