@@ -60,11 +60,14 @@ public sealed class WorkingSetQueryShapeTests
         var apply = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
             "NpgsqlWorkingSetApply.cs"));
-        var fold = File.ReadAllText(Path.Combine(
-            repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
-            "ConsensusAccumulatingWriter.cs"));
-        var native = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "src", "fold_route.c"));
+        // ConsensusAccumulatingWriter is a partial class; its fold methods live in
+        // whichever partial file the modularization placed them, so search them all.
+        var fold = Directory.GetFiles(Path.Combine(
+                repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql"), "ConsensusAccumulatingWriter.*.cs")
+            .Append(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql", "ConsensusAccumulatingWriter.cs"))
+            .Select(File.ReadAllText).ToArray();
+        var native = TypeIdLawTests.ReadCModuleSource(
+            "extension", "laplace_substrate", "src", "fold_route.c");
 
         Assert.DoesNotContain("consensus.attestation_merge",
             apply, StringComparison.Ordinal);
@@ -111,6 +114,12 @@ public sealed class WorkingSetQueryShapeTests
             native,
             StringComparison.Ordinal);
     }
+
+    private static string MethodSource(IEnumerable<string> sources, string name) =>
+        sources.Select(source => CSharpSyntaxTree.ParseText(source).GetRoot())
+            .SelectMany(root => root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+            .Single(method => method.Identifier.ValueText == name)
+            .ToFullString();
 
     private static string MethodSource(string source, string name) =>
         CSharpSyntaxTree.ParseText(source).GetRoot()

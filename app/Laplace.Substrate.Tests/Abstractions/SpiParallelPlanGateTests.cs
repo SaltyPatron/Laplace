@@ -21,7 +21,12 @@ public sealed class SpiParallelPlanGateTests
     private static readonly HashSet<string> ReadWritePlanFiles =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            // The consensus fold route, split across its translation units: every plan
+            // runs inside the fold's write transaction (FOR UPDATE locks, MERGE, DELETE).
             "fold_route.c",
+            "fold_route_evidence.c",
+            "fold_route_plans.c",
+            "fold_route_states.c",
             "conversation_session.c",
             "consensus_bulk_write.c",
         };

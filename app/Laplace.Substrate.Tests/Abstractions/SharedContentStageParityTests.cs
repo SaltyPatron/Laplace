@@ -69,10 +69,13 @@ public sealed class SharedContentStageParityTests
 
 
     [Theory]
-    [InlineData("dog", 2)]
-    [InlineData("ab", 2)]
-    [InlineData("banana", 2)]
-    [InlineData("ab ab", 3)]
+    // A tier is Merkle height (1 + max(child.tier)), never a role. A word of
+    // single-codepoint graphemes is tier 1, repeats included (Native lp_text: "banana"
+    // is one word composed directly from its codepoints); a sentence of words is tier 2.
+    [InlineData("dog", 1)]
+    [InlineData("ab", 1)]
+    [InlineData("banana", 1)]
+    [InlineData("ab ab", 2)]
     // A one-child composition is the child: the root of "A" is the tier-0 codepoint,
     // not a tier-1 wrapper. Only a multi-codepoint cluster roots at the grapheme tier.
     [InlineData("A", 0)]

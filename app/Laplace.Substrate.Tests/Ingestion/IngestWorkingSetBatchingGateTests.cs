@@ -60,9 +60,8 @@ public sealed class IngestWorkingSetBatchingGateTests
     [Fact]
     public void FileBackedApply_CoalescesTinyFilesBySourceUntilCapacity()
     {
-        var root = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
-        var source = File.ReadAllText(Path.Combine(
-            root, "app", "Laplace.Substrate", "Ingestion", "IngestRunner.cs"));
+        var source = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.ReadTypeSource(
+            "app", "Laplace.Substrate", "Ingestion", "IngestRunner.cs");
 
         Assert.Contains("Dictionary<Hash128, ApplyBatchBucket>", source);
         Assert.Contains("Hash128 owner = intent.Metadata.SourceId", source);

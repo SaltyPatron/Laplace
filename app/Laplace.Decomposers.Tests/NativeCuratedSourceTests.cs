@@ -50,10 +50,10 @@ public sealed class NativeCuratedSourceTests
             "claim\t0\t1\tili:i30898\tidentifier vocabulary\tili",
         ] },
         { "conceptnet", [
-            "claim\t0\t1\t[агыруа, language:abk, n, NOUN]\tAntonym\t[аҧсуа, language:abk]",
-            "claim\t0\t1\t[[агыруа, language:abk, n, NOUN], Antonym, [аҧсуа, language:abk]]\tthe strength with which this edge expresses this assertion\t1.0",
-            "claim\t0\t1\t[thəχ kwo, adx, a, ADJ]\tAntonym\t[ʂap wə, adx]",
-            "claim\t0\t1\t[[thəχ kwo, adx, a, ADJ], Antonym, [ʂap wə, adx]]\tthe strength with which this edge expresses this assertion\t1.0",
+            // The edge weight is a measure of the edge, not a claim: it is the score of the
+            // edge's attestation on ConceptNet's 0..2 scale, where the typical weight 1.0 is a draw.
+            "claim\t0\t0.5\t[агыруа, language:abk, n, NOUN]\tAntonym\t[аҧсуа, language:abk]",
+            "claim\t0\t0.5\t[thəχ kwo, adx, a, ADJ]\tAntonym\t[ʂap wə, adx]",
             "claim\t0\t1\tlanguage:abk\tidentifier vocabulary\tlanguage",
             "claim\t0\t1\tadx\tidentifier vocabulary\tlanguage",
             "claim\t0\t1\t[wordnet-pos, n]\tdenotes\tNOUN",

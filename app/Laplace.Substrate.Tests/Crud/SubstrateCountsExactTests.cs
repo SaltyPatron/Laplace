@@ -29,9 +29,7 @@ public sealed class SubstrateCountsExactTests
     [Fact]
     public void IngestCommands_StatusPrintsEstimateDisclaimer()
     {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var ingest = Path.Combine(repoRoot, "app", "Laplace.Cli", "IngestCommands.cs");
-        var text = File.ReadAllText(ingest);
+        var text = TypeIdLawTests.ReadTypeSource("app", "Laplace.Cli", "IngestCommands.cs");
         Assert.Contains("reltuples ESTIMATE", text, StringComparison.Ordinal);
         Assert.Contains("ops.substrate_counts()", text, StringComparison.Ordinal);
     }
