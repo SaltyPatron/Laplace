@@ -12,7 +12,7 @@ const loadWarehouse = () => import('./catalog/WarehouseHome');
 const loadAudit = () => import('./catalog/AuditPanel');
 const loadStage = () => import('./browse/StageBrowse');
 const loadSource = () => import('./browse/SourceBrowse');
-const loadEntity = () => import('./entity/EntityDetail');
+const loadEntity = () => import('../lenses/EntityPage');
 const loadNotFound = () => import('./entity/NotFoundExplorer');
 const loadResolve = () => import('./entity/ResolveBrowseRedirect');
 const loadConstellation = () => import('./glome/ConstellationView');
@@ -31,7 +31,7 @@ const WarehouseHome = lazy(() => loadWarehouse().then((m) => ({ default: m.Wareh
 const AuditPanel = lazy(() => loadAudit().then((m) => ({ default: m.AuditPanel })));
 const StageBrowse = lazy(() => loadStage().then((m) => ({ default: m.StageBrowse })));
 const SourceBrowse = lazy(() => loadSource().then((m) => ({ default: m.SourceBrowse })));
-const EntityDetail = lazy(() => loadEntity().then((m) => ({ default: m.EntityDetail })));
+const EntityPage = lazy(() => loadEntity().then((m) => ({ default: m.EntityPage })));
 const NotFoundExplorer = lazy(() => loadNotFound().then((m) => ({ default: m.NotFoundExplorer })));
 const ResolveBrowseRedirect = lazy(() => loadResolve().then((m) => ({ default: m.ResolveBrowseRedirect })));
 const ConstellationView = lazy(() => loadConstellation().then((m) => ({ default: m.ConstellationView })));
@@ -119,7 +119,7 @@ export function ExploreView({ page }: { page?: ExplorePage }) {
           <Route path="constellation" element={<ConstellationView />} />
           <Route path="stage/:stageId" element={<StageBrowse />} />
           <Route path="source/:sourceKey" element={<SourceBrowse />} />
-          <Route path="entity/:idHex" element={<EntityDetail />} />
+          <Route path="entity/:idHex" element={<EntityPage />} />
           <Route path="notfound/:ref" element={<NotFoundExplorer />} />
           <Route path="resolve/:ref" element={<ResolveBrowseRedirect />} />
           <Route path="walk" element={<WalkPanel />} />

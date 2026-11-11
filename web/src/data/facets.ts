@@ -57,8 +57,9 @@ function servesContract(opts: ApiOptions): Promise<boolean> {
 }
 const notServed = (error: unknown) => error instanceof ApiError && (error.status === 404 || error.status === 405);
 
-// One entity read per id is shared by every adapter that needs it.
+// One entity read per id is shared by every adapter and visual lens that needs it.
 const entityReads = new Map<string, Promise<ExploreEntityResponse>>();
+export const readEntity = (id: string, opts: ApiOptions = {}) => entity(id, opts);
 function entity(id: string, opts: ApiOptions) {
   const key = id.toLowerCase();
   let read = entityReads.get(key);
