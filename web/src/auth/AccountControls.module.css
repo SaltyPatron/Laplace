@@ -30,4 +30,5 @@
   }
   .workspace { display: grid; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); max-width: min(100%, 17rem); min-width: 0; }
   .workspace select { max-width: 100%; }
+  .workspaceName { color: var(--color-text-primary); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
