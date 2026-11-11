@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { ErrorText, LoadingText } from '@ui';
+import { Button, ErrorText, Field, Input, LoadingText } from '@ui';
 import { exploreUnicodeCloud, exploreUnicodePoint, exploreUnicodePositions } from '../api';
 import { clientArtifactGetOrLoad, clientStorageEstimate } from '../../storage/clientArtifactCache';
 import type { UnicodeCloudResponse, UnicodePointResponse } from '../types';
@@ -160,6 +161,33 @@ function Cloud({
     <OrbitControls makeDefault enablePan enableZoom />
   </>;
 }
+/**
+ * Read a codepoint from what a person typed: one character ("A", "é", "😀"),
+ * "U+0041", "u+41", "0x41", or a decimal "#65". Returns null when the text
+ * names no single scalar value.
+ */
+export function parseCodepointQuery(raw: string): number | null {
+  const text = raw.trim();
+  if (!text && raw.length > 0) {
+    // A lone whitespace character is still a character.
+    const only = Array.from(raw);
+    return only.length === 1 ? only[0].codePointAt(0) ?? null : null;
+  }
+  if (!text) return null;
+  const hex = /^(?:u\+|0x|\\u\{?)([0-9a-f]{1,6})\}?$/i.exec(text);
+  const dec = /^#(\d{1,7})$/.exec(text);
+  const chars = Array.from(text);
+  const cp = hex ? parseInt(hex[1], 16)
+    : dec ? parseInt(dec[1], 10)
+    : chars.length === 1 ? chars[0].codePointAt(0) ?? -1
+    : -1;
+  return Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff ? cp : null;
+}
+
+function codepointLabel(cp: number): string {
+  return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
 export function UnicodeGlomeView(){
  const [cloud,setCloud]=useState<UnicodeCloudResponse|null>(null),[buffer,setBuffer]=useState<ArrayBuffer|null>(null),[err,setErr]=useState<string|null>(null),[mode]=useState<'real'|'hash'>('real'),[point,setPoint]=useState<UnicodePointResponse|null>(null);
  const [cacheState,setCacheState]=useState<'checking'|'hit'|'stored'|'unavailable'>('checking');
@@ -175,13 +203,24 @@ export function UnicodeGlomeView(){
    if(!controller.signal.aborted){ setBuffer(artifact.value); setStorage(await clientStorageEstimate()); }
  }catch(e){if(!controller.signal.aborted)setErr(e instanceof Error?e.message:String(e));}})();return()=>controller.abort();},[]);
  const pos=useMemo(()=>{if(!cloud||!buffer)return null;const floats=new Float32Array(buffer),lane=cloud.count*3,offset=mode==='real'?0:lane;return floats.subarray(offset,offset+lane);},[cloud,buffer,mode]);
+ const [query,setQuery]=useState(''),[findError,setFindError]=useState<string|null>(null),[finding,setFinding]=useState(false);
  const pick=useMemo(() => (cp:number) => {
    void exploreUnicodePoint(cp).then(setPoint).catch(e=>setErr(e instanceof Error?e.message:String(e)));
  }, []);
- return <div className={styles.root}><header><div><span>Tier-0 instrument</span><h2>Unicode Glome</h2><p>Every position in the active Unicode T0 ROM. The view projects each codepoint's real 4-D Super-Fibonacci S³ placement into the 3-D unit ball.</p></div><div className={styles.controls}></div></header>{err?<ErrorText>{err}</ErrorText>:null}{!pos?<LoadingText>Loading the complete T0 ROM GPU buffers…</LoadingText>:<div className={styles.layout}><div className={styles.canvas}><Canvas
+ const find=async(event:FormEvent<HTMLFormElement>)=>{
+   event.preventDefault();
+   const cp=parseCodepointQuery(query);
+   if(cp==null){setFindError('Type one character (A), a code point (U+0041 or 0x41), or #65.');return;}
+   if(cloud&&cp>=cloud.count){setFindError(`${codepointLabel(cp)} is outside the ${cloud.count.toLocaleString()} positions in this T0 ROM.`);return;}
+   setFindError(null);setFinding(true);
+   try{setPoint(await exploreUnicodePoint(cp));}
+   catch(e){setFindError(e instanceof Error?e.message:String(e));}
+   finally{setFinding(false);}
+ };
+ return <div className={styles.root}><header><div><span>Tier-0 instrument</span><h2>Unicode Glome</h2><p>Every position in the active Unicode T0 ROM. The view projects each codepoint's real 4-D Super-Fibonacci S³ placement into the 3-D unit ball.</p></div><form className={styles.find} role="search" aria-label="Find a character" onSubmit={(e)=>void find(e)}><Field label="Find a character" help="A character, U+0041, 0x41 or #65" error={findError}><Input value={query} onChange={(e)=>{setQuery(e.target.value);setFindError(null);}} placeholder="A or U+0041" autoComplete="off" spellCheck={false}/></Field><Button type="submit" disabled={finding||!query}>{finding?'Finding…':'Find'}</Button></form></header>{err?<ErrorText>{err}</ErrorText>:null}{!pos?<LoadingText>Loading the complete T0 ROM GPU buffers…</LoadingText>:<div className={styles.layout}><div className={styles.canvas}><Canvas
   frameloop="demand"
   dpr={1}
   camera={{position:[0,0,2.35],fov:48}}
   gl={{ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: false }}
-><color attach="background" args={['#0b1220']}/><Cloud p={pos} pick={pick} selected={point?.codepoint ?? null}/></Canvas></div><aside><strong>{cloud?.count.toLocaleString()} points</strong><code>{cloud?.perfcache_receipt_hex}</code><div className={styles.cacheState}><span>Client artifact cache</span><strong>{cacheState==='hit'?'HIT · IndexedDB':cacheState==='stored'?'STORED · IndexedDB':cacheState==='checking'?'checking…':'unavailable · network only'}</strong>{storage?<small>{(storage.usage/1048576).toFixed(1)} MiB used / {(storage.quota/1073741824).toFixed(1)} GiB quota</small>:null}</div>{point?<><h3>U+{point.codepoint.toString(16).toUpperCase().padStart(4,'0')} {point.display}</h3><dl><dt>DUCET rank</dt><dd>{point.uca_order.toLocaleString()}</dd><dt>Content ID</dt><dd>{point.id_hex}</dd><dt>Real PointZM</dt><dd>{point.x.toPrecision(9)}, {point.y.toPrecision(9)}, {point.z.toPrecision(9)}, {point.m.toPrecision(9)}</dd><dt>r₄</dt><dd>{point.radius.toPrecision(12)}</dd><dt>Hilbert128</dt><dd>{point.hilbert_hex}</dd><dt>Flags</dt><dd>0x{point.flags.toString(16)}</dd></dl></>:<p>Click any point to read its canonical perfcache record and real 4-D coordinates.</p>}</aside></div>}</div>;
+><color attach="background" args={['#0b1220']}/><Cloud p={pos} pick={pick} selected={point?.codepoint ?? null}/></Canvas></div><aside><strong>{cloud?.count.toLocaleString()} points</strong><code>{cloud?.perfcache_receipt_hex}</code><div className={styles.cacheState}><span>Client artifact cache</span><strong>{cacheState==='hit'?'HIT · IndexedDB':cacheState==='stored'?'STORED · IndexedDB':cacheState==='checking'?'checking…':'unavailable · network only'}</strong>{storage?<small>{(storage.usage/1048576).toFixed(1)} MiB used / {(storage.quota/1073741824).toFixed(1)} GiB quota</small>:null}</div>{point?<><h3>{codepointLabel(point.codepoint)} {point.display}</h3>{/^[0-9a-f]{32}$/i.test(point.id_hex)?<RouterLink className={styles.entityLink} to={`/explore/entity/${point.id_hex.toLowerCase()}`}>Open {codepointLabel(point.codepoint)} entity page</RouterLink>:null}<dl><dt>DUCET rank</dt><dd>{point.uca_order.toLocaleString()}</dd><dt>Content ID</dt><dd>{point.id_hex}</dd><dt>Real PointZM</dt><dd>{point.x.toPrecision(9)}, {point.y.toPrecision(9)}, {point.z.toPrecision(9)}, {point.m.toPrecision(9)}</dd><dt>r₄</dt><dd>{point.radius.toPrecision(12)}</dd><dt>Hilbert128</dt><dd>{point.hilbert_hex}</dd><dt>Flags</dt><dd>0x{point.flags.toString(16)}</dd></dl></>:<p>Click any point to read its canonical perfcache record and real 4-D coordinates.</p>}</aside></div>}</div>;
 }

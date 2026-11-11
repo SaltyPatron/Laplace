@@ -7,6 +7,7 @@ import { admitContentRaw, readContent, readContentBytes } from './api';
 import { useAppStore } from '../store';
 import { textBytes, type ContentMode } from './content';
 import { type UploadItem } from './uploadQueue';
+import { readAdmissionHistory, recordAdmissions, type AdmissionRecord } from './admissionHistory';
 import { useUploadQueue } from './UploadProvider';
 import styles from './DataView.module.css';
 
@@ -36,6 +37,8 @@ function DataWorkspace({ tenant }: { tenant: string }) {
     ...item, file_id: receipt?.file_id, content_id: receipt?.content_id, source: receipt?.source, modality: receipt?.modality,
   })), [state.items]);
   const snapshot = useMemo(() => captureRows(rows, 'Explicit local artifact selection and HTTP admission receipts in this tab. This is not a seed manifest run or a complete source inventory.'), [rows]);
+  const [history, setHistory] = useState<AdmissionRecord[]>(() => readAdmissionHistory(scope));
+  useEffect(() => { setHistory((current) => recordAdmissions(scope, current, state.items)); }, [scope, state.items]);
   const queued = state.items.filter((item) => item.status === 'queued').length;
   const admitted = state.items.filter((item) => item.status === 'admitted').length;
   const columns: ResultColumn<VisibleItem>[] = [
@@ -93,6 +96,19 @@ function DataWorkspace({ tenant }: { tenant: string }) {
         <span role="status">{admitted} admitted · {queued} queued{state.running ? ' · admission active' : ''}</span></div>
       <Muted>Only the selection present when you press Ingest is submitted. Navigation stops after the current request and retains this selection in memory; reload loses unsubmitted local selections. An unconfirmed request stops the batch without retrying it.</Muted>
       <ResultWorkspace scopeKey={scope} label="Artifact selection" snapshot={snapshot} columns={columns} rowLabel={(item) => item.name} rowKey={(item) => item.id} />
+    </Panel>
+    <Panel title="Admission history">
+      <Muted>Admissions confirmed in this browser tab for tenant <strong>{tenant}</strong>, newest first. The server does not yet list a workspace's earlier admissions, so the full history is not shown here; open any earlier admission by its returned ID below.</Muted>
+      {history.length === 0 ? <p>Nothing admitted yet in this tab.</p> : <ul className={styles.history} aria-label="Admission history">
+        {history.map((row) => <li key={row.file_id}>
+          <div className={styles.historyHead}><strong>{row.name}</strong><span className={styles.historyStatus}>admitted</span></div>
+          <Muted><time dateTime={row.admitted_at}>{new Date(row.admitted_at).toLocaleString()}</time> · {row.bytes.toLocaleString()} bytes · {row.mode}{row.modality ? ` · ${row.modality}` : ''}{row.path && row.path !== row.name ? ` · ${row.path}` : ''}</Muted>
+          <div className={styles.toolbar}>
+            <Button variant="ghost" onClick={() => openReceipt(row.file_id)} aria-label={`Read ${row.name}`}>Read</Button>
+            {/^[0-9a-f]{32}$/i.test(row.content_id) && <Link to={`/explore/entity/${row.content_id.toLowerCase()}`} aria-label={`Open entity for ${row.name}`}>Open entity</Link>}
+          </div>
+        </li>)}
+      </ul>}
     </Panel>
     <Panel title="Open admitted content"><form className={styles.toolbar} onSubmit={(event) => { event.preventDefault(); openReceipt(lookup); }}>
       <Field label="File, document or content ID" help="Use a returned ID. Readback uses the current tenant's content endpoint."><Input required pattern="[0-9a-fA-F]{32}" value={lookup} onChange={(event) => setLookup(event.target.value)} /></Field><Button type="submit">Read content</Button>

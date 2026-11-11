@@ -72,6 +72,49 @@ const LABEL_VIEW_LIMIT = 160;
 /** ...and then only the ones nearest the center of the view. */
 const LABEL_MAX = 24;
 
+const VISIBLE_CONTROL: Record<string, string> = {
+  ' ': '␠', '\n': '↵', '\r': '␍', '\t': '⇥', ' ': '⍽', '\u0000': '␀', '\u007f': '␡',
+};
+const HEX_ID = /^(?:\\x)?[0-9a-f]{32}$/i;
+const UNREADABLE = /[□�]/gu;
+
+/**
+ * A label a person can read. Whitespace and control characters are drawn as
+ * visible symbols instead of font-fallback boxes, a bare 32-hex entity id is
+ * shortened, and a missing label becomes "unnamed · 1a2b…" (or "U+XXXX" when
+ * the node names a codepoint).
+ */
+export function readableGlomeLabel(label: string | null | undefined, id?: string | null): string {
+  const raw = label ?? '';
+  const shortId = id && HEX_ID.test(id) ? `${id.replace(/^\\x/, '').slice(0, 4).toLowerCase()}…` : '';
+  const unnamed = shortId ? `unnamed · ${shortId}` : 'unnamed';
+  if (!raw) return unnamed;
+  const trimmed = raw.trim();
+  if (HEX_ID.test(trimmed)) return `entity · ${trimmed.replace(/^\\x/, '').slice(0, 4).toLowerCase()}…`;
+  const codepoint = /^u\+([0-9a-f]{4,6})$/i.exec(trimmed);
+  if (codepoint) return `U+${codepoint[1].toUpperCase()}`;
+  // Spaces between words stay spaces; a label that is only whitespace (or a
+  // lone space) is drawn with visible symbols.
+  const allBlank = trimmed === '';
+  let out = '';
+  for (const ch of raw) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if ((ch === ' ' || ch === ' ') && !allBlank) out += ch;
+    else if (VISIBLE_CONTROL[ch]) out += VISIBLE_CONTROL[ch];
+    else if (cp < 0x20) out += String.fromCodePoint(0x2400 + cp); // ␀..␟ control pictures
+    else if ((cp >= 0x80 && cp < 0xa0) || (cp >= 0x200b && cp <= 0x200f) || cp === 0xfeff
+      || (cp >= 0x2028 && cp <= 0x202e) || (cp >= 0x2060 && cp <= 0x2064)) {
+      out += `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+    } else out += ch;
+  }
+  // A replacement box or U+FFFD in the label itself means the text was lost
+  // upstream; keep what survived, or fall back to the short id.
+  const kept = out.replace(UNREADABLE, '').trim();
+  if (!kept) return unnamed;
+  const chars = Array.from(kept);
+  return chars.length > 48 ? `${chars.slice(0, 47).join('')}…` : kept;
+}
+
 /** A metric in [0,1] on the shared steel → signal → error ramp. */
 function metricColor(t: number, palette: GlomePalette): string {
   const x = Math.max(0, Math.min(1, t));
@@ -88,7 +131,8 @@ function metricColor(t: number, palette: GlomePalette): string {
  * - Native `lp_id_to_xyz` / `lp_m_full` (`Laplace-Native/src/geometry.c`):
  *   biased exponent 1021 (`0x3fd`, values in [0.25, 0.5)), where X holds 43 bits
  *   (bits 0..42 of `lp_id`), Y holds 43 bits (bits 43..85), Z holds 42 bits
- *   (bits 86..127), and M holds 51 bits of RLE run count (`lp_m_full`).
+ *   (bits 86..127). M is an integer-valued double (`lp_m_full`): run in bits
+ *   0..29, said (`LP_SAID_*`) 30..32, outcome 33..34, position 35..52.
  * - Engine Core `mantissa_pack` (`Laplace/engine/core/src/mantissa.c`):
  *   biased exponent 1023 (`0x3ff`, values in (-2, -1] U [1, 2)), where sign +
  *   52-bit mantissa holds 53 payload bits per coordinate (X: 53 hash bits, Y: 53
@@ -106,18 +150,23 @@ export function unpackMantissaCoord(
   const exp = Number((raw >> 52n) & 0x7ffn);
   const frac = raw & 0x000fffffffffffffn;
 
-  // Native lp_id_to_xyz / lp_m_full carrier: exponent 0x3fd (1021).
-  if (exp === 0x3fd) {
+  // Native M is not a mantissa carrier: it is an integer-valued double whose
+  // low 30 bits are the run, then said (3), outcome (2) and position (18)
+  // (`lp_m_run` / `lp_m_said` / `lp_m_outcome`, laplace.h). Display the run
+  // share of its 30-bit field; use unpackPathM for the metadata itself.
+  if (axis === 'm' && Number.isInteger(value) && value >= 1 && value < 2 ** 53) {
+    const run30 = Number(BigInt(value) & ((1n << 30n) - 1n)) || 1;
+    return (run30 / 1073741824) * 2 - 1; // 2^30
+  }
+
+  // Native lp_id_to_xyz carrier: exponent 0x3fd (1021).
+  if (exp === 0x3fd && axis !== 'm') {
     if (axis === 'x' || axis === 'y') {
       const part43 = Number(frac & ((1n << 43n) - 1n));
       return (part43 / 8796093022208) * 2 - 1; // 2^43
     }
-    if (axis === 'z') {
-      const part42 = Number(frac & ((1n << 42n) - 1n));
-      return (part42 / 4398046511104) * 2 - 1; // 2^42
-    }
-    const run51 = Number(frac & ((1n << 51n) - 1n));
-    return (run51 / 2251799813685248) * 2 - 1; // 2^51
+    const part42 = Number(frac & ((1n << 42n) - 1n));
+    return (part42 / 4398046511104) * 2 - 1; // 2^42
   }
 
   // Engine Core mantissa_pack carrier: exponent 0x3ff (1023), sign bit = bit 52.
@@ -133,6 +182,21 @@ export function unpackMantissaCoord(
 
   // Already decoded into [-1, 1] display space.
   return Math.max(-1, Math.min(1, value));
+}
+
+/**
+ * Decode a Native path-vertex M (`lp_m_full`, laplace.h): run30 | said3 |
+ * outcome2 | position18, low bits first. Anything that is not an integer in
+ * [1, 2^53) decodes like `lp_m_bits`: run 1 and nothing else.
+ */
+export function unpackPathM(m: number): { run: number; said: number; outcome: number; position: number } {
+  const bits = Number.isInteger(m) && m >= 1 && m < 2 ** 53 ? BigInt(m) : 1n;
+  return {
+    run: Number(bits & ((1n << 30n) - 1n)) || 1,
+    said: Number((bits >> 30n) & 0x7n),
+    outcome: Number((bits >> 33n) & 0x3n),
+    position: Number((bits >> 35n) & ((1n << 18n) - 1n)),
+  };
 }
 
 /**
@@ -491,7 +555,7 @@ function GlomeScene({
       ) : null}
       {labelled.map((i) => (
         <Html key={nodes[i].id} position={positions[i]} zIndexRange={[2, 0]}>
-          <span className={styles.pointLabel}>{nodes[i].label}</span>
+          <span className={styles.pointLabel}>{readableGlomeLabel(nodes[i].label, nodes[i].id)}</span>
         </Html>
       ))}
       {([
@@ -519,7 +583,7 @@ function GlomeScene({
       {hover ? (
         <Html position={project(hover, projection, xmAngle, zmAngle).map((v) => v + 0.08) as [number, number, number]}>
           <div className={styles.tooltip}>
-            <strong>{hover.label}</strong>
+            <strong>{readableGlomeLabel(hover.label, hover.id)}</strong>
             {hover.ordinal != null ? <span> · ord {hover.ordinal}</span> : null}
             {hover.runLength != null && hover.runLength > 1 ? <span> · rle {hover.runLength}</span> : null}
             {hover.mu != null ? <span> · μ {hover.mu.toFixed(1)}</span> : null}
@@ -529,6 +593,9 @@ function GlomeScene({
               : null}
             {projection === 'packed'
               ? <span> · mxyz ({unpackMantissaCoord(hover.x, 'x').toFixed(3)}, {unpackMantissaCoord(hover.y, 'y').toFixed(3)}, {unpackMantissaCoord(hover.z, 'z').toFixed(3)})</span>
+              : null}
+            {projection === 'packed' && hover.m != null && Number.isInteger(hover.m) && hover.m >= 1
+              ? (() => { const m = unpackPathM(hover.m ?? 1); return <span> · M run {m.run} said {m.said} outcome {m.outcome} pos {m.position}</span>; })()
               : null}
             {projection === 'carrier' && hover.m != null && Number.isFinite(hover.m)
               ? <span> · Mmeta {hover.m.toFixed(3)}</span>

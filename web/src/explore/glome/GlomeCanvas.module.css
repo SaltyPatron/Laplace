@@ -127,7 +127,7 @@
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 40rem) {
   .canvas,
   .canvasFill {
     min-height: 22rem;
