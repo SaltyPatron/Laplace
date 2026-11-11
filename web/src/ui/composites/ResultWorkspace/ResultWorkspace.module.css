@@ -31,7 +31,7 @@
   .values dd { margin: 0; min-width: 0; }
   .values pre { margin: 0; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .error { color: var(--color-error); }
-  @media (max-width: 600px) {
+  @media (max-width: 40rem) {
     .values > div { grid-template-columns: minmax(0, 1fr); gap: .25rem; }
     .table th, .table td { min-width: 6rem; max-width: 24ch; }
   }

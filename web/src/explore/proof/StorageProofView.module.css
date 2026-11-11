@@ -709,7 +709,7 @@
   }
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 64rem) {
   .hero,
   .proofGrid,
   .glomePair {
@@ -729,7 +729,7 @@
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 40rem) {
   .root {
     padding: 0.5rem;
   }

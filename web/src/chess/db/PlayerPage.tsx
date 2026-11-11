@@ -258,7 +258,7 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
 
       {player.opponents.length > 0 ? (
         <Panel title="Head to head">
-          <Muted style={{ marginBottom: '0.5rem' }}>
+          <Muted className={styles.lede}>
             Every meeting between the two players adds to one shared record. Opponents are ranked
             by the cautious standing of that record (rating minus twice its uncertainty), so a long
             even series against a strong rival ranks above a short lopsided one.
@@ -292,7 +292,7 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
 
       {player.ratings.length > 0 ? (
         <Panel title="Ratings witnessed">
-          <Muted style={{ marginBottom: '0.5rem' }}>
+          <Muted className={styles.lede}>
             Elo as the sources recorded it on each game: a spread, not a single number.
             These are other organisations' ratings of this player, kept apart from Laplace's own standing.
           </Muted>

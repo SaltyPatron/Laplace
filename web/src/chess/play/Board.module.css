@@ -334,7 +334,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 64rem) {
   .board,
   .evalCol {
     height: min(100cqh, calc(100cqw - 4.2rem), 92vw);

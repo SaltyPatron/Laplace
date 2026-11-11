@@ -34,7 +34,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 64rem) {
   .layout {
     display: flex;
     flex-direction: column;

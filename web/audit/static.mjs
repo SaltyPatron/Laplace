@@ -41,11 +41,14 @@ record('DS-2', count(css, /font-size:\s*(?!var\()[^;]*\d/));
 record('DS-3', count(css, /(?:^|[\s;{])(padding|margin|gap)[a-z-]*:\s*[^;]*\d(rem|px)/, (f) => rel(f) === 'ui/theme.css'));
 {
   const bps = new Set();
-  for (const f of css) for (const m of read(f).matchAll(/@media[^{]*?(\d+)px/g)) bps.add(m[1]);
+  for (const f of css) for (const m of read(f).matchAll(/@media[^{]*?width:\s*(\d+(?:\.\d+)?)(px|rem)/g)) bps.add(m[2] === 'rem' ? Number(m[1]) * 16 : Number(m[1]));
   out['DS-4'] = { pass: bps.size <= 3, value: bps.size, detail: [...bps].sort((a, b) => a - b) };
 }
 record('DS-5', count(features, /<(button|input|select|table)\b/));
-record('DS-6', [...count(code, /style=\{\{/), ...count(css, /!important/)]);
+// Static inline styles only: a literal value ('0.5rem', 0, 'grid'). Data-bound values (bar widths, rating
+// hues, drag positions) are computed per render and belong inline. The reduced-motion override in the
+// theme is the one sanctioned !important.
+record('DS-6', [...count(code, /style=\{\{\s*[A-Za-z]+:\s*(['"][^'"]*['"]|\d)/), ...count(css, /!important/, (f) => rel(f) === 'ui/theme.css')]);
 {
   const dead = ['home/HomeView.tsx', 'home/Scoreboard.tsx', 'home/Leaderboards.tsx', 'topic/TopicView.tsx'].filter((p) => existsSync(join(src, p)));
   out['CODE-1'] = { pass: dead.length === 0, value: dead.length, detail: dead };

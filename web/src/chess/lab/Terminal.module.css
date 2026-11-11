@@ -217,7 +217,7 @@
     box-shadow: var(--shadow-instrument);
   }
 
-  @media (max-width: 46rem) {
+  @media (max-width: 64rem) {
     .row {
       grid-template-columns: 4.2rem 1fr;
     }

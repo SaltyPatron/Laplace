@@ -36,7 +36,7 @@
     align-items: start;
   }
 
-  @media (max-width: 62rem) {
+  @media (max-width: 64rem) {
     .columns {
       grid-template-columns: 1fr;
     }

@@ -1,4 +1,8 @@
 @layer components {
+  .lede {
+    margin-bottom: var(--space-2);
+  }
+
   .dbPage {
     width: min(100%, 1380px);
     margin: 0 auto;
@@ -410,7 +414,7 @@
     align-items: start;
   }
 
-  @media (max-width: 52rem) {
+  @media (max-width: 64rem) {
     .replay {
       grid-template-columns: 1fr;
     }
@@ -566,7 +570,7 @@
     font-weight: 600;
   }
 
-  @media (max-width: 700px) {
+  @media (max-width: 40rem) {
     .heroTitleRow {
       flex-direction: column;
     }

@@ -116,5 +116,6 @@
     .account input { min-width: 0; width: 100%; }
   }
   .scrim { position: fixed; inset: 0; z-index: calc(var(--z-rail) - 1); background: color-mix(in srgb, var(--color-navy) 40%, transparent); }
-  @media (min-width: 40.01rem) and (min-width: 64.01rem) { .scrim { display: none; } }
+  .scrim { display: none; }
+  @media (max-width: 64rem) { .scrim { display: block; } }
 }

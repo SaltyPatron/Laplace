@@ -26,7 +26,7 @@
     }
   }
 
-  @media (max-width: 960px) {
+  @media (max-width: 64rem) {
     .panes {
       grid-template-columns: 1fr;
     }

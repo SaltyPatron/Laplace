@@ -23,8 +23,6 @@
   }
 
   .main > * { flex: 1; min-height: 0; min-width: 0; }
-  .title { color: #f7fbfd !important; text-decoration: none; font-weight: inherit; }
-  .title:hover { color: #ffffff !important; }
   .skipLink {
     position: fixed; inset-block-start: var(--space-2); inset-inline-start: var(--space-2);
     z-index: var(--z-modal, 1000); transform: translateY(-200%);
@@ -51,5 +49,5 @@
   }
   .accountLinks { display: flex; gap: var(--space-3); font-size: var(--text-sm); }
   .accountLinks a { color: #f7fbfd; }
-  @media (max-width: 720px) { .search { width: 100%; } }
+  @media (max-width: 40rem) { .search { width: 100%; } }
 }

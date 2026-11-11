@@ -164,7 +164,7 @@
   }
   .exampleChip:hover { border-color: var(--primitive-blue-500); }
 
-  @media (max-width: 900px) {
+  @media (max-width: 64rem) {
     .ladder { grid-template-columns: 1fr; }
     .node { order: -1; }
   }

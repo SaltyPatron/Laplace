@@ -151,7 +151,7 @@
   }
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 64rem) {
   .layout {
     display: block;
     overflow-y: auto;

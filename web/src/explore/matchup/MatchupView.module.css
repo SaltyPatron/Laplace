@@ -181,7 +181,7 @@
   .tapeType { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
   .tapeEmpty { color: var(--color-text-muted); }
 
-  @media (max-width: 860px) {
+  @media (max-width: 64rem) {
     .tale { grid-template-columns: 1fr; }
     .center { order: 3; }
     .tapeGrid { grid-template-columns: 1fr; }
