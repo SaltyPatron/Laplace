@@ -93,7 +93,7 @@ if ($Operation -eq 'Install') {
     Write-Atomic $installed ($c | ConvertTo-Json -Depth 8)
     if ($PSCommandPath -ne $script) { Copy-Item -LiteralPath $PSCommandPath -Destination $script -Force }
     $client=Join-Path $root 'api-client.json'
-    Write-Atomic $client (@{url=$c.url;tokenFile=(Join-Path $root 'control.token');operators=$c.operators} | ConvertTo-Json -Depth 5)
+    Write-Atomic $client (@{url=$c.url;tokenFile=(Join-Path $root 'control.token')} | ConvertTo-Json -Depth 5)
     foreach($entry in $c.public_files.PSObject.Properties) {
         if ([IO.Path]::GetFileName($entry.Name) -ne $entry.Name) { throw 'Public configuration must remain in the installation directory.' }
         Write-Atomic (Join-Path $root $entry.Name) $(if($entry.Value -is [string]){$entry.Value}else{$entry.Value | ConvertTo-Json -Depth 12})

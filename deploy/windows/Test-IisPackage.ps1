@@ -20,7 +20,7 @@ try {
     foreach($leaf in 'state','state/keys','state/logs','state/output','web/releases'){$null=New-Item -ItemType Directory -Path (Join-Path $WorkDirectory $leaf) -Force}
     Write-IisAtomic (Join-Path $WorkDirectory 'state/postgres-root.crt') $c.database.certificate
     Write-IisAtomic (Join-Path $WorkDirectory 'state/control.token') $records.chess.control_token
-    Write-IisAtomic (Join-Path $WorkDirectory 'state/chess-client.json') (Iis-Json @{url=$c.chess.url;operators=$c.chess.operators;tokenFile=(Join-Path $WorkDirectory 'state/control.token')})
+    Write-IisAtomic (Join-Path $WorkDirectory 'state/chess-client.json') (Iis-Json @{url=$c.chess.url;tokenFile=(Join-Path $WorkDirectory 'state/control.token')})
     $release=Join-Path $WorkDirectory ('web/releases/'+$manifest.revision)
     if(-not(Test-Path $release)){Copy-Item -LiteralPath $c.publish -Destination $release -Recurse}
     $null=Test-IisPackage $release

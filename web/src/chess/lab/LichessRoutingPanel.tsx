@@ -18,7 +18,7 @@ interface Control {
   profiles: Profile[];
   bot?: { connected: boolean; username?: string; gamesRecorded: number; error?: string; recentLog: string[] };
 }
-interface View { available: boolean; canControl: boolean; error?: string; control?: Control }
+interface View { available: boolean; canControl: boolean; controlRefusal?: string | null; error?: string; control?: Control }
 
 export function LichessRoutingPanel() {
   const [view, setView] = useState<View | null>(null);
@@ -90,7 +90,7 @@ export function LichessRoutingPanel() {
       </>}
       {profile && <p>{'database' in profile && <>Database: <strong>{profile.database}</strong>. </>}Up to {profile.maxConcurrent} games; {profile.rated ? 'rated and casual' : 'casual only'}.</p>}
       <Button onClick={() => void apply()} disabled={!view?.canControl || busy || !valid}>{busy ? 'Saving…' : 'Apply routing'}</Button>
-      {!view?.canControl && <Muted>Your signed-in account can view this configuration but does not have permission to change the bot destination.</Muted>}
+      {view && !view.canControl && <Muted>{view.controlRefusal ?? "You can view this configuration but cannot change the bot destination."}</Muted>}
       <p>Controller: {control.controller}. State: <strong>{control.phase}</strong>. Active: {profiles.find(p => p.id === control.activeProfile)?.label ?? 'none'}.</p>
       {routing && control.activeSelection && <p>Reading: {routing.sources.find(s => s.id === control.activeSelection?.readSource)?.label}. Recording: {routing.recordingTargets.find(t => t.id === control.activeSelection?.recordingTarget)?.label}.</p>}
       {(control.activeSelection ? control.selection.revision !== control.activeSelection.revision : control.selection.profile !== control.activeProfile) && control.phase !== 'off' && <Muted>Requested: {profiles.find(p => p.id === control.selection.profile)?.label ?? 'off'}.</Muted>}
