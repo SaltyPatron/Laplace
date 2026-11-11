@@ -26,6 +26,11 @@ async function open(page: Page, path: string, settle = 4000) {
   await page.waitForTimeout(settle);
 }
 const mainText = (page: Page) => page.locator('main').innerText();
+/** Lenses are tabs on the subject page; the open lens is its tabpanel. */
+async function lens(page: Page, name: string) {
+  await page.getByRole('tab', { name, exact: true }).click();
+  return page.getByRole('tabpanel', { name });
+}
 
 // ---------- auth ----------
 test('[AUTH-1] /v1/auth/me reports the key principal', async ({ request }) => {
@@ -134,7 +139,7 @@ test('[CHAT-3] failures show a plain message and Retry', async ({ page, context 
   await box.fill('test'); await box.press('Enter');
   await page.waitForTimeout(8000);
   expect(await mainText(page)).not.toMatch(/Exception/);
-  await expect(page.getByRole('button', { name: /retry/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /retry|try again/i })).toBeVisible();
 });
 
 // ---------- integrity ----------
@@ -147,7 +152,8 @@ test('[GLOME-1] hash/mantissa is not a peer geometry view', async ({ page }) => 
 
 test('[CLAIM-1] claims show witness, source and standing', async ({ page }) => {
   await open(page, `/explore/entity/${DOG}`, 8000);
-  await page.getByText(/supporting claims/i).first().click();
+  // Each claim row opens its witnesses (source, trust, games) from its "N sources" button.
+  await page.getByRole('button', { name: /^\d+ sources? ·/ }).first().click();
   await page.waitForTimeout(3000);
   const text = await mainText(page);
   expect(text).not.toMatch(/Recorded claim \d/);
@@ -182,7 +188,7 @@ test('[GRAPH-1] bank values are not graph nodes', async ({ page }) => {
 // ---------- containment & geometry ----------
 test('[CONT-1] Appears in is first-class and ungated', async ({ page }) => {
   await open(page, `/explore/entity/${DOG}`, 8000);
-  const section = page.getByRole('region', { name: /appears in/i });
+  const section = await lens(page, 'Appears in');
   await expect(section).toBeVisible();
   await expect(section).toContainText(/dog/i);
   expect(await mainText(page)).not.toMatch(/Payment required/i);
@@ -190,7 +196,7 @@ test('[CONT-1] Appears in is first-class and ungated', async ({ page }) => {
 
 test('[CONT-2] containment has total, paging and source per row', async ({ page }) => {
   await open(page, `/explore/entity/${DOG}`, 8000);
-  const section = page.getByRole('region', { name: /appears in/i });
+  const section = await lens(page, 'Appears in');
   await expect(section).toContainText(/\d[\d,]* (sentences|containers|results)/i);
   await expect(section.getByRole('button', { name: /next/i })).toBeVisible();
   const rows = section.getByRole('listitem');
@@ -200,7 +206,7 @@ test('[CONT-2] containment has total, paging and source per row', async ({ page 
 
 test('[CONT-3] the word is highlighted in each container', async ({ page }) => {
   await open(page, `/explore/entity/${DOG}`, 8000);
-  const rows = page.getByRole('region', { name: /appears in/i }).getByRole('listitem');
+  const rows = (await lens(page, 'Appears in')).getByRole('listitem');
   await expect(rows.first().locator('mark')).toBeVisible();
 });
 
@@ -213,7 +219,7 @@ test('[SHAPE-1] trajectory comparison exists', async ({ page }) => {
 test('[GRAPH-2] graph has filters, legend and node panel', async ({ page }) => {
   await open(page, `/explore/entity/${DOG}?inspect=1&detail=graph`, 12000);
   await expect(page.getByRole('combobox', { name: /relation/i }).or(page.getByRole('group', { name: /relation/i }))).toBeVisible();
-  await expect(page.getByRole('list', { name: /legend/i }).or(page.getByText(/legend/i))).toBeVisible();
+  await expect(page.getByRole('list', { name: /legend/i }).or(page.getByText(/how to read this/i)).first()).toBeVisible();
 });
 
 test('[GRAPH-3] 2D graph shows labels and honors hops', async ({ page }) => {
@@ -234,7 +240,7 @@ test('[CONST-1] constellation loads fast with readable labels', async ({ page })
 
 test('[UNI-1] unicode glome can find a character', async ({ page }) => {
   await open(page, '/unicode', 8000);
-  const search = page.getByRole('searchbox').or(page.getByPlaceholder(/character|codepoint/i)).last();
+  const search = page.getByLabel('Find a character');
   await search.fill('A'); await search.press('Enter');
   await page.waitForTimeout(3000);
   expect(await mainText(page)).toMatch(/U\+0041/);
@@ -344,7 +350,7 @@ test('[LAB-2] platform admin can change lichess routing', async ({ page }) => {
 
 test('[DATA-1] admission history is listed', async ({ page }) => {
   await open(page, '/data', 5000);
-  await expect(page.getByRole('region', { name: /admitted|history/i })).toBeVisible();
+  await expect(page.getByRole('region', { name: /admission history/i })).toBeVisible();
 });
 
 // ---------- admin ----------
@@ -369,7 +375,10 @@ test('[ADM-3] vacuum is not primary and needs confirmation', async ({ page }) =>
 test('[ADM-4] workspace directory is complete', async ({ page }) => {
   await open(page, '/operator?section=workspaces', 6000);
   const text = await mainText(page);
-  expect(text).not.toMatch(/Workspace ID\s*\n\s*(\n|$)/);
+  // Every "Workspace ID" label is followed by an ID (a blank line may sit between them).
+  const labels = text.match(/Workspace ID/g)?.length ?? 0;
+  expect(labels).toBeGreaterThan(0);
+  expect(text.match(/Workspace ID\s+[\w-]+/g)?.length ?? 0).toBe(labels);
 });
 
 test('[ADM-5] operator copy is guidance', async ({ page }) => {

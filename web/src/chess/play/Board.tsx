@@ -200,8 +200,8 @@ export function Board({
                     onPointerDown={(e) => onPointerDown(e, sq)}
                     onPointerUp={(e) => onPointerUp(e, sq)}
                   >
-                    {f === colOrder[0] && <span className={cn(styles.coord, styles.coordRank)} aria-hidden="true">{rank}</span>}
-                    {boardRow === rowOrder[7] && <span className={cn(styles.coord, styles.coordFile)} aria-hidden="true">{FILES[f]}</span>}
+                    {f === colOrder[0] && <span className={cn(styles.coord, styles.coordRank)} data-board-coordinate="rank" aria-hidden="true">{rank}</span>}
+                    {boardRow === rowOrder[7] && <span className={cn(styles.coord, styles.coordFile)} data-board-coordinate="file" aria-hidden="true">{FILES[f]}</span>}
                     {piece && <span className={styles.piece}>{GLYPH[piece]}</span>}
                     {showPick && sq === botBestTo && (
                       <Tooltip>

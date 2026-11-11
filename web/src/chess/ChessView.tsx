@@ -157,7 +157,8 @@ export function ChessView() {
 
   return (
 
-    <div className={styles.layout}>
+    // The board and its panel lay out by the space the play area has, not the window width.
+    <div className={styles.frame}><div className={styles.layout}>
 
       <div className={styles.main}>
 
@@ -327,7 +328,7 @@ export function ChessView() {
 
       </Sidebar>
 
-    </div>
+    </div></div>
 
   );
 
