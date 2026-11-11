@@ -114,7 +114,7 @@ export function GraphTab({
   }, [autoTried, centerId]);
 
   return (
-    <Panel title="Consensus web" fill>
+    <Panel title="Web" fill>
       {needsGate ? (
         <GatePrompt
           serviceId="visualization.deep_export"
@@ -139,7 +139,7 @@ export function GraphTab({
             <div className={styles.actions}>
               <details className={styles.settings}>
                 <summary className={styles.settingsSummary}>
-                  Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes
+                  Graph settings · {hops} {hops === 1 ? 'hop' : 'hops'} · {fanout} per subject · up to {nodeCapacity} subjects
                 </summary>
                 <div className={styles.settingsBody}>
                   <Field label="hops" layout="row" htmlFor="web-hops">
@@ -179,11 +179,11 @@ export function GraphTab({
                 </div>
               </details>
               <Button type="button" size="sm" onClick={() => void expand()} disabled={busy}>
-                {busy ? 'Crawling…' : web ? 'Recrawl web' : 'Expand web'}
+                {busy ? 'Walking…' : web ? 'Walk again' : 'Walk the web'}
               </Button>
               {web ? (
                 <Button type="button" size="sm" variant="ghost" onClick={() => { setWeb(null); setTruncated(false); }} disabled={busy}>
-                  Reset to 1-hop
+                  Back to direct strands
                 </Button>
               ) : null}
             </div>
@@ -191,14 +191,14 @@ export function GraphTab({
         />
         {truncated ? (
           <Muted className={styles.note}>
-            Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per parent).
+            Stopped at {(maxNodes || nodeCapacity).toLocaleString()} subjects. Each subject keeps its {fanout} strongest strands; raise the limits in Graph settings to see more.
           </Muted>
-        ) : (
+        ) : web ? (
           <Muted className={styles.note}>
-            Node election: ≤{fanout} strongest unseen per parent · exact induced testimony restored between retained nodes · native normalized-Laplacian belief geometry.
+            Walked {hops} {hops === 1 ? 'hop' : 'hops'} out, keeping each subject's {fanout} strongest strands. Strands between any two subjects shown are all drawn.
           </Muted>
-        )}
-        {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}
+        ) : null}
+        {busy && !web ? <LoadingText>Walking the web…</LoadingText> : null}
         {err ? <ErrorText>{err}</ErrorText> : null}
       </div>
     </Panel>

@@ -8,6 +8,8 @@ import { ensureVisualizationContrast, lerpColor, rgba, useVisualizationPalette, 
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
+import { isPackagingRelation } from '../../data/facets';
+import { relationWords } from '../../domain/Strand/StrandList';
 
 const ForceGraph2D = lazy(() => import('react-force-graph-2d').then((m) => ({ default: m.default }))) as unknown as ComponentType<any>;
 const ForceGraph3D = lazy(() => import('react-force-graph-3d').then((m) => ({ default: m.default }))) as unknown as ComponentType<any>;
@@ -406,14 +408,23 @@ export function ConsensusGraph({
     };
   }, []);
 
-  const baseData = useMemo(
-    () => (web ? fromWeb(web, walkPath) : fromStar(centerId, centerLabel, edges, walkPath)),
+  const rawData = useMemo(
+    () => withoutPackaging(web ? fromWeb(web, walkPath) : fromStar(centerId, centerLabel, edges, walkPath), centerId),
     [web, centerId, centerLabel, edges, walkPath],
   );
+  const relations = useMemo(() => relationCounts(rawData.links), [rawData.links]);
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => setHidden(new Set()), [centerId]);
+  const baseData = useMemo(() => withoutRelations(rawData, hidden, centerId), [rawData, hidden, centerId]);
   const data = useMemo(
     () => graphForDimension(baseData, dim, centerId),
     [baseData, dim, centerId],
   );
+  const toggleRelation = (type: string) => setHidden((prev) => {
+    const next = new Set(prev);
+    if (next.has(type)) next.delete(type); else next.add(type);
+    return next;
+  });
 
   const maxHop = useMemo(
     () => Math.max(0, ...data.nodes.map((n) => n.hop)),
@@ -625,17 +636,39 @@ export function ConsensusGraph({
         ) : null}
         {toolbar}
         <Muted className={styles.legend}>
-          {expanded
-            ? beliefMode
-              ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · native normalized-Laplacian belief geometry · node hue = support/refutation · node mass = witnesses · refutations do not bind`
-              : `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · force projection · node hue = support/refutation · node mass = witnesses · signed Glicko drives attraction`
-            : `1-hop · ${data.nodes.length}n · expand for native belief geometry`}
-          {' · '}
-          {dim !== '2d'
-            ? 'WASD/arrows move · Q/E turn · PgUp/PgDn up/down · Home origin · End antipode · Shift sprint · LMB orbit · MMB/RMB pan · click recenter · dbl-click open'
-            : 'drag pan · scroll zoom · double-click open'}
+          {`${data.nodes.length.toLocaleString()} ${data.nodes.length === 1 ? 'subject' : 'subjects'} · ${data.links.length.toLocaleString()} ${data.links.length === 1 ? 'strand' : 'strands'} · reaches ${maxHop} ${maxHop === 1 ? 'hop' : 'hops'} out`}
+          {expanded ? '' : ' · expand to walk further'}
         </Muted>
       </div>
+      {relations.length > 0 ? (
+        <div className={styles.relations} role="group" aria-label="Relations shown">
+          {relations.map(([type, count]) => (
+            <button
+              key={type}
+              type="button"
+              className={styles.relation}
+              aria-pressed={!hidden.has(type)}
+              onClick={() => toggleRelation(type)}
+              title={hidden.has(type) ? 'Show these strands' : 'Hide these strands'}
+            >
+              {type === 'walk' ? 'your walk' : relationWords(type)} <span className={styles.relationCount}>{count}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <details className={styles.key}>
+        <summary>How to read this</summary>
+        <ul>
+          <li>Each dot is a subject; each line is a strand that sources attest. Thicker, brighter strands pull harder; red strands are disputed or refuted.</li>
+          <li>Larger dots have more witnesses. Dot colour shows whether the strands around it are supported or opposed.</li>
+          <li>{beliefMode
+            ? 'Belief layout: positions come from the standing of the strands themselves, so subjects that sources tie together sit together.'
+            : 'Force layout: strands pull subjects together in proportion to their standing.'}</li>
+          <li>{dim !== '2d'
+            ? 'Move with WASD or the arrow keys, Q/E to turn, PgUp/PgDn for up and down. Drag to orbit, right-drag to pan. Click a subject to fly to it; double-click to open it.'
+            : 'Drag to pan, scroll to zoom. Double-click a subject to open it.'}</li>
+        </ul>
+      </details>
       {walkPath.length > 0 ? (
         <Muted className={styles.overlayNote}>Walk path overlay ({walkPath.length} steps)</Muted>
       ) : null}
@@ -673,10 +706,10 @@ export function ConsensusGraph({
             nodeLabel={(n: WebNode) => {
               const visual = nodeVisuals.get(n.id);
               return visual
-                ? `${n.label} · hop ${n.hop} · +${visual.support.toFixed(2)} / −${visual.opposition.toFixed(2)} standing · ${visual.witnesses.toLocaleString()} witnesses`
-                : `${n.label} · hop ${n.hop}`;
+                ? `${n.label} · ${hopWords(n.hop)} · ${visual.witnesses.toLocaleString()} ${visual.witnesses === 1 ? 'witness' : 'witnesses'}`
+                : `${n.label} · ${hopWords(n.hop)}`;
             }}
-            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
+            linkLabel={(l: WebEdge) => strandTooltip(l)}
             nodeRelSize={1.55}
             nodeVal={(n: WebNode) => nodeVisuals.get(n.id)?.val ?? 1}
             nodeColor={(n: WebNode) => nodeVisuals.get(n.id)?.color ?? palette.muted}
@@ -727,10 +760,10 @@ export function ConsensusGraph({
             nodeLabel={(n: WebNode) => {
               const visual = nodeVisuals.get(n.id);
               return visual
-                ? `${n.label} · hop ${n.hop} · +${visual.support.toFixed(2)} / −${visual.opposition.toFixed(2)} standing · ${visual.witnesses.toLocaleString()} witnesses`
-                : `${n.label} · hop ${n.hop}`;
+                ? `${n.label} · ${hopWords(n.hop)} · ${visual.witnesses.toLocaleString()} ${visual.witnesses === 1 ? 'witness' : 'witnesses'}`
+                : `${n.label} · ${hopWords(n.hop)}`;
             }}
-            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
+            linkLabel={(l: WebEdge) => strandTooltip(l)}
             linkWidth={(l: WebEdge) => 0.3 + binding(l.weight) * 1.25 + witnessMass(l.witnesses) * 0.65}
             linkColor={(l: WebEdge) => {
               if (l.walk) return palette.signal;
@@ -759,11 +792,14 @@ export function ConsensusGraph({
               ctx.arc(x, y, r, 0, 2 * Math.PI);
               ctx.fillStyle = visual?.color ?? hopColor(node.hop, node.walk || node.id === centerId, palette);
               ctx.fill();
-              if (globalScale >= 1.15) {
-                const label = node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label;
-                const fontSize = 10 / globalScale;
-                ctx.font = `${fontSize}px sans-serif`;
-                ctx.fillStyle = palette.muted;
+              if (labelledIds.has(node.id) || globalScale >= 2.5) {
+                const label = node.label.length > 22 ? `${node.label.slice(0, 21)}…` : node.label;
+                const fontSize = 11 / globalScale;
+                ctx.font = `${node.id === centerId ? '600 ' : ''}${fontSize}px sans-serif`;
+                ctx.lineWidth = 3 / globalScale;
+                ctx.strokeStyle = palette.background;
+                ctx.strokeText(label, x + r + 1.2, y + fontSize * 0.35);
+                ctx.fillStyle = node.id === centerId ? palette.primary : palette.muted;
                 ctx.fillText(label, x + r + 1.2, y + fontSize * 0.35);
               }
             }}
@@ -897,4 +933,41 @@ function fromStar(
 
 function walkIdsHas(walkPath: WalkPathNode[], id: string) {
   return walkPath.some((n) => n.idHex === id);
+}
+
+const hopWords = (hop: number) => (hop === 0 ? 'centre' : `${hop} ${hop === 1 ? 'hop' : 'hops'} out`);
+
+function strandTooltip(l: WebEdge): string {
+  if (l.walk) return 'your walk';
+  const parts = [relationWords(l.type)];
+  if (l.witnesses > 0) parts.push(`${l.witnesses.toLocaleString()} ${l.witnesses === 1 ? 'witness' : 'witnesses'}`);
+  if (l.rating) parts.push(`standing ${l.rating.toFixed(0)} ± ${(2 * l.rd).toFixed(0)}`);
+  if (l.refuted) parts.push('refuted');
+  else if (l.weight < 0) parts.push('opposed');
+  return parts.join(' · ');
+}
+
+const endpoint = (end: unknown) => (typeof end === 'string' ? end : (end as WebNode).id);
+
+/** Packaging pointers and bank fields are filters, never strands: they must not appear as web nodes. */
+export function withoutPackaging(data: GraphData, centerId: string): GraphData {
+  return withoutRelations(data, null, centerId);
+}
+
+/** Drop strands of hidden (or packaging) relations, then subjects no remaining strand reaches. */
+export function withoutRelations(data: GraphData, hidden: ReadonlySet<string> | null, centerId: string): GraphData {
+  const links = data.links.filter((l) => l.walk || (!isPackagingRelation(l.type) && !hidden?.has(l.type)));
+  if (links.length === data.links.length) return data;
+  const kept = new Set<string>([centerId]);
+  for (const l of links) {
+    kept.add(endpoint(l.source));
+    kept.add(endpoint(l.target));
+  }
+  return { nodes: data.nodes.filter((n) => n.walk || kept.has(n.id)), links };
+}
+
+function relationCounts(links: WebEdge[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const l of links) counts.set(l.type, (counts.get(l.type) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
