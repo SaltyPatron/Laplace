@@ -8,3 +8,11 @@ CREATE OR REPLACE FUNCTION consensus.eff_mu(p_rating double precision, p_deviati
 BEGIN ATOMIC
     SELECT public.laplace_confidence(p_rating, p_deviation, 2);
 END;
+
+-- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
+-- the conservative bound in rating points x 1e9, the literal form the eff_mu btrees index (rating - 2*rd).
+CREATE OR REPLACE FUNCTION consensus.eff_mu(p_rating bigint, p_rd bigint)
+    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT p_rating - 2 * p_rd;
+END;

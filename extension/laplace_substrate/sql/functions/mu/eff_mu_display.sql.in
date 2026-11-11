@@ -12,3 +12,17 @@ CREATE OR REPLACE FUNCTION consensus.eff_mu_display(p_confidence double precisio
 BEGIN ATOMIC
     SELECT round(p_confidence::numeric, 3);
 END;
+
+-- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
+-- the bound in rating points, three decimals.
+CREATE OR REPLACE FUNCTION consensus.eff_mu_display(p_rating bigint, p_rd bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT round((consensus.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3);
+END;
+
+CREATE OR REPLACE FUNCTION consensus.eff_mu_display(p_eff_mu_fp bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT round((p_eff_mu_fp / 1e9)::numeric, 3);
+END;

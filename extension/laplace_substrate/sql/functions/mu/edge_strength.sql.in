@@ -5,3 +5,11 @@ CREATE OR REPLACE FUNCTION consensus.edge_strength(p_rating double precision, p_
 BEGIN ATOMIC
     SELECT consensus.eff_mu(p_rating, p_deviation);
 END;
+
+-- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
+-- the Native reading of its points.
+CREATE OR REPLACE FUNCTION consensus.edge_strength(p_rating bigint, p_rd bigint)
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT consensus.edge_strength(p_rating / 1e9::double precision, p_rd / 1e9::double precision);
+END;

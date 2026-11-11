@@ -5,3 +5,11 @@ CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(p_rating double precision,
 BEGIN ATOMIC
     SELECT 2 * consensus.eff_mu(p_rating, p_deviation) - 1;
 END;
+
+-- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
+-- the Native reading of its points.
+CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(p_rating bigint, p_rd bigint)
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT consensus.walk_edge_weight(p_rating / 1e9::double precision, p_rd / 1e9::double precision);
+END;

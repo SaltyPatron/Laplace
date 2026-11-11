@@ -6,7 +6,7 @@ BEGIN;
 SELECT consensus.glicko2_neutral_mu() = 1500 AS anchor_is_native,
        consensus.glicko2_initial_rd() = 350 AS unrated_deviation_is_native,
        consensus.glicko2_initial_volatility() = 0.06 AS unrated_volatility_is_native,
-       to_regprocedure('consensus.eff_mu(bigint,bigint)') IS NULL AS fp1e9_eff_mu_retired,
+       consensus.walk_edge_weight(1600000000000::bigint, 30000000000::bigint) = consensus.walk_edge_weight(1600::float8, 30::float8) AS fp1e9_is_native_read,
        to_regprocedure('consensus.effective_mu(bigint,bigint)') IS NULL AS duplicate_effective_mu_retired;
 
 -- eff_mu is the Native conservative confidence; strength is the same reading and
