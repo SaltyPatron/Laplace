@@ -7,12 +7,9 @@ import {
 import styles from './Admin.module.css';
 
 /**
- * Index health and repair through installed operations: `ops.index_health` lists
- * invalid indexes, including partitioned parents left as shells with no valid
- * leaves, and reindex, ANALYZE and VACUUM act on the same database from here.
- *
- * Each operation is long-running and cancellable from the Activity tab rather than
- * bounded; each commits incrementally, so cancelling keeps completed work.
+ * Database maintenance: lists invalid indexes (through `ops.index_health`) and runs
+ * reindex, ANALYZE and VACUUM. Each action can be stopped from System activity and
+ * keeps the work it already finished.
  */
 export function Repair() {
   const { tenant } = useAppStore();
@@ -45,7 +42,7 @@ export function Repair() {
     setNote(null);
     try {
       await fn();
-      setNote(after ?? `${label} finished.`);
+      setNote(after ?? 'Finished.');
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -84,30 +81,27 @@ export function Repair() {
         {err && <ErrorText className={styles.runErrBox}>{err}</ErrorText>}
         {note && <Banner variant="info">{note}</Banner>}
 
-        {health == null ? <LoadingText>Reading ops.index_health()…</LoadingText>
+        {health == null ? <LoadingText>Checking indexes…</LoadingText>
           : health.length === 0 ? (
-            <Muted>
-              All indexes are valid. Row counts alone can look healthy while an index is unusable;
-              this check reads index validity directly.
-            </Muted>
+            <Muted>All indexes are valid. Nothing needs rebuilding.</Muted>
           ) : (
             <>
               {shells.length > 0 && (
                 <Banner variant="warning">
-                  {shells.length} partitioned parent{shells.length === 1 ? ' has' : 's have'} zero
-                  leaves — the shell class: present in the catalog, unusable for reads, invisible
-                  to row counts.
+                  {shells.length === 1 ? '1 partitioned index has' : `${shells.length} partitioned indexes have`} no
+                  usable parts. Queries cannot use {shells.length === 1 ? 'it' : 'them'} even though the table
+                  still reports its rows. Rebuild invalid indexes to fix this.
                 </Banner>
               )}
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
                   <thead>
                     <tr>
-                      <th scope="col">index</th>
-                      <th scope="col">table</th>
-                      <th scope="col">schema</th>
-                      <th scope="col">partitioned</th>
-                      <th scope="col">leaves</th>
+                      <th scope="col">Index</th>
+                      <th scope="col">Table</th>
+                      <th scope="col">Schema</th>
+                      <th scope="col">Partitioned</th>
+                      <th scope="col">Usable parts</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -129,6 +123,10 @@ export function Repair() {
             </>
           )}
 
+        <Muted>
+          Use Rebuild invalid indexes when this list is not empty. Dry run lists what would be rebuilt
+          without changing anything.
+        </Muted>
         <div className={styles.toolbar}>
           <Button
             variant="ghost"
@@ -136,7 +134,7 @@ export function Repair() {
             onClick={() => void run(
               'reindex dry run',
               () => reindexInvalid(true, 600, { tenant }),
-              'Dry run logged the plan to the server log — read it back with ops.app_log.',
+              'Dry run finished. The list of indexes it would rebuild is in the server log; nothing was changed.',
             )}
           >
             Dry run
@@ -153,21 +151,21 @@ export function Repair() {
 
       <Panel title="Maintenance">
         <Muted>
-          Run ANALYZE when queries slow down even though the right index exists. Run VACUUM to reclaim
-          space after large deletes or reloads; it runs on its own connection and can take hours on the
-          whole database.
+          Refresh statistics (ANALYZE) when queries become slow even though the right indexes exist.
+          Run VACUUM to reclaim space after large deletes or reloads. On the whole database it can take
+          hours; you can stop it from System activity.
         </Muted>
 
         <Button
           variant="ghost"
           loading={busy === 'ANALYZE'}
-          onClick={() => void run('ANALYZE', () => analyzeSubstrate(3600, { tenant }))}
+          onClick={() => void run('ANALYZE', () => analyzeSubstrate(3600, { tenant }), 'Statistics refreshed.')}
         >
-          ANALYZE substrate
+          Refresh statistics (ANALYZE)
         </Button>
 
         <label className={styles.field}>
-          <span>table (blank = whole database)</span>
+          <span>Table (leave empty for the whole database)</span>
           <Input
             value={vacTable}
             onChange={(e) => setVacTable(e.target.value)}
@@ -177,19 +175,18 @@ export function Repair() {
         <div className={styles.toolbar}>
           <label className={styles.liveLabel}>
             <Toggle checked={vacAnalyze} onCheckedChange={setVacAnalyze} aria-label="Also analyze" />
-            ANALYZE too
+            Also refresh statistics
           </label>
           <label className={styles.liveLabel}>
             <Toggle checked={vacFull} onCheckedChange={setVacFull} aria-label="Vacuum full" />
-            FULL
+            Full rewrite
           </label>
           <Button variant="ghost" loading={busy === 'VACUUM'} onClick={startVacuum}>Run VACUUM</Button>
         </div>
         {vacFull && (
           <Muted className={styles.writeWarn}>
-            VACUUM FULL rewrites the table and holds an ACCESS EXCLUSIVE lock for the whole
-            rewrite: reads and writes to it block until it finishes, and it needs free disk equal
-            to the table's size.
+            A full rewrite locks the table until it finishes: nothing can read or write it in the
+            meantime, and it needs free disk space equal to the table's size.
           </Muted>
         )}
       </Panel>
@@ -211,35 +208,33 @@ export function Repair() {
         }
       >
         <p>
-          Each index is rebuilt in its own transaction, so the run is resumable: cancelling from
-          the Activity tab loses only the index in flight.
+          Each index is rebuilt on its own. If you stop the rebuild from System activity, the indexes
+          already rebuilt stay fixed.
         </p>
         <p>
-          The rebuild takes an exclusive lock on each index's table. That is the right trade here —
-          these indexes are <strong>already invalid</strong>, so reads cannot use them and the
-          outage began before the repair did.
+          While an index is rebuilt, its table is locked. These indexes are already unusable, so
+          reads lose nothing they currently have.
         </p>
       </Modal>
 
       <Modal
         open={confirmVacuumFull}
         onClose={() => setConfirmVacuumFull(false)}
-        title={vacFull ? 'VACUUM FULL rewrites the table' : `Run VACUUM on ${vacTable.trim() || 'the whole database'}?`}
+        title={vacFull ? 'Run a full VACUUM rewrite?' : `Run VACUUM on ${vacTable.trim() || 'the whole database'}?`}
         actions={
           <>
             <Button variant="ghost" onClick={() => setConfirmVacuumFull(false)}>Cancel</Button>
-            <Button loading={busy === 'VACUUM'} onClick={startVacuum}>Run it</Button>
+            <Button loading={busy === 'VACUUM'} onClick={startVacuum}>Run VACUUM</Button>
           </>
         }
       >
         {vacFull ? <>
           <p>
-            ACCESS EXCLUSIVE for the whole rewrite: every read and write to{' '}
-            <code>{vacTable.trim() || 'every substrate table'}</code> blocks until it finishes, and
-            it needs free disk equal to the table's current size.
+            Every read and write to <code>{vacTable.trim() || 'every table'}</code> waits until the
+            rewrite finishes, and it needs free disk space equal to the table's current size.
           </p>
-          <p>Plain VACUUM reclaims space without the lock and is almost always what you want.</p>
-        </> : <p>VACUUM does not block reads or writes, but on the whole database it can run for hours and adds I/O load to the host.</p>}
+          <p>A regular VACUUM reclaims space without locking and is usually the better choice.</p>
+        </> : <p>VACUUM does not block reads or writes, but on the whole database it can run for hours and slows other work on the server while it runs.</p>}
       </Modal>
     </div>
   );

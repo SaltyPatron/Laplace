@@ -5,6 +5,7 @@ import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorks
 import { captureRows } from '../ui/lib/resultRows';
 import { useAppStore } from '../store';
 import { closeIngestRun, ingestFiles, ingestRuns, type IngestFile, type IngestRun } from './api';
+import { IngestRunFailure } from './IngestRunFailure';
 import { countText, ingestDuration, ingestStatusTone, OPEN_INGEST_STATES, progressText } from './ingestPresentation';
 import styles from './Admin.module.css';
 
@@ -112,12 +113,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
         <div className={styles.runState}>
           <Status value={run.status} />
           {run.phase && <strong>{run.phase}</strong>}
-          {run.error && (
-            <details className={styles.runErr}>
-              <summary>Run error</summary>
-              <pre className={styles.sig}>{run.error}</pre>
-            </details>
-          )}
+          {run.error && <IngestRunFailure run={run} tenant={tenant} />}
         </div>
       ),
     },
