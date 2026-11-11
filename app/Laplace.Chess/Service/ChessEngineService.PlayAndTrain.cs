@@ -147,7 +147,7 @@ public sealed partial class ChessEngineService
         }
 
         if (status != "ongoing")
-            await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
+            liveHost.FinishPlaySessionAfterReply(sessionId, ParseTerminalStatus(status), adjudicated: false);
 
         return new ChessPlayMoveResult(next.Board.ToFen(), status != "ongoing", status, Legal: true,
             Ply: session.PlyCount, Motifs: motifs);
@@ -194,7 +194,7 @@ public sealed partial class ChessEngineService
         ReturnEngine(search);
 
         if (status != "ongoing")
-            await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
+            liveHost.FinishPlaySessionAfterReply(sessionId, ParseTerminalStatus(status), adjudicated: false);
 
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, reads,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
