@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { exploreLexicon } from '../../query/api';
 import type { ResponseField } from '../../query/types';
@@ -38,34 +38,7 @@ import { EntityHeader } from './EntityHeader';
 import { LexiconEntry } from './LexiconEntry';
 import { decomposableSurface, decompositionMatchesEntity } from './decomposeSurface';
 import type { EntityTab, NeighborMode } from './tabs/types';
-
-const loadOverviewTab = () => import('./tabs/OverviewTab');
-const loadGraphTab = () => import('./tabs/GraphTab');
-const loadGlomeTab = () => import('./tabs/GlomeTab');
-const loadStructureTab = () => import('./tabs/StructureTab');
-const loadLinksTab = () => import('./tabs/LinksTab');
-const loadProvenanceTab = () => import('./tabs/ProvenanceTab');
-const loadExportTab = () => import('./tabs/ExportTab');
-
-const OverviewTab = lazy(() => loadOverviewTab().then((m) => ({ default: m.OverviewTab })));
-const GraphTab = lazy(() => loadGraphTab().then((m) => ({ default: m.GraphTab })));
-const GlomeTab = lazy(() => loadGlomeTab().then((m) => ({ default: m.GlomeTab })));
-const StructureTab = lazy(() => loadStructureTab().then((m) => ({ default: m.StructureTab })));
-const LinksTab = lazy(() => loadLinksTab().then((m) => ({ default: m.LinksTab })));
-const ProvenanceTab = lazy(() => loadProvenanceTab().then((m) => ({ default: m.ProvenanceTab })));
-const ExportTab = lazy(() => loadExportTab().then((m) => ({ default: m.ExportTab })));
-
-const TAB_PREFETCH: Record<EntityTab, () => Promise<unknown>> = {
-  overview: loadOverviewTab,
-  graph: loadGraphTab,
-  glome: loadGlomeTab,
-  structure: loadStructureTab,
-  links: loadLinksTab,
-  provenance: loadProvenanceTab,
-  export: loadExportTab,
-};
-
-const TAB_IDS: EntityTab[] = ['overview', 'graph', 'glome', 'structure', 'links', 'provenance', 'export'];
+import { EntityTabPanel, TAB_IDS, TAB_PREFETCH } from './EntityTabPanel';
 
 export function EntityDetail({ selectedId, selectedLabel, selectedType }: { selectedId?: string; selectedLabel?: string; selectedType?: string } = {}) {
   const { idHex: routeId = '' } = useParams();
@@ -389,60 +362,32 @@ export function EntityDetail({ selectedId, selectedLabel, selectedType }: { sele
       {inspectOpen && unlocked && show ? (
         <>
           <div className={fillTab ? styles.tabFill : undefined}>
-            <Suspense fallback={<LoadingText>Loading entity workspace…</LoadingText>}>
-            {tab === 'overview' ? <OverviewTab entity={show} /> : null}
-            {tab === 'graph' ? (
-              <GraphTab
-                centerId={show.id_hex}
-                centerLabel={show.label}
-                edgesOut={show.consensus_out}
-                edgesIn={show.consensus_in}
-                walkPath={walkPath}
-                onNodeClick={(id) => nav(entityDestination(id, location), { preventScrollReset: true })}
-              />
-            ) : null}
-            {tab === 'glome' ? (
-              <GlomeTab
-                entity={show}
-                neighborMode={neighborMode}
-                neighborsUnlocked={neighborsUnlocked}
-                glomeExtraNodes={glomeExtraNodes}
-                walkHighlight={walkHighlight}
-                onNeighborModeChange={setNeighborMode}
-                onLoadNeighbors={() => void loadNeighbors()}
-              />
-            ) : null}
-            {tab === 'structure' ? (
-              <StructureTab
-                entity={show}
-                preview={preview}
-                decomposeNodes={decomposeNodes}
-                decomposeBusy={decomposeBusy}
-                containersUnlocked={containersUnlocked}
-                containers={containers}
-                onDecompose={() => void runDecompose()}
-                onLoadContainers={() => void loadContainers()}
-              />
-            ) : null}
-            {tab === 'links' ? (
-              <LinksTab
-                linksUnlocked={linksUnlocked}
-                members={members}
-                peers={peers}
-                onLoadLinks={() => void loadLinks()}
-              />
-            ) : null}
-            {tab === 'provenance' ? <ProvenanceTab entity={show} /> : null}
-            {tab === 'export' ? (
-              <ExportTab
-                busy={exportBusy}
-                onExport={() => void downloadExport()}
-                receipt={exportReceipt}
-                witnessRows={show.evidence_count}
-                consensusRows={show.consensus_out.length + show.consensus_in.length}
-              />
-            ) : null}
-            </Suspense>
+            <EntityTabPanel
+              tab={tab}
+              show={show}
+              preview={preview}
+              walkPath={walkPath}
+              onNodeClick={(id) => nav(entityDestination(id, location), { preventScrollReset: true })}
+              neighborMode={neighborMode}
+              neighborsUnlocked={neighborsUnlocked}
+              glomeExtraNodes={glomeExtraNodes}
+              walkHighlight={walkHighlight}
+              onNeighborModeChange={setNeighborMode}
+              onLoadNeighbors={() => void loadNeighbors()}
+              decomposeNodes={decomposeNodes}
+              decomposeBusy={decomposeBusy}
+              containersUnlocked={containersUnlocked}
+              containers={containers}
+              onDecompose={() => void runDecompose()}
+              onLoadContainers={() => void loadContainers()}
+              linksUnlocked={linksUnlocked}
+              members={members}
+              peers={peers}
+              onLoadLinks={() => void loadLinks()}
+              exportBusy={exportBusy}
+              onExport={() => void downloadExport()}
+              exportReceipt={exportReceipt}
+            />
           </div>
         </>
       ) : null}
