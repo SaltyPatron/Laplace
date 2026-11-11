@@ -132,6 +132,7 @@ test('a tablebase position shows its verdict and best moves from the mover\'s vi
     moves: [
       { san: 'Kb1', position: 'b1'.repeat(16), wdl: 'loss', dtz: -10 },
       { san: 'Qb1', position: 'c1'.repeat(16), wdl: 'draw', dtz: 0 },
+      { san: 'Qg2', position: 'd1'.repeat(16), wdl: 'blessed loss', dtz: -101 },
     ] } }));
   await playOn(page, KQK);
   await page.goto('/play');
@@ -143,6 +144,7 @@ test('a tablebase position shows its verdict and best moves from the mover\'s vi
   await expect(moves.getByRole('listitem').first()).toContainText('Kb1');
   await expect(moves.getByRole('listitem').first()).toContainText('wins, 10');
   await expect(moves.getByRole('listitem').nth(1)).toContainText('Qb1 draws');
+  await expect(moves.getByRole('listitem').nth(2)).toContainText('Qg2 wins, but not within the 50-move rule');
 });
 
 test('a few-piece position without a recorded table says so', async ({ page }) => {

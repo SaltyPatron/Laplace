@@ -3,14 +3,14 @@ import { pieceCount, positionTablebase, TABLEBASE_PIECES, type Wdl } from './api
 import styles from './Openings.module.css';
 
 const OUTCOME: Record<string, string> = {
-  win: 'wins', 'cursed-win': 'wins, but not within the 50-move rule', draw: 'draws',
-  'blessed-loss': 'loses, but saved by the 50-move rule', loss: 'loses',
+  win: 'wins', 'cursed win': 'wins, but not within the 50-move rule', draw: 'draws',
+  'blessed loss': 'loses, but saved by the 50-move rule', loss: 'loses',
 };
 /** The verdict for the side whose view it is, in words; an unknown verdict is shown as served. */
 const words = (wdl: Wdl) => OUTCOME[wdl] ?? wdl;
 /** A move's verdict is from the opponent's view after it; the mover's result is its inverse. */
 const INVERSE: Record<string, string> = {
-  win: 'loss', 'cursed-win': 'blessed-loss', draw: 'draw', 'blessed-loss': 'cursed-win', loss: 'win',
+  win: 'loss', 'cursed win': 'blessed loss', draw: 'draw', 'blessed loss': 'cursed win', loss: 'win',
 };
 const forMover = (wdl: Wdl) => INVERSE[wdl] ?? wdl;
 
