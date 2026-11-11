@@ -92,9 +92,10 @@ def validate(config):
             raise ValueError('Verification requires local HTTP or HTTPS')
     if not 1 <= int(config['port']) <= 65535:
         raise ValueError('Invalid database port')
-    # This installation pins existing application data. It is not a database migration.
-    if config['substrate']['database'] != config['database']:
-        raise ValueError('This setup requires the current co-located application and substrate database')
+    # The substrate is recreated whenever its extensions change (there is no upgrade path), so the
+    # application's accounts, keys and billing live in a database of their own on the same cluster.
+    if config['substrate']['database'] == config['database']:
+        raise ValueError('The application and substrate databases must be distinct')
     for item in (config, config['substrate']):
         if item['database_host'] != '127.0.0.1' or int(item['port']) != int(config['port']):
             raise ValueError('Runtime installation requires the declared local cluster')
@@ -448,6 +449,15 @@ def write_machine_settings(config):
     SYNC.atomic(path, candidate, stat.st_mode & 0o777, stat.st_uid, stat.st_gid)
 
 
+def application_refused(argv, database, env=None):
+    """A substrate login cannot open the application database (CONNECT revoked or no HBA rule)."""
+    argv = list(argv)
+    argv[argv.index('-d') + 1] = database
+    result = subprocess.run(argv, env=env, input='SELECT 1;', text=True, capture_output=True, timeout=20)
+    return bool(result.returncode) and ('permission denied for database' in result.stderr
+                                        or 'no pg_hba.conf entry' in result.stderr)
+
+
 def install_identities(config, lock):
     env = dict(os.environ, LAPLACE_HOST_LOCK_FD=str(lock.fileno()),
                LAPLACE_INSTALL_CAPTURE_DIAGNOSTICS='1',
@@ -535,9 +545,7 @@ def install_identities(config, lock):
             input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
         if actual.splitlines() != [config['substrate']['role'], fresh['native_receipt']]:
             raise ValueError('API substrate identity/native operation differs from the selected substrate')
-        refused = subprocess.run(substrate_args, env=substrate_env, input='SELECT * FROM app.tenants LIMIT 1;',
-                                 text=True, capture_output=True, timeout=20)
-        if not refused.returncode or 'permission denied' not in refused.stderr:
+        if not application_refused(substrate_args, config['database'], env=substrate_env):
             raise ValueError('API substrate login can cross the application data boundary')
         verification['substrate'] = {'role': config['substrate']['role'], 'native_receipt': fresh['native_receipt'],
                                      'application_data': 'denied'}
@@ -546,8 +554,7 @@ def install_identities(config, lock):
         peer_result = checked(peer_args, input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
         if peer_result.splitlines() != [mcp['role'], fresh['native_receipt']]:
             raise ValueError('MCP peer identity/native operation differs from the selected substrate')
-        denied = subprocess.run(peer_args, input='SELECT * FROM app.tenants LIMIT 1;', text=True, capture_output=True, timeout=20)
-        if not denied.returncode or 'permission denied' not in denied.stderr:
+        if not application_refused(peer_args, config['database']):
             raise ValueError('MCP can cross the application data boundary')
         runner = pwd.getpwnam(declarations(machine)['LAPLACE_AGENT_USER'])
         for path, access in ((Path(runner.pw_dir) / '.pgpass', '-r'), (Path(config['credentials']), '-r'),

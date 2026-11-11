@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / 'deploy/linux/runtime'
@@ -274,6 +274,24 @@ class RuntimeBoundaries(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'another host'):
                 runtime.preflight(CONFIG)
             run.assert_not_called()
+
+    def test_application_database_is_never_the_recreated_substrate(self):
+        self.assertNotEqual(CONFIG['database'], CONFIG['substrate']['database'])
+        config = copy.deepcopy(CONFIG)
+        config['database'] = config['substrate']['database']
+        with self.assertRaisesRegex(ValueError, 'must be distinct'):
+            runtime.validate(config)
+
+    def test_substrate_logins_are_refused_by_the_application_database(self):
+        argv = ['psql', '-U', 'substrate_role', '-d', CONFIG['substrate']['database'], '-f', '-']
+        for stderr, refused in (('FATAL:  permission denied for database "laplace-app"', True),
+                                ('FATAL:  no pg_hba.conf entry for host', True),
+                                ('', False)):
+            result = Mock(returncode=2 if stderr else 0, stderr=stderr)
+            with self.subTest(stderr=stderr), patch.object(runtime.subprocess, 'run', return_value=result) as run:
+                self.assertEqual(runtime.application_refused(argv, CONFIG['database']), refused)
+                self.assertIn(CONFIG['database'], run.call_args.args[0])
+                self.assertNotIn(CONFIG['substrate']['database'], run.call_args.args[0])
 
     def test_invalid_privilege_and_path_declarations(self):
         for change in ('role', 'pool', 'state', 'user'):
