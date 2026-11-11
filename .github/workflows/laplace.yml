@@ -122,21 +122,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 2d24e4cce4fa4b9df801323cb62d017e0206ff1c
+          ref: main
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 27ea38259c6a51db0a8cc822d91d269a6c2734e8
+          ref: main
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 10e779cf131161dc113b743adb92df16e1030f20
+          ref: main
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 
@@ -335,21 +335,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 2d24e4cce4fa4b9df801323cb62d017e0206ff1c
+          ref: main
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-postgres
-          ref: 27ea38259c6a51db0a8cc822d91d269a6c2734e8
+          ref: main
           path: .ci-dependencies/Laplace-postgres
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 10e779cf131161dc113b743adb92df16e1030f20
+          ref: main
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
 

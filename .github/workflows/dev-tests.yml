@@ -139,21 +139,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Native
-          ref: 2d24e4cce4fa4b9df801323cb62d017e0206ff1c
+          ref: main
           path: .ci-dependencies/Laplace-Native
           persist-credentials: false
       - name: Check out the canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 10e779cf131161dc113b743adb92df16e1030f20
+          ref: main
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Materialize the verified Operations build contract
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Operations
-          ref: 86d74d9fc00433779d32f9426677a0c1dc7e8874
+          ref: main
           path: .ci-dependencies/operations-source
           token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
