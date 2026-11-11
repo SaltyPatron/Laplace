@@ -104,3 +104,51 @@ test('a game list reads every game\'s deepest opening in one batch', async ({ pa
   // One request for the page, carrying only the games that have movetext, in order.
   expect(batches).toEqual([{ pgns: ['1. e4 e5 2. Nf3 Nf6 1-0', '1. h4 a5 1-0'] }]);
 });
+
+const KQK = '8/8/8/8/8/8/1Q6/K6k w - - 0 1';
+const playOn = async (page: import('@playwright/test').Page, fen: string) => {
+  await page.route('**/modular/api/chess/position?**', (route) => route.fulfill({ json: { position: 'f1'.repeat(16), games: 0, openings: [] } }));
+  await page.route(/\/chess\/(legal|eval|new)$/, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/legal')) return route.fulfill({ json: { moves: [], inCheck: false, status: 'ongoing' } });
+    if (path.endsWith('/eval')) return route.fulfill({ json: { whiteScoreCp: 0, depth: 1, nodes: 1 } });
+    return route.fulfill({ json: { fen } });
+  });
+};
+
+test('a full board never asks the tablebase', async ({ page }) => {
+  let asked = 0;
+  await page.route('**/modular/api/chess/tablebase?**', (route) => { asked += 1; return route.fulfill({ json: {} }); });
+  await playOn(page, START_FEN);
+  await page.goto('/play');
+  await expect(page.getByRole('region', { name: 'Openings of this position' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Endgame tablebase' })).toHaveCount(0);
+  expect(asked).toBe(0);
+});
+
+test('a tablebase position shows its verdict and best moves from the mover\'s view', async ({ page }) => {
+  await page.route('**/modular/api/chess/tablebase?**', (route) => route.fulfill({ json: {
+    position: 'aa'.repeat(16), wdl: 'win', dtz: 11,
+    moves: [
+      { san: 'Kb1', position: 'b1'.repeat(16), wdl: 'loss', dtz: -10 },
+      { san: 'Qb1', position: 'c1'.repeat(16), wdl: 'draw', dtz: 0 },
+    ] } }));
+  await playOn(page, KQK);
+  await page.goto('/play');
+  await page.getByRole('button', { name: 'New game' }).click();
+  const panel = page.getByRole('region', { name: 'Endgame tablebase' });
+  await expect(panel).toContainText('White to move wins with best play');
+  await expect(panel).toContainText('distance to zeroing 11');
+  const moves = panel.getByRole('list', { name: 'Best moves by tablebase verdict' });
+  await expect(moves.getByRole('listitem').first()).toContainText('Kb1');
+  await expect(moves.getByRole('listitem').first()).toContainText('wins, 10');
+  await expect(moves.getByRole('listitem').nth(1)).toContainText('Qb1 draws');
+});
+
+test('a few-piece position without a recorded table says so', async ({ page }) => {
+  await page.route('**/modular/api/chess/tablebase?**', (route) => route.fulfill({ json: { position: 'bb'.repeat(16), wdl: null, dtz: null, moves: [] } }));
+  await playOn(page, '8/8/8/8/8/8/1QR5/K6k w - - 0 1');
+  await page.goto('/play');
+  await page.getByRole('button', { name: 'New game' }).click();
+  await expect(page.getByRole('region', { name: 'Endgame tablebase' })).toContainText('No tablebase verdict is recorded for this 4-piece position.');
+});

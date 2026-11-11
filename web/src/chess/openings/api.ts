@@ -51,3 +51,25 @@ export const mostSpecific = (openings: OpeningLine[]) => openings.at(-1) ?? null
 export interface GameDeepestOpening { deepest: OpeningLine | null }
 export const gameOpeningsBatch = (pgns: string[], signal?: AbortSignal) =>
   apiPost<GameDeepestOpening[]>('/modular/api/chess/game-openings', { pgns }, { signal });
+
+/** Syzygy win/draw/loss as the endpoint names it (win, draw, loss, and the 50-move-rule cases). */
+export type Wdl = string;
+
+/**
+ * GET /modular/api/chess/tablebase: Syzygy verdicts recorded as claims on the same position
+ * ids. `wdl`/`dtz` are from the side to move's view; each move's are from the opponent's view
+ * after it, best move first. Positions without a recorded table give null verdicts.
+ */
+export interface TablebaseResponse {
+  position: string;
+  wdl: Wdl | null;
+  dtz: number | null;
+  moves: { san: string; position: string; wdl: Wdl | null; dtz: number | null }[];
+}
+
+export const positionTablebase = (fen: string, signal?: AbortSignal) =>
+  apiGet<TablebaseResponse>(`/modular/api/chess/tablebase?fen=${encodeURIComponent(fen)}`, { signal });
+
+/** Syzygy tables cover at most five pieces here; more is never asked. */
+export const TABLEBASE_PIECES = 5;
+export const pieceCount = (fen: string) => (fen.split(' ')[0].match(/[prnbqkPRNBQK]/g) ?? []).length;
