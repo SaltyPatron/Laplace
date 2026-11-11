@@ -8,6 +8,8 @@ import { BandPicker } from '../../query/BandPicker';
 import { DialPanel } from '../../query/DialPanel';
 import { changeWorld, readWorld, selectWorldEntity } from '../../world/context';
 import { RetainedContext } from '../../world/RetainedContext';
+import { WorldProjection } from '../../world/WorldLink';
+import { useEntityLabels } from '../../shell/inspector';
 import { EntityLink } from '../components/EntityLink';
 import { MasterDetail } from '../../ui/composites/MasterDetail/MasterDetail';
 import { FacetCheckboxes } from '../../ui/composites/FacetCheckboxes/FacetCheckboxes';
@@ -16,8 +18,22 @@ import type { BrowseResponse } from './types';
 import { collectKnowledge, keyedAnswers, type KnowledgeAnswers, type KnowledgeResult } from './knowledge';
 import styles from './BrowseHome.module.css';
 
-const EntityDetail = lazy(() => import('../entity/EntityDetail').then(module => ({ default: module.EntityDetail })));
-const TrajectoryCalculation = lazy(() => import('../../query/TrajectoryCalculation').then(module => ({ default: module.TrajectoryCalculation })));
+const SubjectView = lazy(() => import('../../lenses/SubjectView').then(module => ({ default: module.SubjectView })));
+/** Saved ?presentation= values keep opening the matching lens. */
+const PRESENTATION_LENS: Record<string, string> = { knowledge: 'means' };
+
+/** The selected result, seen through the same lenses as the entity page and the inspector. */
+function SelectedSubject({ id, label, lens, onLensChange }: { id: string; label?: string; lens: string; onLensChange: (lens: string) => void }) {
+  const known = useEntityLabels((s) => s.labels[id.toLowerCase()]);
+  return <Suspense fallback={<LoadingText>Loading knowledge…</LoadingText>}>
+    <header className={styles.subjectHeader}>
+      <h2>{label ?? known ?? id}</h2>
+      <Link to={`/explore/entity/${id}${lens !== 'means' ? `?lens=${lens}` : ''}`}>Open as a page</Link>
+    </header>
+    {/* Inside the collection, subject links select within the search instead of leaving it. */}
+    <WorldProjection><SubjectView id={id} lens={lens} onLensChange={onLensChange} /></WorldProjection>
+  </Suspense>;
+}
 const PAGE = 50, MAX_CAPACITY = 32768;
 type Read = { method: string; status: 'loading' | 'ready' | 'error'; error?: string; result?: KnowledgeAnswers; browse?: BrowseResponse };
 /** How a result was found, in words a reader uses. Internal shape ids never reach the page. */
@@ -206,7 +222,9 @@ export function KnowledgeWorkspace() {
       {browse && <div className={styles.pager}><Button variant="ghost" disabled={!offset} onClick={() => apply({ offset: String(Math.max(0, offset - PAGE)) })}>‹ Previous entities</Button><Muted>{browse.receipt.matched_entities} entities reached</Muted><Button variant="ghost" disabled={offset + browse.hits.length >= browse.receipt.matched_entities} onClick={() => apply({ offset: String(offset + PAGE) })}>Next entities ›</Button>{browse.receipt.candidate_truncated && capacity < MAX_CAPACITY && <Button onClick={() => apply({ capacity: String(Math.min(MAX_CAPACITY, capacity * 2)), offset: null })}>Expand entity frontier</Button>}</div>}
     </Panel>}>
       {(selected || selectedAnswer) && !rows.some(row => row.entityId === selected || row.key === selectedAnswer) && all.length > 0 && <p role="status">{all.some(row => row.entityId === selected || row.key === selectedAnswer) ? 'The selected result is outside the current filters.' : 'The selected subject is outside this returned collection. The originating search remains available.'}</p>}
-      {answer ? <><h2>{answer.text}</h2><dl className={styles.receipt}>{answer.observations.map((observation, index) => <div key={index}><dt>{label(observation.method)}</dt><dd>{observation.standing == null ? 'Standing not returned' : `Conservative standing ${round(observation.standing, 1)}`} · {observation.witnesses == null ? 'Witness count not returned' : `${observation.witnesses} witnesses`}</dd></div>)}</dl>{answer.topicId && <Button onClick={() => apply({ selected: answer.topicId!, answer: null })}>Inspect related subject</Button>}</> : selected && /^[0-9a-f]{32}$/i.test(selected) ? <Suspense fallback={<LoadingText>Loading knowledge…</LoadingText>}><EntityDetail key={selected} selectedId={selected} selectedLabel={all.find(row => row.entityId === selected)?.text} selectedType={all.find(row => row.entityId === selected)?.kind} /><details><summary>Calculate a trajectory from this content</summary><TrajectoryCalculation key={selected} topic={selected} /></details></Suspense> : selectedAnswer ? <p role="status">{loading ? 'Reading the selected answer…' : 'The selected answer was not returned in this read. Its reference has been retained.'}</p> : <><h2>Select a result</h2><p>Read its content and relations here. Your search and filters remain in place.</p></>}
+      {answer ? <><h2>{answer.text}</h2><dl className={styles.receipt}>{answer.observations.map((observation, index) => <div key={index}><dt>{label(observation.method)}</dt><dd>{observation.standing == null ? 'Standing not returned' : `Conservative standing ${round(observation.standing, 1)}`} · {observation.witnesses == null ? 'Witness count not returned' : `${observation.witnesses} witnesses`}</dd></div>)}</dl>{answer.topicId && <Button onClick={() => apply({ selected: answer.topicId!, answer: null })}>Inspect related subject</Button>}</> : selected && /^[0-9a-f]{32}$/i.test(selected) ? <SelectedSubject key={selected} id={selected} label={all.find(row => row.entityId === selected)?.text}
+            lens={PRESENTATION_LENS[params.get('presentation') ?? ''] ?? params.get('presentation') ?? 'means'}
+            onLensChange={(lens) => apply({ presentation: lens === 'means' ? null : lens })} /> : selectedAnswer ? <p role="status">{loading ? 'Reading the selected answer…' : 'The selected answer was not returned in this read. Its reference has been retained.'}</p> : <><h2>Select a result</h2><p>Read its content and relations here. Your search and filters remain in place.</p></>}
     </MasterDetail>
     {query && <details className={styles.receiptDetails}><summary>Search read scope</summary><p>Methods combine by union. Result checkboxes use OR within a field and AND between fields; they filter the returned collection. Entity paging and frontier limits apply to the entity method. Other methods return their own bounded reads. Equal reply text is combined without merging method measurements.</p>{reads.map(read => <p key={read.method}>{label(read.method)}: {read.status}{read.result ? ` · ${read.result.rows.length} rows` : ''}</p>)}{browse && <pre>{JSON.stringify(browse.receipt, null, 2)}</pre>}</details>}
   </Stack>;

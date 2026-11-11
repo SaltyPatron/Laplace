@@ -116,3 +116,6 @@
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
+
+.subjectHeader { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.subjectHeader h2 { margin: 0; }
