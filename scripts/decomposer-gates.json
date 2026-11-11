@@ -52,14 +52,9 @@
         "20260415"
       ]
     },
-    "operational": {
-      "decomposer": "OperationalDecomposer",
-      "layer": 2,
-      "prerequisites": [
-        "unicode",
-        "iso-639"
-      ],
-      "consensus_gates": []
+    "laplace-operational": {
+      "native": true,
+      "layer": 2
     },
     "cili": {
       "decomposer": "CILI",
@@ -612,12 +607,11 @@
         }
       ]
     },
-    "agents": {
-      "decomposer": "AgentTraceDecomposer",
-      "layer": 2,
-      "prerequisites": [],
-      "consensus_gates": [],
-      "skip_layer_complete": true
+    "agent-transcripts": {
+      "native": true
+    },
+    "syzygy": {
+      "native": true
     },
     "verbnet-gl": {
       "decomposer": "VerbNet-GL",
