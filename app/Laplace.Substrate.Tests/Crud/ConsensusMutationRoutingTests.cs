@@ -68,32 +68,6 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
-    public void ChessRatingRepairRebuildsCompletePlayerRatingSurfaceFromDurableEvidence()
-    {
-        var sql = Read("extension", "laplace_substrate", "sql", "functions",
-            "chess", "repair_player_ratings.sql.in");
-
-        // A corrupt rating can keep a plausible witness count and timestamp, so the repair
-        // rebuilds every player rating from durable testimony without reading the current
-        // consensus values.
-        Assert.DoesNotContain("IF NOT FOUND THEN\n        RETURN", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("pg_laplace_repair_player_ratings_batch", sql, StringComparison.Ordinal);
-        Assert.Contains("LANGUAGE C", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("current.witness_count", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("current.last_observed_at", sql, StringComparison.Ordinal);
-        var native = Read("extension", "laplace_substrate", "src", "chess_rating_repair.c");
-        var catalog = Read("engine", "core", "src", "sql_catalog.def");
-        Assert.Contains("PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)", native);
-        Assert.Contains("qsort(evidence, n, sizeof(RepairEvidence), evidence_compare)", native);
-        Assert.Contains("glicko2_fold_uniform_period", native);
-        Assert.Contains("consensus.repair_evidence", native);
-        Assert.Contains("consensus.repair_write", native);
-        Assert.Contains("WHERE subject_id = ANY($1) AND type_id = ANY($2)", catalog);
-        Assert.Contains("WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM", catalog);
-    }
-
-    [Fact]
     public void ProductionConsensusMutationAuthorityHasNoOtherSqlWriters()
     {
         var sqlRoot = Path.Combine(RepoRoot, "extension", "laplace_substrate", "sql");

@@ -78,7 +78,6 @@ set(EXT_EXECUTION_SOURCES
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/entity_mask_write.c
-    src/chess_rating_repair.c
     src/chess_syzygy.c
     src/band_leaders.c
     src/generate_walk.c
@@ -250,7 +249,6 @@ set(EXT_C_SOURCES
     src/band_leaders.c
     src/consensus_scan.c
     src/chess_roster.c
-    src/chess_rating_repair.c
     src/display_native.c
     src/geometry_successors.c
     src/highway_mask.c

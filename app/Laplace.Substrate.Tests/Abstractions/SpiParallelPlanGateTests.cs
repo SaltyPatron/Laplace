@@ -22,7 +22,6 @@ public sealed class SpiParallelPlanGateTests
         new(StringComparer.OrdinalIgnoreCase)
         {
             "fold_route.c",
-            "chess_rating_repair.c",
             "conversation_session.c",
             "consensus_bulk_write.c",
         };

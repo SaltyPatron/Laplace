@@ -229,23 +229,6 @@ SQL_QUERY("generation.adjacency_manifests", "bytea[],int4",
 
 
 
-SQL_QUERY("chess.repair_normalize", "bytea[],bytea[]",
-    "UPDATE laplace.attestations SET opponent_rating_fp1e9 = consensus.glicko2_neutral_mu_fp1e9() "
-        "WHERE subject_id = ANY($1) AND type_id = ANY($2) "
-        "AND opponent_rating_fp1e9 <> consensus.glicko2_neutral_mu_fp1e9()")
-SQL_QUERY("consensus.repair_evidence", "bytea[],bytea[]",
-    "SELECT subject_id,type_id,object_id,id,observation_count,sum_score_fp1e9,"
-        "opponent_rd_fp1e9,last_observed_at,fold_replayable,opponent_rating_fp1e9 FROM laplace.attestations "
-        "WHERE subject_id = ANY($1) AND type_id = ANY($2)")
-SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[],int8[],timestamptz[]",
-    "INSERT INTO laplace.consensus AS c (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
-        "SELECT laplace.consensus_id(b.subject,b.type,b.object),b.* FROM "
-        "unnest($1,$2,$3,$4,$5,$6,$7,$8) b(subject,type,object,rating,rd,volatility,witness_count,last_observed_at) "
-        "ON CONFLICT(id,type_id,subject_id) DO UPDATE SET rating=EXCLUDED.rating,rd=EXCLUDED.rd,"
-        "volatility=EXCLUDED.volatility,witness_count=EXCLUDED.witness_count,last_observed_at=EXCLUDED.last_observed_at "
-        "WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM "
-        "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")
-
 SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu_fp1e9(),consensus.glicko2_initial_rd_fp1e9()")
 SQL_QUERY("language.code_surfaces", "bytea[]",
     "SELECT public.blake3_send(entity),content FROM public.laplace_labels("
