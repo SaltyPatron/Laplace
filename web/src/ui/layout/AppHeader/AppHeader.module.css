@@ -14,8 +14,8 @@
     background: var(--color-navy);
     border-bottom: 1px solid color-mix(in srgb, white 14%, transparent);
     box-shadow: 0 3px 14px color-mix(in srgb, var(--color-navy) 22%, transparent);
-    color: #f7fbfd;
-    --color-text-primary: #f7fbfd;
+    color: var(--color-on-navy);
+    --color-text-primary: var(--color-on-navy);
     --color-text-muted: var(--color-navy-muted);
     --color-bg-panel: var(--color-navy);
     --color-bg-panel-2: var(--color-navy-raised);
@@ -44,11 +44,11 @@
   }
 
   .title a {
-    color: #f7fbfd;
+    color: var(--color-on-navy);
   }
 
   .title a:hover {
-    color: #ffffff;
+    color: white;
   }
 
   .title::before {
@@ -56,7 +56,7 @@
     width: 11px;
     height: 11px;
     margin-right: var(--space-3);
-    border: 2px solid #f7fbfd;
+    border: 2px solid var(--color-on-navy);
     background: var(--color-signal);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-signal) 18%, transparent);
     transform: rotate(45deg);

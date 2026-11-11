@@ -7,6 +7,7 @@ import { Button, ErrorText, Field, Input, LoadingText } from '@ui';
 import { exploreUnicodeCloud, exploreUnicodePoint, exploreUnicodePositions } from '../api';
 import { clientArtifactGetOrLoad, clientStorageEstimate } from '../../storage/clientArtifactCache';
 import type { UnicodeCloudResponse, UnicodePointResponse } from '../types';
+import { useVisualizationPalette } from '../visualizationPalette';
 import styles from './UnicodeGlomeView.module.css';
 
 function GpuPicker({
@@ -132,6 +133,7 @@ function Cloud({
     return value;
   }, [p]);
   useEffect(() => () => geometry.dispose(), [geometry]);
+  const palette = useVisualizationPalette();
 
   const selectedPosition = selected != null && selected >= 0 && selected * 3 + 2 < p.length
     ? [p[selected * 3], p[selected * 3 + 1], p[selected * 3 + 2]] as [number, number, number]
@@ -142,7 +144,7 @@ function Cloud({
       <pointsMaterial
         size={1.15}
         sizeAttenuation={false}
-        color="#e2e8f0"
+        color={palette.primary}
         transparent={false}
         toneMapped={false}
       />
@@ -151,12 +153,12 @@ function Cloud({
     {selectedPosition ? (
       <mesh position={selectedPosition}>
         <sphereGeometry args={[0.018, 12, 12]} />
-        <meshBasicMaterial color="#22d3ee" toneMapped={false} />
+        <meshBasicMaterial color={palette.signal} toneMapped={false} />
       </mesh>
     ) : null}
     <mesh>
       <sphereGeometry args={[1,32,32]} />
-      <meshBasicMaterial wireframe transparent opacity={.28} color="#94a3b8" toneMapped={false} />
+      <meshBasicMaterial wireframe transparent opacity={.28} color={palette.muted} toneMapped={false} />
     </mesh>
     <OrbitControls makeDefault enablePan enableZoom />
   </>;
@@ -189,6 +191,7 @@ function codepointLabel(cp: number): string {
 }
 
 export function UnicodeGlomeView(){
+  const palette = useVisualizationPalette();
  const [cloud,setCloud]=useState<UnicodeCloudResponse|null>(null),[buffer,setBuffer]=useState<ArrayBuffer|null>(null),[err,setErr]=useState<string|null>(null),[mode]=useState<'real'|'hash'>('real'),[point,setPoint]=useState<UnicodePointResponse|null>(null);
  const [cacheState,setCacheState]=useState<'checking'|'hit'|'stored'|'unavailable'>('checking');
  const [storage,setStorage]=useState<{usage:number;quota:number}|null>(null);
@@ -222,5 +225,5 @@ export function UnicodeGlomeView(){
   dpr={1}
   camera={{position:[0,0,2.35],fov:48}}
   gl={{ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: false }}
-><color attach="background" args={['#0b1220']}/><Cloud p={pos} pick={pick} selected={point?.codepoint ?? null}/></Canvas></div><aside><strong>{cloud?.count.toLocaleString()} points</strong><code>{cloud?.perfcache_receipt_hex}</code><div className={styles.cacheState}><span>Client artifact cache</span><strong>{cacheState==='hit'?'HIT · IndexedDB':cacheState==='stored'?'STORED · IndexedDB':cacheState==='checking'?'checking…':'unavailable · network only'}</strong>{storage?<small>{(storage.usage/1048576).toFixed(1)} MiB used / {(storage.quota/1073741824).toFixed(1)} GiB quota</small>:null}</div>{point?<><h3>{codepointLabel(point.codepoint)} {point.display}</h3>{/^[0-9a-f]{32}$/i.test(point.id_hex)?<RouterLink className={styles.entityLink} to={`/explore/entity/${point.id_hex.toLowerCase()}`}>Open {codepointLabel(point.codepoint)} entity page</RouterLink>:null}<dl><dt>DUCET rank</dt><dd>{point.uca_order.toLocaleString()}</dd><dt>Content ID</dt><dd>{point.id_hex}</dd><dt>Real PointZM</dt><dd>{point.x.toPrecision(9)}, {point.y.toPrecision(9)}, {point.z.toPrecision(9)}, {point.m.toPrecision(9)}</dd><dt>r₄</dt><dd>{point.radius.toPrecision(12)}</dd><dt>Hilbert128</dt><dd>{point.hilbert_hex}</dd><dt>Flags</dt><dd>0x{point.flags.toString(16)}</dd></dl></>:<p>Click any point to read its canonical perfcache record and real 4-D coordinates.</p>}</aside></div>}</div>;
+><color attach="background" args={[palette.background]}/><Cloud p={pos} pick={pick} selected={point?.codepoint ?? null}/></Canvas></div><aside><strong>{cloud?.count.toLocaleString()} points</strong><code>{cloud?.perfcache_receipt_hex}</code><div className={styles.cacheState}><span>Client artifact cache</span><strong>{cacheState==='hit'?'HIT · IndexedDB':cacheState==='stored'?'STORED · IndexedDB':cacheState==='checking'?'checking…':'unavailable · network only'}</strong>{storage?<small>{(storage.usage/1048576).toFixed(1)} MiB used / {(storage.quota/1073741824).toFixed(1)} GiB quota</small>:null}</div>{point?<><h3>{codepointLabel(point.codepoint)} {point.display}</h3>{/^[0-9a-f]{32}$/i.test(point.id_hex)?<RouterLink className={styles.entityLink} to={`/explore/entity/${point.id_hex.toLowerCase()}`}>Open {codepointLabel(point.codepoint)} entity page</RouterLink>:null}<dl><dt>DUCET rank</dt><dd>{point.uca_order.toLocaleString()}</dd><dt>Content ID</dt><dd>{point.id_hex}</dd><dt>Real PointZM</dt><dd>{point.x.toPrecision(9)}, {point.y.toPrecision(9)}, {point.z.toPrecision(9)}, {point.m.toPrecision(9)}</dd><dt>r₄</dt><dd>{point.radius.toPrecision(12)}</dd><dt>Hilbert128</dt><dd>{point.hilbert_hex}</dd><dt>Flags</dt><dd>0x{point.flags.toString(16)}</dd></dl></>:<p>Click any point to read its canonical perfcache record and real 4-D coordinates.</p>}</aside></div>}</div>;
 }

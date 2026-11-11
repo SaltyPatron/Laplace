@@ -69,6 +69,36 @@
     --viz-signal: #69d9d1;
     --viz-steel: #8fc4e2;
     --viz-error: #ff8f9b;
+    --viz-border: #36576b;
+    --viz-deep: #0b1220;
+
+    /* Status and neutral accents shared by feature views. */
+    --color-on-navy: #f7fbfd;
+    --color-neutral-mid: rgb(127 127 127);
+    --color-go: #3ecf8e;
+    --color-go-deep: #2f9e54;
+    --color-gold: #e8b339;
+    --color-gold-deep: #c8962d;
+    --color-gold-ink: #1a1304;
+    --color-danger-soft: #dc4646;
+    --color-info-soft: #78a0dc;
+
+    /* Data scales: bad → neutral → good (move strength, evaluation bars). */
+    --scale-bad: hsl(0 85% 55%);
+    --scale-mid: hsl(65 72% 52%);
+    --scale-good: hsl(130 70% 48%);
+
+    /* Chess board. The board keeps its own palette in both themes. */
+    --chess-square-light: #b6c2da;
+    --chess-square-dark: #5b6b8c;
+    --chess-ink: #0b0e14;
+    --chess-highlight: #ffcf3a;
+    --chess-arrow: #27c07a;
+    --chess-frame: #1b2436;
+    --chess-frame-light: #e9eef9;
+    --chess-target: #4f8cff;
+    --chess-hint: hsl(22 95% 52%);
+    --chess-pick: hsl(28 90% 55%);
 
     --material-enamel: var(--color-bg-panel);
     --material-raised:

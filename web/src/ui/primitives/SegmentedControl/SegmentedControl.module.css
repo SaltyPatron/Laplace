@@ -25,7 +25,7 @@
 
   .selected {
     background: var(--color-accent-fill);
-    color: #fff;
+    color: white;
   }
 
   .option:disabled {

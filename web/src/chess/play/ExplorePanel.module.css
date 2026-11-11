@@ -34,6 +34,6 @@
   }
 
   .clickable:hover td {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, white 6%, transparent);
   }
 }

@@ -57,7 +57,7 @@
 
   .resizeHandle:hover,
   :global(body[data-receipt-resizing]) .resizeHandle {
-    background: rgba(120, 160, 220, 0.35);
+    background: color-mix(in srgb, var(--color-info-soft) 35%, transparent);
   }
 
   :global(body[data-receipt-resizing]) {

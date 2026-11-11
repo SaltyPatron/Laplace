@@ -39,12 +39,12 @@
   }
 
   .ply:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, white 6%, transparent);
   }
 
   .plyActive {
-    background: rgba(255, 207, 58, 0.22);
-    box-shadow: inset 0 0 0 1px rgba(255, 207, 58, 0.45);
+    background: color-mix(in srgb, var(--chess-highlight) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chess-highlight) 45%, transparent);
   }
 
   .moves {
@@ -65,7 +65,7 @@
   }
 
   .moves li:first-child {
-    background: rgba(255, 207, 58, 0.1);
+    background: color-mix(in srgb, var(--chess-highlight) 10%, transparent);
   }
 
   .dot {
@@ -90,7 +90,7 @@
   }
 
   .pickstar {
-    color: #ffcf3a;
+    color: var(--chess-highlight);
     margin-left: auto;
   }
 

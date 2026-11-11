@@ -26,15 +26,15 @@
   gap: var(--space-1);
   min-height: 92px;
   padding: var(--space-4) var(--space-4);
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border: 1px solid var(--border, color-mix(in srgb, var(--color-neutral-mid) 25%, transparent));
   border-radius: 8px;
   text-decoration: none;
   color: inherit;
-  background: rgba(127, 127, 127, 0.035);
+  background: color-mix(in srgb, var(--color-neutral-mid) 3.5%, transparent);
 }
 
 .directoryCard:hover {
-  background: rgba(127, 127, 127, 0.075);
+  background: color-mix(in srgb, var(--color-neutral-mid) 7.5%, transparent);
 }
 
 .directoryCard span {

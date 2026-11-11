@@ -17,25 +17,25 @@
   }
 
   .confirm {
-    background: rgba(62, 207, 142, 0.15);
+    background: color-mix(in srgb, var(--color-go) 15%, transparent);
     color: var(--color-confirm);
-    border-color: rgba(62, 207, 142, 0.4);
+    border-color: color-mix(in srgb, var(--color-go) 40%, transparent);
   }
 
   .refute {
-    background: rgba(255, 107, 107, 0.15);
+    background: color-mix(in srgb, var(--color-danger-soft) 15%, transparent);
     color: var(--color-refute);
   }
 
   .draw {
-    background: rgba(232, 179, 57, 0.15);
+    background: color-mix(in srgb, var(--color-gold) 15%, transparent);
     color: var(--color-draw);
   }
 
   .engineOk {
     color: var(--color-confirm);
-    border-color: rgba(62, 207, 142, 0.4);
-    background: rgba(62, 207, 142, 0.08);
+    border-color: color-mix(in srgb, var(--color-go) 40%, transparent);
+    background: color-mix(in srgb, var(--color-go) 8%, transparent);
   }
 
   .engineMissing {

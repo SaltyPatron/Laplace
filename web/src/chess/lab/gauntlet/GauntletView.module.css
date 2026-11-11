@@ -81,12 +81,12 @@
     background: var(--color-bg-abyss);
     padding: var(--space-2) var(--space-2);
     margin-bottom: var(--space-3);
-    color: #eef6f9;
-    --color-text-primary: #eef6f9;
+    color: var(--viz-text);
+    --color-text-primary: var(--viz-text);
     --color-bg-panel: var(--color-bg-abyss);
     --color-bg-panel-2: var(--color-navy-raised);
-    --color-text-muted: #b9cad4;
-    --color-border-default: #36576b;
+    --color-text-muted: var(--viz-muted);
+    --color-border-default: var(--viz-border);
   }
 
   .commandHead {

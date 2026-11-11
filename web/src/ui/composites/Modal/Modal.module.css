@@ -16,7 +16,7 @@
     padding: var(--space-5);
     box-shadow: var(--shadow-instrument);
   }
-  .panel::backdrop { background: rgb(0 0 0 / 0.45); }
+  .panel::backdrop { background: color-mix(in srgb, black 45%, transparent); }
   .panel h2 { margin-top: 0; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 }

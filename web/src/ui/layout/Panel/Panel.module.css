@@ -64,7 +64,7 @@
   }
 
   .expanded::backdrop {
-    background: var(--color-backdrop, rgb(0 0 0 / 0.45));
+    background: var(--color-backdrop, color-mix(in srgb, black 45%, transparent));
   }
 
   @media (prefers-reduced-motion: reduce) {

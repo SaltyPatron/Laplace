@@ -24,7 +24,7 @@
   }
 
   .lgStar {
-    color: #ffcf3a;
+    color: var(--chess-highlight);
   }
 
   .pv {

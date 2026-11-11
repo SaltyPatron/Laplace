@@ -35,7 +35,8 @@ const record = (id, hits, limit = 0) => { out[id] = { pass: hits.length <= limit
 
 record('DS-1', [
   ...count(css, /#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d|hsla?\(\s*\d/, (f) => rel(f) === 'ui/theme.css'),
-  ...count(code, /['"`]#[0-9a-fA-F]{3,8}['"`]/),
+  // visualizationPalette.ts mirrors the --viz-* tokens as fallbacks for non-DOM renderer contexts.
+  ...count(code, /['"`]#[0-9a-fA-F]{3,8}['"`]/, (f) => rel(f) === 'explore/visualizationPalette.ts'),
 ]);
 // Container-relative glyph sizes (cqw/cqi: chess pieces scale with their board) are geometry, not type.
 record('DS-2', count(css, /font-size:(?!\s*var\()(?![^;}]*cq[wi])[^;}]*\d/, (f) => rel(f) === 'ui/theme.css'));
