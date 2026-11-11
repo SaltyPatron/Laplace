@@ -12,7 +12,6 @@
 -- p_tc_class filters in ID SPACE via the identity law (laplace.word_id of the class
 -- surface, e.g. 'bullet', 'blitz'), never by rendering and comparing text.
 -- Group by ids, realize ONCE over the page -- the read law's shape.
-DROP FUNCTION IF EXISTS laplace.chess_opening_preference(bytea, text, int);
 CREATE OR REPLACE FUNCTION chess.opening_preference(p_player bytea,
                                                     p_tc_class text DEFAULT NULL,
                                                     p_limit int DEFAULT 12)

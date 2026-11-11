@@ -1,13 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_physicalities(bytea);
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.entity_physicalities(bytea)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(type smallint, x double precision, y double precision, z double precision, m double precision, radius double precision, n_constituents integer, hilbert_index bytea)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_id','type','x','y','z','m','radius','n_constituents','hilbert_index']::text[])) THEN
-        DROP FUNCTION ops.entity_physicalities(bytea);
-    END IF;
-END $upgrade_shape$;
 -- One set projection serves single-entity inspection and batch/UI geometry.
 -- Native owns exact stored reads; the retained typed forms share this adapter.
 CREATE OR REPLACE FUNCTION ops.entity_physicalities(p_ids bytea[])

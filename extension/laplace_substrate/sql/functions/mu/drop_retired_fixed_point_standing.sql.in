@@ -1,8 +1,0 @@
--- Retired with the fixed-point standing scale. By this point of the upgrade every
--- function that called them has been recreated against the float8 forms
--- (consensus.edge_rank(bytea, double precision), consensus.eff_mu), so nothing
--- depends on them; no CASCADE, so a caller that was not recreated fails loudly.
-DROP FUNCTION IF EXISTS consensus.weight(bigint, bigint, consensus.weight_mode, bigint, bytea);
-DROP TYPE IF EXISTS consensus.weight_mode;
-DROP FUNCTION IF EXISTS consensus.effective_mu(bigint, bigint);
-DROP FUNCTION IF EXISTS consensus.edge_rank(bytea, numeric);

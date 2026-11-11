@@ -125,15 +125,15 @@ public sealed class PromptResolutionLadderGateTests
     /// the manifests listed prompt_language last. Inverting the dependency to fix the
     /// recursion inverted the required order too, and nothing said so — the isolate
     /// already had every function installed, so it kept answering while a fresh
-    /// CREATE EXTENSION failed on the very first statement. An upgrade path can hide an
-    /// ordering fault indefinitely; only a clean install proves it.
+    /// CREATE EXTENSION failed on the very first statement. Only a clean install proves
+    /// the order, and a clean install is the only path an extension has.
     /// </summary>
     [Fact]
     public void PromptResolution_ManifestsInstallRungsInLadderOrder()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
 
-        foreach (var manifest in new[] { "manifest.install", "manifest.upgrade" })
+        foreach (var manifest in new[] { "manifest.install" })
         {
             var path = Path.Combine(
                 repoRoot, "extension", "laplace_substrate", "sql", manifest);

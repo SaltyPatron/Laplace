@@ -13,4 +13,3 @@ BEGIN ATOMIC
 END;
 
 -- Keyed presence is native (descent_probe.c); the three-array SQL form is dropped.
-DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[]);

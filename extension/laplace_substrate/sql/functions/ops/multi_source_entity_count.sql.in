@@ -1,5 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.multi_source_entity_count();
-
 CREATE OR REPLACE FUNCTION ops.multi_source_entity_count()
     RETURNS bigint
     LANGUAGE sql STABLE PARALLEL SAFE

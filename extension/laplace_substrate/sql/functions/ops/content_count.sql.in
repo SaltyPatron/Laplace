@@ -1,6 +1,5 @@
 -- Content entities (those with a Content physicality), overall or among one
 -- source's attestation subjects.
-DROP FUNCTION IF EXISTS laplace.content_count(bytea);
 
 CREATE OR REPLACE FUNCTION ops.content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint

@@ -1,5 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.trajectory_unpacked_points(bytea);
-
 -- Entity and lane arrays describe one selected set. The native reader computes
 -- canonical physicality identities and performs partition-routed PK batches.
 -- Logical ordinals and RLE expansion use the canonical trajectory kernel.

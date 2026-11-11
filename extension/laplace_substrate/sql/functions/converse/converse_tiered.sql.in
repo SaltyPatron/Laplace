@@ -53,7 +53,6 @@
 -- READ-ONLY (#878): no CREATE TEMP / CREATE INDEX. Working set lives in plpgsql
 -- arrays so the MCP op lane (SQLSTATE 25006) and any read-only connection can
 -- call this. Algorithm identical; only the scratch storage moved.
-DROP FUNCTION IF EXISTS laplace.converse_tiered(bytea, bytea, int, int);
 CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
                                            p_lang  bytea DEFAULT NULL,
                                            p_steps int DEFAULT 4,

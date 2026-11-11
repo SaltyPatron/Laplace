@@ -3,7 +3,6 @@
 -- multilingual by source name, the remainder as text evidence. Models count
 -- their ATTENDS cells; documents count Document entities, since a document is
 -- structure, not attestations.
-DROP FUNCTION IF EXISTS laplace.modality_counts();
 
 CREATE OR REPLACE FUNCTION ops.modality_counts()
     RETURNS TABLE(

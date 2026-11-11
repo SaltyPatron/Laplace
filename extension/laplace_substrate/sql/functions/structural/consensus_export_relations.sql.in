@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.consensus_export_relations(bytea);
 CREATE OR REPLACE FUNCTION structural.consensus_export_relations(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, object_id bytea, rating bigint, witness_count bigint)
     LANGUAGE sql STABLE

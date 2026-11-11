@@ -20,7 +20,6 @@
 -- Their capacity is caller-owned; NULL requests the complete ranked family.
 -- consensus.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
 -- its loosest strand).
-DROP FUNCTION IF EXISTS laplace.converse_facts(bytea, bytea);
 CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea,
                                           p_lang bytea,
                                           p_part_limit int,

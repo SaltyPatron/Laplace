@@ -46,10 +46,6 @@
 -- STABLE promises and what the planner is entitled to act on (folding repeated
 -- calls, hoisting it out of a scan). It was declared STABLE when it landed;
 -- p_sample = 0 happens to satisfy the promise, the default 0.3 does not.
--- Return-type change needs a DROP: CREATE OR REPLACE cannot alter a function's
--- RETURNS TABLE. Adding avg_constituents to this surface failed the upgrade
--- until this line existed -- the same trap prompt_coherence and infer hit.
-DROP FUNCTION IF EXISTS laplace.geometry_audit(double precision);
 
 CREATE OR REPLACE FUNCTION structural.geometry_audit(p_sample double precision DEFAULT 0.3)
     RETURNS TABLE(tier smallint, entities bigint,

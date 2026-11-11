@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.recall_related_in_response(bytea, text);
 CREATE OR REPLACE FUNCTION converse.recall_related_in_response(p_topic bytea, p_type_name text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

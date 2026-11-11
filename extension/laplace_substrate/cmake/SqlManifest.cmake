@@ -55,7 +55,7 @@ function(laplace_manifest_files out_var manifest_file src_sql_dir)
 endfunction()
 
 # Fail configuration if any *.sql.in under src_sql_dir is neither referenced by a
-# manifest (install/upgrade) nor allow-listed (build shims / config templates).
+# manifest.install nor allow-listed (build shims / config templates).
 # This is the structural lock that makes the legacy numbered-monolith /
 # orphaned-module pattern impossible to reintroduce: a stray file that ships
 # nothing breaks the build instead of rotting unnoticed.
@@ -63,9 +63,7 @@ function(laplace_check_manifest_complete src_sql_dir)
     set(_referenced ${ARGN})   # remaining args = already-resolved module abs paths
     set(_allowed
         "${src_sql_dir}/laplace_substrate.sql.in"
-        "${src_sql_dir}/laplace_substrate_upgrade.sql.in"
         "${src_sql_dir}/laplace_geom.sql.in"
-        "${src_sql_dir}/laplace_geom_upgrade.sql.in"
         "${src_sql_dir}/uninstall_laplace_substrate.sql.in"
         "${src_sql_dir}/sqldefines.h.in")
     file(GLOB_RECURSE _all_sql CONFIGURE_DEPENDS "${src_sql_dir}/*.sql.in")
@@ -81,7 +79,7 @@ function(laplace_check_manifest_complete src_sql_dir)
         string(REPLACE ";" "\n  " _orphan_str "${_orphans}")
         message(FATAL_ERROR
             "SQL manifest completeness check failed. These *.sql.in files are not "
-            "referenced by manifest.install/manifest.upgrade and are not allow-listed. "
+            "referenced by manifest.install and are not allow-listed. "
             "Add them to a manifest or delete them:\n  "
             "${_orphan_str}")
     endif()

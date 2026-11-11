@@ -568,20 +568,18 @@ phase_install_extension_sql() (
   install_sql_extension() {
     local ext="$1"
     local build_dir="$LAPLACE_BUILD_DIRECTORY/extension/$ext"
-    local control="$build_dir/$ext.control" version versioned upgrade execution_module
+    local control="$build_dir/$ext.control" version versioned execution_module
     [[ -f "$control" ]] || { echo "::error::$ext generated control file missing" >&2; return 1; }
     version="$(sed -nE "s/^default_version[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$control" | head -1)"
     [[ -n "$version" ]] || { echo "::error::$ext generated control has no default_version" >&2; return 1; }
     versioned="$build_dir/$ext--$version.sql"
-    upgrade="$build_dir/${ext}_upgrade.sql"
-    [[ -f "$versioned" && -f "$upgrade" ]] || {
+    [[ -f "$versioned" ]] || {
       echo "::error::$ext generated SQL payload incomplete for version $version" >&2
       return 1
     }
 
     install -m 0664 "$control" "$LAPLACE_EXT_SHAREDIR/$ext.control"
     install -m 0664 "$versioned" "$LAPLACE_EXT_SHAREDIR/$ext--$version.sql"
-    install -m 0664 "$upgrade" "$LAPLACE_EXT_SHAREDIR/${ext}_upgrade.sql"
     if [[ -f "$build_dir/laplace_execution_module.txt" ]]; then
       install -m 0664 "$build_dir/laplace_execution_module.txt"         "$LAPLACE_EXT_SHAREDIR/laplace_execution_module.txt"
     fi

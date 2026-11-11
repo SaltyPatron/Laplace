@@ -1,7 +1,6 @@
 -- A direct claim names these entities as endpoints. Predicate membership and
 -- shared packaging are not a direct relation. Both orientations share the
 -- Native endpoint/mask/standing reader; value claims keep their absent predicate.
-DROP FUNCTION IF EXISTS laplace.relation_summary(bytea, bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_summary(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)

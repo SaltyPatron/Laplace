@@ -2,7 +2,6 @@
 -- executes this once per walk step (generate_walk.c edge_plan); non-inlined,
 -- each step paid a full function execution. walk_branches batches natively
 -- and does not use this function.
-DROP FUNCTION IF EXISTS laplace.consensus_walk_edges(bytea, bytea, int, bytea[]);
 CREATE OR REPLACE FUNCTION consensus.walk_edges(
     p_subject  bytea,
     p_type     bytea DEFAULT NULL,

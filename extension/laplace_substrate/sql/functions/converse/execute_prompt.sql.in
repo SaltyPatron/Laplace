@@ -1,2 +1,0 @@
--- Compile and execute the composition-backed WHAT_IS program.
-DROP FUNCTION IF EXISTS converse.execute_prompt(text, bytea);

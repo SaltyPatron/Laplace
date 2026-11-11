@@ -16,7 +16,6 @@
 -- same operation with those retained pairs. A zero return counts zero changed
 -- entity masks, never discarded work. Repair procedures orchestrate batches and
 -- transactions separately in highway_mask_rebuild.sql.in.
-DROP FUNCTION IF EXISTS laplace.highway_mask_deposit(bytea[], bytea[]);
 
 CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(
     p_entity_ids bytea[], p_type_ids bytea[])

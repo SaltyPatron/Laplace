@@ -31,14 +31,9 @@
 --   * rows arrive sorted by (type, id, subject); the
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
-DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
 -- The 7-arg forms are DROPPED, not left alongside: adding a DEFAULTed parameter
 -- via CREATE OR REPLACE would leave the old arity resident as a separate
 -- overload, and a 7-argument call would then be ambiguous.
-DROP FUNCTION IF EXISTS consensus.upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
-DROP FUNCTION IF EXISTS consensus.upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
-DROP FUNCTION IF EXISTS consensus.upsert_type(bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
-DROP FUNCTION IF EXISTS consensus.upsert_type(bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
 CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],

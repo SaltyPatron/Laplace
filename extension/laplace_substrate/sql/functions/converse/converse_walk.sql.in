@@ -158,7 +158,6 @@ BEGIN ATOMIC
     FROM generation.walk_batch(p_prompt, p_steps, p_seeds, NULL) b;
 END;
 
-DROP FUNCTION IF EXISTS laplace.converse_walk(text, int, bigint);
 CREATE OR REPLACE FUNCTION converse.walk(p_prompt text,
                                          p_steps int,
                                          p_seed bigint,

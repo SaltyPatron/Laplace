@@ -2,7 +2,6 @@
 -- deterministic type-1 manifest for every frontier node, expands each packed
 -- RLE record as an ordered edge (retaining run_length and flags), and performs
 -- no recursive SQL or per-node query loop.
-DROP FUNCTION IF EXISTS laplace.constituents_closure(bytea[], integer);
 CREATE OR REPLACE FUNCTION realize.constituents_closure(
     p_roots bytea[],
     p_max_depth integer DEFAULT 0

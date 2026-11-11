@@ -20,7 +20,6 @@
 -- "Successor" is not a direct substrate relationship: this operation projects
 -- a container's ordered constituents into a text-generation stream. Structural
 -- inference retains the point -> container -> constituent hop via containers_of().
-DROP FUNCTION IF EXISTS laplace.geometry_successors_batch(bytea[], int, int, boolean);
 CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
         p_points   bytea[],
         p_limit    int DEFAULT 20,
@@ -34,12 +33,7 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
 -- wrapper installed would preserve an unused public execution path whose only
 -- caller unpacked historical projection trajectories instead of reading exact
 -- MOVE evidence.
-DROP FUNCTION IF EXISTS structural.geometry_successors_typed(
-    bytea, int, int, boolean, smallint);
-DROP FUNCTION IF EXISTS structural.geometry_successors_batch_typed(
-    bytea[], int, int, boolean, smallint);
 
-DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
 CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_point    bytea,
         p_limit    int DEFAULT 20,
@@ -58,7 +52,6 @@ BEGIN ATOMIC
 END;
 
 -- Named mirror: "what comes before x", read from the same sequence.
-DROP FUNCTION IF EXISTS laplace.geometry_predecessors(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.geometry_predecessors(
         p_point  bytea,
         p_limit  int DEFAULT 20,
@@ -71,7 +64,6 @@ END;
 
 -- Both directions at once, for the symmetric questions (shared-usage overlap,
 -- domain co-occurrence) that must not be silently halved to fit a one-way walk.
-DROP FUNCTION IF EXISTS laplace.geometry_neighbours(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.geometry_neighbours(
         p_point  bytea,
         p_limit  int DEFAULT 20,

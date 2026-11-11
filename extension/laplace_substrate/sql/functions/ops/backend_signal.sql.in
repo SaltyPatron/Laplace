@@ -13,24 +13,6 @@
 -- Cancel ends the running statement and leaves the session to roll back.
 -- Terminate drops the connection, for a backend that ignored a cancel; its
 -- open transaction is lost.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.cancel_backend(int)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_pid','pid','signalled','was_state','was_query','was_seconds']::text[])) THEN
-        DROP FUNCTION ops.cancel_backend(int);
-    END IF;
-END $upgrade_shape$;
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.terminate_backend(int)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_pid','pid','signalled','was_state','was_query','was_seconds']::text[])) THEN
-        DROP FUNCTION ops.terminate_backend(int);
-    END IF;
-END $upgrade_shape$;
 
 CREATE OR REPLACE FUNCTION ops.cancel_backend(p_pid int)
     RETURNS TABLE(pid int, signalled boolean, was_state text, was_query text,

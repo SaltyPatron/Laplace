@@ -11,4 +11,3 @@ BEGIN ATOMIC
     JOIN laplace.physicalities p ON p.id = u.id;
 END;
 
-DROP FUNCTION IF EXISTS laplace.physicalities_present_ordinals(bytea[], bytea[]);

@@ -4,15 +4,6 @@
 -- leaves > 0). One installed operation for every surface; floor checks call it.
 -- BEGIN ATOMIC: pg_catalog oids are stable and the regnamespace literals name
 -- schemas this extension guarantees.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.index_health()')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(index_name text, table_name text, valid boolean, is_partitioned_parent boolean, leaf_count bigint, schema_name text)'
-             OR proargnames IS DISTINCT FROM ARRAY['index_name','table_name','valid','is_partitioned_parent','leaf_count','schema_name']::text[])) THEN
-        DROP FUNCTION ops.index_health();
-    END IF;
-END $upgrade_shape$;
 -- schema_name is the last column: ops.reindex_invalid needs it because an index
 -- name alone is ambiguous across the substrate schemas.
 CREATE OR REPLACE FUNCTION ops.index_health()

@@ -6,7 +6,6 @@
 -- Relation membership remains owned by the manifest-generated
 -- consensus.relation_set_ids operation; no relation roster is duplicated here
 -- or in C.
-DROP FUNCTION IF EXISTS laplace.relate_path_raw(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.relate_path_raw(
         p_x bytea,
         p_y bytea,
@@ -19,7 +18,6 @@ CREATE OR REPLACE FUNCTION consensus.relate_path_raw(
 -- Rendering is deliberately outside the search and runs once, after native
 -- election. There is no session SET clause: the body is fully qualified and
 -- remains eligible for SQL inlining.
-DROP FUNCTION IF EXISTS laplace.relate_path(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.relate_path(
         p_x bytea,
         p_y bytea,

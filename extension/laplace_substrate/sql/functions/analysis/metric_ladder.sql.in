@@ -20,24 +20,6 @@
 -- every UNION literal, because an atomic body binds names and types at CREATE.
 -- metric_ladder_words pins this function's oid, so its shape check runs first:
 -- the base cannot be dropped while the wrapper stands.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.metric_ladder_words(text, text)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rung text, value double precision, collides boolean, order_bearing boolean)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_a','p_b','rung','value','collides','order_bearing']::text[])) THEN
-        DROP FUNCTION ops.metric_ladder_words(text, text);
-    END IF;
-END $upgrade_shape$;
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.metric_ladder(bytea, bytea)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rung text, value double precision, collides boolean, order_bearing boolean)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_a','p_b','rung','value','collides','order_bearing']::text[])) THEN
-        DROP FUNCTION ops.metric_ladder(bytea, bytea);
-    END IF;
-END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.metric_ladder(p_a bytea, p_b bytea)
 RETURNS TABLE(rung          text,
               value         double precision,
@@ -83,15 +65,6 @@ COMMENT ON FUNCTION ops.metric_ladder(bytea, bytea) IS
 
 
 -- ops.metric_ladder_words: the same ladder addressed by surface.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.metric_ladder_words(text, text)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rung text, value double precision, collides boolean, order_bearing boolean)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_a','p_b','rung','value','collides','order_bearing']::text[])) THEN
-        DROP FUNCTION ops.metric_ladder_words(text, text);
-    END IF;
-END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.metric_ladder_words(p_a text, p_b text)
 RETURNS TABLE(rung          text,
               value         double precision,

@@ -170,25 +170,21 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SqlManifest.cmake)
 #      rotting unnoticed, as 43_table_tuning and finish_consensus_fold_steps did).
 laplace_manifest_files(_install_modules
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
-laplace_manifest_files(_upgrade_modules
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install")
 
 laplace_check_manifest_complete("${CMAKE_CURRENT_SOURCE_DIR}/sql"
-    ${_install_modules} ${_upgrade_modules})
+    ${_install_modules})
 
+# There is no upgrade path. A different version is a different extension: the
+# substrate database that carries it is recreated and CREATE EXTENSION runs fresh.
 set(_ext_version_inputs
     ${_install_modules}
-    ${_upgrade_modules}
     "${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate.sql.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate_upgrade.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install")
 list(REMOVE_DUPLICATES _ext_version_inputs)
 list(SORT _ext_version_inputs)
 # The extension version is content-derived at configure time: every shipped SQL input
@@ -401,19 +397,11 @@ laplace_write_sql_chain(
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql")
 set(_install_deps ${SQL_CHAIN_DEPS})
-laplace_write_sql_chain(
-    "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/upgrade_chain.sql.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql")
-set(_upgrade_deps ${SQL_CHAIN_DEPS})
 
 set(EXT_SQL_MODULES
     sql/laplace_substrate.sql.in
-    sql/laplace_substrate_upgrade.sql.in
     sql/manifest.install
-    sql/manifest.upgrade
     ${_install_deps}
-    ${_upgrade_deps}
 )
 
 target_include_directories(laplace_execution PRIVATE "${_query_program_include}")
@@ -445,28 +433,7 @@ add_custom_command(
     VERBATIM
 )
 
-set(EXT_UPGRADE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.sql)
-set(EXT_UPGRADE_TMP ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.tmp)
-add_custom_command(
-    OUTPUT  ${EXT_UPGRADE_SQL}
-    DEPENDS ${EXT_SQL_MODULES}
-            ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND ${LAPLACE_SQLPP} ${LAPLACE_SQLPP_FLAGS}
-            -I${CMAKE_CURRENT_SOURCE_DIR}/sql
-            -I${CMAKE_CURRENT_SOURCE_DIR}/sql/generated
-            -I${CMAKE_CURRENT_BINARY_DIR}/sql
-            ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}_upgrade.sql.in
-            > ${EXT_UPGRADE_TMP}
-    COMMAND ${BASH} -c "grep -v '^#' ${EXT_UPGRADE_TMP} \
-            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g; s'EXECUTION_LIBRARY'${EXT_EXECUTION_MODULE}'g\" \
-            > ${EXT_UPGRADE_SQL}"
-    COMMAND ${CMAKE_COMMAND} -E remove ${EXT_UPGRADE_TMP}
-    COMMENT "Preprocessing ${EXT_NAME} upgrade body → ${EXT_NAME}_upgrade.sql"
-    VERBATIM
-)
-
-add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL} ${EXT_UPGRADE_SQL})
+add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 add_dependencies(laplace_execution ${EXT_NAME}_sql)
 
@@ -479,7 +446,6 @@ if(NOT WIN32)
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
         ${EXT_BUILT_SQL}
-        ${EXT_UPGRADE_SQL}
         ${CMAKE_CURRENT_BINARY_DIR}/laplace_execution_module.txt
         DESTINATION ${LAPLACE_EXT_SHAREDIR}
         PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}

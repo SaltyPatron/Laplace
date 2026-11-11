@@ -1,5 +1,4 @@
 -- Row estimates from the storage selected by the installed Native schema.
-DROP FUNCTION IF EXISTS laplace.substrate_counts();
 
 -- One source asserting one claim is one attestation. Publication retains the
 -- cardinality beside its witness; polling does not walk testimony or refold it.

@@ -1,7 +1,0 @@
--- RETIRED: consensus is derived state, not a cache that inference may delete
--- independently of testimony. Direct DELETE makes the graph disagree with its
--- surviving attestations and requires an out-of-band refold to become truthful
--- again. No caller exists; remove the executable alternate implementation while
--- preserving upgrade cleanup.
-DROP FUNCTION IF EXISTS generation.prune(bigint, boolean);
-DROP FUNCTION IF EXISTS laplace.laplace_prune(bigint, boolean);

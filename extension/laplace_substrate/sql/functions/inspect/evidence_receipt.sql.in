@@ -64,5 +64,3 @@ FROM facts f LEFT JOIN provenance p ON p.claim OPERATOR(@extschema:laplace@.=) f
 GROUP BY f.claim,f.predicate,f.type,f.object,f.fact,f.eff_mu ORDER BY f.eff_mu DESC,f.claim;
 END;
 
-
-DROP FUNCTION IF EXISTS ops.native_evidence_receipt(bytea,integer);

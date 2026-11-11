@@ -29,7 +29,6 @@
 -- Ranking is consensus.edge_rank(relation salience x consensus.eff_mu), the readout law the serving
 -- surface already uses. Labels resolve in ONE realize_batch after the limit, per
 -- the rank-then-label rule — never a scalar realize per row.
-DROP FUNCTION IF EXISTS laplace.edges(bytea, text, bytea[], int, boolean, bytea);
 CREATE OR REPLACE FUNCTION consensus.edges(
         p_subject   bytea,
         p_direction text    DEFAULT 'both',
@@ -82,7 +81,6 @@ BEGIN ATOMIC
 ;
 END;
 
-DROP FUNCTION IF EXISTS laplace.edges(text, text, int, boolean);
 CREATE OR REPLACE FUNCTION consensus.edges(
         p_word      text,
         p_direction text    DEFAULT 'both',
@@ -104,15 +102,6 @@ END;
 -- sanctioned trajectory-containment boundary; all relation-family/Glicko access
 -- stays here in the consensus boundary. The result is still canonical ids and
 -- typed standing state; rendering happens after page selection.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.browse_named_entities(bytea[], bytea, int, int, int)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, tier smallint, type_id bytea, matched_name_id bytea, match_kind text, rating numeric, rd numeric, eff_mu numeric, witness_count bigint, candidate_name_count bigint, candidate_truncated boolean, matched_entity_count bigint)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_members','p_exact','p_offset','p_limit','p_capacity','entity_id','tier','type_id','matched_name_id','match_kind','rating','rd','eff_mu','witness_count','candidate_name_count','candidate_truncated','matched_entity_count']::text[])) THEN
-        DROP FUNCTION consensus.browse_named_entities(bytea[], bytea, int, int, int);
-    END IF;
-END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION consensus.browse_named_entities(
     p_members bytea[],
     p_exact bytea DEFAULT NULL,

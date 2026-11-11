@@ -14,7 +14,6 @@ BEGIN ATOMIC
     SELECT * FROM converse.prompt_tree(p_text, true);
 END;
 
-DROP FUNCTION IF EXISTS laplace.prompt_words(text);
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

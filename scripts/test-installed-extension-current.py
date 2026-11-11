@@ -30,12 +30,9 @@ class InstalledExtensionParityTests(unittest.TestCase):
 
             files = {
                 sql / "manifest.install": "a.sql.in\n",
-                sql / "manifest.upgrade": "b.sql.in\n",
                 sql / "a.sql.in": "SELECT 'install';\n",
-                sql / "b.sql.in": "SELECT 'upgrade';\n",
                 ext / "laplace_substrate.control.in": "default_version = '@EXT_VERSION@'\n",
                 sql / "laplace_substrate.sql.in": "-- install shim\n",
-                sql / "laplace_substrate_upgrade.sql.in": "-- upgrade shim\n",
                 sql / "sqldefines.h.in": "-- defines\n",
             }
             for path, content in files.items():

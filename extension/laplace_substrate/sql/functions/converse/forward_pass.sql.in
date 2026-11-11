@@ -1,6 +1,4 @@
 -- Forward program shared read primitives (spec 36): bindings, key_facts, couple, respond, translate.
-DROP FUNCTION IF EXISTS converse.key_facts(bytea[], int) CASCADE;
-DROP FUNCTION IF EXISTS converse.couple(bytea, bytea, bytea, int) CASCADE;
 
 CREATE OR REPLACE FUNCTION converse._binding_evidence_impl(
     p_terms bytea[], p_lang bytea, p_support boolean)

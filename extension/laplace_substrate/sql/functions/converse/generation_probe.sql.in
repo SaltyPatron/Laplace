@@ -6,7 +6,6 @@
 -- seed wave instead of living as ad-hoc operator SQL. Distinctness is then
 -- count(DISTINCT reply) per lane over this table; topicality is read against
 -- the topic's own consensus by the caller.
-DROP FUNCTION IF EXISTS laplace.generation_probe(text, bigint[], int, bytea);
 CREATE OR REPLACE FUNCTION generation.probe(p_prompt text,
                                             p_seeds bigint[],
                                             p_steps int DEFAULT 30,

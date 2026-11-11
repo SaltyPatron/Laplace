@@ -1,6 +1,5 @@
 -- The anchor every strand enters at and plays against, on Laplace-Native's
 -- standing scale (LP_GLICKO_RATING, laplace.h): float8 rating points.
-DROP FUNCTION IF EXISTS laplace.glicko2_neutral_mu();
 CREATE OR REPLACE FUNCTION consensus.glicko2_neutral_mu() RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_standing_anchor'
     LANGUAGE C LAPLACE_IMMUTABLE;

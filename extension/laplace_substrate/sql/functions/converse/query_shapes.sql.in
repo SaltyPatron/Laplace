@@ -3,7 +3,6 @@
 -- Published so a client builds its controls from the substrate instead of
 -- hardcoding a menu. Every shape is named for the structure it reads, not for
 -- an English phrasing that would select it.
-DROP FUNCTION IF EXISTS laplace.query_shapes();
 CREATE OR REPLACE FUNCTION converse.query_shapes()
     RETURNS TABLE(shape text, summary text, needs_topic2 boolean,
                   needs_type boolean, accepts_lang boolean)

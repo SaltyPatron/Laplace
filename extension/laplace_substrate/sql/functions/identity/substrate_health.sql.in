@@ -3,16 +3,6 @@
 -- exact entity count) runs only with p_deep; otherwise those columns are NULL,
 -- not 0, because "not checked" and "checked, none found" are different claims.
 -- deep_checked says which one was returned.
-DROP FUNCTION IF EXISTS laplace.substrate_health();
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('laplace.substrate_health(boolean)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(ok boolean, fake_tier_bands bigint, identity_violations bigint, entities bigint, surface_present boolean, registry_relations bigint, deep_checked boolean)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_deep','ok','fake_tier_bands','identity_violations','entities','surface_present','registry_relations','deep_checked']::text[])) THEN
-        DROP FUNCTION laplace.substrate_health(boolean);
-    END IF;
-END $upgrade_shape$;
 
 CREATE OR REPLACE FUNCTION laplace.substrate_health(p_deep boolean DEFAULT false)
 RETURNS TABLE(

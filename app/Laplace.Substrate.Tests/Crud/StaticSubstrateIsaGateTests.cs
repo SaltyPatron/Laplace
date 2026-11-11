@@ -33,23 +33,16 @@ public sealed class StaticSubstrateIsaGateTests
         Assert.DoesNotContain("p_tiers smallint[]", entities, StringComparison.Ordinal);
         Assert.DoesNotContain("p_hilberts bytea[]", physicalities, StringComparison.Ordinal);
         Assert.DoesNotContain("p_type_ids bytea[]", attestations, StringComparison.Ordinal);
-        Assert.Contains(
-            "DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[])",
-            attestations,
-            StringComparison.Ordinal);
     }
 
     [Theory]
-    [InlineData("laplace_decay.sql.in", "generation.decay")]
-    [InlineData("laplace_prune.sql.in", "generation.prune")]
-    public void DerivedConsensus_CannotExposeDirectMutationInferenceVerbs(
-        string file, string function)
+    [InlineData("generation.decay")]
+    [InlineData("generation.prune")]
+    public void DerivedConsensus_CannotExposeDirectMutationInferenceVerbs(string function)
     {
-        var sql = Read("extension", "laplace_substrate", "sql", "functions", "inference", file);
-        Assert.Contains($"DROP FUNCTION IF EXISTS {function}", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain($"CREATE OR REPLACE FUNCTION {function}", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("UPDATE ONLY", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DELETE FROM ONLY", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("EXECUTE format", sql, StringComparison.OrdinalIgnoreCase);
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var sql = Path.Combine(root, "extension", "laplace_substrate", "sql");
+        foreach (var file in Directory.EnumerateFiles(sql, "*.sql.in", SearchOption.AllDirectories))
+            Assert.DoesNotContain($"FUNCTION {function}(", File.ReadAllText(file), StringComparison.Ordinal);
     }
 }

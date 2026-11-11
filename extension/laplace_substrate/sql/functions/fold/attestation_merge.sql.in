@@ -1,9 +1,6 @@
 -- Compatibility replay surface. An existing five-tuple is the same witness.
 -- Both forms validate their typed input and return zero without database work.
 -- The shared writer admits novel identities and folds only that accepted set.
-DROP FUNCTION IF EXISTS laplace.attestation_merge(bytea[], bytea[], bytea[], bigint[], bigint[], timestamptz[]);
-DROP FUNCTION IF EXISTS consensus.attestation_merge(bytea[], bytea[], bytea[], bigint[], bigint[], timestamptz[]);
-DROP FUNCTION IF EXISTS consensus.attestation_merge_type(bytea, bytea[], bytea[], bigint[], bigint[], timestamptz[]);
 CREATE OR REPLACE FUNCTION consensus.attestation_merge(
     p_ids      bytea[],
     p_types    bytea[],

@@ -1,5 +1,0 @@
--- Conflict-safe, set-sized canonical physicality admission is now owned by
--- sql_catalog.def (write.physicalities_merge).
-DROP FUNCTION IF EXISTS laplace.physicalities_merge(
-    bytea[], bytea[], smallint[], bytea[], bytea[], bytea[],
-    integer[], double precision[], boolean[], integer[], boolean[], timestamptz[]);

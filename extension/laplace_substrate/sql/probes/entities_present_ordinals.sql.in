@@ -9,4 +9,3 @@ CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
 
 -- Tier is not an entity key, so the (ids, tiers) form is dropped; tier-keyed
 -- rounds use entities_stored_bitmap / tier_batch_existence_probe.
-DROP FUNCTION IF EXISTS laplace.entities_present_ordinals(bytea[], smallint[]);

@@ -1,6 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_count(bytea);
-DROP FUNCTION IF EXISTS laplace.entity_counts_by_types(bytea[]);
-
 CREATE OR REPLACE FUNCTION ops.entity_count(p_type bytea)
     RETURNS bigint
     LANGUAGE sql STABLE

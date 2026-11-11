@@ -17,4 +17,3 @@ END;
 -- Physicalities are HASH(id), so the id routes the probe and a hilbert key
 -- names no partition; the (ids, hilberts) form is dropped. A stored row must
 -- never read absent: bulk COPY has no ON CONFLICT and would abort.
-DROP FUNCTION IF EXISTS laplace.physicalities_exist_bitmap(bytea[], bytea[]);

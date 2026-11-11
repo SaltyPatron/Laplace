@@ -24,9 +24,7 @@ add_subdirectory(laplace_geom)
         $files=@{
             "$name.control.in"="default_version = '@EXT_VERSION@'"
             'sql/manifest.install'='functions/install.sql.in'
-            'sql/manifest.upgrade'='functions/upgrade.sql.in'
             'sql/functions/install.sql.in'="SELECT 'install';"
-            'sql/functions/upgrade.sql.in'="SELECT 'upgrade';"
             "sql/$name.sql.in"='install shim'
             'sql/sqldefines.h.in'='#define SQL_CONSTANT 1'
         }
@@ -34,9 +32,8 @@ add_subdirectory(laplace_geom)
         $cmake=@'
 include("@MANIFEST@")
 laplace_manifest_files(install "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
-laplace_manifest_files(upgrade "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
 file(GLOB templates "${CMAKE_CURRENT_SOURCE_DIR}/sql/*.in" "${CMAKE_CURRENT_SOURCE_DIR}/*.control.in")
-set(inputs ${install} ${upgrade} ${templates})
+set(inputs ${install} ${templates})
 list(SORT inputs)
 set(hashes "")
 foreach(input IN LISTS inputs)
@@ -50,7 +47,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version.txt" "${version}")
     }
     $null=Invoke-TestCMake @('-S',$source,'-B',$build,'-G','Ninja')
     foreach($name in 'laplace_substrate','laplace_geom'){
-        foreach($leaf in 'sql/functions/install.sql.in','sql/functions/upgrade.sql.in','sql/sqldefines.h.in',"sql/$name.sql.in","$name.control.in"){
+        foreach($leaf in 'sql/functions/install.sql.in','sql/sqldefines.h.in',"sql/$name.sql.in","$name.control.in"){
             $version=Join-Path $build "$name/version.txt"
             $before=Get-Content -LiteralPath $version -Raw
             $other=if($name -eq 'laplace_substrate'){'laplace_geom'}else{'laplace_substrate'}

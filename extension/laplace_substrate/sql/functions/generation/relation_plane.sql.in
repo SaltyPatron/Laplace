@@ -5,7 +5,6 @@
 -- id is resolved into a local FIRST (a variable is a bound parameter and
 -- therefore an index condition — Rule #4; a function call in the qual is
 -- not, lesson L12).
-DROP FUNCTION IF EXISTS laplace.relation_plane(text, text, int, bytea[]);
 CREATE OR REPLACE FUNCTION generation.relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL,
         p_vocab bytea[] DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)

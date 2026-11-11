@@ -107,17 +107,9 @@ if not exist "%SUB_DIR%\laplace_substrate.control" (
 
 copy /y "%GEOM_DIR%\laplace_geom.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
 for %%F in ("%GEOM_DIR%\laplace_geom--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
-rem laplace_geom is content-hash versioned like laplace_substrate: an installed database
-rem reaches the new hash only through the bridge made from this upgrade body.
-if not exist "%GEOM_DIR%\laplace_geom_upgrade.sql" (
-  echo ERROR: missing %GEOM_DIR%\laplace_geom_upgrade.sql — run build-extensions.cmd first
-  exit /b 1
-)
-copy /y "%GEOM_DIR%\laplace_geom_upgrade.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 copy /y "%SUB_DIR%\laplace_substrate.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
 for %%F in ("%SUB_DIR%\laplace_substrate--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
-copy /y "%SUB_DIR%\laplace_substrate_upgrade.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 rem Retain the stable alias for predecessor bindings. Current functions use the
 rem content-addressed module so long-lived backends load the matching generation.

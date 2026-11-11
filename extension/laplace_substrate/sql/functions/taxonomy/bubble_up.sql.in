@@ -2,7 +2,6 @@
 -- domain geometry, ranking, ordering, and explicit truncation all belong to
 -- bubble_up_batch; duplicating that CTE cascade here made two definitions of one
 -- operation and paid the scalar partition fanout again.
-DROP FUNCTION IF EXISTS laplace.bubble_up(bytea, bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,

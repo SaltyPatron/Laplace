@@ -103,9 +103,8 @@ public class SqlConsolidationTests
         }
 
         // The secondary indexes created with the consensus table must remain.
-        // consensus_object_btree is deliberately ABSENT: retired 2026-08-13 as a
-        // strict prefix of consensus_object_type_btree under the same partial
-        // predicate (its .sql.in is now the guarded DROP) — asserted below.
+        // consensus_object_btree is deliberately ABSENT: a strict prefix of
+        // consensus_object_type_btree under the same partial predicate — asserted below.
         foreach (var idx in new[]
                  {
                      "consensus_type_btree",
@@ -119,8 +118,7 @@ public class SqlConsolidationTests
             Assert.True(exists, $"index {idx} missing after inline fold");
         }
 
-        // The retired duplicate must NOT come back (indexes/consensus_object_btree.sql.in
-        // is the guarded DROP; a resurrected create means the manifest regressed).
+        // The duplicate must NOT come back; a resurrected create means the manifest regressed.
         var retired = (bool)(await ScalarAsync(
             "SELECT to_regclass('laplace.consensus_object_btree') IS NULL"))!;
         Assert.True(retired, "consensus_object_btree resurrected — retired as a strict prefix duplicate of consensus_object_type_btree");

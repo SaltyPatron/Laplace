@@ -30,8 +30,6 @@
 -- The public signature remains unchanged so every BEGIN ATOMIC caller keeps its
 -- recorded dependency. The private native binding uses the same installed C
 -- symbol and descriptor; no server-image change or restart is required.
-DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
-DROP FUNCTION IF EXISTS converse.prompt_coherence_native(text);
 
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,

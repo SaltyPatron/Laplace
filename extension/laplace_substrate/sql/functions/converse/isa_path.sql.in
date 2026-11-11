@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.isa_path(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION converse.isa_path(p_x bytea, p_y bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(path bytea[], types bytea[], path_mu numeric)
     LANGUAGE C STABLE STRICT PARALLEL SAFE

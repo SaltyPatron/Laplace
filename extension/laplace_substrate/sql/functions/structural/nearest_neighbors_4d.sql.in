@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.nearest_neighbors_4d(text, integer);
 CREATE OR REPLACE FUNCTION structural.nearest_neighbors_4d(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE sql STABLE

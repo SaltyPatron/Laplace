@@ -1,14 +1,5 @@
 -- CREATE OR REPLACE cannot change a function's result columns, so a
 -- differently shaped installed ops.api is dropped first.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.api(text)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(name text, args text, returns text, kind text)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_like','name','args','returns','kind']::text[])) THEN
-        DROP FUNCTION ops.api(text);
-    END IF;
-END $upgrade_shape$;
 
 -- `kind` says function or procedure: a procedure is invoked with CALL and a
 -- function with SELECT, so a caller needs it to issue the right statement.
