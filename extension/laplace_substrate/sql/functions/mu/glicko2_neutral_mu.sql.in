@@ -4,3 +4,9 @@ DROP FUNCTION IF EXISTS laplace.glicko2_neutral_mu();
 CREATE OR REPLACE FUNCTION consensus.glicko2_neutral_mu() RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_standing_anchor'
     LANGUAGE C LAPLACE_IMMUTABLE;
+
+-- The same anchor in legacy laplace.consensus fixed point (points x 1e9), until its writer moves to public.consensus.
+CREATE OR REPLACE FUNCTION consensus.glicko2_neutral_mu_fp1e9() RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT round(consensus.glicko2_neutral_mu() * 1e9)::bigint;
+END;
