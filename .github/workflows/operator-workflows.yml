@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Engine
-          ref: 270f95d21afb489ca5f3a66c1f4cdd4061f8c515
+          ref: 250e0607c9ed73a670b3887438190e96e6aec2dc
           path: .ci-dependencies/Laplace-Engine
           persist-credentials: false
       - name: Validate workflow syntax and operator ownership
