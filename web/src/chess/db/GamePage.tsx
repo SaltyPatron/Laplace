@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { WorldLink as Link } from '../../world/WorldLink';
-import { ErrorText, LoadingText, Muted, Panel, Stack } from '@ui';
+import { ErrorText, LoadingText, Muted, Panel, ReadStatus, Stack, useReadResource } from '@ui';
 import { chessGame, chessGamePlies } from './api';
 import { GameBoard } from './GameBoard';
+import { gameOpenings } from '../openings/api';
+import { OpeningName } from '../openings/Openings';
 import type { ChessGamePliesResponse, ChessGameResponse } from './types';
 import styles from './ChessDb.module.css';
 
@@ -39,8 +41,20 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
     return () => { stale = true; };
   }, [idHex]);
 
+  // One read for every ply's position: which named openings hold each, the deepest one the
+  // line reaches, and the first ply out of book.
+  const movetext = game?.movetext ?? null;
+  const openings = useReadResource({
+    key: JSON.stringify(['chess-game-openings', idHex, movetext]),
+    enabled: !!movetext,
+    read: (signal) => gameOpenings(movetext!, signal),
+  });
+  const byPly = new Map(openings.data?.plies.map((row) => [row.ply, row.openings]) ?? []);
+
   if (err) return <ErrorText>{err}</ErrorText>;
   if (!game) return <LoadingText>Reading the game…</LoadingText>;
+  const leaves = openings.data?.out_of_book_at ?? null;
+  const leavingMove = leaves != null && plies ? plies.plies[leaves - 1] : null;
 
   return (
     <Stack gap={4}>
@@ -75,10 +89,35 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
         </Muted>
       </Panel>
 
+      <Panel title="Opening">
+        {!movetext ? <Muted>This game carries no movetext, so its opening cannot be read.</Muted> : (
+          <>
+            <ReadStatus label="Openings" resource={openings} />
+            {openings.data && (
+              openings.data.deepest ? (
+                <Stack gap={2}>
+                  <p className={styles.note}>
+                    <OpeningName opening={openings.data.deepest} />{' '}
+                    <Muted>the deepest named line this game follows ({openings.data.deepest.plies} plies)</Muted>
+                  </p>
+                  <Muted>
+                    {leaves == null
+                      ? 'Every position of this game lies on a named opening line.'
+                      : `Leaves book at ply ${leaves}${leavingMove ? ` (${leavingMove.white_moved ? `${Math.ceil(leaves / 2)}.` : `${Math.ceil(leaves / 2)}…`} ${leavingMove.san})` : ''}.`}
+                    {' '}Step through the replay to see the openings of each position, including transpositions.
+                  </Muted>
+                </Stack>
+              ) : <Muted>No position of this game lies on a named opening line.</Muted>
+            )}
+          </>
+        )}
+      </Panel>
+
       <Panel title="Replay">
         {pliesErr ? <ErrorText>{pliesErr}</ErrorText> : null}
         {!pliesErr && plies === null ? <LoadingText>Replaying the game…</LoadingText> : null}
-        {plies ? <GameBoard data={plies} white={game.white} black={game.black} /> : null}
+        {plies ? <GameBoard data={plies} white={game.white} black={game.black}
+          openingsAt={openings.data ? (ply) => byPly.get(ply) : undefined} /> : null}
       </Panel>
 
       <Panel title="Reconstructed movetext">

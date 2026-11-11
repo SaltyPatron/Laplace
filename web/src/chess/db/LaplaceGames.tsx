@@ -5,6 +5,7 @@ import { StatCard } from '../../explore/components/StatCard';
 import { chessLaplaceGames } from './api';
 import { OutcomeChip } from './RecordBar';
 import type { ChessGameRow, ChessGamesResponse } from './types';
+import { DeepestOpeningCell, useDeepestOpenings } from '../openings/Openings';
 import styles from './ChessDb.module.css';
 
 const PAGE = 200;
@@ -40,6 +41,8 @@ export function LaplaceGames() {
     return () => { stale = true; };
   }, [offset]);
 
+  // One batched opening read for the loaded page, not per filter.
+  const deepest = useDeepestOpenings(data?.games ?? null);
   const filtered = useMemo(() => (data?.games ?? []).filter((game) => {
     const matchesText = !query || [game.opponent, game.event, game.eco, game.played_on]
       .some((value) => value?.toLowerCase().includes(query));
@@ -140,6 +143,7 @@ export function LaplaceGames() {
                 <Th>Outcome</Th>
                 <Th>Event</Th>
                 <Th>ECO</Th>
+                <Th title="The deepest named opening this game follows, read from the substrate">Opening</Th>
               </tr>
             </thead>
             <tbody>
@@ -155,6 +159,7 @@ export function LaplaceGames() {
                   <Td><OutcomeChip outcome={game.outcome} /></Td>
                   <Td>{game.event ?? '—'}</Td>
                   <Td>{game.eco ?? '—'}</Td>
+                  <Td><DeepestOpeningCell id={game.id} openings={deepest} /></Td>
                 </tr>
               ))}
             </tbody>
