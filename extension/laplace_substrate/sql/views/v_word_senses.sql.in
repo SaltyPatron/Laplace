@@ -9,7 +9,7 @@ SELECT c.subject_id AS word_id,
        c.volatility,
        c.witness_count,
        c.last_observed_at,
-       consensus.eff_mu(c.rating, c.rd) AS eff_mu
+       consensus.eff_mu(c.rating, c.rd)::double precision AS eff_mu
 FROM laplace.v_consensus_unrefuted c
 WHERE c.type_id = laplace.relation_type_id('HAS_SENSE')
   AND c.object_id IS NOT NULL;
