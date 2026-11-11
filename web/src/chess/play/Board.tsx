@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
 import { formatSubstrateMoveDelta } from '../evalDisplay';
 import shared from './playShared.module.css';
 import styles from './Board.module.css';
+import { sqRC } from './playTypes';
 
 export const GLYPH: Record<string, string> = {
   K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
@@ -71,17 +72,41 @@ export interface BoardProps {
   onPointerDown: (e: PointerEvent, sq: string) => void;
   onPointerUp: (e: PointerEvent, sq: string) => void;
   onDragMove: (x: number, y: number) => void;
+  /** Enter or Space on a square: the same selection a click makes (select a piece, then its target). */
+  onActivate?: (sq: string) => void;
 }
 
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
   whiteEval, evalFrac, evalDetail, evalPending = false, boardRef, flip = false, lastMove, matedKing, checkedKing,
   readOnly = false, displayOnly = false, footer,
-  onPointerDown, onPointerUp, onDragMove,
+  onPointerDown, onPointerUp, onDragMove, onActivate,
 }: BoardProps) {
   const board = parseBoard(fen);
   const rowOrder = visualOrder(flip);
   const colOrder = visualOrder(flip);
+  // One tab stop for the whole grid (the WAI-ARIA grid pattern): arrows move between squares
+  // in the order they are drawn, so a flipped board moves the way it looks.
+  const [focusSq, setFocusSq] = useState('e2');
+  const tabSq = sel ?? focusSq;
+  const onSquareKey = (e: KeyboardEvent<HTMLDivElement>, sq: string) => {
+    const { f, r } = sqRC(sq);
+    const col = colOrder.indexOf(f), row = rowOrder.indexOf(r);
+    const step: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    let next: string | null = null;
+    if (step[e.key]) {
+      const [dc, dr] = step[e.key];
+      const c = col + dc, rr = row + dr;
+      if (c >= 0 && c < 8 && rr >= 0 && rr < 8) next = sqName(colOrder[c], rowOrder[rr]);
+    } else if (e.key === 'Home') next = sqName(colOrder[0], rowOrder[row]);
+    else if (e.key === 'End') next = sqName(colOrder[7], rowOrder[row]);
+    else if ((e.key === 'Enter' || e.key === ' ') && !readOnly && onActivate) { e.preventDefault(); onActivate(sq); return; }
+    else return;
+    e.preventDefault();
+    if (!next) return;
+    setFocusSq(next);
+    boardRef.current?.querySelector<HTMLElement>(`[data-square="${next}"]`)?.focus();
+  };
 
   const selMoves = sel ? legal.filter((m) => m.uci.startsWith(sel)) : [];
   const targets = new Set(selMoves.map((m) => m.uci.slice(2, 4)));
@@ -182,6 +207,10 @@ export function Board({
                     role={readOnly ? 'cell' : 'gridcell'}
                     aria-label={`${sq}: ${piece ? `${piece === piece.toUpperCase() ? 'White' : 'Black'} ${PIECE_NAMES[piece.toLowerCase()] ?? piece}` : 'empty'}${inCheck ? ', in check' : ''}${mated ? ', checkmated' : ''}`}
                     aria-selected={readOnly ? undefined : sel === sq}
+                    data-square={sq}
+                    tabIndex={sq === tabSq ? 0 : -1}
+                    onKeyDown={(e) => onSquareKey(e, sq)}
+                    onFocus={() => setFocusSq(sq)}
                     className={cn(
                       styles.square,
                       dark ? styles.dark : styles.light,

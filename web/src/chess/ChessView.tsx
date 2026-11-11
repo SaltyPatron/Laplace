@@ -73,6 +73,14 @@ export function ChessView() {
 
   };
 
+  // Keyboard activation: the left-click rules without a drag.
+  const onActivate = (sq: string) => {
+    setMarks(new Set()); setUserArrows([]);
+    if (busy || reviewing || status !== 'ongoing') return;
+    if (sel && sel !== sq) { void playFromTo(sel, sq); setSel(null); return; }
+    setSel(isMine(sq) && sel !== sq ? sq : null);
+  };
+
   const onPointerUp = (e: React.PointerEvent, sq: string) => {
 
     if (e.button === 2) {
@@ -203,6 +211,7 @@ export function ChessView() {
           onPointerDown={onPointerDown}
 
           onPointerUp={onPointerUp}
+          onActivate={onActivate}
 
           onDragMove={(x, y) => setDrag((d) => (d ? { ...d, x, y } : d))}
 

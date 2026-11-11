@@ -240,7 +240,7 @@ test('[CONST-1] constellation loads fast with readable labels', async ({ page })
 
 test('[UNI-1] unicode glome can find a character', async ({ page }) => {
   await open(page, '/unicode', 8000);
-  const search = page.getByLabel('Find a character');
+  const search = page.getByRole('textbox', { name: 'Find a character' });
   await search.fill('A'); await search.press('Enter');
   await page.waitForTimeout(3000);
   expect(await mainText(page)).toMatch(/U\+0041/);
@@ -322,7 +322,8 @@ test('[CHESS-2] board coordinates shown', async ({ page }) => {
 });
 
 test('[CHESS-3] player profile is formatted', async ({ page }) => {
-  await open(page, '/chess', 5000);
+  // Search by name: with no recorded games the player sorts among the unrated, far past page one.
+  await open(page, '/chess?q=Nakamura', 5000);
   await page.getByRole('link', { name: /Nakamura, Hikaru/ }).first().click();
   await page.waitForTimeout(5000);
   const text = await mainText(page);
@@ -343,9 +344,14 @@ test('[LAB-1] calibration can be selected', async ({ page }) => {
   await expect(page.getByRole('combobox').or(page.getByRole('link', { name: /run calibration|produce/i })).first()).toBeVisible();
 });
 
-test('[LAB-2] platform admin can change lichess routing', async ({ page }) => {
+test('[LAB-2] lichess routing says who may change it', async ({ page }) => {
+  // The audit holds a service key, not a person. Routing follows the platform roles
+  // (services.manage), so the page must say why this session cannot change it; an
+  // administrator changing it is covered by LichessControlAccessTests.
   await open(page, '/lab/lichess', 4000);
-  expect(await mainText(page)).not.toMatch(/does not have permission to change the bot destination/);
+  const text = await mainText(page);
+  expect(text).not.toMatch(/does not have permission to change the bot destination/);
+  expect(text).toMatch(/service credential/i);
 });
 
 test('[DATA-1] admission history is listed', async ({ page }) => {
@@ -388,6 +394,11 @@ test('[ADM-5] operator copy is guidance', async ({ page }) => {
 
 test('[SET-1] settings tab bar renders correctly', async ({ page }) => {
   await open(page, '/settings', 4000);
+  // Workspace settings belong to a person; a service key is shown how to sign in instead.
+  if (await page.getByText(/Sign in to select a workspace/).isVisible()) {
+    await expect(page.getByRole('link', { name: /Sign in with/ }).first()).toBeVisible();
+    return;
+  }
   const box = await page.locator('[aria-current=page], [aria-selected=true]').filter({ hasText: /workspace/i }).first().boundingBox();
   expect(box?.height ?? 999).toBeLessThanOrEqual(48);
 });
