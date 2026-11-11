@@ -41,11 +41,11 @@ internal static class IngestDataPaths
         string name = catalog.Resolve(cliSource);
         var source = catalog.Sources.FirstOrDefault(source => source.Name == name)
             ?? throw new InvalidOperationException($"Unknown ingest source '{cliSource}'. Read ingest catalog.");
-        var roots = source.Roots.Select(ExpandRoot).ToArray();
+        var roots = source.Roots.Select(ExpandRoot).OfType<string>().ToArray();
         // A file-only source (tokenizers) declares its roots through absolute
         // file patterns. The stable prefix is configuration, not a corpus scan.
         if (roots.Length == 0)
-            roots = source.Files.Select(line => FilePatternRoot(ExpandRoot(line))).ToArray();
+            roots = source.Files.Select(ExpandRoot).OfType<string>().Select(FilePatternRoot).ToArray();
         return roots
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .ToArray();
@@ -61,18 +61,31 @@ internal static class IngestDataPaths
             : Path.GetDirectoryName(Path.GetFullPath(prefix))!;
     }
 
-    private static string ExpandRoot(string root) => Regex.Replace(root, @"\$(?:\{(?<name>[A-Z_]+)\}|(?<name>[A-Z_]+))", match =>
+    /// <summary>
+    /// A recipe path with <c>$NAME</c> read from the environment, as the Engine's
+    /// <c>path_expand</c> reads it: where data is kept is the machine's to say. The declared
+    /// ingest and model roots keep their installed resolution. A variable the environment
+    /// does not set (or sets empty) leaves the path unresolved (null), and the Engine drops it too.
+    /// </summary>
+    private static string? ExpandRoot(string root)
     {
-        var name = match.Groups["name"].Value;
-        return name switch
+        bool resolved = true;
+        string expanded = Regex.Replace(root, @"\$(?:\{(?<name>[A-Z0-9_]+)\}|(?<name>[A-Z0-9_]+))", match =>
         {
-            "DATA" or "LAPLACE_DATA" => LaplaceInstall.DeclaredIngestRoot(),
-            "MODELS" or "LAPLACE_MODELS" => LaplaceInstall.DeclaredModelsRoot(),
-            "SRC" or "LAPLACE_SRC" => Environment.GetEnvironmentVariable("LAPLACE_SRC")
-                ?? throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code."),
-            _ => throw new InvalidDataException($"Unsupported recipe-root variable: {name}")
-        };
-    });
+            var name = match.Groups["name"].Value;
+            string? value = name switch
+            {
+                "DATA" or "LAPLACE_DATA" => LaplaceInstall.DeclaredIngestRoot(),
+                "MODELS" or "LAPLACE_MODELS" => LaplaceInstall.DeclaredModelsRoot(),
+                "SRC" or "LAPLACE_SRC" => Environment.GetEnvironmentVariable("LAPLACE_SRC")
+                    ?? throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code."),
+                _ => Environment.GetEnvironmentVariable(name),
+            };
+            if (string.IsNullOrEmpty(value)) { resolved = false; return ""; }
+            return value;
+        });
+        return resolved ? expanded : null;
+    }
 
     private static IEnumerable<string> ExpandDirectories(string root)
     {
