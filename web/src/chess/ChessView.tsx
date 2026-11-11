@@ -23,6 +23,7 @@ import { sqRC } from './play/playTypes';
 import { useBoardInteraction } from './play/useBoardInteraction';
 import { usePlayGame } from './play/usePlayGame';
 import { useTraining } from './play/useTraining';
+import { PositionOpenings } from './openings/Openings';
 
 import styles from './ChessView.module.css';
 
@@ -284,6 +285,8 @@ export function ChessView() {
           onSubstrate={setUseSubstrate} onRecordToSubstrate={changeRecordToSubstrate} onEvalMode={setEvalMode}
 
         />
+
+        <PositionOpenings fen={fen} />
 
         <MoveList
 

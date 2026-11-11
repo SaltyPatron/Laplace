@@ -5,6 +5,8 @@ import { Board } from '../play/Board';
 import type { ChessGamePliesResponse, ChessPlyRow } from './types';
 import styles from './ChessDb.module.css';
 import layout from './GameBoard.module.css';
+import { OpeningList } from '../openings/Openings';
+import type { OpeningLine } from '../openings/api';
 
 /** Playback speeds. "clock" replays the recorded think times; the rest are fixed intervals. */
 type Speed = 'clock' | 'fast' | 'normal' | 'slow';
@@ -61,7 +63,10 @@ function realtimeGapMs(plies: ChessPlyRow[], i: number): number {
  * entity every other game that reached it shares, with its trajectories and rated
  * continuations.
  */
-export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse; white: string; black: string }) {
+/** `openingsAt(ply)`: the named openings holding the position shown at that ply (0 = start), once read. */
+export function GameBoard({ data, white, black, openingsAt }: {
+  data: ChessGamePliesResponse; white: string; black: string; openingsAt?: (ply: number) => OpeningLine[] | undefined;
+}) {
   const { plies, start_fen: startFen, has_clocks: hasClocks } = data;
 
   const [ply, setPly] = useState(0);
@@ -178,6 +183,13 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
           <Button variant="ghost" onClick={() => { setPlaying(false); setPly(plies.length); }} aria-label="End" disabled={atEnd}>⏭</Button>
           <Button variant="ghost" onClick={() => setFlip((f) => !f)} aria-label="Flip board">⇅</Button>
         </div>
+
+        {openingsAt && (
+          <section className={layout.plyOpenings} aria-label="Openings at this move">
+            <OpeningList openings={openingsAt(ply) ?? []}
+              emptyText={ply === 0 ? 'The starting position.' : 'Out of book: no named opening contains this position.'} />
+          </section>
+        )}
 
         <Range
           className={styles.scrub}
