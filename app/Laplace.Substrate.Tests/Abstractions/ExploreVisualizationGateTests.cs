@@ -15,10 +15,14 @@ public class ExploreVisualizationGateTests
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine([Root, .. parts]));
 
+    // A view split into modules is gated as the whole module: every .ts/.tsx file in its folder.
+    private static string Module(params string[] parts) => string.Join(Environment.NewLine,
+        Directory.EnumerateFiles(Path.Combine([Root, .. parts]), "*.ts*").Order(StringComparer.Ordinal).Select(File.ReadAllText));
+
     [Fact]
     public void ConsensusGraph_UsesDimensionPrivateVolumetricState()
     {
-        var graph = Read("web", "src", "explore", "graph", "ConsensusGraph.tsx");
+        var graph = Module("web", "src", "explore", "graph");
 
         Assert.Contains("graphForDimension(baseData, dim, centerId)", graph);
         Assert.Contains("volumetricSeed(node.id, node.hop)", graph);
@@ -30,8 +34,8 @@ public class ExploreVisualizationGateTests
     [Fact]
     public void ThreeRenderers_UseSharedUiVisualizationTokens_NotLegacyPalette()
     {
-        var graph = Read("web", "src", "explore", "graph", "ConsensusGraph.tsx");
-        var glome = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+        var graph = Module("web", "src", "explore", "graph");
+        var glome = Module("web", "src", "explore", "glome");
         var palette = Read("web", "src", "explore", "visualizationPalette.ts");
         var theme = Read("web", "src", "ui", "theme.css");
 
@@ -70,7 +74,7 @@ public class ExploreVisualizationGateTests
     public void GlomeRibbon_UsesTheSameLiveProjectionAsItsNodes()
     {
         var tab = Read("web", "src", "explore", "entity", "tabs", "GlomeTab.tsx");
-        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+        var canvas = Module("web", "src", "explore", "glome");
 
         Assert.DoesNotContain("placementBallPos", tab);
         Assert.DoesNotContain("packedDisplayPos", tab);
