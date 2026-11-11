@@ -82,3 +82,25 @@ test('a game shows its deepest opening, where it leaves book, and each ply\'s op
   await next.click();
   await expect(atMove).toContainText('Out of book: no named opening contains this position.');
 });
+
+test('a game list reads every game\'s deepest opening in one batch', async ({ page }) => {
+  const row = (id: string, movetext: string | null) => ({ id: id.repeat(32), played_on: '2026.11.11', event: 'Laplace Play', eco: null,
+    as_white: true, opponent_id: null, opponent: 'Browser player', result: '1-0', outcome: 2, movetext });
+  await page.route('**/v1/chess/laplace/games?**', (route) => route.fulfill({ json: { object: 'chess.games', player_id: '', offset: 0,
+    games: [row('a', '1. e4 e5 2. Nf3 Nf6 1-0'), row('b', '1. h4 a5 1-0'), row('c', null)] } }));
+  const batches: unknown[] = [];
+  await page.route('**/modular/api/chess/game-openings', (route) => {
+    batches.push(route.request().postDataJSON());
+    return route.fulfill({ json: [
+      { line: 'f6'.repeat(16), plies: [], deepest: PETROV, out_of_book_at: null },
+      { line: 'a5'.repeat(16), plies: [], deepest: null, out_of_book_at: 1 },
+    ] });
+  });
+  await page.goto('/chess/laplace');
+  const rows = page.getByRole('row');
+  await expect(rows.filter({ hasText: 'Petrov Defence' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'no named line' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'no movetext' })).toHaveCount(1);
+  // One request for the page, carrying only the games that have movetext, in order.
+  expect(batches).toEqual([{ pgns: ['1. e4 e5 2. Nf3 Nf6 1-0', '1. h4 a5 1-0'] }]);
+});

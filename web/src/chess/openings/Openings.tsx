@@ -1,5 +1,5 @@
 import { Muted, ReadStatus, useReadResource } from '@ui';
-import { mostSpecific, positionOpenings, type OpeningLine } from './api';
+import { gameOpeningsBatch, mostSpecific, positionOpenings, type OpeningLine } from './api';
 import styles from './Openings.module.css';
 
 /** One named opening: ECO, name and its length in plies. */
@@ -32,6 +32,31 @@ export function OpeningList({ openings, emptyText }: { openings: OpeningLine[]; 
       )}
     </div>
   );
+}
+
+/**
+ * The deepest named opening of each game on a list page, from one batched read. A game
+ * without movetext, or one the substrate cannot replay, maps to null.
+ */
+export function useDeepestOpenings(games: { id: string; movetext?: string | null }[] | null) {
+  const readable = (games ?? []).filter((game) => !!game.movetext);
+  const read = useReadResource({
+    key: JSON.stringify(['chess-deepest-openings', readable.map((game) => game.id)]),
+    enabled: readable.length > 0,
+    read: (signal) => gameOpeningsBatch(readable.map((game) => game.movetext!), signal),
+  });
+  const byId = new Map<string, OpeningLine | null>();
+  read.data?.forEach((result, index) => byId.set(readable[index].id, result?.deepest ?? null));
+  return { byId, read, readable: new Set(readable.map((game) => game.id)) };
+}
+
+/** A list cell: the game's deepest named opening, or why there is none. */
+export function DeepestOpeningCell({ id, openings }: { id: string; openings: ReturnType<typeof useDeepestOpenings> }) {
+  if (!openings.readable.has(id)) return <Muted>no movetext</Muted>;
+  if (openings.read.error) return <Muted>unavailable</Muted>;
+  if (!openings.byId.has(id)) return <Muted>reading…</Muted>;
+  const deepest = openings.byId.get(id);
+  return deepest ? <OpeningName opening={deepest} /> : <Muted>no named line</Muted>;
 }
 
 /** The openings of the position on a board, read by FEN from the substrate. */

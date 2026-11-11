@@ -7,6 +7,7 @@ import { chessGamePlies, chessPlayer, chessPlayerGames } from './api';
 import { GameBoard } from './GameBoard';
 import { OutcomeChip, RecordCell, recordText, scoreText } from './RecordBar';
 import type { ChessGamePliesResponse, ChessGameRow, ChessPlayerResponse, ChessRecord } from './types';
+import { DeepestOpeningCell, useDeepestOpenings } from '../openings/Openings';
 import styles from './ChessDb.module.css';
 
 const PAGE = 25;
@@ -55,6 +56,8 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
   }, [idHex, offset]);
 
   const latestGame = offset === 0 && games && games.length > 0 ? games[0] : null;
+  // One batched opening read for the page of games.
+  const deepest = useDeepestOpenings(games);
   useEffect(() => {
     let stale = false;
     setLatestPlies(null);
@@ -204,6 +207,7 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
                   <Th>Result</Th>
                   <Th>Event</Th>
                   <Th>ECO</Th>
+                  <Th title="The deepest named opening this game follows, read from the substrate">Opening</Th>
                 </tr>
               </thead>
               <tbody>
@@ -230,6 +234,7 @@ export function PlayerPage({ selectedId, embedded = false }: { selectedId?: stri
                     </Td>
                     <Td>{g.event ?? '—'}</Td>
                     <Td>{g.eco ?? '—'}</Td>
+                    <Td><DeepestOpeningCell id={g.id} openings={deepest} /></Td>
                   </tr>
                 ))}
               </tbody>

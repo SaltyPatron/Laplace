@@ -93,6 +93,8 @@ export interface ChessGameRow {
   opponent: string;
   result: string | null;
   outcome: number | null;
+  /** The game's movetext, which the opening read takes; null when the game carries none. */
+  movetext?: string | null;
 }
 
 export interface ChessGamesResponse {
