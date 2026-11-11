@@ -14,7 +14,6 @@ public sealed class IngestRosterParityTests
     private static readonly HashSet<string> OperationalOnlyRoutes =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "agents",
             "chess",
             "chess-analyze",
             "chess-books",
@@ -56,7 +55,7 @@ public sealed class IngestRosterParityTests
         var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase).ToList();
         // These existing path/operator commands were previously mixed into the
         // cadence JSON. They do not declare corpus order or another recipe estate.
-        string[] pathCommands = ["document", "repo", "stack", "tiny-codes", "operational", "safetensors"];
+        string[] pathCommands = ["document", "repo", "stack", "tiny-codes", "safetensors"];
         var unclassified = runtimeRoutes
             .Except(manifestRoutes, StringComparer.OrdinalIgnoreCase)
             .Except(OperationalOnlyRoutes, StringComparer.OrdinalIgnoreCase)

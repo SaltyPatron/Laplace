@@ -14,7 +14,7 @@ internal static class IngestDispatchTable
     /// Sources whose dispatch is determined by their key alone: resolve the decomposer
     /// and the data path, and hand both to the runner with the layer-order precondition.
     /// </summary>
-    private static readonly string[] StandardSources = ["operational"];
+    private static readonly string[] StandardSources = [];
 
     /// <summary>
     /// Same shape without the layer-order precondition: these sources resume per file
@@ -42,13 +42,18 @@ internal static class IngestDispatchTable
     /// </summary>
     private static readonly (string Key, IngestHandler Handler)[] Exceptions =
     [
-        ("code",     cli => IngestCommands.IngestCodeAsync(cli)),
-        ("repo",     cli => IngestCommands.IngestRepoAsync(cli)),
-        ("tabular",  cli => IngestCommands.IngestTabularAsync(cli)),
+        // Files outside the recipe estate's corpora run through the Engine's recipes, matched by
+        // file name; each file's trunk is its own witness. A verified Git corpus still writes its
+        // admission receipt through the managed repository reader.
+        ("code",     cli => IngestCommands.IngestNativeFilesAsync("code", cli)),
+        ("repo",     cli => cli.GitCorpusSelection is null && cli.GitCorpusReceipt is null
+                                ? IngestCommands.IngestNativeFilesAsync("repo", cli)
+                                : IngestCommands.IngestRepoAsync(cli)),
+        ("tabular",  cli => IngestCommands.IngestNativeFilesAsync("tabular", cli)),
+        ("document", cli => IngestCommands.IngestNativeFilesAsync("document",
+                                cli with { Path = IngestDataPaths.Resolve("document", cli.Path) })),
         ("parquet",  cli => IngestCommands.IngestParquetAsync(cli)),
-        ("document", cli => IngestCommands.IngestDocumentAsync(cli)),
         ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
-        ("agents",   cli => IngestCommands.IngestAgentsAsync(cli)),
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
         ("model-corroborate", cli => IngestCommands.CorroborateSafetensorSnapshotsAsync(cli)),
 

@@ -25,15 +25,32 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    internal static async Task<int> IngestNativeRecipeAsync(string source, IngestCliArgs cli, CancellationToken ct = default)
+    internal static Task<int> IngestNativeRecipeAsync(string source, IngestCliArgs cli, CancellationToken ct = default)
+        => IngestNativeAsync(source, source, cli, ct);
+
+    /// <summary>
+    /// Files that belong to no corpus of the recipe estate (a code tree, documents, tables): the Engine
+    /// reads each through the recipe its name matches, and each file's trunk is its own witness at the
+    /// class that recipe declares. <paramref name="lane"/> only names the run in its receipts.
+    /// </summary>
+    internal static Task<int> IngestNativeFilesAsync(string lane, IngestCliArgs cli, CancellationToken ct = default)
     {
-        if (cli.LangOverride is not null || LanguageFilter.ForSource(source)?.IsActive == true)
+        if (string.IsNullOrWhiteSpace(cli.Path))
+            return Task.FromResult(CliRuntime.Fail($"usage: laplace-mono ingest {lane} <file-or-directory>"));
+        if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
+            return Task.FromResult(CliRuntime.Fail($"ingest {lane}: path not found: {cli.Path}"));
+        return IngestNativeAsync(null, lane, cli, ct);
+    }
+
+    private static async Task<int> IngestNativeAsync(string? source, string lane, IngestCliArgs cli, CancellationToken ct)
+    {
+        if (cli.LangOverride is not null || (source is not null && LanguageFilter.ForSource(source)?.IsActive == true))
             throw new ArgumentException("Native source ingestion admits the languages declared by its recipe. Remove --langs and ambient language filters, or select a language-scoped recipe.");
         if (cli.EmitCrossLanguageLinks is not null
             || cli.RegisterOnly || cli.Force || cli.NoAnalyze || cli.Recursive
             || cli.AnalyzeDepth != 0 || cli.AnalyzeNodes != 0 || cli.SecondPath.Length != 0
             || cli.GitCorpusSelection is not null || cli.GitCorpusReceipt is not null)
-            throw new ArgumentException("Canonical source ingestion uses its native recipe. Select input paths or a recipe preview mode.");
+            throw new ArgumentException("Native ingestion reads through the Engine's recipes. Select input paths or a recipe preview mode.");
 
         var execution = NativeRecipeExecution.Configured();
         string[] paths = string.IsNullOrWhiteSpace(cli.Path) ? [] : [cli.Path];
@@ -57,8 +74,8 @@ internal static partial class IngestCommands
             // layer numbers are a different contract and must not initialize its rows.
             const int layer = -1;
             var catalog = EtlManifest.Catalog;
-            string canonicalSource = catalog.Resolve(source);
-            journal.OnNativeRunStart(source, layer);
+            string? canonicalSource = source is null ? null : catalog.Resolve(source);
+            journal.OnNativeRunStart(lane, layer);
             var elapsed = Stopwatch.StartNew();
             long entities = 0, physicalities = 0, attestations = 0;
             long completedEntities = 0, completedPhysicalities = 0, completedAttestations = 0;
@@ -85,9 +102,9 @@ internal static partial class IngestCommands
                     if (progress.Event is "file-start" or "file-known")
                     {
                         var info = new FileInfo(file);
-                        journal.OnFileStarted(source, file, info.Exists ? info.Length : progress.FileBytes);
+                        journal.OnFileStarted(lane, file, info.Exists ? info.Length : progress.FileBytes);
                     }
-                    if (progress.Event is "file-composed" or "file-known") journal.OnFileComposed(source, file,
+                    if (progress.Event is "file-composed" or "file-known") journal.OnFileComposed(lane, file,
                         progress.FileId is { } id ? Hash128.FromBytes(Convert.FromHexString(id)) : null,
                         records: progress.Records);
                 }
@@ -96,12 +113,13 @@ internal static partial class IngestCommands
                     completedEntities = entities; completedPhysicalities = physicalities; completedFiles = done;
                     completedAttestations = attestations;
                     completedAttestationsMeasured &= progress.AttestationsMeasured == true;
-                    if (progress.SourceId is { } id && catalog.Resolve(progress.Source ?? "") == canonicalSource)
+                    bool requested = canonicalSource is null || catalog.Resolve(progress.Source ?? "") == canonicalSource;
+                    if (progress.SourceId is { } id && canonicalSource is not null && requested)
                     {
                         sourceId = Hash128.FromBytes(Convert.FromHexString(id));
                         journal.OnNativeSourceIdentified(sourceId);
                     }
-                    complete = catalog.Resolve(progress.Source ?? "") == canonicalSource;
+                    complete = requested;
                 }
                 bool measured = completedAttestationsMeasured && progress.AttestationsMeasured == true;
                 if (measured != attestationsMeasured)
@@ -109,7 +127,7 @@ internal static partial class IngestCommands
                     journal.OnNativeAttestationMeasurement(measured);
                     attestationsMeasured = measured;
                 }
-                lastProgress = new IngestProgress(source, layer, 0, 0, 0,
+                lastProgress = new IngestProgress(lane, layer, 0, 0, 0,
                     total, done, total, done, progress.File, "files", elapsed.Elapsed,
                     EntitiesInserted: entities, PhysicalitiesInserted: physicalities, AttestationsInserted: attestations);
                 journal.OnNativeProgress(lastProgress);
@@ -118,7 +136,7 @@ internal static partial class IngestCommands
                 {
                     string reading = progress.File is null ? "" : $"; file={System.Text.Json.JsonSerializer.Serialize(progress.File)}; records={progress.Records:N0}";
                     string assertions = attestationsMeasured ? $", {attestations:N0} new attestations" : "";
-                    Console.WriteLine($"ingest {source}: {done}/{total} files, {entities:N0} new entities, {physicalities:N0} new physicalities{assertions}; {progress.Event}{reading}");
+                    Console.WriteLine($"ingest {lane}: {done}/{total} files, {entities:N0} new entities, {physicalities:N0} new physicalities{assertions}; {progress.Event}{reading}");
                     printedAt = elapsed.Elapsed.TotalSeconds;
                 }
             }
@@ -133,15 +151,15 @@ internal static partial class IngestCommands
                     string failure = said.Length == 0
                         ? $"Native ingestion exited with status {code} and wrote nothing to stderr."
                         : $"Native ingestion exited with status {code}:\n{said}";
-                    CliRuntime.LoggerFactory.CreateLogger("ingest").LogError("{Source}: {Failure}", source, failure);
-                    journal.OnRunFailed(source, "failed", failure);
+                    CliRuntime.LoggerFactory.CreateLogger("ingest").LogError("{Source}: {Failure}", lane, failure);
+                    journal.OnRunFailed(lane, "failed", failure);
                     journal.OnNativeFilesFinished("failed");
                     return code;
                 }
                 if (!complete || total == 0) throw new InvalidDataException("The Native Engine did not report a completed ingest with selected files for the requested source.");
-                if (paths.Length == 0 && sourceId == default)
+                if (source is not null && paths.Length == 0 && sourceId == default)
                     throw new InvalidDataException("The Native Engine reported files without publishing the requested corpus witness. The retained files do not establish completed corpus admission.");
-                journal.OnRunFinished(source, new IngestRunResult(sourceId, source, 0, 0, 0,
+                journal.OnRunFinished(lane, new IngestRunResult(sourceId, lane, 0, 0, 0,
                     entities, physicalities, attestations, 0, elapsed.Elapsed, [],
                     FilesDone: done, InputUnitsDone: done, InputUnitsTotal: total), "ok");
                 journal.OnNativeFilesFinished("ok");
@@ -152,7 +170,7 @@ internal static partial class IngestCommands
             {
                 string status = ex is OperationCanceledException ? "cancelled" : "failed";
                 if (lastProgress is { } final) journal.OnNativeProgress(final, force: true);
-                journal.OnRunFailed(source, status, ex.Message);
+                journal.OnRunFailed(lane, status, ex.Message);
                 journal.OnNativeFilesFinished(status);
                 throw;
             }
