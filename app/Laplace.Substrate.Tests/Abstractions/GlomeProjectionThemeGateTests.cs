@@ -9,10 +9,14 @@ public sealed class GlomeProjectionThemeGateTests
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine([Root, .. parts]));
 
+    // A view split into modules is gated as the whole module: every .ts/.tsx file in its folder.
+    private static string Module(params string[] parts) => string.Join(Environment.NewLine,
+        Directory.EnumerateFiles(Path.Combine([Root, .. parts]), "*.ts*").Order(StringComparer.Ordinal).Select(File.ReadAllText));
+
     [Fact]
     public void PlacementProjection_PreservesMAndRadiusDepth_AndNodesStayPainted()
     {
-        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+        var canvas = Module("web", "src", "explore", "glome");
 
         Assert.Contains("const xmM = x * sx + m * cx", canvas, StringComparison.Ordinal);
         Assert.Contains("const zmZ = z * cz - xmM * sz", canvas, StringComparison.Ordinal);
@@ -48,7 +52,7 @@ public sealed class GlomeProjectionThemeGateTests
     [Fact]
     public void DemandRenderer_InvalidatesAfterWritingInstanceTransforms()
     {
-        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+        var canvas = Module("web", "src", "explore", "glome");
 
         Assert.Contains("const invalidate = useThree((s) => s.invalidate);", canvas, StringComparison.Ordinal);
         Assert.Contains("mesh.instanceMatrix.needsUpdate = true;", canvas, StringComparison.Ordinal);
@@ -59,7 +63,7 @@ public sealed class GlomeProjectionThemeGateTests
     [Fact]
     public void StorageProof_SelectsTheEmittedRootAndNeverSoftHidesRomFailure()
     {
-        var proof = Read("web", "src", "explore", "proof", "StorageProofView.tsx");
+        var proof = Module("web", "src", "explore", "proof");
 
         Assert.Contains("node.id_hex === result.root_id_hex", proof, StringComparison.Ordinal);
         Assert.Contains("node.id_hex === proof.root_id_hex", proof, StringComparison.Ordinal);
@@ -81,7 +85,7 @@ public sealed class GlomeProjectionThemeGateTests
         var canvasCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var tabCss = Read("web", "src", "explore", "entity", "tabs", "GlomeTab.module.css");
         var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
-        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+        var canvas = Module("web", "src", "explore", "glome");
 
         Assert.Contains("@media (prefers-color-scheme: dark)", theme, StringComparison.Ordinal);
         Assert.Contains("useVisualizationPalette()", canvas, StringComparison.Ordinal);
@@ -128,7 +132,7 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.DoesNotContain("navDisclosure", explore, StringComparison.Ordinal);
         Assert.Contains("<div className={styles.graphBody}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);
-        Assert.Contains("Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes", graphTab, StringComparison.Ordinal);
+        Assert.Contains("Graph settings · {hops} {hops === 1 ? 'hop' : 'hops'} · {fanout} per subject · up to {nodeCapacity} subjects", graphTab, StringComparison.Ordinal);
         Assert.Contains(".graphBody", graphTabCss, StringComparison.Ordinal);
         Assert.Contains("flex: 1 1 auto;", graphTabCss, StringComparison.Ordinal);
         Assert.Contains(".note", graphTabCss, StringComparison.Ordinal);
