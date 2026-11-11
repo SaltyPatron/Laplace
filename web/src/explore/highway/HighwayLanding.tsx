@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Muted } from '@ui';
+import { Muted, Table } from '@ui';
 import { highwayPopulation, relationBands } from '../../query/api';
 import type { HighwayPopulationStatus, RelationBand } from '../../query/types';
 import { HIGHWAY_LAYERS } from './layers';
@@ -60,7 +60,7 @@ export function HighwayLanding() {
 
       {error && <Muted className={styles.err}>Band volumes unavailable — {error}</Muted>}
 
-      <table className={styles.standings}>
+      <Table className={styles.standings}>
         <thead>
           <tr>
             <th scope="col">Division</th>
@@ -112,7 +112,7 @@ export function HighwayLanding() {
             );
           })}
         </tbody>
-      </table>
+      </Table>
 
       <Muted className={styles.foot}>
         Band volume and stored Highway-mask population are separate live facts.

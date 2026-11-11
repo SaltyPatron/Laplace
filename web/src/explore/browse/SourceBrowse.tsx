@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useRouteText } from '../../layout/useRouteText';
-import { Button, ErrorText, Muted, Panel, ReadStatus, Stack, useReadResource } from '@ui';
+import { Button, ErrorText, Muted, Panel, ReadStatus, Stack, useReadResource, Select } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../../ui/lib/resultRows';
 import { useAppStore } from '../../store';
@@ -69,7 +69,7 @@ function SourceRows({ source, tenant, quoteId }: { source: ExploreSourceRow; ten
   ];
   return <Panel title="Assertions" expandable actions={<Button variant="ghost" disabled={!source.id_hex} onClick={() => void roster.refresh()}>Refresh assertions</Button>}>
     {!source.id_hex ? <Muted>No source ID was returned. The testimony read is unavailable.</Muted> : <>
-      <label>Requested assertion sample <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[40, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Requested assertion sample <Select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[40, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}</Select></label>
       <ReadStatus label="Source assertions" resource={roster} />
       {roster.data && <ResultWorkspace compact scopeKey={JSON.stringify([tenant, source.id_hex])} label="Source assertions" snapshot={roster.data} columns={columns}
         rowLabel={(row, index) => `${row.subject} · ${row.relation} · ${row.object} (row ${index + 1})`}

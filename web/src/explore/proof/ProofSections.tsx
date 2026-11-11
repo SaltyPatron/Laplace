@@ -1,6 +1,6 @@
 /** Static and read-only sections of the storage proof: summary strip, law cards, selected address panel and address ledger. */
 import { Link } from 'react-router-dom';
-import { Muted } from '@ui';
+import { Muted, Table } from '@ui';
 
 import type { ExploreEntityPreviewResponse, StorageProofNodeRow, StorageProofResponse } from '../types';
 import { STORAGE_PROOF_SURFACE_VERSION, compactId, prettyNumber, visibleText } from './proofGeometry';
@@ -266,7 +266,7 @@ export function AddressLedger({
         </div>
       </div>
       <div className={styles.ledgerWrap}>
-        <table className={styles.ledger}>
+        <Table className={styles.ledger}>
           <thead>
             <tr>
               <th>ord</th>
@@ -309,7 +309,7 @@ export function AddressLedger({
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </div>
     </section>
   );

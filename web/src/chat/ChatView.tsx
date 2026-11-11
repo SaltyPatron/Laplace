@@ -6,6 +6,7 @@ import {
   Button,
   ConsensusBadge,
   Muted,
+  Select,
   TextArea,
 } from '@ui';
 
@@ -109,7 +110,7 @@ export function ChatView() {
           {authUser && conversations.length > 0 && (
             <label className={styles.sessions}>
               <span>Session</span>
-              <select
+              <Select
                 value={session ?? ''}
                 onChange={(event) => {
                   clearConversation();
@@ -122,7 +123,7 @@ export function ChatView() {
                     {conversation.title || conversation.sessionKey}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
 

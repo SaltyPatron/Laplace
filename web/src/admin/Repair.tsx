@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Banner, Button, ErrorText, Input, LoadingText, Modal, Muted, Panel, Toggle } from '@ui';
+import { Banner, Button, ErrorText, Input, LoadingText, Modal, Muted, Panel, Toggle, Table } from '@ui';
 import { useAppStore } from '../store';
 import {
   analyzeSubstrate, indexHealth, reindexInvalid, vacuum, type IndexHealthRow,
@@ -94,7 +94,7 @@ export function Repair() {
                 </Banner>
               )}
               <div className={styles.tableWrap}>
-                <table className={styles.table}>
+                <Table className={styles.table}>
                   <thead>
                     <tr>
                       <th scope="col">Index</th>
@@ -118,7 +118,7 @@ export function Repair() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </div>
             </>
           )}

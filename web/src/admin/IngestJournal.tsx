@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource } from '@ui';
+import { Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource, Select } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
 import { useAppStore } from '../store';
@@ -185,9 +185,9 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
           </label>
           <label className={styles.limitLabel}>
             Runs
-            <select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
+            <Select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
               {[10, 25, 50, 100, 500].map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
+            </Select>
           </label>
           <Button variant="ghost" onClick={() => void runsRead.refresh()}>Refresh</Button>
         </div>
@@ -278,9 +278,9 @@ function RunFiles({ runId, tenant, live, countersMeasured, onClose }: { runId: s
       <div className={styles.toolbar}>
         <label className={styles.limitLabel}>
           Files
-          <select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
+          <Select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
             {[250, 500, 1000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
+          </Select>
         </label>
         <Button variant="ghost" disabled={!valid} onClick={() => void filesRead.refresh()}>Refresh</Button>
       </div>

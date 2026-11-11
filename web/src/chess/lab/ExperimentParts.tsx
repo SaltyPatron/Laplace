@@ -7,7 +7,9 @@ import {
   SegmentedControl,
   Select,
   SliderField,
+  Table,
   Toggle,
+  UnstyledButton,
 } from '@ui';
 import type { LabExperiment } from './experiments';
 import type { LabEvent } from './sse';
@@ -26,7 +28,7 @@ export function ExperimentCard({
   onSelect: () => void;
 }) {
   return (
-    <button
+    <UnstyledButton
       type="button"
       role="option"
       aria-selected={selected}
@@ -37,7 +39,7 @@ export function ExperimentCard({
       <span className={styles.experimentTagline}>{exp.tagline}</span>
       {exp.recordsLive && <span className={styles.experimentBadge}>records</span>}
       {blocked && <span className={styles.experimentBadgeWarn}>needs setup</span>}
-    </button>
+    </UnstyledButton>
   );
 }
 
@@ -139,7 +141,7 @@ export function LabRow({ e, onAction }: {
       <li className={styles.tableRow}>
         <div className={styles.tableTitle}>{e.title}</div>
         <div className={styles.tableScroll}>
-          <table className={styles.labTable}>
+          <Table className={styles.labTable}>
             {e.columns && (
               <thead><tr>{e.columns.map((c, i) => <th key={i}>{c}</th>)}{e.action && <th>Action</th>}</tr></thead>
             )}
@@ -157,7 +159,7 @@ export function LabRow({ e, onAction }: {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       </li>
     );

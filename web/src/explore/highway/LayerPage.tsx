@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { ErrorText, LoadingText, Muted, Panel } from '@ui';
+import { ErrorText, LoadingText, Muted, Panel, Table } from '@ui';
 import { queryLeaders, relationBands } from '../../query/api';
 import type { BandLeaders, RelationBand } from '../../query/types';
 import { SearchBar } from '../components/SearchBar';
@@ -97,7 +97,7 @@ export function LayerPage() {
                   : 'Nothing has been rated in this division yet.'}
               </Muted>
             ) : (
-              <table className={styles.standings}>
+              <Table className={styles.standings}>
                 <thead>
                   <tr>
                     <th scope="col" className={styles.num}>#</th>
@@ -130,7 +130,7 @@ export function LayerPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             )}
         </Panel>
       )}

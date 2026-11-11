@@ -1,6 +1,6 @@
 /** Consensus-graph controls and key: projection/hops/fanout/capacity toolbar, relation filter and "How to read this". */
 import type { ReactNode } from 'react';
-import { Field, Input, Muted, SegmentedControl } from '@ui';
+import { Field, Input, Muted, SegmentedControl, ToggleButton } from '@ui';
 import styles from './ConsensusGraph.module.css';
 import { relationWords } from '../../domain/Strand/StrandList';
 import { clamp, type Dim } from './graphData';
@@ -110,16 +110,15 @@ export function GraphLegend({
       {relations.length > 0 ? (
         <div className={styles.relations} role="group" aria-label="Relations shown">
           {relations.map(([type, count]) => (
-            <button
+            <ToggleButton
               key={type}
-              type="button"
               className={styles.relation}
-              aria-pressed={!hidden.has(type)}
+              pressed={!hidden.has(type)}
               onClick={() => onToggleRelation(type)}
               title={hidden.has(type) ? 'Show these strands' : 'Hide these strands'}
             >
               {type === 'walk' ? 'your walk' : relationWords(type)} <span className={styles.relationCount}>{count}</span>
-            </button>
+            </ToggleButton>
           ))}
         </div>
       ) : null}

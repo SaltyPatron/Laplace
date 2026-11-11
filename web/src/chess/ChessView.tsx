@@ -233,7 +233,7 @@ export function ChessView() {
 
           >
 
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+            <div className={styles.promotion}>
 
               {(['q', 'r', 'b', 'n'] as const).map((p) => (
 

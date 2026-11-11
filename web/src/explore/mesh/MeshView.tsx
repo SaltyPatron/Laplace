@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { WorldLink as RouterLink } from '../../world/WorldLink';
 import { changeWorld, selectWorldEntity } from '../../world/context';
-import { Button, ErrorText, LoadingText, Muted } from '@ui';
+import { Button, ErrorText, LoadingText, Muted, UnstyledButton } from '@ui';
 import { exploreMesh, explorePreview } from '../api';
 import { useExploreStore } from '../store';
 import { PlayerCard } from '../entity/PlayerCard';
@@ -127,14 +127,14 @@ function Column({ title, hint, links, side, onPick, empty }: {
         <ul className={styles.links}>
           {links.map((l, i) => (
             <li key={`${l.id}-${i}`}>
-              <button type="button" data-entity-ref={l.id} className={styles.link} onClick={() => onPick(l)}>
+              <UnstyledButton type="button" data-entity-ref={l.id} className={styles.link} onClick={() => onPick(l)}>
                 <span className={styles.arrow}>{side === 'up' ? '↑' : '↓'}</span>
                 <span className={styles.linkBody}>
                   <span className={styles.rel}>{l.relation.replace(/_/g, ' ')}</span>
                   <span className={styles.linkLabel}>{l.label || l.id}</span>
                 </span>
                 {l.hub_type && <span className={styles.linkHub}>{l.hub_type.replace(/_/g, ' ')}</span>}
-              </button>
+              </UnstyledButton>
             </li>
           ))}
         </ul>

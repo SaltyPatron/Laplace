@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Badge, Banner, Button, ErrorText, Input, LoadingText, Muted, Panel, TextArea,
+  Badge, Banner, Button, ErrorText, Input, LoadingText, Muted, Panel, Table, TextArea,
 } from '@ui';
 import { useAppStore } from '../store';
 import {
@@ -110,7 +110,7 @@ export function Agents() {
             )}
 
             <div className={styles.tableWrap}>
-              <table className={styles.table}>
+              <Table className={styles.table}>
                 <thead>
                   <tr>
                     <th scope="col">route</th>
@@ -146,7 +146,7 @@ export function Agents() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           </>
         )}

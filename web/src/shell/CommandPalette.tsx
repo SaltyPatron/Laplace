@@ -5,6 +5,7 @@ import { browseSubstrate } from '../explore/browse/api';
 import type { BrowseHit } from '../explore/browse/types';
 import { useAppStore } from '../store';
 import { Icon } from '../ui/icons';
+import { Input } from '../ui/primitives/Input';
 import { useInspector } from './inspector';
 import { NAV } from './nav';
 import styles from './CommandPalette.module.css';
@@ -89,7 +90,7 @@ export function CommandPalette() {
       <div className={styles.palette} role="dialog" aria-modal="true" aria-label="Search and go to">
         <div className={styles.field}>
           <Icon name="search" />
-          <input ref={input} className={styles.input} value={text} placeholder="Search anything, or type a place to go…"
+          <Input variant="bare" ref={input} className={styles.input} value={text} placeholder="Search anything, or type a place to go…"
             role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list"
             aria-activedescendant={options[active] ? `${listId}-${active}` : undefined}
             onChange={(event) => { setText(event.target.value); setActive(0); }}

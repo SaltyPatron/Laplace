@@ -2,7 +2,7 @@ import type { MoveScore } from './Board';
 import type { SearchInfo } from '../ChessView';
 import { formatSubstrateMoveDelta } from '../evalDisplay';
 import { sanLine, toSan } from '../san';
-import { cn, Muted, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
+import { cn, Muted, Tooltip, TooltipContent, TooltipTrigger, UnstyledButton } from '@ui';
 import { Panel } from './Panel';
 import shared from './playShared.module.css';
 import styles from './MoveList.module.css';
@@ -64,21 +64,21 @@ export function MoveList({
             {Array.from({ length: Math.ceil(history.length / 2) }, (_, i) => (
               <li key={i}>
                 <span className={styles.movenum}>{i + 1}.</span>
-                <button
+                <UnstyledButton
                   type="button"
                   className={cn(styles.ply, viewPly === i * 2 + 1 && styles.plyActive)}
                   onClick={() => onGoToPly?.(i * 2 + 1)}
                 >
                   {history[i * 2]}
-                </button>
+                </UnstyledButton>
                 {history[i * 2 + 1] ? (
-                  <button
+                  <UnstyledButton
                     type="button"
                     className={cn(styles.ply, viewPly === i * 2 + 2 && styles.plyActive)}
                     onClick={() => onGoToPly?.(i * 2 + 2)}
                   >
                     {history[i * 2 + 1]}
-                  </button>
+                  </UnstyledButton>
                 ) : (
                   <span className={styles.ply} />
                 )}

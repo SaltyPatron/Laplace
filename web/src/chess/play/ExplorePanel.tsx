@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { cn, Input, Muted } from '@ui';
+import { cn, Input, Muted, Table } from '@ui';
 import { apiPost } from '../../api/client';
 import { Panel } from './Panel';
 import styles from './ExplorePanel.module.css';
@@ -58,7 +58,7 @@ export function ExplorePanel({ fen, onPlayMove }: { fen: string; onPlayMove?: (u
       {err && <Muted>explore failed: {err}</Muted>}
       {!err && data && moves.length === 0 && <Muted>No attested continuations here{hasPlayer ? ` for ${data.player}` : ''}.</Muted>}
       {moves.length > 0 && (
-        <table className={styles.table}>
+        <Table className={styles.table}>
           <thead>
             <tr>
               <th>move</th>
@@ -84,7 +84,7 @@ export function ExplorePanel({ fen, onPlayMove }: { fen: string; onPlayMove?: (u
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </Panel>
   );

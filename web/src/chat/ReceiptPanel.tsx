@@ -12,6 +12,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  UnstyledButton,
 } from '@ui';
 import { apiGet, ApiError, type EvidenceResponse } from '../api/client';
 import { asNum, useAppStore } from '../store';
@@ -110,9 +111,9 @@ export function ReceiptPanel() {
   if (collapsed) {
     return (
       <aside className={styles.collapsed} aria-label="Evidence panel collapsed">
-        <button type="button" className={styles.reopen} onClick={() => setCollapsed(false)}>
+        <UnstyledButton type="button" className={styles.reopen} onClick={() => setCollapsed(false)}>
           Evidence
-        </button>
+        </UnstyledButton>
       </aside>
     );
   }

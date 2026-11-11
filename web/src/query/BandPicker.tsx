@@ -1,4 +1,4 @@
-import { Checkbox, Muted } from '@ui';
+import { Checkbox, Muted, UnstyledButton } from '@ui';
 import type { RelationBand } from './types';
 import styles from './BandPicker.module.css';
 
@@ -11,6 +11,6 @@ export function BandPicker({ bands, selected, onChange }: Props) {
     <div className={styles.grid}>{populated.map(band => <Checkbox key={band.band} checked={selected.includes(band.band)}
       label={`${band.name.replaceAll('_', ' ')} · ${band.consensus_rows.toLocaleString()} consensus rows`}
       onChange={event => onChange(event.target.checked ? [...selected, band.band].sort((a, b) => a - b) : selected.filter(value => value !== band.band))} />)}</div>
-    {!!selected.length && <button type="button" className={styles.clear} onClick={() => onChange([])}>Clear band constraints</button>}
+    {!!selected.length && <UnstyledButton type="button" className={styles.clear} onClick={() => onChange([])}>Clear band constraints</UnstyledButton>}
   </div>;
 }

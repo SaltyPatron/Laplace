@@ -1,5 +1,6 @@
 /** Storage-proof bit-carrier inspector and Tier-0 distribution experiment panels. */
 import { useMemo } from 'react';
+import { Range, UnstyledButton } from '@ui';
 
 import type { StorageProofPackedVertexRow } from '../types';
 import { GlomeCanvas } from '../glome/GlomeCanvas';
@@ -127,9 +128,8 @@ export function DistributionLab({
         </div>
         <div className={styles.rankControl}>
           <label htmlFor="occupied-ranks">Occupied DUCET prefix</label>
-          <input
+          <Range
             id="occupied-ranks"
-            type="range"
             min={1000}
             max={atomWindow}
             step={1000}
@@ -142,14 +142,14 @@ export function DistributionLab({
 
       <div className={styles.quickRanks}>
         {[150_000, 250_000, 300_000, atomWindow].map((value) => (
-          <button
+          <UnstyledButton
             type="button"
             key={value}
             className={bounded === value ? styles.smallButtonActive : styles.smallButton}
             onClick={() => setOccupied(value)}
           >
             {value === atomWindow ? 'full window' : value.toLocaleString()}
-          </button>
+          </UnstyledButton>
         ))}
       </div>
 

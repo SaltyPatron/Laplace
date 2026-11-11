@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Button, ErrorText, Input, Modal, Muted, Panel, Select, useReadResource } from '@ui';
+import { Button, Checkbox, ErrorText, Input, Modal, Muted, Panel, Select, UnstyledButton, useReadResource } from '@ui';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import { useAppStore } from '../store';
 import { AccountControls } from './AccountControls';
@@ -149,7 +149,7 @@ function WorkspaceSettings() {
       <label className={styles.mobileSections}>Settings page<Select value={section} onChange={(event) => setSection(event.target.value as typeof SECTIONS[number])}>
         {SECTIONS.map((item, index) => <option key={item} value={item}>{SECTION_NAMES[index]}</option>)}</Select></label>
       <nav className={styles.sections} aria-label="Workspace settings sections">{SECTIONS.map((item, index) =>
-        <button key={item} aria-current={section === item ? 'page' : undefined} onClick={() => setSection(item)}>{SECTION_NAMES[index]}</button>)}</nav>
+        <UnstyledButton key={item} aria-current={section === item ? 'page' : undefined} onClick={() => setSection(item)}>{SECTION_NAMES[index]}</UnstyledButton>)}</nav>
       {error && <ErrorText>{error}</ErrorText>}
       {message && <p role="status">{message}</p>}
       {account.loading && <Muted>{account.value ? 'Refreshing workspace…' : 'Loading workspace and subscription…'}</Muted>}
@@ -163,7 +163,7 @@ function WorkspaceSettings() {
       {account.value && <>
         {section === 'workspace' && <Panel title="Workspace settings">
           <label className={styles.field}>Current workspace
-            <select value={account.value.tenantId} disabled={!!busy} onChange={(event) => {
+            <Select value={account.value.tenantId} disabled={!!busy} onChange={(event) => {
               const value = event.target.value;
               void run('workspace', () => selectWorkspace(value));
             }}>
@@ -171,7 +171,7 @@ function WorkspaceSettings() {
               {account.value.workspaces.map((workspace) => <option key={workspace.tenantId} value={workspace.tenantId}>
                 {workspace.displayName} · {workspace.role}
               </option>)}
-            </select>
+            </Select>
           </label>
           <details><summary>Technical identifiers</summary><Muted>Workspace ID: {account.value.tenantId}. Account ID: {account.value.userId}.</Muted></details>
           {manages && <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('rename', async () => {
@@ -224,9 +224,9 @@ function WorkspaceSettings() {
           </div>)}
           <p>Invitation links are single-use and expire in seven days. Anyone signed in who holds the link can join; send it privately.</p>
           <div className={styles.form}>
-            <label className={styles.field}>Invitation role<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+            <label className={styles.field}>Invitation role<Select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
               <option value="member">Member</option>{active?.role === 'owner' && <option value="admin">Administrator</option>}
-            </select></label>
+            </Select></label>
             <Button disabled={!!busy} loading={busy === 'invite'} onClick={() => void run('invite', async () => {
               const result = await apiPost<{ invitationPath: string }>('/v1/account/invitations', { role: inviteRole });
               setInviteLink(new URL(result.invitationPath, window.location.origin).href); refresh((n) => n + 1);
@@ -264,7 +264,7 @@ function WorkspaceSettings() {
           </div>}
           <div className={styles.form}>
             <label className={styles.field}>Find an API client<Input type="search" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Application name or key prefix" /></label>
-            <label><input type="checkbox" checked={showRevoked} onChange={(event) => setShowRevoked(event.target.checked)} /> Include revoked keys</label>
+            <label><Checkbox checked={showRevoked} onChange={(event) => setShowRevoked(event.target.checked)} /> Include revoked keys</label>
           </div>
           {keys.loading && <Muted>Loading keys…</Muted>}
           {keys.error && <ErrorText>{keys.error}</ErrorText>}

@@ -1,6 +1,7 @@
 import { useParams, useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { plainMessage, requestIdOf } from '../api/client';
 import { ErrorText } from '../ui/primitives/Text';
+import { UnstyledButton } from '../ui/primitives/UnstyledButton';
 import { readIdentity } from '../data/facets';
 import { useEntityLabels } from '../shell/inspector';
 import { useAppStore } from '../store';
@@ -28,9 +29,9 @@ export function EntityPage() {
     <header className={styles.header}>
       <div className={styles.titleBlock}>
         <h1 id="entity-title" className={styles.title} title={id}>{label ?? (identity.error ? id : 'Loading…')}</h1>
-        <button type="button" className={styles.copy} onClick={() => void navigator.clipboard?.writeText(id)} title="Copy the content address">
+        <UnstyledButton type="button" className={styles.copy} onClick={() => void navigator.clipboard?.writeText(id)} title="Copy the content address">
           <code>{id.slice(0, 8)}…{id.slice(-4)}</code> Copy
-        </button>
+        </UnstyledButton>
       </div>
       <nav className={styles.actions} aria-label="Do more with this">
         <RouterLink to={`/explore/matchup?x=${encodeURIComponent(label ?? id)}`}>Compare</RouterLink>

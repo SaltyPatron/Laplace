@@ -11,6 +11,8 @@ import {
   Table,
   Td,
   Th,
+  ToggleButton,
+  UnstyledButton,
 } from '@ui';
 import { chessPlayers } from './api';
 import type { ChessPlayersResponse } from './types';
@@ -153,16 +155,15 @@ export function PlayersIndex() {
 
         <nav className={styles.alphabet} aria-label="Browse players by first letter">
           {ALPHABET.map((letter) => (
-            <button
+            <ToggleButton
               key={letter}
-              type="button"
-              aria-pressed={initial === letter}
+              pressed={initial === letter}
               data-active={initial === letter}
               className={styles.letter}
               onClick={() => chooseInitial(letter)}
             >
               {letter}
-            </button>
+            </ToggleButton>
           ))}
         </nav>
       </header>
@@ -270,12 +271,12 @@ function SortableHead({
   const selected = active === value;
   return (
     <Th aria-sort={selected ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <button className={styles.sortButton} type="button" onClick={() => onSort(value)}>
+      <UnstyledButton className={styles.sortButton} onClick={() => onSort(value)}>
         {label}
         <span className={styles.sortMark} aria-hidden="true">
           {selected ? (direction === 'asc' ? '↑' : '↓') : '↕'}
         </span>
-      </button>
+      </UnstyledButton>
     </Th>
   );
 }

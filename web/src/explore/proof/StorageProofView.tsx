@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ErrorText, LoadingText } from '@ui';
+import { ErrorText, LoadingText, UnstyledButton } from '@ui';
 
 import { explorePreview, exploreStorageProof } from '../api';
 import type {
@@ -192,9 +192,9 @@ export function StorageProofView() {
           />
           <div className={styles.formActions}>
             <span>Shareable: /proof?q=…</span>
-            <button type="submit" disabled={!draft.trim() || busy}>
+            <UnstyledButton type="submit" disabled={!draft.trim() || busy}>
               {busy ? 'Computing…' : 'Prove storage'}
-            </button>
+            </UnstyledButton>
           </div>
         </form>
       </header>
@@ -238,20 +238,20 @@ export function StorageProofView() {
                   <p>Collapsed storage spine only; parser-only unary wrappers are omitted.</p>
                 </div>
                 <div className={styles.segmented}>
-                  <button
+                  <UnstyledButton
                     type="button"
                     className={direction === 'trunk' ? styles.segmentActive : styles.segment}
                     onClick={() => setDirection('trunk')}
                   >
                     trunk → leaf
-                  </button>
-                  <button
+                  </UnstyledButton>
+                  <UnstyledButton
                     type="button"
                     className={direction === 'leaf' ? styles.segmentActive : styles.segment}
                     onClick={() => setDirection('leaf')}
                   >
                     leaf → trunk
-                  </button>
+                  </UnstyledButton>
                 </div>
               </div>
               <div className={styles.nodeList}>
@@ -259,7 +259,7 @@ export function StorageProofView() {
                   const depth = depthOf(node, byOrdinal);
                   const isSelected = node.ordinal === selectedOrdinal;
                   return (
-                    <button
+                    <UnstyledButton
                       type="button"
                       key={node.ordinal}
                       className={isSelected ? styles.nodeRowSelected : styles.nodeRow}
@@ -273,7 +273,7 @@ export function StorageProofView() {
                       <span className={styles.nodeLabel} title={visibleText(node.label)}>{visibleText(node.label) || '∅'}</span>
                       <code>{compactId(node.id_hex)}</code>
                       <span className={styles.radius}>r {node.radius.toFixed(3)}</span>
-                    </button>
+                    </UnstyledButton>
                   );
                 })}
               </div>
@@ -333,7 +333,7 @@ export function StorageProofView() {
               <>
                 <div className={styles.vertexPicker} aria-label="Packed vertex">
                   {selected.packed_vertices.map((vertex, index) => (
-                    <button
+                    <UnstyledButton
                       type="button"
                       key={vertex.vertex}
                       className={selectedPacked === index ? styles.vertexActive : styles.vertex}
@@ -341,7 +341,7 @@ export function StorageProofView() {
                     >
                       v{vertex.vertex} · ord {vertex.logical_ordinal}
                       {vertex.run_length > 1 ? ` · ×${vertex.run_length}` : ''}
-                    </button>
+                    </UnstyledButton>
                   ))}
                 </div>
                 <div className={styles.glomePair}>

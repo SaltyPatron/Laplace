@@ -5,8 +5,8 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
-const source = await readFile(new URL('../src/explore/glome/GlomeCanvas.tsx', import.meta.url), 'utf8');
-const parsed = ts.createSourceFile('GlomeCanvas.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const source = await readFile(new URL('../src/explore/glome/glomeProjection.ts', import.meta.url), 'utf8');
+const parsed = ts.createSourceFile('glomeProjection.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const selected = parsed.statements.filter((node) =>
   ts.isFunctionDeclaration(node) && (
     node.name?.text === 'placementBallPos'

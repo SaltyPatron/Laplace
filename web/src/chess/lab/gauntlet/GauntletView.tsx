@@ -5,9 +5,11 @@ import {
   Chip,
   Muted,
   Panel,
+  Table,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  UnstyledButton,
   useVisiblePolling,
 } from '@ui';
 import { apiGet, apiPost } from '../../../api/client';
@@ -300,7 +302,7 @@ export function GauntletView() {
             <Muted>Finished games appear here as the match conductor reports them.</Muted>
           ) : (
             <div className={styles.tableScroll}>
-              <table className={styles.table}>
+              <Table className={styles.table}>
                 <thead>
                   <tr><th>#</th><th>White</th><th>Black</th><th>Result</th></tr>
                 </thead>
@@ -311,7 +313,7 @@ export function GauntletView() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
           {logs.length > 0 && (
@@ -349,7 +351,7 @@ export function GauntletView() {
             <ul className={styles.history}>
               {gauntlets.map((j) => (
                 <li key={j.id}>
-                  <button
+                  <UnstyledButton
                     type="button"
                     className={[styles.historyItem, j.id === activeId && styles.historyItemActive]
                       .filter(Boolean).join(' ')}
@@ -360,7 +362,7 @@ export function GauntletView() {
                     <Muted className={styles.historySummary}>
                       {j.summary.message ?? `${j.summary.done}/${j.summary.total}`}
                     </Muted>
-                  </button>
+                  </UnstyledButton>
                 </li>
               ))}
             </ul>

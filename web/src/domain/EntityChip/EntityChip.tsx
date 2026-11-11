@@ -1,5 +1,6 @@
 import { useInspector } from '../../shell/inspector';
 import { cn } from '../../ui/lib/cn';
+import { ToggleButton } from '../../ui/primitives/ToggleButton';
 import styles from './EntityChip.module.css';
 
 export interface EntityChipProps {
@@ -16,10 +17,10 @@ export function EntityChip({ id, label, tier, showTier = false, className }: Ent
   const { open, current } = useInspector();
   const active = current === id.toLowerCase();
   return (
-    <button type="button" className={cn(styles.chip, active && styles.active, className)} data-entity-id={id}
-      aria-pressed={active} title={`Open “${label}” in the inspector`} onClick={() => open(id, label)}>
+    <ToggleButton className={cn(styles.chip, active && styles.active, className)} data-entity-id={id}
+      pressed={active} title={`Open “${label}” in the inspector`} onClick={() => open(id, label)}>
       <span className={styles.label}>{label || id.slice(0, 8)}</span>
       {showTier && tier != null && <span className={styles.tier} aria-label={`tier ${tier}`}>T{tier}</span>}
-    </button>
+    </ToggleButton>
   );
 }

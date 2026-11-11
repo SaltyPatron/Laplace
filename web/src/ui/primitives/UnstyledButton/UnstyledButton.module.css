@@ -1,0 +1,10 @@
+@layer components {
+  /* Zero specificity: any feature class wins over these defaults. */
+  :where(.button) {
+    cursor: pointer;
+  }
+
+  :where(.button:disabled) {
+    cursor: default;
+  }
+}

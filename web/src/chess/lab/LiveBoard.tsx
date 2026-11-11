@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cn, Muted } from '@ui';
+import { cn, Muted, ToggleButton } from '@ui';
 import { GLYPH, parseBoard, sqName } from '../play/Board';
 import styles from './LiveBoard.module.css';
 
@@ -27,24 +27,22 @@ export function LiveBoard({ boards, lastGame }: { boards: Record<number, LabBoar
     <div className={styles.wrap}>
       {games.length > 1 && (
         <div className={styles.picker} aria-label="Live games">
-          <button
-            type="button"
+          <ToggleButton
             className={cn(styles.chip, pinned === null && styles.chipActive)}
-            aria-pressed={pinned === null}
+            pressed={pinned === null}
             onClick={() => setPinned(null)}
           >
             follow
-          </button>
+          </ToggleButton>
           {games.slice(-8).map((g) => (
-            <button
+            <ToggleButton
               key={g}
-              type="button"
               className={cn(styles.chip, pinned === g && styles.chipActive)}
-              aria-pressed={pinned === g}
+              pressed={pinned === g}
               onClick={() => setPinned((p) => (p === g ? null : g))}
             >
               #{g}
-            </button>
+            </ToggleButton>
           ))}
         </div>
       )}

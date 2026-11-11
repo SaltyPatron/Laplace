@@ -38,6 +38,11 @@
     cursor: default;
   }
 
+  /* Zero specificity: the embedding surface's class owns the look. */
+  :where(.bare) {
+    min-width: 0;
+  }
+
   .error {
     border-color: var(--color-error);
   }

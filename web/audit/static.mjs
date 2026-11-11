@@ -60,9 +60,9 @@ record('DS-6', [...count(code, /style=\{\{\s*[A-Za-z]+:\s*(['"][^'"]*['"]|\d)/),
   out['CODE-2'] = { pass: big.length === 0, value: big.length, detail: big.map(([f, n]) => `${f} ${n}`) };
 }
 {
-  const p = join(src, 'explore/glome/GlomeCanvas.tsx');
+  const p = join(src, 'explore/glome/glomeProjection.ts');
   const bad = existsSync(p) && /51-bit/.test(read(p));
-  out['CODE-3'] = { pass: !bad, value: bad ? 1 : 0, detail: bad ? ['explore/glome/GlomeCanvas.tsx still decodes a 51-bit run count'] : [] };
+  out['CODE-3'] = { pass: !bad, value: bad ? 1 : 0, detail: bad ? ['explore/glome/glomeProjection.ts still decodes a 51-bit run count'] : [] };
 }
 
 mkdirSync(join(web, 'audit/results'), { recursive: true });
