@@ -58,7 +58,6 @@ BEGIN
 END
 $$;
 
-DROP TRIGGER IF EXISTS ingest_run_touch ON @extschema@.ingest_run_journal;
 CREATE TRIGGER ingest_run_touch
 BEFORE UPDATE ON @extschema@.ingest_run_journal
 FOR EACH ROW
@@ -80,9 +79,6 @@ BEGIN
 END
 $$;
 
-DROP TRIGGER IF EXISTS ingest_file_touch_run ON @extschema@.ingest_file_journal;
-DROP TRIGGER IF EXISTS ingest_file_touch_run_insert ON @extschema@.ingest_file_journal;
-DROP TRIGGER IF EXISTS ingest_file_touch_run_update ON @extschema@.ingest_file_journal;
 CREATE TRIGGER ingest_file_touch_run_insert
 AFTER INSERT ON @extschema@.ingest_file_journal
 REFERENCING NEW TABLE AS changed_files
@@ -130,7 +126,6 @@ END;
 -- Ingest run history, newest first. Read-only: valid inside a read-only
 -- transaction. A stale 'running' row is projected as cancelled by the same
 -- liveness predicate the reconciler uses; reading never writes the journal.
-DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
 CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
 RETURNS SETOF laplace.ingest_run_journal
 LANGUAGE sql

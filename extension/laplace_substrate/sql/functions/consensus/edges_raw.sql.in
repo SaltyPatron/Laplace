@@ -28,7 +28,6 @@
 -- (consensus.edges(), which wraps this and resolves in one realize_batch after the limit),
 -- because the native walkers that consume edges want ids and would pay for text
 -- they never realize.render.
-DROP FUNCTION IF EXISTS laplace.edges_raw(bytea, text, bytea[], int, boolean, text);
 
 CREATE OR REPLACE FUNCTION consensus._edges_raw_batch_impl(
         p_subjects  bytea[],

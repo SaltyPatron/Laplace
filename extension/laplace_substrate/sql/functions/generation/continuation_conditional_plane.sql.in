@@ -18,7 +18,6 @@
 -- Emitted w = log((c(x,y) + k) / (c(x) + k*V)) — add-k smoothing over the
 -- vocab, so each row is a proper (log) conditional distribution up to the
 -- unseen-mass remainder. NEGATIVE values are expected and meaningful.
-DROP FUNCTION IF EXISTS laplace.continuation_conditional_plane(bytea[], int, double precision, int);
 CREATE OR REPLACE FUNCTION generation.continuation_conditional_plane(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
         p_degree_cap int DEFAULT 512)

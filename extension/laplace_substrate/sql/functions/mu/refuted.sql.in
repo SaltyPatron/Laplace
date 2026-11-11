@@ -1,7 +1,6 @@
 -- A standing is refuted when even its optimistic bound, two deviations above
 -- its rating, loses to the anchor: the Native confidence read at k = -2 is below
 -- one half.
-DROP FUNCTION IF EXISTS laplace.refuted(bigint, bigint);
 CREATE OR REPLACE FUNCTION consensus.refuted(p_rating double precision, p_deviation double precision)
     RETURNS boolean LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC

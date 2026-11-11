@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.edge_rank(bytea, numeric);
 CREATE OR REPLACE FUNCTION consensus.edge_rank(p_type bytea, p_confidence double precision)
     RETURNS double precision
     LANGUAGE sql STABLE PARALLEL SAFE

@@ -21,7 +21,6 @@
 --                         the line being asked about. The subject restriction now
 --                         lives inside the CTE: `line` drives, laplace.attestations is probed
 --                         by subject_id.
-DROP FUNCTION IF EXISTS laplace.chess_missed_finish(bytea, int);
 CREATE OR REPLACE FUNCTION chess.missed_finish(p_line bytea, p_limit int DEFAULT 32)
     RETURNS TABLE(
         from_position bytea,

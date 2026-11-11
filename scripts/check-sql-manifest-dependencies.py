@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Reject manifests that bind views or functions after their literal SQL consumers.
 
-Fresh CREATE EXTENSION starts with no pre-existing views, while upgrade/dev databases
-can retain old views and accidentally hide a broken manifest order. This check keeps
-that distinction visible without mutating a database in pull-request validation.
+CREATE EXTENSION is the only install path and starts with no pre-existing views or
+functions, so every SQL consumer must be bound after what it reads. This check proves
+the order without mutating a database in pull-request validation.
 
 Entries under sql/generated are build products and may not exist in a clean source
 checkout; their existence/determinism remains owned by the normal codegen/build gates.
@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL_ROOT = ROOT / "extension" / "laplace_substrate" / "sql"
-MANIFESTS = (SQL_ROOT / "manifest.install", SQL_ROOT / "manifest.upgrade")
+MANIFESTS = (SQL_ROOT / "manifest.install",)
 GENERATED_PREFIX = "generated/"
 
 CREATE_VIEW_RE = re.compile(
@@ -168,7 +168,7 @@ def main() -> int:
             print(f"  - {error}", file=sys.stderr)
         return 1
 
-    print("SQL_MANIFEST_DEPENDENCY_ORDER_OK manifests=install,upgrade")
+    print("SQL_MANIFEST_DEPENDENCY_ORDER_OK manifests=install")
     return 0
 
 

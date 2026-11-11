@@ -8,7 +8,6 @@
 --
 -- Returns WORD-pair corrections: (x, y, log P̂(class(y)|class(x))) for vocab
 -- pairs whose classes are known — directly summable with the conditional plane.
-DROP FUNCTION IF EXISTS laplace.pos_transition_plane(bytea[], int, double precision, int);
 CREATE OR REPLACE FUNCTION generation.pos_transition_plane(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
         p_degree_cap int DEFAULT 512)

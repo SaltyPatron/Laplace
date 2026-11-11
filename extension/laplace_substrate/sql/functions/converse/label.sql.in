@@ -1,5 +1,4 @@
 -- Semantic surface selection remains separate from selected-ID display.
-DROP FUNCTION IF EXISTS laplace.label(bytea);
 CREATE OR REPLACE FUNCTION realize.label(p_id bytea) RETURNS text
 AS 'EXECUTION_LIBRARY','pg_laplace_label' LANGUAGE C STABLE PARALLEL SAFE;
 

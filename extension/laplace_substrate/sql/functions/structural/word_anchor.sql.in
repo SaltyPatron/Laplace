@@ -1,6 +1,5 @@
 -- Canonical Native point and packed path. hilbert_index carries the Native
 -- 64-bit key in network byte order; it is not the retired 128-bit encoding.
-DROP FUNCTION IF EXISTS laplace.word_anchor(bytea);
 CREATE OR REPLACE FUNCTION structural.word_anchor(p_id bytea)
     RETURNS TABLE(
         id          bytea,

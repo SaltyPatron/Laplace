@@ -29,7 +29,6 @@
 -- never as a filter.
 --
 -- Set-based: one tally, one join, no per-row scalar (G2, id space throughout).
-DROP FUNCTION IF EXISTS laplace.prompt_state(text);
 CREATE OR REPLACE FUNCTION converse.prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

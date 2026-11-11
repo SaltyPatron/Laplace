@@ -323,21 +323,29 @@ phase_reset() {
 # Compiler servers may outlive a build. The supervising shell owns the host lock;
 # those servers must not retain its file descriptor after the phase completes.
 dotnet_app() { LAPLACE_REUSE_INSTALLED_NATIVE=0 dotnet "$@" 8>&-; }
+# This checkout's migrator: the declared schema (db/schema) is read from the checkout, never from the installed release.
+migrations() {
+  local out="$SITE_WORK/migrations"
+  [[ -n "${migrations_published:-}" ]] || {
+    dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$out" -v minimal --nologo
+    migrations_published=1
+  }
+  ( cd "$ROOT" && LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" dotnet "$out/Laplace.Migrations.dll" "$@" )
+}
 phase_migrate() {
   need_pg
   say "migrate $LAPLACE_DBNAME"
-  local out="$SITE_WORK/migrations"
-  dotnet_app publish "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release --no-self-contained -o "$out" -v minimal --nologo
-  ( cd "$ROOT" && LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" dotnet "$out/Laplace.Migrations.dll" up )   # the declared schema (db/schema) is read from the checkout and applied on every deploy
+  migrations up   # the declared schema is applied in full on every deploy
   [[ "$(sql -c "SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'laplace' AND c.relname = 'entities'")" == p ]] \
     || fail "laplace.entities is not the partitioned generation: the extension installed predates the schema"
 }
-# A newer extension than the database has is updated in place through the bridge its upgrade script makes
-# (scripts/pipeline.sh sync_one_extension), never by dropping it.
+# laplace_geom and laplace_substrate have no upgrade path: their version is a content hash, and a database that
+# carries another version is recreated, never updated in place. So is one whose Native laplace extension has no
+# update script to the available version (Laplace-postgres ships none before release).
 phase_extensions() {
   need_pg
   say "extensions in $LAPLACE_DBNAME"
-  local ext avail installed module
+  local ext avail installed module stale=()
   for ext in laplace laplace_geom laplace_substrate; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
     installed="$(sql -c "SELECT extversion FROM pg_extension WHERE extname = '$ext'")"
@@ -345,10 +353,8 @@ phase_extensions() {
     if [[ -z "$installed" ]]; then installed="none yet: the migrations make it at $avail"
     else
       if [[ "$installed" != "$avail" ]]; then
-        # Native ships a normal versioned upgrade chain in PostgreSQL's share
-        # directory. Only the monorepo extensions need the generated hash bridge.
-        if [[ "$ext" != laplace ]]; then
-          install -m 664 "$EXT_SHARE/extension/${ext}_upgrade.sql" "$EXT_SHARE/extension/$ext--$installed--$avail.sql"
+        if [[ "$ext" != laplace || "$(sql -c "SELECT count(*) FROM pg_extension_update_paths('laplace') WHERE source = '$installed' AND target = '$avail' AND path IS NOT NULL")" != 1 ]]; then
+          stale+=("$ext $installed -> $avail"); continue
         fi
         PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
         installed="$installed -> $avail"
@@ -363,10 +369,34 @@ phase_extensions() {
     fi
     echo "  $ext $installed"
   done
-  # laplace_geom retires a function only once nothing else uses it; laplace_substrate
-  # moved off it in the loop above, so this is when the retirement can finish.
-  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql \
-    -c "DO \$retire\$ BEGIN IF to_regproc('public.laplace_geom_retire') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END \$retire\$;" >/dev/null
+  [[ ${#stale[@]} -eq 0 ]] || recreate_substrate "${stale[@]}"
+}
+
+# The substrate database recreated from this checkout's declaration (Laplace.Migrations nuke): a replacement made with
+# a fresh CREATE EXTENSION and the declared substrate schema, carrying the database's settings and grants, swapped in
+# by name; the old database is dropped. The deployment declares whether a version change may recreate its substrate
+# (LAPLACE_SUBSTRATE_RECREATE, machine.env or the delivery's environment):
+#   version                          the substrate only; a database that also holds the application schema
+#                                    (LAPLACE_APP_DBNAME unset or naming it) is refused
+#   version-including-application    also a database that still holds the application schema, whose accounts, keys
+#                                    and billing are then made again from the declaration (a host whose application
+#                                    data is disposable, until it has an application database of its own)
+#   unset                            refuse; recreate deliberately (Database maintenance workflow, operation=recreate)
+recreate_substrate() {
+  local why
+  why="$(printf '%s, ' "$@")"; why="${why%, }"
+  case "${LAPLACE_SUBSTRATE_RECREATE:-}" in
+    version|version-including-application) ;;
+    *) fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path; this host does not declare LAPLACE_SUBSTRATE_RECREATE=version: recreate it deliberately (Database maintenance workflow, database=substrate, operation=recreate)" ;;
+  esac
+  if [[ -z "${LAPLACE_APP_DBNAME:-}" || "$LAPLACE_APP_DBNAME" == "$LAPLACE_DBNAME" ]]; then
+    [[ "$LAPLACE_SUBSTRATE_RECREATE" == version-including-application ]] \
+      || fail "$LAPLACE_DBNAME carries $why and extensions have no upgrade path, but it also holds the application schema (LAPLACE_APP_DBNAME=${LAPLACE_APP_DBNAME:-unset}): give the application a database of its own before the substrate is recreated"
+    say "recreate $LAPLACE_DBNAME ($why): substrate and the application schema it still holds"
+  else
+    say "recreate $LAPLACE_DBNAME ($why): substrate only, the application database $LAPLACE_APP_DBNAME is kept"
+  fi
+  migrations nuke --yes
 }
 
 # ------------------------------------------------------------------------------------------------ app + publish

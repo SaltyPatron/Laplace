@@ -3,9 +3,6 @@
 -- A pair's score is the stronger of its two orientations, since the plane may
 -- be attested either way. Unattested scores 0 so every sampled pair
 -- contributes a number; that is the eval's convention, not a refutation.
-DROP FUNCTION IF EXISTS laplace.eval_pair_plane_score(bytea, bytea, bytea);
-DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_positives(text, text, int);
-DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_negatives(text, int);
 
 CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
     p_w1 bytea, p_w2 bytea, p_type bytea)

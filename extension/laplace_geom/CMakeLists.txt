@@ -287,37 +287,23 @@ if(NOT EXT_NAME)
     set(EXT_NAME laplace_geom)
 endif()
 set(EXT_MODULE_PATHNAME "${EXT_NAME}")
-# EXT_VERSION is a CONTENT HASH of what actually ships, not PROJECT_VERSION.
-#
-# It was PROJECT_VERSION, which never changed, so laplace_geom had exactly one
-# script — laplace_geom--<project>.sql — and no upgrade path at all. A function
-# ADDED here reached a freshly created database and never reached an installed
-# one: CREATE EXTENSION had already run at that version and there was no bridge
-# for ALTER EXTENSION UPDATE to apply. That is not a theoretical gap; it broke a
-# substrate upgrade, because an index expression referencing the new function is
-# evaluated immediately at CREATE INDEX and hard-fails rather than degrading.
-#
-# Hashing the SQL inputs makes the version move whenever the shipped SQL moves,
-# which is what makes an upgrade bridge possible — the same mechanism
-# laplace_substrate uses, for the same reason.
+# EXT_VERSION is a CONTENT HASH of what actually ships, not PROJECT_VERSION, so
+# the version moves whenever the shipped SQL moves — the same mechanism
+# laplace_substrate uses. There is no upgrade path: a changed version means the
+# substrate database that carries this extension is recreated and CREATE
+# EXTENSION runs fresh.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../laplace_substrate/cmake/SqlManifest.cmake)
 laplace_manifest_files(_geom_install_modules
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
-laplace_manifest_files(_geom_upgrade_modules
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade" "${CMAKE_CURRENT_SOURCE_DIR}/sql")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install")
 
 set(_geom_version_inputs
     ${_geom_install_modules}
-    ${_geom_upgrade_modules}
     "${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_geom.sql.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_geom_upgrade.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.install")
 list(REMOVE_DUPLICATES _geom_version_inputs)
 list(SORT _geom_version_inputs)
 set(_geom_sql_hashes "")
@@ -383,38 +369,7 @@ add_custom_command(
     VERBATIM
 )
 
-laplace_write_sql_chain(
-    "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/upgrade_chain.sql.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade"
-    "${CMAKE_CURRENT_SOURCE_DIR}/sql")
-set(_geom_upgrade_deps ${SQL_CHAIN_DEPS})
-
-set(EXT_UPGRADE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.sql)
-set(EXT_UPGRADE_TMP ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}_upgrade.tmp)
-
-add_custom_command(
-    OUTPUT  ${EXT_UPGRADE_SQL}
-    DEPENDS sql/${EXT_NAME}_upgrade.sql.in
-            sql/manifest.upgrade
-            ${_geom_upgrade_deps}
-            ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND ${LAPLACE_SQLPP} ${LAPLACE_SQLPP_FLAGS}
-            -I${CMAKE_CURRENT_SOURCE_DIR}/sql
-            -I${CMAKE_CURRENT_BINARY_DIR}/sql
-            -I${CMAKE_CURRENT_BINARY_DIR}/sql/generated
-            ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}_upgrade.sql.in
-            > ${EXT_UPGRADE_TMP}
-    COMMAND ${BASH} -c "grep -v '^#' ${EXT_UPGRADE_TMP} \
-            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
-            | perl -lpe \"s'\@extschema\@\\\\.''g\" \
-            > ${EXT_UPGRADE_SQL}"
-    COMMAND ${CMAKE_COMMAND} -E remove ${EXT_UPGRADE_TMP}
-    COMMENT "Preprocessing ${EXT_NAME} upgrade body → ${EXT_NAME}_upgrade.sql"
-    VERBATIM
-)
-
-add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL} ${EXT_UPGRADE_SQL})
+add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
 if(NOT WIN32)
@@ -426,7 +381,6 @@ install(TARGETS ${EXT_NAME}
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     ${EXT_BUILT_SQL}
-    ${EXT_UPGRADE_SQL}
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

@@ -1,2 +1,0 @@
--- Drops physicalities_residual_btree. No read consumes alignment_residual.
-DROP INDEX IF EXISTS physicalities_residual_btree;

@@ -20,5 +20,3 @@ BEGIN ATOMIC
  SELECT evidence FROM ops.entity_evidence_counts(ARRAY[p_subject]);
 END;
 
-
-DROP FUNCTION IF EXISTS ops.native_evidence_counts(bytea[]);

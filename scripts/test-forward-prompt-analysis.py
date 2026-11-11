@@ -51,7 +51,7 @@ def main() -> int:
         "generation.forward_route_trace_ids(bytea[], integer, integer, integer)",
         "converse.prompt_operands(text)",
     ):
-        assert f"DROP FUNCTION IF EXISTS {retired};" in walk
+        assert f"FUNCTION {retired.split('(')[0]}(" not in walk
 
     # Exact observation identity precedes cognition. No text heuristic is
     # permitted to replace the canonical prompt tree.
@@ -65,7 +65,7 @@ def main() -> int:
         "only forward_text and the observed turn execute the native cognition program"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
-    assert "converse.prompt_operands(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
+    assert "converse.prompt_operands(" not in walk
     native = (ROOT / "extension/laplace_substrate/src/content_resolve.c").read_text()
     operands = native.split("laplace_prompt_input(text *input)", 1)[1].split(
         "pg_laplace_prompt_tree(PG_FUNCTION_ARGS)", 1)[0]
@@ -302,14 +302,11 @@ def main() -> int:
     assert ".effective" not in program
     assert "candidate.effective" not in program
 
-    assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
+    assert "generation.forward_frontier_ids(" not in walk
     assert "generation.forward_frontier(p_prompt" not in walk
 
-    drop_frontier = "DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);"
-    drop_trace = "DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);"
-    assert drop_frontier in walk
-    assert drop_trace in walk
-    assert walk.index(drop_frontier) < walk.index(drop_trace)
+    assert "FUNCTION generation.forward_frontier(" not in walk
+    assert "FUNCTION generation.forward_route_trace(" not in walk
 
     # Natural chat enters the forward program for every open turn (spec 36; read-path.md: no single
     # operation "is the read architecture by itself"). The joint meeting of the turn's content terms is

@@ -37,7 +37,3 @@ BEGIN ATOMIC
     WHERE r.band = ANY (p_bands);
 END;
 
--- Retired before release: this helper shipped with no caller. Keep the DROP in
--- the extension script so an upgrade removes installations from the brief
--- broken-main window instead of preserving dead API surface indefinitely.
-DROP FUNCTION IF EXISTS laplace.relation_family_type_ids(text);

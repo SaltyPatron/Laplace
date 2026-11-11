@@ -41,6 +41,10 @@ elseif($sql -eq 'SHOW data_directory;'){$env:TEST_DATA}
 elseif($sql -like 'SELECT count(*) FROM pg_roles*'){'1'}
 elseif($sql -like 'SELECT count(*) FROM pg_available_extensions*'){if($env:TEST_EXTENSION_MISSING -eq '1'){'0'}else{'1'}}
 elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
+elseif($sql -like 'SELECT count(*) FROM pg_database*'){if($env:TEST_STALE_EXTENSION){'1'}else{'0'}}
+elseif($sql -like "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'*" -and $env:TEST_STALE_EXTENSION -and
+    -not (Select-String -LiteralPath $env:TEST_EVENTS -SimpleMatch 'migration:nuke' -Quiet)){'old'}
+elseif($sql -like 'SELECT extversion FROM pg_extension*' -or $sql -like 'SELECT default_version FROM pg_available_extensions*'){if($env:TEST_STALE_EXTENSION){'new'}}
 '@ | Set-Content "$work/psql.ps1"
     function global:dotnet {
         $verb=$args[1]
@@ -98,6 +102,13 @@ elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
         Assert ($env:LAPLACE_DB -ceq 'ambient-connection' -and $env:PGPASSWORD -ceq 'ambient-secret-fixture') 'Process environment was not restored.'
         Write-Host "PASS $($case[0]) $($case[1]): scoped commands, runtime grants, environment restoration"
     }
+    '' | Set-Content $env:TEST_EVENTS
+    $env:TEST_STALE_EXTENSION='1'
+    try{& $command @invoke -Database substrate -Operation migrate}finally{Remove-Item Env:TEST_STALE_EXTENSION}
+    $events=Get-Content $env:TEST_EVENTS
+    Assert ((($events | Where-Object {$_ -like 'migration:*'}) -join ',') -ceq 'migration:nuke,migration:substrate-status') 'A substrate carrying another extension version was not recreated.'
+    Assert (@($events | Where-Object {$_ -like 'sql:*ALTER EXTENSION*'}).Count -eq 0) 'A content-hash extension was updated in place.'
+    Write-Host 'PASS substrate migrate recreates a database whose extension version changed'
     '' | Set-Content $env:TEST_EVENTS
     $env:GITHUB_ACTIONS='true';Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue
     & $command @invoke -Database application -Operation recreate

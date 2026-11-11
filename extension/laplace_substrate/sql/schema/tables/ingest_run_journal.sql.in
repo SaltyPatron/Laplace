@@ -185,7 +185,6 @@ BEGIN
 END
 $$;
 
-DROP TRIGGER IF EXISTS ingest_run_throughput_apply ON ingest_run_journal;
 CREATE TRIGGER ingest_run_throughput_apply
 BEFORE UPDATE OF status, ended_at, entities, physicalities, attestations
 ON ingest_run_journal
@@ -195,7 +194,6 @@ EXECUTE FUNCTION ops.ingest_throughput_apply();
 
 -- Accepts the source's latest measured clean run as its baseline. Explicit
 -- operator action; no run or read path calls it.
-DROP FUNCTION IF EXISTS ops.ingest_throughput_accept(text);
 CREATE OR REPLACE FUNCTION ops.ingest_throughput_accept(p_source text)
 RETURNS TABLE(source_name text, baseline_rows_per_s double precision, accepted_run_id uuid)
 LANGUAGE plpgsql VOLATILE

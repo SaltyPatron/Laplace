@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.attestation_response(bytea, bytea, bytea[], bytea, integer);
 -- Source/context filters bind witnessed support. Standing remains the declared
 -- pooled prior; it is not a source-only refold. Counts are distinct sources in
 -- that support, independent of repeated observations or consensus witness mass.

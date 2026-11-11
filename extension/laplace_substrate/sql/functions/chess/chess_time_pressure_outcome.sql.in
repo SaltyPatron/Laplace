@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.chess_time_pressure_outcome();
 CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     RETURNS TABLE(
         think_class     text,

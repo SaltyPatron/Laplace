@@ -9,22 +9,21 @@ public sealed class ExtensionManifestSeparationTests
         File.ReadAllText(Path.Combine([Root, .. parts]));
 
     [Fact]
-    public void FreshInstallOwnsCoreTopology_UpgradeCannotRepartition()
+    public void ExtensionsHaveOnlyAFreshInstallPath()
     {
-        var install = Read("extension", "laplace_substrate", "sql", "manifest.install");
-        var upgrade = Read("extension", "laplace_substrate", "sql", "manifest.upgrade");
+        foreach (var extension in new[] { "laplace_substrate", "laplace_geom" })
+        {
+            var sql = Path.Combine(Root, "extension", extension, "sql");
+            Assert.False(File.Exists(Path.Combine(sql, "manifest.upgrade")),
+                $"{extension} has no upgrade path; a changed version recreates the substrate database");
+            Assert.False(File.Exists(Path.Combine(sql, extension + "_upgrade.sql.in")),
+                $"{extension} has no upgrade path; a changed version recreates the substrate database");
+        }
 
+        var install = Read("extension", "laplace_substrate", "sql", "manifest.install");
         Assert.DoesNotContain("/drop_", install);
-        Assert.DoesNotContain("/drop_", upgrade);
         Assert.DoesNotContain("attestation_witness_columns.sql.in", install);
-        Assert.DoesNotContain("attestation_witness_columns.sql.in", upgrade);
         Assert.DoesNotContain("attestation_qualifier_mask.sql.in", install);
-        Assert.DoesNotContain("attestation_qualifier_mask.sql.in", upgrade);
-        Assert.DoesNotContain("schema/tables/entities.sql.in", upgrade);
-        Assert.DoesNotContain("schema/tables/physicalities.sql.in", upgrade);
-        Assert.DoesNotContain("schema/tables/attestations.sql.in", upgrade);
-        Assert.DoesNotContain("schema/tables/consensus.sql.in", upgrade);
-        Assert.DoesNotContain("indexes/physicalities_entity_btree.sql.in", upgrade);
     }
 
     [Fact]
@@ -61,7 +60,7 @@ public sealed class ExtensionManifestSeparationTests
     [Fact]
     public void EdgeRankIndex_IsInstalledAfterItsImmutableRankFunction()
     {
-        foreach (var manifestName in new[] { "manifest.install", "manifest.upgrade" })
+        foreach (var manifestName in new[] { "manifest.install" })
         {
             var manifest = Read("extension", "laplace_substrate", "sql", manifestName);
             Assert.True(
@@ -81,7 +80,7 @@ public sealed class ExtensionManifestSeparationTests
             "functions/highway/laplace_highway_ready.sql.in",
             "functions/highway/laplace_highway_mask_from_bits.sql.in",
         ];
-        foreach (var manifestName in new[] { "manifest.install", "manifest.upgrade" })
+        foreach (var manifestName in new[] { "manifest.install" })
         {
             var entries = Read("extension", "laplace_substrate", "sql", manifestName)
                 .Split('\n', StringSplitOptions.TrimEntries);

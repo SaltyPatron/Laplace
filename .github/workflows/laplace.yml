@@ -104,6 +104,9 @@ jobs:
     timeout-minutes: 240
     env:
       LAPLACE_CONNINFO: ""
+      # No upgrade path: a changed extension recreates this host's substrate (deploy/linux/site.sh recreate_substrate).
+      # hart-server's laplace-mono still holds the disposable staging application schema until laplace-app is activated.
+      LAPLACE_SUBSTRATE_RECREATE: version-including-application
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
@@ -192,7 +195,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions updated in place, migrations
+      - name: Database laplace-mono, extensions current (no upgrade path), migrations
         run: |
           deploy/linux/site.sh database extensions migrate
 
@@ -317,6 +320,9 @@ jobs:
       queue: max
     env:
       LAPLACE_CONNINFO: ""
+      # No upgrade path: a changed extension recreates this host's substrate (deploy/linux/site.sh recreate_substrate).
+      # A qualification host's databases are disposable.
+      LAPLACE_SUBSTRATE_RECREATE: version-including-application
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
       LAPLACE_RECIPE_ENGINE_SOURCE: ${{ github.workspace }}/.ci-dependencies/Laplace-Engine
@@ -372,7 +378,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions updated in place, migrations (the application database too, LAPLACE_APP_DB)
+      - name: Database laplace-mono, extensions current (no upgrade path), migrations (the application database too, LAPLACE_APP_DB)
         run: |
           deploy/linux/site.sh database extensions migrate
 

@@ -10,7 +10,6 @@
 -- reference is schema-qualified.
 --
 --   CALL ops.refold_source('ConceptNetDecomposer');
-DROP PROCEDURE IF EXISTS ops.refold_source(text, boolean);
 
 CREATE OR REPLACE PROCEDURE ops.refold_source(
     p_source_name text,

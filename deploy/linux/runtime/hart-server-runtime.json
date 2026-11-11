@@ -4,7 +4,7 @@
   "operator": "ahart",
   "record": "application-runtime",
   "database_host": "127.0.0.1",
-  "database": "laplace-mono",
+  "database": "laplace-app",
   "role": "laplace_staging_app",
   "database_owner": "laplace",
   "port": 5432,

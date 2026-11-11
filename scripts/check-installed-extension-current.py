@@ -69,13 +69,11 @@ def _sha256_file(path):
 
 
 def source_version(module_pathname, execution_module):
-    inputs = manifest_files(SQL / "manifest.install") + manifest_files(SQL / "manifest.upgrade")
+    inputs = manifest_files(SQL / "manifest.install")
     inputs += [EXT / "laplace_substrate.control.in",
                SQL / "laplace_substrate.sql.in",
-               SQL / "laplace_substrate_upgrade.sql.in",
                SQL / "sqldefines.h.in",
-               SQL / "manifest.install",
-               SQL / "manifest.upgrade"]
+               SQL / "manifest.install"]
     # dedupe then sort, exactly as CMakeLists does before hashing.
     seen, ordered = set(), []
     for p in inputs:

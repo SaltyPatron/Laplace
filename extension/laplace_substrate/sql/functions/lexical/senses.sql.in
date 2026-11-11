@@ -5,7 +5,6 @@
 -- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
 -- lexical.senses — GH #862. Every call site moves in this same commit; a rename
 -- with a live caller is a tree that does not install.
-DROP FUNCTION IF EXISTS laplace.senses(bytea);
 -- One election for a set of distinct terms. Scalar callers delegate here;
 -- stream callers bind the whole term set before entering the taxonomy cascade.
 -- A term's senses are its bindings to keys (converse.bindings): the key is the concept

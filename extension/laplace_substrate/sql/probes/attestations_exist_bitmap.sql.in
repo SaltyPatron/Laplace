@@ -1,7 +1,6 @@
 -- Presence bitmap for the persist stage of ingest. An attestation id alone
 -- cannot prune HASH(subject_id), so the caller passes the subject (and type)
 -- it already holds; parallel arrays, length-checked natively.
-DROP FUNCTION IF EXISTS laplace.attestations_exist_bitmap(bytea[]);
 CREATE OR REPLACE FUNCTION laplace.attestations_exist_bitmap(
     ids bytea[], type_ids bytea[], subject_ids bytea[])
     RETURNS bytea

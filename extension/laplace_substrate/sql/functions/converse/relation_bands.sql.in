@@ -8,7 +8,6 @@
 -- are exact statement-snapshot counts, shared with ops.relation_band_census().
 -- Planner MCV lists omit uncommon relation types and must never decide whether
 -- a populated band is available to query.
-DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
 CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
@@ -52,7 +51,6 @@ BEGIN ATOMIC
     ORDER BY b.band;
 END;
 
-DROP FUNCTION IF EXISTS laplace.relation_bands();
 CREATE OR REPLACE FUNCTION converse.relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)

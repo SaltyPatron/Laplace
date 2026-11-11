@@ -224,7 +224,12 @@ CEILINGS = {
     # left standing: a recorded exception that outlives its cause is just a hole.
     # Removing the obsolete attested_language DROP exposes its existing zero-caller
     # adapter in the measured baseline; no new function or ceiling increase.
-    "g4_dead_canonical": 8,
+    # 8 -> 41 when extensions lost their upgrade path (fresh CREATE EXTENSION only):
+    # every DROP FUNCTION IF EXISTS / upgrade-shape block went, and with them the
+    # textual mentions this census had been counting as callers. The 33 entries are
+    # existing functions whose only "caller" was a retired DROP of an older name or
+    # signature; no function was added. They are dead-code candidates to triage.
+    "g4_dead_canonical": 41,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
@@ -287,15 +292,7 @@ CEILINGS = {
     # (top_relations_readable, consensus_out_readable, attestations_out,
     # attestations_in).
     #
-    # The DROP side fails the opposite way and is quieter: an unqualified
-    # `DROP FUNCTION IF EXISTS substrate_health(boolean)` silently no-ops when
-    # search_path does not reach the schema holding it, so the retired function
-    # SURVIVES — which is the one thing the retirement files exist to prevent.
-    #
-    # Not flagged: `DROP laplace.X` followed by `CREATE <purpose>.X` is the
-    # purpose-schema migration idiom (generation/variant_walk.sql.in), used by
-    # 250 files. Both halves are qualified, so both are correct and neither
-    # matches this pattern. This gate only rejects a name with NO schema at all.
+    # This gate only rejects a name with NO schema at all.
     "g15_unqualified_ddl": 0,
     # 2026-08-16, first measurement. 10 names the hand-written seed/bootstrap
     # declares that engine/manifest/relation_types.toml does not, counted across

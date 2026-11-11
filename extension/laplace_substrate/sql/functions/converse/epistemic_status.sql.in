@@ -9,17 +9,6 @@
 --   confirmed  its conservative bound beats the anchor      (consensus.eff_mu > 1/2)
 --   contested  volatility above 1.5x the unrated volatility (Native LP_GLICKO_VOLATILITY)
 --   thin       otherwise
-DO $upgrade_shape$
-BEGIN
-    IF to_regprocedure('converse.epistemic_status(bytea, bytea, int)') IS NOT NULL
-       AND pg_get_function_result(to_regprocedure('converse.epistemic_status(bytea, bytea, int)')) LIKE '%type text%' THEN
-        DROP FUNCTION converse.epistemic_status(bytea, bytea, int);
-    END IF;
-    IF to_regprocedure('converse.epistemic_status_core(bytea, int)') IS NOT NULL
-       AND pg_get_function_result(to_regprocedure('converse.epistemic_status_core(bytea, int)')) LIKE '%type_id bytea%' THEN
-        DROP FUNCTION converse.epistemic_status_core(bytea, int);
-    END IF;
-END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION converse.epistemic_status_core(p_entity bytea, p_limit int DEFAULT 30)
     RETURNS TABLE(strand bytea, parts bytea[], status text, rating double precision,
                   deviation double precision, volatility double precision, matches bigint)

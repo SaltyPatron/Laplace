@@ -27,7 +27,6 @@
 -- ends in the state one run would. No SET clause: a procedure carrying one
 -- cannot COMMIT; references are schema-qualified.
 -- Invoke with: CALL ops.evict_source(laplace.source_id('ChessAnalysis'));
-DROP PROCEDURE IF EXISTS laplace.evict_source(bytea, bytea[], bytea[], int, boolean);
 
 CREATE OR REPLACE PROCEDURE ops.evict_source(
     p_source       bytea,

@@ -24,30 +24,17 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
-    public void DecayAndPruneAreDropOnlyRetiredSurfaces()
+    public void DecayAndPruneAreNotInstalled()
     {
-        var decay = Read("extension", "laplace_substrate", "sql", "functions",
-            "inference", "laplace_decay.sql.in");
-        var prune = Read("extension", "laplace_substrate", "sql", "functions",
-            "inference", "laplace_prune.sql.in");
-
-        Assert.Contains("DROP FUNCTION IF EXISTS generation.decay", decay,
-            StringComparison.Ordinal);
-        Assert.Contains("DROP FUNCTION IF EXISTS laplace.laplace_decay", decay,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("CREATE OR REPLACE FUNCTION", decay,
-            StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UPDATE ", decay, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("INSERT INTO ", decay, StringComparison.OrdinalIgnoreCase);
-
-        Assert.Contains("DROP FUNCTION IF EXISTS generation.prune", prune,
-            StringComparison.Ordinal);
-        Assert.Contains("DROP FUNCTION IF EXISTS laplace.laplace_prune", prune,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("CREATE OR REPLACE FUNCTION", prune,
-            StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DELETE FROM ", prune, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UPDATE ", prune, StringComparison.OrdinalIgnoreCase);
+        var sql = Path.Combine(RepoRoot, "extension", "laplace_substrate", "sql");
+        Assert.False(File.Exists(Path.Combine(sql, "functions", "inference", "laplace_decay.sql.in")));
+        Assert.False(File.Exists(Path.Combine(sql, "functions", "inference", "laplace_prune.sql.in")));
+        foreach (var file in Directory.EnumerateFiles(sql, "*.sql.in", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+            foreach (var retired in new[] { "generation.decay", "generation.prune", "laplace.laplace_decay", "laplace.laplace_prune" })
+                Assert.DoesNotContain("FUNCTION " + retired + "(", text, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

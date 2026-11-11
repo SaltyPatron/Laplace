@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.resolve_ref(text);
 CREATE OR REPLACE FUNCTION ops.resolve_refs(p_ids bytea[],p_labels text[])
 RETURNS TABLE(ordinal bigint,id bytea,label text,present boolean)
 LANGUAGE sql STABLE PARALLEL SAFE

@@ -1,19 +1,4 @@
 -- Model ingest is decomposition, not a second inference runtime.
-DROP FUNCTION IF EXISTS generation.model_attention_row(integer, integer, text, integer);
-DROP FUNCTION IF EXISTS generation.model_forward(bytea, text, integer);
-DROP FUNCTION IF EXISTS generation.model_pair_cos(bytea, bytea, bytea, bytea);
-DROP FUNCTION IF EXISTS generation.model_circuit_slices(text, integer, integer);
-DROP FUNCTION IF EXISTS generation.pg_laplace_model_forward(bytea, bytea[], bytea, bytea, integer);
-DROP FUNCTION IF EXISTS generation.model_row_topk(bytea, bytea, bytea, integer);
-DROP FUNCTION IF EXISTS generation.model_pair_score(bytea, bytea, bytea, bytea);
-
-DROP FUNCTION IF EXISTS laplace.model_attention_row(integer, integer, text, integer);
-DROP FUNCTION IF EXISTS laplace.model_forward(bytea, text, integer);
-DROP FUNCTION IF EXISTS laplace.model_pair_cos(bytea, bytea, bytea, bytea);
-DROP FUNCTION IF EXISTS laplace.model_circuit_slices(text, integer, integer);
-DROP FUNCTION IF EXISTS laplace.pg_laplace_model_forward(bytea, bytea[], bytea, bytea, integer);
-DROP FUNCTION IF EXISTS laplace.model_row_topk(bytea, bytea, bytea, integer);
-DROP FUNCTION IF EXISTS laplace.model_pair_score(bytea, bytea, bytea, bytea);
 
 CREATE OR REPLACE FUNCTION generation.trajectory_bits(p_trajectory_wkb bytea)
 RETURNS bytea

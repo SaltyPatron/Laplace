@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, int, bigint);
 -- Output projection is separate from routing/steering. NULL/empty output
 -- relations admit physical continuations only. Graph identities remain active
 -- evidence; they become output candidates only through this declared projection.

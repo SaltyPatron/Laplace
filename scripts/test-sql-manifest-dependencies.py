@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh-install binding order and existing-writer upgrade regressions."""
+"""Fresh-install binding order regressions."""
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -57,7 +57,7 @@ class ManifestTests(unittest.TestCase):
                     self.assertEqual([], checker.validate_manifest(manifest)
                                      + checker.validate_atomic_dependencies(manifest))
 
-    def test_install_and_upgrade_bind_all_atomic_dependencies_in_order(self):
+    def test_install_binds_all_atomic_dependencies_in_order(self):
         for manifest in checker.MANIFESTS:
             self.assertEqual([], checker.validate_atomic_dependencies(manifest))
 

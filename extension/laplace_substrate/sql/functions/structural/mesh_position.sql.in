@@ -1,7 +1,5 @@
 -- A node's position in the semantic mesh. IDs are selected and ranked first;
 -- every display label is resolved in one position-aligned batch at the edge.
-DROP FUNCTION IF EXISTS laplace.mesh_position(bytea);
-DROP FUNCTION IF EXISTS structural.mesh_position(bytea);
 CREATE OR REPLACE FUNCTION structural.mesh_position(
     p_id bytea,
     p_relation_limit integer DEFAULT NULL,

@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.continue_text(text, int, int, double precision, int, text[], double precision, boolean);
 CREATE OR REPLACE FUNCTION generation.continue_text(
         p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,
         p_spread double precision DEFAULT 0.6, p_breadth int DEFAULT 8,

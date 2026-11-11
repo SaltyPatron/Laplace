@@ -1,5 +1,3 @@
-DROP FUNCTION IF EXISTS chess.player_search_candidates(text, integer);
-DROP FUNCTION IF EXISTS chess.player_search_candidates(text[], integer);
 CREATE OR REPLACE FUNCTION chess.player_search_candidates(
     p_queries text[], p_limit integer DEFAULT 600, p_offset integer DEFAULT 0,
     p_sort text DEFAULT 'strength', p_direction text DEFAULT 'desc',

@@ -242,6 +242,9 @@ def main(argv=None, *, resource_tuner=None):
             limit = int(config['connection_limit'])
             if limit < 1 or limit < int(config['pool_max']):
                 raise ValueError('Runtime connection allocation is invalid')
+            if config.get('substrate', {}).get('database', database) != database:
+                # A database of the application's own: only its owner and runtime login may open it.
+                sql(f'REVOKE CONNECT ON DATABASE "{database}" FROM PUBLIC')
             sql(f'ALTER ROLE "{role}" CONNECTION LIMIT {limit}; GRANT CONNECT ON DATABASE "{database}" TO "{role}"; '
                 f'GRANT USAGE ON SCHEMA app TO "{role}"; '
                 f'GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA app TO "{role}"; '

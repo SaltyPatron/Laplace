@@ -12,7 +12,6 @@
 -- If the Highway registry is unavailable the result is empty. Foundry already
 -- interprets all-zero masks as its constant-gate fallback; it must never reuse
 -- stale stored masks merely because some rows happen to be populated.
-DROP FUNCTION IF EXISTS laplace.entity_highway_masks(bytea[]);
 CREATE OR REPLACE FUNCTION generation.entity_highway_masks(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, highway_mask bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

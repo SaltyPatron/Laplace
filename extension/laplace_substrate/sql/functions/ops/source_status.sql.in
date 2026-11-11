@@ -8,16 +8,6 @@
 -- Native witness ids are actual source trunks; counts and names come from
 -- their retained assertion measurement and source record. Compatibility
 -- installations retain their historical table projection below.
--- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
-DO $upgrade_shape$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.source_status(text)')
-        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(source text, source_id bytea, ingested boolean, known boolean, evidence_approx bigint, has_entities boolean, last_run_status text, last_run_at timestamp with time zone, throughput_status text, throughput_compared boolean, throughput_rows_per_s double precision, throughput_baseline_rows_per_s double precision, throughput_slowdown_ratio double precision)'
-             OR proargnames IS DISTINCT FROM ARRAY['p_source','source','source_id','ingested','known','evidence_approx','has_entities','last_run_status','last_run_at','throughput_status','throughput_compared','throughput_rows_per_s','throughput_baseline_rows_per_s','throughput_slowdown_ratio']::text[])) THEN
-        DROP FUNCTION ops.source_status(text);
-    END IF;
-END $upgrade_shape$;
-DROP FUNCTION IF EXISTS laplace.source_status(text);
 
 CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source                         text,

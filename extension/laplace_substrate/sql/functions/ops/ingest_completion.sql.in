@@ -58,4 +58,3 @@ BEGIN ATOMIC
 END;
 
 -- Units a witness has completed at a layer, for resume audits and gates.
-DROP FUNCTION IF EXISTS ops.units_completed(bytea, int);

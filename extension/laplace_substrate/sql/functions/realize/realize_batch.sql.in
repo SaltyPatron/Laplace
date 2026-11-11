@@ -3,8 +3,6 @@
 -- translations and definitions. Missing output remains NULL. Candidate rendering
 -- and first-nonempty election are legacy policy inside this boundary, not proof
 -- that semantic selection runs entirely in identity space.
-DROP FUNCTION IF EXISTS laplace.realize_batch(bytea[], bytea);
-DROP FUNCTION IF EXISTS realize._batch_c(bytea[], bytea);
 
 CREATE OR REPLACE FUNCTION realize.batch(p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]

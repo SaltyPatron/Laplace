@@ -10,7 +10,6 @@
 --   p_type_name    canonical relation type, for the related / related_in shapes
 --   p_lang         target language, for the translate shape
 --   p_context_ids  other resolved ids, used to disambiguate a sense
-DROP FUNCTION IF EXISTS laplace.recall_intent(text, bytea, bytea, text, text, bytea[]);
 CREATE OR REPLACE FUNCTION converse.recall_intent(
         p_intent text,
         p_topic bytea,

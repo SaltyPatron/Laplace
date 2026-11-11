@@ -17,8 +17,6 @@ indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_direction_gist.sql.in
 indexes/physicalities_hilbert_btree.sql.in
-indexes/physicalities_radius_btree.sql.in
-indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
 indexes/physicalities_traj_probe.sql.in
 indexes/physicalities_traj_first_id_btree.sql.in
@@ -50,10 +48,7 @@ functions/glicko2/laplace_glicko2_accumulate_period.sql.in
 functions/cascade/astar_path_raw.sql.in
 functions/trajectory/trajectory_point_count.sql.in
 functions/trajectory/trajectory_prefix_distance.sql.in
-indexes/entities_tier_brin.sql.in
-indexes/entities_tier_type_brin.sql.in
 schema/tables/consensus.sql.in
-indexes/consensus_object_btree.sql.in
 indexes/consensus_type_btree.sql.in
 indexes/consensus_subject_type_btree.sql.in
 indexes/consensus_type_subject_btree.sql.in
@@ -254,7 +249,6 @@ functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
 functions/converse/contrast.sql.in
-functions/structural/browse_named_entities.sql.in
 functions/structural/collocates.sql.in
 functions/structural/explore_anchor_neighbors.sql.in
 functions/structural/nearest_neighbors_4d.sql.in
@@ -264,7 +258,6 @@ functions/structural/consensus_export_relations_mu.sql.in
 functions/structural/model_recipes.sql.in
 functions/converse/operation_frame_routes.sql.in
 functions/converse/compile_prompt.sql.in
-functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/define.sql.in
 functions/lexical/define_with_context.sql.in
@@ -286,7 +279,6 @@ functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
-functions/ingest/physicalities_merge.sql.in
 functions/generation/trajectory_plane.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
@@ -317,7 +309,6 @@ functions/generation/recall_trajectories.sql.in
 functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
-functions/consensus/entity_has_type.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
 functions/highway/relation_highway.sql.in
 functions/converse/relation_bands.sql.in
@@ -344,7 +335,6 @@ inference/translations.sql.in
 inference/translate_to.sql.in
 inference/language_coverage.sql.in
 inference/attention.sql.in
-functions/realize/realize_canonical.sql.in
 functions/consensus/shared_objects.sql.in
 functions/consensus/edges.sql.in
 functions/consensus/related.sql.in
@@ -368,7 +358,6 @@ functions/contrast/consensus_subject_edges.sql.in
 functions/contrast/physicality_count.sql.in
 functions/variant/consensus_peer.sql.in
 functions/generation/metric_edges.sql.in
-functions/converse/execute_prompt.sql.in
 functions/variant/entity_tier_of.sql.in
 functions/variant/entity_has_trajectory.sql.in
 functions/variant/respell_variant_seed.sql.in
@@ -431,7 +420,6 @@ functions/ops/activity.sql.in
 functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in
 functions/ops/log_readers.sql.in
-functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
 views/v_entities_highway.sql.in
 views/v_word_senses.sql.in
@@ -452,9 +440,7 @@ functions/inference/laplace_nearest_entity.sql.in
 functions/inference/laplace_astar_path.sql.in
 functions/inference/laplace_forward_step.sql.in
 functions/inference/laplace_distill.sql.in
-functions/inference/laplace_prune.sql.in
 functions/inference/laplace_witness.sql.in
-functions/inference/laplace_decay.sql.in
 functions/chess/chess_outcome.sql.in
 functions/chess/chess_player_moves.sql.in
 functions/chess/chess_player_id.sql.in

@@ -33,7 +33,6 @@
 -- Semantics here are unchanged by construction: same function, same argument,
 -- same COALESCE(NULLIF(consensus.relation_canonical, ''), label) ladder. Only the number of
 -- evaluations changes.
-DROP FUNCTION IF EXISTS laplace.links(text);
 CREATE OR REPLACE FUNCTION converse.links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE

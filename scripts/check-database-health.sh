@@ -62,7 +62,7 @@ if [[ "$require_source_match" == 1 ]]; then
   source_ext=$("$SCRIPT_DIR/check-installed-extension-current.py" --print-source-version)
   [[ -n "$source_ext" ]] || fail "could not determine the source laplace_substrate version"
   [[ "$ext" == "$source_ext" ]] || \
-    fail "live laplace_substrate version is stale: database=$ext source=$source_ext"
+    fail "live laplace_substrate version is stale: database=$ext source=$source_ext; extensions have no upgrade path, recreate the substrate database"
   artifact_scope="source"
 else
   # Developer/operator DB actions intentionally operate on the already-installed
@@ -77,7 +77,7 @@ JOIN pg_available_extension_versions a
   ON a.name = e.extname AND a.version = e.extversion
 WHERE e.extname = 'laplace_substrate';")
   [[ "${installed_match:-0}" != "0" ]] || \
-    fail "live laplace_substrate version $ext is not present in installed extension artifacts"
+    fail "live laplace_substrate version $ext is not present in installed extension artifacts; extensions have no upgrade path, recreate the substrate database"
 fi
 
 missing=$("${PSQL[@]}" -d "$DB" -tAc "
@@ -122,14 +122,14 @@ if ! "${PSQL[@]}" -d "$DB" -tAc \
 fi
 
 # Bind the native attestation COPY surface without reading or writing evidence.
-# Table existence and an extension version alone do not prove an upgrade applied
-# the additive columns required by the current writer.
+# Table existence and an extension version alone do not prove the installed
+# extension carries the columns required by the current writer.
 if ! "${PSQL[@]}" -d "$DB" -tAc "
 SELECT id, subject_id, type_id, object_id, source_id, context_id, outcome,
        last_observed_at, observation_count, sum_score_fp1e9,
        opponent_rd_fp1e9, opponent_rating_fp1e9, fold_replayable, qualifier_mask
 FROM laplace.attestations WHERE false;" >/dev/null; then
-  fail "attestation writer columns are missing; extension schema upgrade is incomplete"
+  fail "attestation writer columns are missing; the extension predates the writer, recreate the substrate database"
 fi
 
 invalid=$("${PSQL[@]}" -d "$DB" -tAc "
