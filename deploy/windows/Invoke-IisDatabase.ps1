@@ -200,6 +200,9 @@ try {
                 $upgradeSrc=Join-Path $deployExtDir "${ext}_upgrade.sql"
                 if(Test-Path -LiteralPath $upgradeSrc -PathType Leaf){
                     Copy-Item -LiteralPath $upgradeSrc -Destination (Join-Path $deployExtDir "${ext}--${installed}--${avail}.sql") -Force
+                }elseif($ext -ne 'laplace'){
+                    # Hash-versioned monorepo extensions have no version chain; the upgrade body is the only path.
+                    throw "Extension $ext moves from $installed to $avail but $upgradeSrc is not installed; install-extensions must deploy ${ext}_upgrade.sql."
                 }
                 Write-Host "Upgrading extension $ext from $installed to $avail in $selected"
                 $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION $ext UPDATE TO '$avail';" $selected

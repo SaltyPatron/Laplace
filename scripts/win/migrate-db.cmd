@@ -34,18 +34,26 @@ rem The installed extension brought to the version the host has (pipeline.sh doe
 rem Linux): a migration only creates a missing extension, so without this a rebuilt
 rem extension never reaches a database that already has one. The version is a content hash
 rem with no chain of upgrade scripts; the generic upgrade script is the bridge between the
-rem installed version and the available one.
-set "EXT_INSTALLED=" & set "EXT_AVAILABLE="
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'"`) do set "EXT_INSTALLED=%%v"
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'"`) do set "EXT_AVAILABLE=%%v"
-if not defined EXT_AVAILABLE ( echo ERROR: laplace_substrate is not available on %LAPLACE_PGHOST% & exit /b 1 )
-if not "%EXT_INSTALLED%"=="%EXT_AVAILABLE%" (
-  echo migrate-db: laplace_substrate %EXT_INSTALLED% -^> %EXT_AVAILABLE%
-  copy /y "%LAPLACE_DEPLOY%\share\extension\laplace_substrate_upgrade.sql" "%LAPLACE_DEPLOY%\share\extension\laplace_substrate--%EXT_INSTALLED%--%EXT_AVAILABLE%.sql" >nul || exit /b 1
-  set "PGOPTIONS=-c lock_timeout=20s"
-  psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -v ON_ERROR_STOP=1 -c "ALTER EXTENSION laplace_substrate UPDATE TO '%EXT_AVAILABLE%'" || exit /b 1
-  set "PGOPTIONS="
-)
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'"`) do echo migrate-db: laplace_substrate extversion=%%v
+rem installed version and the available one. laplace_geom goes first: laplace_substrate builds on it.
+call :bridge laplace_geom || exit /b 1
+call :bridge laplace_substrate || exit /b 1
 echo migrate-db: OK ^(schema generation verified: partitioned^)
+exit /b 0
+:bridge
+set "EXT_INSTALLED=" & set "EXT_AVAILABLE="
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT extversion FROM pg_extension WHERE extname='%1'"`) do set "EXT_INSTALLED=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT default_version FROM pg_available_extensions WHERE name='%1'"`) do set "EXT_AVAILABLE=%%v"
+if not defined EXT_AVAILABLE ( echo ERROR: %1 is not available on %LAPLACE_PGHOST% & exit /b 1 )
+if not defined EXT_INSTALLED exit /b 0
+if "%EXT_INSTALLED%"=="%EXT_AVAILABLE%" goto :bridge_done
+echo migrate-db: %1 %EXT_INSTALLED% -^> %EXT_AVAILABLE%
+if not exist "%LAPLACE_DEPLOY%\share\extension\%1_upgrade.sql" ( echo ERROR: %1_upgrade.sql is not installed; run install-extensions.cmd & exit /b 1 )
+copy /y "%LAPLACE_DEPLOY%\share\extension\%1_upgrade.sql" "%LAPLACE_DEPLOY%\share\extension\%1--%EXT_INSTALLED%--%EXT_AVAILABLE%.sql" >nul || exit /b 1
+set "PGOPTIONS=-c lock_timeout=20s"
+psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -v ON_ERROR_STOP=1 -c "ALTER EXTENSION %1 UPDATE TO '%EXT_AVAILABLE%'"
+set "RC=%ERRORLEVEL%"
+set "PGOPTIONS="
+if not "%RC%"=="0" exit /b 1
+:bridge_done
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT extversion FROM pg_extension WHERE extname='%1'"`) do echo migrate-db: %1 extversion=%%v
 exit /b 0
