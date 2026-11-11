@@ -32,7 +32,7 @@ extern "C" {
 /* v1 dense table: every channel-byte magnitude. */
 #define LAPLACE_MODALITY_NUMBER_PERFCACHE_VALUE_COUNT 256u
 
-#define LAPLACE_MODALITY_NUMBER_PERFCACHE_GENERATOR_TAG "modality_number_perfcache/v1"
+#define LAPLACE_MODALITY_NUMBER_PERFCACHE_GENERATOR_TAG "modality_number_perfcache/v2-merkle-height"
 #define LAPLACE_MODALITY_NUMBER_PERFCACHE_SCOPE "u8"
 
 typedef struct {
