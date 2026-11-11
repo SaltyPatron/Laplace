@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -154,22 +155,6 @@ int main(int argc, char** argv) {
     hash128_t source_hash;
     compute_source_hash(t0_fp, &source_hash);
 
-    {
-        std::ifstream prev(cli.output, std::ios::binary);
-        if (prev) {
-            laplace_modality_number_perfcache_header_t hdr{};
-            prev.read((char*)&hdr, sizeof(hdr));
-            if (prev.gcount() == (std::streamsize)sizeof(hdr)
-                && hdr.magic == LAPLACE_MODALITY_NUMBER_PERFCACHE_MAGIC
-                && hdr.format_version == LAPLACE_MODALITY_NUMBER_PERFCACHE_VERSION
-                && std::memcmp(&hdr.source_hash, &source_hash, sizeof(hash128_t)) == 0) {
-                std::fprintf(stderr,
-                    "modality_number_perfcache: sources unchanged — emit skipped\n");
-                return 0;
-            }
-        }
-    }
-
     std::vector<laplace_modality_number_perfcache_record_t> records(
         LAPLACE_MODALITY_NUMBER_PERFCACHE_VALUE_COUNT);
     for (uint32_t v = 0; v < LAPLACE_MODALITY_NUMBER_PERFCACHE_VALUE_COUNT; ++v) {
@@ -212,6 +197,18 @@ int main(int argc, char** argv) {
     hash128_blake3(blob.data(), blob.size(), &crc);
     put_h128(blob, crc);
 
+    // A perf-cache is what its law produces now: it is always regenerated, and written only when its bytes differ
+    // from the file there, so an unchanged blob keeps its timestamp. No input fingerprint decides this.
+    {
+        std::ifstream prev(cli.output, std::ios::binary);
+        std::vector<uint8_t> existing((std::istreambuf_iterator<char>(prev)), std::istreambuf_iterator<char>());
+        if (prev.good() || prev.eof()) {
+            if (existing == blob) {
+                std::fprintf(stderr, "modality_number_perfcache: regenerated, identical -> %s\n", cli.output.c_str());
+                return 0;
+            }
+        }
+    }
     std::ofstream out(cli.output, std::ios::binary);
     if (!out) {
         std::fprintf(stderr, "cannot write %s\n", cli.output.c_str());

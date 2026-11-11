@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <algorithm>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -190,17 +192,6 @@ int main(int argc, char** argv) {
     hash128_t source_hash;
     hash128_blake3(mix.data(), mix.size(), &source_hash);
 
-    {
-        std::ifstream prev(cli.output, std::ios::binary);
-        laplace_vocabulary_perfcache_header_t old{};
-        if (prev && prev.read(reinterpret_cast<char*>(&old), sizeof(old))
-            && old.magic == LAPLACE_VOCABULARY_PERFCACHE_MAGIC
-            && old.format_version == LAPLACE_VOCABULARY_PERFCACHE_VERSION
-            && std::memcmp(&old.source_hash, &source_hash, sizeof(hash128_t)) == 0) {
-            std::fprintf(stderr, "vocabulary_perfcache: sources unchanged; emit skipped\n");
-            return 0;
-        }
-    }
 
     std::vector<laplace_vocabulary_perfcache_record_t> records;
     std::string strings;
@@ -292,6 +283,15 @@ int main(int argc, char** argv) {
     hash128_blake3(blob.data(), blob.size(), &crc);
     put(blob, crc);
 
+    // Always regenerated; written only when its bytes differ from the file there. No input fingerprint decides this.
+    {
+        std::ifstream prev(cli.output, std::ios::binary);
+        std::vector<uint8_t> existing((std::istreambuf_iterator<char>(prev)), std::istreambuf_iterator<char>());
+        if (existing.size() == blob.size() && std::equal(existing.begin(), existing.end(), blob.begin())) {
+            std::fprintf(stderr, "vocabulary_perfcache: regenerated, identical -> %s\n", cli.output.c_str());
+            return 0;
+        }
+    }
     const std::string tmp = cli.output + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary);
