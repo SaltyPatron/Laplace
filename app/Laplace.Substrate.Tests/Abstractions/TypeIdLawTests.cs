@@ -156,6 +156,40 @@ public class TypeIdLawTests
 
     internal static string FindRepoRootPublic() => FindRepoRoot();
 
+    /// <summary>
+    /// Reads a C# type's full source: <c>Name.cs</c> plus every partial-class file
+    /// <c>Name.*.cs</c> beside it, in ordinal order. Source gates assert on the
+    /// type, not on whichever file a modularization split happened to leave a member in.
+    /// </summary>
+    internal static string ReadTypeSource(params string[] mainFileParts)
+    {
+        var main = Path.Combine([FindRepoRoot(), .. mainFileParts]);
+        var dir = Path.GetDirectoryName(main)!;
+        var stem = Path.GetFileNameWithoutExtension(main);
+        var parts = new List<string> { File.ReadAllText(main) };
+        parts.AddRange(Directory.GetFiles(dir, stem + ".*.cs")
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .Select(File.ReadAllText));
+        return string.Join("\n", parts);
+    }
+
+    /// <summary>
+    /// Reads a C module's full source: <c>name.c</c> plus the translation units and
+    /// internal header it was split into (<c>name_*.c</c>, <c>name_*.h</c>) beside it.
+    /// </summary>
+    internal static string ReadCModuleSource(params string[] mainFileParts)
+    {
+        var main = Path.Combine([FindRepoRoot(), .. mainFileParts]);
+        var dir = Path.GetDirectoryName(main)!;
+        var stem = Path.GetFileNameWithoutExtension(main);
+        var parts = new List<string> { File.ReadAllText(main) };
+        parts.AddRange(Directory.GetFiles(dir, stem + "_*.c")
+            .Concat(Directory.GetFiles(dir, stem + "_*.h"))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .Select(File.ReadAllText));
+        return string.Join("\n", parts);
+    }
+
     internal static string ReadSqlCatalog(string? repoRoot = null)
     {
         var root = repoRoot ?? FindRepoRoot();

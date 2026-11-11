@@ -11,12 +11,19 @@ public sealed class WordNetNativeRecipeTests
     {
         string[] claims = await NativeCorpusAssertions.ClaimsAsync("princeton-wordnet",
             Fixture("data.noun"), Fixture("data.verb"));
-        Assert.Equal(41, claims.Length);
+        Assert.Equal(45, claims.Length);
         Assert.Equal(14, claims.Count(claim => claim.Contains("\tidentifier vocabulary\tili", StringComparison.Ordinal)));
-        Assert.Equal(3, claims.Count(claim => claim.Contains("\tdenotes\t", StringComparison.Ordinal)));
+        // The source notation is said beside what it reads as: wordnet-pos tags through the
+        // highway's tagset crosswalk, pointer symbols through WordNet's documented pointer types.
+        Assert.Equal(7, claims.Count(claim => claim.Contains("\tdenotes\t", StringComparison.Ordinal)));
+        Assert.Contains("claim\t0\t1\t[wordnet-pos, n]\tdenotes\tNOUN", claims);
+        Assert.Contains("claim\t0\t1\t[wordnet-pointer, @]\tdenotes\thypernym", claims);
         Assert.Contains("claim\t0\t1\tili:i35545\twords in the synset\t[entity, eng, ili:i35545]", claims);
         Assert.Contains("claim\t0\t1\tili:i35546\twords in the synset\t[physical entity, eng, ili:i35546]", claims);
-        Assert.Contains("claim\t0\t1\tili:i35546\t@\tili:i35545", claims);
+        // A pointer is the relation WordNet documents for its symbol (wninput.5WN: @ Hypernym),
+        // never the markup symbol itself.
+        Assert.Contains("claim\t0\t1\tili:i35546\thypernym\tili:i35545", claims);
+        Assert.DoesNotContain(claims, claim => claim.Contains("\t@\t", StringComparison.Ordinal));
         Assert.Contains("claim\t0\t1\tili:i21790\twords in the synset\t[hold, eng, ili:i21790]", claims);
         Assert.Contains("claim\t0\t1\tili:i21790\ta definition, one or more example sentences, or both\tkeep from exhaling or expelling; \"hold your breath\"", claims);
         Assert.Contains("claim\t0\t1\tili:i21790\tgeneric verb sentence frames for words in the synset\t8", claims);

@@ -332,14 +332,14 @@ public sealed class IngestMutexGateTests
     public void HighwayMaskDeposit_CallerMatchesInstalledSurface()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var writer = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud",
-            "Npgsql", "ConsensusAccumulatingWriter.cs"));
+        var writer = TypeIdLawTests.ReadTypeSource("app", "Laplace.Substrate", "Crud",
+            "Npgsql", "ConsensusAccumulatingWriter.cs");
         var installer = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "sql", "functions", "highway", "highway_mask_deposit.sql.in"));
         var refresher = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "sql", "functions", "highway", "highway_mask_refresh.sql.in"));
-        var native = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
-            "src", "highway_mask.c"));
+        var native = TypeIdLawTests.ReadCModuleSource("extension", "laplace_substrate",
+            "src", "highway_mask.c");
 
         // The gate is that the caller and the installed surface agree -- NOT that they
         // agree on `laplace.`. This previously pinned the pre-migration name in both

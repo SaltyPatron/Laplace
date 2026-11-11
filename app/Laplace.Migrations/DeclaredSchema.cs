@@ -133,7 +133,7 @@ internal static class DeclaredSchema
         using var transaction = connection.BeginTransaction();
         try
         {
-            using (var limit = new NpgsqlCommand("SET LOCAL lock_timeout = '15s'", connection, transaction)) limit.ExecuteNonQuery();
+            using (var limit = NpgsqlCatalog.Command(connection, transaction, "advisory.timeout_local", "15s")) limit.ExecuteNonQuery();
             var before = Snapshot(connection, transaction);
             Apply(connection, transaction, files);
             var after = Snapshot(connection, transaction);

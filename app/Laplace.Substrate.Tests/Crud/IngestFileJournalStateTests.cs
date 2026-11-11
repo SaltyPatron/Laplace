@@ -10,9 +10,8 @@ public sealed class IngestFileJournalStateTests
     public void ComposedFilesAreVisibleAndReconciledAsIncomplete()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var observability = Path.Combine(
-            repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIngestObservability.cs");
-        var text = File.ReadAllText(observability);
+        var text = TypeIdLawTests.ReadTypeSource(
+            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIngestObservability.cs");
 
         Assert.Contains("\"journal.files_composed\"", text, StringComparison.Ordinal);
         Assert.Contains("status = 'composed'", SqlCatalog.Get("journal.files_composed").Text, StringComparison.Ordinal);

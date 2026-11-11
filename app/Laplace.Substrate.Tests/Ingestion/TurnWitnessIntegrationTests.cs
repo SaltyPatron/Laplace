@@ -11,9 +11,9 @@ public sealed class TurnWitnessIntegrationTests
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var witness = Path.Combine(repoRoot, "app", "Laplace.Endpoints.OpenAICompat", "TurnWitness.cs");
-        var endpoints = Path.Combine(repoRoot, "app", "Laplace.Endpoints.OpenAICompat", "EndpointMappings.Inference.cs");
         var witnessText = File.ReadAllText(witness);
-        var endpointsText = File.ReadAllText(endpoints);
+        var endpointsText = TypeIdLawTests.ReadTypeSource(
+            "app", "Laplace.Endpoints.OpenAICompat", "EndpointMappings.Inference.cs");
         Assert.Contains("IsAvailable", witnessText, StringComparison.Ordinal);
         Assert.Contains("TryEnqueue", witnessText, StringComparison.Ordinal);
         Assert.DoesNotContain("DropWrite", witnessText, StringComparison.Ordinal);
