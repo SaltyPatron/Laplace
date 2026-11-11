@@ -14,6 +14,11 @@ export interface AccountControlsProps {
 
 const invitationStorageKey = 'laplace.pending-workspace-invitation';
 
+/** A picker earns its place only when there is another workspace to switch to, or the current one is not yet chosen. */
+export function hasChoice(account: { tenantId: string; workspaces: { tenantId: string }[] }) {
+  return account.workspaces.length !== 1 || account.workspaces[0].tenantId !== account.tenantId;
+}
+
 export function AccountControls({ user, providers, returnUrl }: AccountControlsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -45,7 +50,10 @@ export function AccountControls({ user, providers, returnUrl }: AccountControlsP
           <Link to="/settings">{label}</Link>
           <Muted>{user.email || user.provider}</Muted>
         </div>
-        {workspaces.data && <label className={styles.workspace}>Workspace<Select aria-label="Current workspace" value={workspaces.data.tenantId} disabled={busy} onChange={async (event) => {
+        {/* The one workspace you are in is a fact, not a choice: a picker appears only when there is one to make. */}
+        {workspaces.data && !hasChoice(workspaces.data) && <div className={styles.workspace} role="group" aria-label="Current workspace">Workspace
+          <span className={styles.workspaceName}>{workspaces.data.workspaces[0].displayName} · {roleName(workspaces.data.workspaces[0].role)}</span></div>}
+        {workspaces.data && hasChoice(workspaces.data) && <label className={styles.workspace}>Workspace<Select aria-label="Current workspace" value={workspaces.data.tenantId} disabled={busy} onChange={async (event) => {
           setBusy(true); setError('');
           try {
             await apiPost(`/v1/account/workspaces/${encodeURIComponent(event.target.value)}/select`, {});

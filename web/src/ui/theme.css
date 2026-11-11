@@ -248,7 +248,11 @@
     color: var(--color-accent);
   }
 
+  /* Pages lay out with @container page. The shell's column is the nearest page container
+     in the app; body is the fallback, so a view rendered outside the shell (a test fixture,
+     an embed) still lays out against the window instead of never matching at all. */
   body {
+    container: page / inline-size;
     margin: 0;
     height: 100%;
     background-color: var(--color-bg-surface);

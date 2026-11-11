@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button, Checkbox, ErrorText, Input, Modal, Muted, Panel, Select, UnstyledButton, useReadResource } from '@ui';
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import { useAppStore } from '../store';
-import { AccountControls } from './AccountControls';
+import { AccountControls, hasChoice } from './AccountControls';
 import { useSectionParam } from '../layout/useSectionParam';
 import { roleName } from './access';
 import { WorkspaceInvitation } from './WorkspaceInvitation';
@@ -162,7 +162,9 @@ function WorkspaceSettings() {
 
       {account.value && <>
         {section === 'workspace' && <Panel title="Workspace settings">
-          <label className={styles.field}>Current workspace
+          {!hasChoice(account.value) && <div className={styles.field} role="group" aria-label="Current workspace">Current workspace
+            <Muted>{account.value.workspaces[0].displayName} · {roleName(account.value.workspaces[0].role)}. Create or join another workspace to switch between them.</Muted></div>}
+          {hasChoice(account.value) && <label className={styles.field}>Current workspace
             <Select value={account.value.tenantId} disabled={!!busy} onChange={(event) => {
               const value = event.target.value;
               void run('workspace', () => selectWorkspace(value));
@@ -172,7 +174,7 @@ function WorkspaceSettings() {
                 {workspace.displayName} · {workspace.role}
               </option>)}
             </Select>
-          </label>
+          </label>}
           <details><summary>Technical identifiers</summary><Muted>Workspace ID: {account.value.tenantId}. Account ID: {account.value.userId}.</Muted></details>
           {manages && <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void run('rename', async () => {
             await apiPut('/v1/account/workspace', { name: rename }); refresh((n) => n + 1); setMessage('Workspace name saved.');
