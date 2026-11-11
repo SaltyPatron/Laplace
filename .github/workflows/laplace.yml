@@ -192,7 +192,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions updated in place, migrations
+      - name: Database laplace-mono, extensions current (no upgrade path), migrations
         run: |
           deploy/linux/site.sh database extensions migrate
 
@@ -372,7 +372,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions updated in place, migrations (the application database too, LAPLACE_APP_DB)
+      - name: Database laplace-mono, extensions current (no upgrade path), migrations (the application database too, LAPLACE_APP_DB)
         run: |
           deploy/linux/site.sh database extensions migrate
 

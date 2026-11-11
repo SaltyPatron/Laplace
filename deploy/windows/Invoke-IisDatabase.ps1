@@ -76,6 +76,18 @@ function Query([string]$Sql,[string]$Name='postgres'){
     if($LASTEXITCODE){throw ($result -join "`n")}
     ($result -join "`n").Trim()
 }
+# Each extension of the selected substrate whose installed version cannot reach the available one in place.
+function ExtensionDrift {
+    if($Database -ne 'substrate' -or $Operation -notin 'migrate','repair'){return}
+    if((Query "SELECT count(*) FROM pg_database WHERE datname='$selected';") -ne '1'){return}
+    foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+        $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
+        $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
+        if(-not $installed -or -not $avail -or $installed -ceq $avail){continue}
+        if($ext -eq 'laplace' -and (Query "SELECT count(*) FROM pg_extension_update_paths('laplace') WHERE source='$installed' AND target='$avail' AND path IS NOT NULL;" $selected) -eq '1'){continue}
+        "$ext $installed -> $avail"
+    }
+}
 function Migrate([string]$Verb){
     & dotnet $MigrationRuntime $Verb --yes
     if($LASTEXITCODE){throw "Migration command $Verb failed (exit $LASTEXITCODE)."}
@@ -166,10 +178,21 @@ try {
             }
         }
     }
+    # laplace_geom and laplace_substrate have no upgrade path (their version is a content hash), and Native's laplace
+    # has none where Laplace-postgres ships no update script: a substrate database carrying another version is
+    # recreated (nuke: a replacement made with a fresh CREATE EXTENSION and the declared substrate schema, carrying
+    # the database's settings and grants), never updated in place. Only the substrate: the access declaration keeps
+    # the application in a database of its own.
+    $stale=@(ExtensionDrift)
     $prefix=if($Database -eq 'application'){'app-'}else{'substrate-'}
     switch($Operation){
         status { Migrate ($prefix+'status') }
-        {$_ -in 'migrate','repair'} { Migrate ($prefix+'up') }
+        {$_ -in 'migrate','repair' -and $stale} {
+            Write-Host "Recreating substrate database $selected (extensions have no upgrade path): $($stale -join ', ')"
+            $receipt.recreated_for=$stale
+            Migrate 'nuke'
+        }
+        {$_ -in 'migrate','repair' -and -not $stale} { Migrate ($prefix+'up') }
         remigrate {
             Migrate $(if($Database -eq 'application'){'app-reset'}else{'reset'})
             Migrate ($prefix+'up')
@@ -189,28 +212,15 @@ try {
                 $null=Query "ALTER DATABASE `"$selected`" SET $($cacheSetting.Name) = '$normalizedPath';" 'postgres'
             }
         }
-        $deployExtDir=Join-Path $deployRoot 'share/extension'
-        if(-not(Test-Path -LiteralPath $deployExtDir -PathType Container)){
-            $deployExtDir=Join-Path $deployRoot 'pgsql-18/share/extension'
+        # Recreation above leaves nothing to reach; what remains is Native's laplace where an update script exists.
+        $remaining=@(ExtensionDrift)
+        if($remaining){throw "Extensions have no upgrade path and $selected still carries $($remaining -join ', ') after migration; recreate the substrate database: laplace-ops db substrate recreate -Yes"}
+        $installed=(Query "SELECT extversion FROM pg_extension WHERE extname='laplace';" $selected)
+        $avail=(Query "SELECT default_version FROM pg_available_extensions WHERE name='laplace';" $selected)
+        if($installed -and $avail -and $installed -cne $avail){
+            Write-Host "Upgrading extension laplace from $installed to $avail in $selected"
+            $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION laplace UPDATE TO '$avail';" $selected
         }
-        foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
-            $installed=(Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected)
-            $avail=(Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected)
-            if($installed -and $avail -and $installed -cne $avail){
-                $upgradeSrc=Join-Path $deployExtDir "${ext}_upgrade.sql"
-                if(Test-Path -LiteralPath $upgradeSrc -PathType Leaf){
-                    Copy-Item -LiteralPath $upgradeSrc -Destination (Join-Path $deployExtDir "${ext}--${installed}--${avail}.sql") -Force
-                }elseif($ext -ne 'laplace'){
-                    # Hash-versioned monorepo extensions have no version chain; the upgrade body is the only path.
-                    throw "Extension $ext moves from $installed to $avail but $upgradeSrc is not installed; install-extensions must deploy ${ext}_upgrade.sql."
-                }
-                Write-Host "Upgrading extension $ext from $installed to $avail in $selected"
-                $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION $ext UPDATE TO '$avail';" $selected
-            }
-        }
-        # laplace_geom retires a function only once nothing else uses it; laplace_substrate
-        # moved off it in the update above, so this is when the retirement can finish.
-        $null=Query 'SET lock_timeout = ''20s''; DO $retire$ BEGIN IF to_regproc(''public.laplace_geom_retire'') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END $retire$;' $selected
     }
     if($Operation -ne 'status'){
         # Recreating an absent database cannot copy its old grants; the access declaration owns them.

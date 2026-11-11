@@ -756,26 +756,11 @@ phase_migrate() {
   dotnet "$mig" up
 }
 
-alter_extension_update() {
-  local ext="$1" avail="$2" rc=0 log
-  mkdir -p "${LAPLACE_WORK_ROOT}"
-  log=$(mktemp "${LAPLACE_WORK_ROOT}/alter-extension.XXXXXX")
-  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
-      -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
-  if [[ "$rc" != 0 ]]; then
-    cat "$log" >&2
-    if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
-      psql -d "$PGDATABASE" -U "$PGUSER" -P pager=off -c \
-        "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,120) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
-    fi
-  fi
-  rm -f "$log"
-  return "$rc"
-}
-
+# laplace_geom and laplace_substrate have no upgrade path: their version is a content hash, and a
+# database that carries another version is recreated (Database maintenance workflow,
+# database=substrate, operation=recreate), never updated in place. A missing extension is created.
 sync_one_extension() {
-  local ext="$1" avail installed bridge
+  local ext="$1" avail installed
   avail=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='$ext'" | tr -d '[:space:]')
   installed=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT extversion FROM pg_extension WHERE extname='$ext'" | tr -d '[:space:]')
   [[ -n "$avail" ]] || { echo "::error::$ext is not available on the server" >&2; return 1; }
@@ -784,17 +769,14 @@ sync_one_extension() {
     return
   fi
   [[ "$installed" != "$avail" ]] || { echo "$ext already at $avail"; return; }
-  bridge="$LAPLACE_EXT_SHAREDIR/$ext--${installed}--${avail}.sql"
-  install -m 664 "$LAPLACE_EXT_SHAREDIR/${ext}_upgrade.sql" "$bridge"
-  alter_extension_update "$ext" "$avail"
+  echo "::error::$ext $installed is installed in $PGDATABASE but $avail is available: extensions have no upgrade path; recreate the substrate database (it must not hold the application database)" >&2
+  return 1
 }
 
 phase_sync_extension() (
   echo "===== PHASE — SYNC EXTENSION SQL ====="
-  # Extension upgrades replace views/functions and require DDL locks. Do not
-  # restart the live API between native install and schema synchronization and
-  # then let request transactions deadlock the upgrade. Quiesce the API for the
-  # exact DDL window; PostgreSQL remains online for the migration itself.
+  # Creating a missing extension takes DDL locks. Quiesce the API for the exact
+  # DDL window; PostgreSQL remains online.
   local api_was_active=0 sync_rc=0
   systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
   cleanup_extension_sync() {
@@ -809,44 +791,7 @@ phase_sync_extension() (
   [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
 
   sync_one_extension laplace_geom
-  local avail installed bridge log rc=0
-  avail=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" | tr -d '[:space:]')
-  installed=$(psql -d "$PGDATABASE" -U "$PGUSER" -tAX -c "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'" | tr -d '[:space:]')
-  [[ -n "$avail" ]] || { echo "::error::laplace_substrate not available" >&2; return 1; }
-  if [[ -z "$installed" ]]; then
-    psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate CASCADE"
-  elif [[ "$installed" != "$avail" ]]; then
-    bridge="$LAPLACE_EXT_SHAREDIR/laplace_substrate--${installed}--${avail}.sql"
-    install -m 664 "$LAPLACE_EXT_SHAREDIR/laplace_substrate_upgrade.sql" "$bridge"
-    mkdir -p "${LAPLACE_WORK_ROOT}"
-    log=$(mktemp "${LAPLACE_WORK_ROOT}/substrate-update.XXXXXX")
-    PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-      psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
-        -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
-    if [[ "$rc" != 0 ]] && grep -q 'could not find function\|could not load library\|undefined symbol' "$log" \
-       && ! grep -q 'laplace_execution_[0-9a-f]' "$log"; then
-      cat "$log" >&2
-      restart_postgres "preloaded substrate image is stale for new SQL"
-      rc=0
-      PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
-        psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
-          -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" || rc=$?
-    fi
-    if [[ "$rc" != 0 ]]; then
-      cat "$log" >&2
-      if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
-        psql -d "$PGDATABASE" -U "$PGUSER" -P pager=off -c \
-          "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,160) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
-      fi
-      rm -f "$log"
-      return "$rc"
-    fi
-    rm -f "$log"
-  fi
-  # laplace_geom retires a function only once nothing else uses it; laplace_substrate
-  # moved off it in the update above, so this is when the retirement can finish.
-  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
-    -c "DO \$retire\$ BEGIN IF to_regproc('public.laplace_geom_retire') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END \$retire\$;"
+  sync_one_extension laplace_substrate
 
   if [[ "$api_was_active" == 1 ]]; then
     sudo -n systemctl start laplace-api
