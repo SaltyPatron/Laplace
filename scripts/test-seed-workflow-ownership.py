@@ -296,7 +296,7 @@ native_sources = json.loads(os.environ["FOUNDATION_TEST_NATIVE_SOURCES"])
 omitted = set(json.loads(os.environ["FOUNDATION_TEST_OMIT"]))
 for source in sys.argv[2:]:
     if source not in omitted:
-        present.add(native_sources[source] if source != "operational" else sources[source])
+        present.add(native_sources[source])
 state.write_text(json.dumps(sorted(present)))
 ''')
 
@@ -307,8 +307,8 @@ state.write_text(json.dumps(sorted(present)))
 
     def run_ladder(self, *, missing=(), omitted=(), args=(), ingest_rc=0):
         self.state.write_text(json.dumps([
-            (self.NATIVE_SOURCES[key] if key != "operational" else source)
-            for key, source in self.SOURCES.items() if key not in missing
+            self.NATIVE_SOURCES[key]
+            for key in self.SOURCES if key not in missing
         ]), encoding="utf-8")
         self.env["FOUNDATION_TEST_OMIT"] = json.dumps(list(omitted))
         self.env["FOUNDATION_TEST_INGEST_RC"] = str(ingest_rc)
@@ -327,8 +327,7 @@ state.write_text(json.dumps(sorted(present)))
         self.assertEqual(self.calls(), [["framenet"]])
         self.assertIn("foundation complete: foundation-test", result.stdout)
         self.assertEqual(set(json.loads(self.state.read_text())),
-                         {(self.NATIVE_SOURCES[k] if k != "operational" else v)
-                          for k, v in self.SOURCES.items()})
+                         {self.NATIVE_SOURCES[k] for k in self.SOURCES})
 
     def test_successful_ingest_without_markers_lists_every_remaining_source(self):
         result = self.run_ladder(
