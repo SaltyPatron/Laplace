@@ -21,6 +21,7 @@ sql(){
     *"extversion"*"'laplace'"*) echo 1.24;;
     *"default_version"*) echo new_hash;;
     *"extversion"*) echo old_hash;;
+    *"laplace_geom_retire"*) printf 'retire\n' >> "$work/applied";;
     *"ALTER EXTENSION"*) printf '%s\n' "$*" >> "$work/applied";;
     *"laplace_restore_function_bindings"*) printf '%s\n' "$*" >> "$work/rebound";;
     *) fail "unexpected SQL operation: $*";;
@@ -31,8 +32,11 @@ grep -q "ALTER EXTENSION laplace UPDATE TO '1.26'" "$work/applied"
 [[ ! -e "$EXT_SHARE/extension/laplace--1.24--1.26.sql" ]]
 cmp "$EXT_SHARE/extension/laplace_geom_upgrade.sql" "$EXT_SHARE/extension/laplace_geom--old_hash--new_hash.sql"
 cmp "$EXT_SHARE/extension/laplace_substrate_upgrade.sql" "$EXT_SHARE/extension/laplace_substrate--old_hash--new_hash.sql"
-[[ $(wc -l < "$work/applied") == 3 ]]
+[[ $(wc -l < "$work/applied") == 4 ]]
+# A geom retirement waits for its users, so it runs once, after substrate's update.
+[[ $(tail -1 "$work/applied") == retire ]]
+grep -q "ALTER EXTENSION laplace_substrate UPDATE" <(sed -n 3p "$work/applied")
 # The content-addressed Native module is rebound from the installed control file, once.
 grep -qF "AS '\$libdir/laplace_fixture', 'laplace_restore_function_bindings'" "$work/rebound"
 [[ $(wc -l < "$work/rebound") == 1 ]]
-echo 'PASS Native uses its version chain; monorepo extensions retain their hash bridges'
+echo 'PASS Native uses its version chain; monorepo extensions retain their hash bridges; geom retires after substrate'

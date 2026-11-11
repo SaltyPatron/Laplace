@@ -845,6 +845,10 @@ phase_sync_extension() (
     fi
     rm -f "$log"
   fi
+  # laplace_geom retires a function only once nothing else uses it; laplace_substrate
+  # moved off it in the update above, so this is when the retirement can finish.
+  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
+    -c "DO \$retire\$ BEGIN IF to_regproc('public.laplace_geom_retire') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END \$retire\$;"
 
   if [[ "$api_was_active" == 1 ]]; then
     sudo -n systemctl start laplace-api

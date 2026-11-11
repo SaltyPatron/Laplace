@@ -37,6 +37,8 @@ rem with no chain of upgrade scripts; the generic upgrade script is the bridge b
 rem installed version and the available one. laplace_geom goes first: laplace_substrate builds on it.
 call :bridge laplace_geom || exit /b 1
 call :bridge laplace_substrate || exit /b 1
+rem laplace_geom retires a function only once laplace_substrate (upgraded just above) no longer uses it.
+psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -v ON_ERROR_STOP=1 -c "DO $retire$ BEGIN IF to_regproc('public.laplace_geom_retire') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END $retire$;" || exit /b 1
 echo migrate-db: OK ^(schema generation verified: partitioned^)
 exit /b 0
 :bridge

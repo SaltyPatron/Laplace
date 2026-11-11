@@ -1,4 +1,5 @@
 functions/laplace_geom_version.sql.in
+functions/retired_identity.sql.in
 functions/laplace_hash128_blake3.sql.in
 functions/laplace_hilbert_encode.sql.in
 functions/laplace_hilbert_decode.sql.in

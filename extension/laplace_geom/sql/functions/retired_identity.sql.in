@@ -1,4 +1,42 @@
 -- Identity is Laplace-Native's alone: a composition's ID is public.laplace_compose
 -- (lp_id_compose) and text's is public.laplace_text_id (lp_text_id). The duplicate
--- composition hasher this extension once carried is retired on upgrade.
-DROP FUNCTION IF EXISTS laplace_hash128_merkle(smallint, bytea[]);
+-- composition hasher this extension once carried is retired.
+--
+-- A retirement waits for its users. laplace_substrate is upgraded after this
+-- extension (it builds on what this one adds), and until then its installed SQL
+-- functions still reference what is being retired; an unconditional DROP here
+-- fails the whole upgrade. laplace_geom_retire() drops each retired function
+-- once nothing outside this extension depends on it, and says which it kept.
+-- The upgrade calls it, and deployments call it again after every extension is
+-- current, which is when the last user has moved.
+CREATE OR REPLACE FUNCTION laplace_geom_retire()
+    RETURNS integer
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog, public
+AS $retire$
+DECLARE
+    retired constant text[] := ARRAY['laplace_hash128_merkle(smallint,bytea[])'];
+    signature text;
+    target regprocedure;
+    dropped integer := 0;
+BEGIN
+    FOREACH signature IN ARRAY retired LOOP
+        target := to_regprocedure(signature);
+        CONTINUE WHEN target IS NULL;
+        IF EXISTS (SELECT 1 FROM pg_depend
+                   WHERE refclassid = 'pg_proc'::regclass AND refobjid = target AND deptype = 'n') THEN
+            RAISE NOTICE 'laplace_geom: % is still referenced; it is retired once its users are upgraded', signature;
+            CONTINUE;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_depend
+                   WHERE classid = 'pg_proc'::regclass AND objid = target AND deptype = 'e') THEN
+            EXECUTE format('ALTER EXTENSION laplace_geom DROP FUNCTION %s', target);
+        END IF;
+        EXECUTE format('DROP FUNCTION %s', target);
+        dropped := dropped + 1;
+    END LOOP;
+    RETURN dropped;
+END
+$retire$;
+
+SELECT laplace_geom_retire();

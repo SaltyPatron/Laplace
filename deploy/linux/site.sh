@@ -363,6 +363,10 @@ phase_extensions() {
     fi
     echo "  $ext $installed"
   done
+  # laplace_geom retires a function only once nothing else uses it; laplace_substrate
+  # moved off it in the loop above, so this is when the retirement can finish.
+  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql \
+    -c "DO \$retire\$ BEGIN IF to_regproc('public.laplace_geom_retire') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END \$retire\$;" >/dev/null
 }
 
 # ------------------------------------------------------------------------------------------------ app + publish

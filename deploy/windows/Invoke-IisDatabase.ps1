@@ -208,6 +208,9 @@ try {
                 $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION $ext UPDATE TO '$avail';" $selected
             }
         }
+        # laplace_geom retires a function only once nothing else uses it; laplace_substrate
+        # moved off it in the update above, so this is when the retirement can finish.
+        $null=Query 'SET lock_timeout = ''20s''; DO $retire$ BEGIN IF to_regproc(''public.laplace_geom_retire'') IS NOT NULL THEN PERFORM public.laplace_geom_retire(); END IF; END $retire$;' $selected
     }
     if($Operation -ne 'status'){
         # Recreating an absent database cannot copy its old grants; the access declaration owns them.
