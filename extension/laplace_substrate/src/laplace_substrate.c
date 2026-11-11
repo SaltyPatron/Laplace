@@ -177,6 +177,33 @@ pg_laplace_standing_volatility(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(LP_GLICKO_VOLATILITY);
 }
 
+/* The walk law: a cell's Glicko-2 expected score against a certain neutral
+ * reference, RD pulling an uncertain cell toward 0.5 through g(phi). The SQL
+ * walk weights read the same body the native traversals call (spi_common.h
+ * laplace_edge_strength, astar_path.c, foundry_crawl.c), so a walk in SQL and a
+ * walk in C weigh one edge alike. Ranking (consensus.eff_mu) is a separate,
+ * conservative reading; a thin, unrefuted claim stays walkable. */
+PG_FUNCTION_INFO_V1(pg_laplace_edge_strength);
+Datum
+pg_laplace_edge_strength(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_FLOAT8(laplace_glicko2_expected_score(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_walk_edge_weight);
+Datum
+pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_FLOAT8(laplace_walk_edge_weight(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_refuted);
+Datum
+pg_laplace_refuted(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(laplace_glicko2_refuted(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_score_inverse);
 
 Datum

@@ -8,10 +8,9 @@ BEGIN ATOMIC
     SELECT public.laplace_confidence(p_rating, p_deviation, -2) < 0.5;
 END;
 
--- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
--- the Native reading of its points.
+
+-- A legacy fixed-point standing (laplace.consensus): the C law the native walks use (laplace_glicko2_refuted).
 CREATE OR REPLACE FUNCTION consensus.refuted(p_rating bigint, p_rd bigint)
-    RETURNS boolean LANGUAGE sql LAPLACE_IMMUTABLE
-BEGIN ATOMIC
-    SELECT consensus.refuted(p_rating / 1e9::double precision, p_rd / 1e9::double precision);
-END;
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_refuted'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

@@ -1,15 +1,13 @@
--- The signed weight a walk gives a strand, in [-1, 1]: the Native conservative
--- confidence around one half.
+-- The signed weight a walk gives a strand, in [-1, 1]: 2 * edge_strength - 1, the same C body every native walk calls
+-- (laplace_walk_edge_weight). Positive for any standing above neutral, however thin; RD attenuates it.
+CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_edge_weight'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+-- A Native standing (public.consensus, float8 points) through the same body.
 CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(p_rating double precision, p_deviation double precision)
     RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC
-    SELECT 2 * consensus.eff_mu(p_rating, p_deviation) - 1;
-END;
-
--- Legacy laplace.consensus (bigint rating and rd, fixed point x 1e9) until its writer moves to public.consensus:
--- the Native reading of its points.
-CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(p_rating bigint, p_rd bigint)
-    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
-BEGIN ATOMIC
-    SELECT consensus.walk_edge_weight(p_rating / 1e9::double precision, p_rd / 1e9::double precision);
+    SELECT consensus.walk_edge_weight(round(p_rating * 1e9)::bigint, round(p_deviation * 1e9)::bigint);
 END;

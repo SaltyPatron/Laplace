@@ -12,26 +12,26 @@ SELECT consensus.glicko2_neutral_mu() = 1500 AS anchor_is_native,
  t                | t                           | t                            | t                    | t
 (1 row)
 
--- eff_mu is the Native conservative confidence; strength is the same reading and
--- the signed walk weight is that reading around one half.
+-- eff_mu is the Native conservative confidence (the ranking); strength and the
+-- signed walk weight are the C walk law, the same at either scale.
 SELECT bool_and(consensus.eff_mu(r, d) = public.laplace_confidence(r, d, 2)) AS eff_mu_is_native_confidence,
-       bool_and(consensus.edge_strength(r, d) = consensus.eff_mu(r, d)) AS strength_is_confidence,
-       bool_and(consensus.walk_edge_weight(r, d) = 2 * consensus.eff_mu(r, d) - 1) AS signed_weight_matches_strength,
+       bool_and(consensus.edge_strength(r, d) = consensus.edge_strength(round(r * 1e9)::bigint, round(d * 1e9)::bigint)) AS strength_is_the_c_walk,
+       bool_and(consensus.walk_edge_weight(r, d) = 2 * consensus.edge_strength(r, d) - 1) AS signed_weight_matches_strength,
        bool_and(consensus.refuted(r, d) = (public.laplace_confidence(r, d, -2) < 0.5)) AS refuted_is_optimistic_loss
 FROM (VALUES (1600.0::float8, 30.0::float8), (1600, 350), (1400, 30), (1500, 80), (2010.5, 12)) v(r, d);
- eff_mu_is_native_confidence | strength_is_confidence | signed_weight_matches_strength | refuted_is_optimistic_loss 
+ eff_mu_is_native_confidence | strength_is_the_c_walk | signed_weight_matches_strength | refuted_is_optimistic_loss 
 -----------------------------+------------------------+--------------------------------+----------------------------
  t                           | t                      | t                              | t
 (1 row)
 
-SELECT consensus.walk_edge_weight(1700, 30) > 0 AS confident_win_is_walkable,
+SELECT consensus.walk_edge_weight(1600, 350) > 0 AS a_wide_rd_win_is_walkable,
        consensus.walk_edge_weight(1400, 30) < 0 AS refutation_is_negative,
        consensus.walk_edge_weight(1500, 0) = 0 AS anchor_is_zero,
        consensus.walk_edge_weight(1600, 30) > consensus.walk_edge_weight(1600, 350) AS deviation_attenuates,
        consensus.refuted(1400, 30) AS confident_loss_is_refuted,
        NOT consensus.refuted(1400, 350) AS uncertain_loss_is_not_refuted,
        consensus.eff_mu_display(1600, 30) = round(public.laplace_confidence(1600, 30, 2)::numeric, 3) AS display_rounds_confidence;
- confident_win_is_walkable | refutation_is_negative | anchor_is_zero | deviation_attenuates | confident_loss_is_refuted | uncertain_loss_is_not_refuted | display_rounds_confidence 
+ a_wide_rd_win_is_walkable | refutation_is_negative | anchor_is_zero | deviation_attenuates | confident_loss_is_refuted | uncertain_loss_is_not_refuted | display_rounds_confidence 
 ---------------------------+------------------------+----------------+----------------------+---------------------------+-------------------------------+---------------------------
  t                         | t                      | t              | t                    | t                         | t                             | t
 (1 row)
