@@ -59,7 +59,7 @@ if($Operation -eq 'Render') {
     $values=Get-IisEnvironment $c $records
     if($records.chess.control_token -notmatch '^[a-f0-9]{64}$'){throw 'Missing Lichess controller client credential.'}
     Write-IisAtomic (Join-Path $state 'control.token') $records.chess.control_token
-    Write-IisAtomic (Join-Path $state 'chess-client.json') (Iis-Json @{url=$c.chess.url;operators=$c.chess.operators;tokenFile=(Join-Path $state 'control.token')})
+    Write-IisAtomic (Join-Path $state 'chess-client.json') (Iis-Json @{url=$c.chess.url;tokenFile=(Join-Path $state 'control.token')})
     if($c.chess.match_engines){
         $engineDirectory=Join-Path $state 'engine-connections'
         $profiles=@{}

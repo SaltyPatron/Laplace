@@ -6,11 +6,11 @@ using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed record LichessControlClientConfiguration(string Url, string TokenFile, Guid[] Operators);
+internal sealed record LichessControlClientConfiguration(string Url, string TokenFile);
 internal sealed record LichessProfileSelectionRequest(string? Profile, long ExpectedRevision,
     string? ReadSource = null, string? RecordingTarget = null);
 
-internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<LichessControlClient> log)
+internal sealed class LichessControlClient(IHttpClientFactory clients, PlatformAuthorization authorization, ILogger<LichessControlClient> log)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient SharedProbeHttp = new() { Timeout = TimeSpan.FromSeconds(5) };
@@ -25,8 +25,8 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
         bool tailnet = IPAddress.TryParse(uri.Host, out var address) && address.GetAddressBytes() is [100, >= 64 and <= 127, _, _];
         if (uri.Scheme != "https" && !(uri.Scheme == "http" && (uri.IsLoopback || tailnet)))
             throw new InvalidDataException("Lichess control requires HTTPS, loopback or an explicit Tailscale address.");
-        if (!string.IsNullOrEmpty(uri.UserInfo) || !Path.IsPathFullyQualified(c.TokenFile) || c.Operators is null)
-            throw new InvalidDataException("Invalid Lichess control client credential or operator declarations.");
+        if (!string.IsNullOrEmpty(uri.UserInfo) || !Path.IsPathFullyQualified(c.TokenFile))
+            throw new InvalidDataException("Invalid Lichess control client credential declaration.");
         return c;
     }
 
@@ -86,7 +86,8 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
         using var response = await SendAsync(c, HttpMethod.Get, "status", null, ct);
         if (!response.IsSuccessStatusCode) return Failure(response.StatusCode);
         var control = await response.Content.ReadFromJsonAsync<JsonElement>(Json, ct);
-        return Results.Json(new { available = true, canControl = User(context.User) is { } user && c.Operators.Contains(user), control });
+        var canControl = await authorization.AllowsAsync(context, PlatformPolicy.Services, ct);
+        return Results.Json(new { available = true, canControl, controlRefusal = canControl ? null : Refusal(context), control });
     }
 
     public async Task<IResult> SelectAsync(HttpContext context, LichessProfileSelectionRequest request, CancellationToken ct)
@@ -96,11 +97,14 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
     {
         var c = Configuration();
         if (c is null) return Results.Json(new { error = "Lichess controller is not configured." }, statusCode: 503);
-        if (User(context.User) is not { } user || !c.Operators.Contains(user))
-            return Results.Json(new { error = "Your signed-in account does not have the lichess.configure permission." }, statusCode: 403);
+        // The shared bot is a platform service: the same services.manage permission that starts and
+        // stops services (Operations manager, Platform administrator, the installation credential).
+        if (!await authorization.AllowsAsync(context, PlatformPolicy.Services, ct))
+            return Results.Json(new { error = Refusal(context) }, statusCode: 403);
+        var actor = User(context.User) is { } user ? user.ToString("D") : "installation-credential";
         using var response = await SendAsync(c, HttpMethod.Post, "selection",
             new { request.Profile, request.ExpectedRevision, request.ReadSource, request.RecordingTarget,
-                actor = $"{Environment.MachineName}/{user:D}" }, ct);
+                actor = $"{Environment.MachineName}/{actor}" }, ct);
         if (!response.IsSuccessStatusCode && response.StatusCode is not (HttpStatusCode.Conflict or HttpStatusCode.BadRequest))
             return Failure(response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>(Json, ct);
@@ -116,6 +120,11 @@ internal sealed class LichessControlClient(IHttpClientFactory clients, ILogger<L
         if (body is not null) request.Content = JsonContent.Create(body);
         return await clients.CreateClient("lichess-control").SendAsync(request, ct);
     }
+
+    /// <summary>Why this caller may view but not change routing, in words the page can show as is.</summary>
+    private static string Refusal(HttpContext context) => User(context.User) is null
+        ? "This session uses a service credential. Sign in as an Operations manager or Platform administrator to change the bot destination."
+        : "Changing the bot destination needs the Operations manager or Platform administrator role. A platform administrator can assign it under Admin → People & roles.";
 
     private static IResult Failure(HttpStatusCode status) => Results.Json(new
     { error = "The installed Lichess controller rejected the request.", upstreamStatus = (int)status }, statusCode: 503);
