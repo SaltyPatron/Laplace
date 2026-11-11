@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: SaltyPatron/Laplace-Operations
-          ref: main
+          ref: 84c50ef7479adcd1b556dbb20a853b75e387eb15
           path: .ci-dependencies/operations-source
           token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
