@@ -92,8 +92,8 @@ test('a game list reads every game\'s deepest opening in one batch', async ({ pa
   await page.route('**/modular/api/chess/game-openings', (route) => {
     batches.push(route.request().postDataJSON());
     return route.fulfill({ json: [
-      { line: 'f6'.repeat(16), plies: [], deepest: PETROV, out_of_book_at: null },
-      { line: 'a5'.repeat(16), plies: [], deepest: null, out_of_book_at: 1 },
+      { deepest: PETROV },
+      { deepest: null },
     ] });
   });
   await page.goto('/chess/laplace');

@@ -46,6 +46,8 @@ export const gameOpenings = (pgn: string, signal?: AbortSignal) =>
 /** The most specific opening: the longest line that still contains the position. */
 export const mostSpecific = (openings: OpeningLine[]) => openings.at(-1) ?? null;
 
-/** One batched read for a page of games: each entry aligns with its pgn; a game with an illegal move is null. */
+/** One batched read for a page of games (at most 512): an array aligned with pgns, each
+ * { deepest } (null for a game with an illegal move or no named position). */
+export interface GameDeepestOpening { deepest: OpeningLine | null }
 export const gameOpeningsBatch = (pgns: string[], signal?: AbortSignal) =>
-  apiPost<(GameOpeningsResponse | null)[]>('/modular/api/chess/game-openings', { pgns }, { signal });
+  apiPost<GameDeepestOpening[]>('/modular/api/chess/game-openings', { pgns }, { signal });

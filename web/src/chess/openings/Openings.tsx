@@ -46,7 +46,7 @@ export function useDeepestOpenings(games: { id: string; movetext?: string | null
     read: (signal) => gameOpeningsBatch(readable.map((game) => game.movetext!), signal),
   });
   const byId = new Map<string, OpeningLine | null>();
-  read.data?.forEach((result, index) => byId.set(readable[index].id, result?.deepest ?? null));
+  read.data?.forEach((result, index) => byId.set(readable[index].id, result.deepest));
   return { byId, read, readable: new Set(readable.map((game) => game.id)) };
 }
 
