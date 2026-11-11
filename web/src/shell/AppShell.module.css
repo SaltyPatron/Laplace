@@ -89,7 +89,8 @@
   .banners { display: grid; gap: var(--space-2); padding: var(--space-3) var(--page-gutter) 0; }
   .banners:empty { display: none; }
   /* Positioned at z 1 so the opt-in familiar can sit above page content without covering modals. */
-  .main { position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; flex-direction: column; padding: var(--space-5) var(--page-gutter) var(--space-7); }
+  /* Pages size to this column (the window minus rail and drawer), so their layouts query it, not the viewport. */
+  .main { container: page / inline-size; position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; flex-direction: column; padding: var(--space-5) var(--page-gutter) var(--space-7); }
   .main > * { flex: 1; min-width: 0; }
 
   /* Medium: icon rail */

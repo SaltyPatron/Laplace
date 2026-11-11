@@ -81,12 +81,12 @@
   }
 }
 
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .tableTools {
     align-items: stretch;
     flex-direction: column;
   }
 }
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .hasSelection > .hero, .hasSelection > .tableTools, .hasSelection > .facets { display: none; }
 }

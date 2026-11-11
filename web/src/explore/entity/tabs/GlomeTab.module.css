@@ -26,7 +26,7 @@
     }
   }
 
-  @media (max-width: 64rem) {
+  @container page (max-width: 52rem) {
     .panes {
       grid-template-columns: 1fr;
     }

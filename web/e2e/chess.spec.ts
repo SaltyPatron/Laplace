@@ -124,6 +124,28 @@ test.describe('chess UI', () => {
     await expect(page).toHaveURL(/direction=asc/);
   });
 
+  test('a player with no recorded games reads as unrated, not as a neutral prior', async ({ page }) => {
+    await page.route('**/v1/chess/players?**', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        object: 'chess.players',
+        total: 2,
+        offset: 0,
+        players: [
+          { rank: 1, id: '11112222333344445555666677778888', name: 'Karpov, Anatoly', games: 2056, rating: 1820, rd: 60, eff_mu: 1700 },
+          { rank: 2, id: '99990000aaaabbbbccccddddeeeeffff', name: 'Profile, Only', games: 0, rating: 1500, rd: 350, eff_mu: 800 },
+        ],
+      }),
+    }));
+    await page.goto('/chess');
+    const unrated = page.getByRole('row').filter({ hasText: 'Profile, Only' });
+    await expect(unrated).toContainText('Unrated (no recorded games)');
+    await expect(unrated).not.toContainText('800');
+    await expect(unrated).not.toContainText('±350');
+    await expect(unrated.getByRole('cell').first()).toHaveText('—');
+    await expect(page.getByRole('row').filter({ hasText: 'Karpov, Anatoly' })).toContainText('1700');
+  });
+
   test('Laplace games have a dedicated, filterable URL', async ({ page }) => {
     await page.route('**/v1/chess/laplace/games?**', async (route) => {
       await route.fulfill({

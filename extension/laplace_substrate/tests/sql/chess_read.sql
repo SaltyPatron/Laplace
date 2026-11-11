@@ -615,6 +615,16 @@ BEGIN
         RAISE EXCEPTION 'FAIL: profile-only player was hidden from master list or assigned invented standing: %/%/%/%',
             n, ra, rdv, mu;
     END IF;
+    -- No recorded games is no standing: an unrated player follows every rated one in
+    -- both directions, so a games-ascending page still opens on a played record.
+    SELECT player_id INTO got FROM chess.ranked(1, 0, 'games', 'asc');
+    IF got <> spas THEN RAISE EXCEPTION 'FAIL: games ASC put an unrated player before the one-game record'; END IF;
+    -- Unrated RD (350) is the widest, yet RD descending still lists every rated player first.
+    IF EXISTS (SELECT 1 FROM chess.ranked(100, 0, 'rd', 'desc') a
+                 JOIN chess.ranked(100, 0, 'rd', 'desc') b ON b.rank > a.rank
+                WHERE a.games = 0 AND b.games > 0) THEN
+        RAISE EXCEPTION 'FAIL: the widest-RD sort put an unrated player before a rated one';
+    END IF;
     -- A declared type alone does not witness a player or a profile. Such
     -- identities can be staged before their evidence commits during ingestion.
     INSERT INTO laplace.entities(id,tier,type_id)

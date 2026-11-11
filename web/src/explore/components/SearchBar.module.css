@@ -31,7 +31,7 @@
   }
 }
 
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .heading {
     align-items: flex-start;
     flex-direction: column;

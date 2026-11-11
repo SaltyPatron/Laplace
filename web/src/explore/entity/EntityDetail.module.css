@@ -114,7 +114,7 @@
   }
 }
 
-@media (max-width: 40rem) {
+@container page (max-width: 36rem) {
   .titleBlock,
   .actions {
     flex-basis: 100%;

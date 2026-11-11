@@ -20,7 +20,7 @@
     padding-left: var(--space-1);
   }
 
-  @media (max-width: 40rem) {
+  @container page (max-width: 36rem) {
     .controls {
       flex-wrap: wrap;
     }

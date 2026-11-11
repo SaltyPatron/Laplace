@@ -220,16 +220,24 @@ export function PlayersIndex() {
               <tbody>
                 {data.players.map((player) => (
                   <tr key={player.id}>
-                    <Td>{player.rank || '—'}</Td>
+                    {/* No recorded games is no standing: the server lists these after every
+                        rated player, and the table says so instead of printing the neutral prior. */}
+                    <Td>{player.games > 0 && player.rank ? player.rank : '—'}</Td>
                     <Td>
                       <Link className={styles.playerLink} to={`/chess/players/${player.id}`}>
                         {player.name}
                       </Link>
                     </Td>
                     <Td>{player.games.toLocaleString()}</Td>
-                    <Td title="rating − 2·RD">{player.eff_mu.toFixed(0)}</Td>
-                    <Td>{player.rating.toFixed(0)}</Td>
-                    <Td>±{player.rd.toFixed(0)}</Td>
+                    {player.games > 0 ? (
+                      <>
+                        <Td title="rating − 2·RD">{player.eff_mu.toFixed(0)}</Td>
+                        <Td>{player.rating.toFixed(0)}</Td>
+                        <Td>±{player.rd.toFixed(0)}</Td>
+                      </>
+                    ) : (
+                      <Td colSpan={3}><Muted>Unrated (no recorded games)</Muted></Td>
+                    )}
                   </tr>
                 ))}
               </tbody>
