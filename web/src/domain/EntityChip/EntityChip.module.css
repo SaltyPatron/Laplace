@@ -17,6 +17,7 @@
     text-underline-offset: 0.2em;
   }
   .chip:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); text-decoration-color: currentColor; }
+  .mark { padding: 0 var(--space-half); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-gold) 35%, transparent); color: inherit; }
   .active { background: color-mix(in srgb, var(--color-accent) 16%, transparent); }
   .label { overflow-wrap: anywhere; }
   .tier {

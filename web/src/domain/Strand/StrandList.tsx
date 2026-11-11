@@ -12,8 +12,12 @@ const KIND_LABEL: Record<string, string> = {
   contains: 'Made of', 'contained-in': 'Appears in', precedes: 'Comes before', follows: 'Comes after',
   'co-occurs': 'Occurs with', 'shape-similar': 'Shaped like',
 };
-/** IsA → "is a", AtLocation → "at location", HAS_PART → "has part". */
-export const relationWords = (relation: string) => relation.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ').toLowerCase();
+/** A relation type the backend returned by ID because it has no recorded name (32 hex digits). */
+export const isUnnamedRelation = (relation: string) => /^[0-9a-f]{32}$/i.test(relation.trim());
+/** IsA → "is a", AtLocation → "at location", HAS_PART → "has part". An unnamed type reads as such, never as its ID. */
+export const relationWords = (relation: string) => isUnnamedRelation(relation)
+  ? 'unnamed relation'
+  : relation.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ').toLowerCase();
 export const kindLabel = (kind: string) => KIND_LABEL[kind] ?? relationWords(relationOf(kind as Strand['kind']) ?? kind);
 
 /** Consensus as a bar: 1500 is neutral; the bar shows how far the conservative standing sits from it. */
@@ -25,13 +29,13 @@ export function StandingMeter({ strength, state }: { strength: number | null; st
   </span>;
 }
 
-function StrandRow({ strand, side }: { strand: Strand; side: 'to' | 'from' }) {
+function StrandRow({ strand, side, highlight }: { strand: Strand; side: 'to' | 'from'; highlight?: string }) {
   const other = side === 'to' ? strand.to : strand.from;
   const [open, setOpen] = useState(false);
   const games = strand.spiders.reduce((sum, s) => sum + s.count, 0);
   return <li className={styles.row}>
     <div className={styles.main}>
-      <EntityChip id={other.id} label={other.label} />
+      <EntityChip id={other.id} label={other.label} highlight={highlight} />
       {strand.run && strand.run > 1 && <span className={styles.muted}>× {strand.run}</span>}
       {strand.via && <span className={styles.muted}>in <EntityChip id={strand.via.id} label={strand.via.label} /></span>}
     </div>
@@ -47,6 +51,12 @@ function StrandRow({ strand, side }: { strand: Strand; side: 'to' | 'from' }) {
       <span className={styles.muted}>trust {s.trust} · {s.count} {s.count === 1 ? 'game' : 'games'}{s.score != null ? ` · score ${s.score.toFixed(2)}` : ''}</span>
     </li>)}</ul>}
   </li>;
+}
+
+/** Unnamed relation types stay separate groups; the ID is kept for developers in the heading's tooltip. */
+function unnamedRelationTitle(strand: Strand | undefined) {
+  const relation = strand ? relationOf(strand.kind) : undefined;
+  return relation && isUnnamedRelation(relation) ? `Relation type ${relation} has no recorded name` : undefined;
 }
 
 /** Strands grouped by kind and direction ("dog is a …" vs "… is a dog"), strongest first. One component for every facet. */
@@ -70,8 +80,9 @@ export function StrandList({ subjectId, subjectLabel, strands, groupByKind = tru
   }, [strands, groupByKind, subject, subjectLabel]);
   if (!strands.length) return <p className={styles.empty}>{empty}</p>;
   return <div className={styles.groups}>{groups.map(([key, { title, items }]) => <section key={key} className={styles.group} data-relation-group={key}>
-    {groupByKind && <h4 className={styles.groupTitle}>{title} <span className={styles.muted}>{items.length}</span></h4>}
+    {groupByKind && <h4 className={styles.groupTitle} title={unnamedRelationTitle(items[0])}>{title} <span className={styles.muted}>{items.length}</span></h4>}
     <ul className={styles.list}>{items.map((strand, index) => <StrandRow key={`${strand.from.id}-${strand.to.id}-${strand.kind}-${index}`} strand={strand}
-      side={strand.from.id === subjectId.toLowerCase() ? 'to' : 'from'} />)}</ul>
+      side={strand.from.id === subjectId.toLowerCase() ? 'to' : 'from'}
+      highlight={strand.kind === 'contained-in' ? subjectLabel : undefined} />)}</ul>
   </section>)}</div>;
 }

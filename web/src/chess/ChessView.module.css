@@ -5,6 +5,9 @@
     justify-content: center;
   }
 
+  /* Board beside its panel needs about 52rem of the play area itself; narrower, they stack. */
+  .frame { container: chess-play / inline-size; height: 100%; min-height: 0; }
+
   .layout {
     display: grid;
     grid-template-columns: minmax(32rem, 1fr) minmax(19rem, 22rem);
@@ -40,7 +43,7 @@
   }
 }
 
-@media (max-width: 64rem) {
+@container chess-play (max-width: 52rem) {
   .layout {
     display: flex;
     flex-direction: column;
@@ -56,7 +59,7 @@
 
   .main {
     flex: 0 0 auto;
-    height: min(calc(100vw + 8rem), 48rem);
+    height: min(calc(100cqw + 8rem), 48rem);
     min-height: 30rem;
   }
 }

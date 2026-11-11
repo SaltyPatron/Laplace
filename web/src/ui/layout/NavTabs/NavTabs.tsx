@@ -25,7 +25,7 @@ export function NavTabs({ tabs, className, label = 'Sections' }: NavTabsProps) {
     <nav className={cn(styles.tabs, className)} aria-label={label}>
       {tabs.map((tab) => tab.href ? (
         <Button key={tab.id} asChild variant="nav" active={tab.active}>
-          <a href={tab.href} onPointerEnter={tab.onIntent} onFocus={tab.onIntent} onClick={(event) => {
+          <a href={tab.href} aria-current={tab.active ? 'page' : undefined} onPointerEnter={tab.onIntent} onFocus={tab.onIntent} onClick={(event) => {
             if (!tab.onClick || event.defaultPrevented || event.button !== 0 ||
                 event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -33,7 +33,7 @@ export function NavTabs({ tabs, className, label = 'Sections' }: NavTabsProps) {
           }}>{tab.label}</a>
         </Button>
       ) : (
-        <Button key={tab.id} type="button" variant="nav" active={tab.active}
+        <Button key={tab.id} type="button" variant="nav" active={tab.active} aria-current={tab.active ? 'true' : undefined}
           onPointerEnter={tab.onIntent} onFocus={tab.onIntent} onClick={tab.onClick}>
           {tab.label}
         </Button>

@@ -1,5 +1,8 @@
 @layer components {
+  /* The shell must grow with its content. #root is a fixed-height flex column, so a shrinking shell
+     stopped at the window height and the sticky rail scrolled away with the overflow. */
   .shell {
+    flex: 1 0 auto;
     min-height: 100dvh;
     display: grid;
     grid-template-columns: var(--rail-width) minmax(0, 1fr);

@@ -22,6 +22,21 @@ test('the rail is present on every surface, including deep inside Explore', asyn
   await expect(rail(page).getByRole('link', { name: 'Ask', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
+test('the rail stays in place when a long page scrolls', async ({ page }) => {
+  // Content taller than the window (here, 3000px added to main): the rail must not scroll away with it.
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await stubApi(page);
+  await page.goto('/settings');
+  await expect(rail(page).getByRole('link', { name: 'Ask', exact: true })).toBeVisible();
+  const scrolled = await page.evaluate(() => {
+    const tall = document.createElement('div'); tall.style.height = '3000px'; tall.style.flex = 'none'; document.querySelector('main')!.append(tall);
+    window.scrollTo(0, document.documentElement.scrollHeight); return window.scrollY;
+  });
+  expect(scrolled).toBeGreaterThan(100);
+  const top = await rail(page).evaluate((nav) => nav.getBoundingClientRect().top);
+  expect(Math.abs(top)).toBeLessThan(1);
+});
+
 test('every rail destination deep-links by URL (refresh-safe, back-button)', async ({ page }) => {
   test.setTimeout(120_000);
   const destinations: [string, string, RegExp][] = [
