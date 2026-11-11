@@ -754,7 +754,7 @@ export function StorageProofView() {
                     >
                       <span className={styles.depthMark} style={{ '--depth': depth } as CSSProperties} />
                       <span className={styles.tierBadge}>T{node.tier}</span>
-                      <span className={styles.nodeLabel} title={node.label}>{node.label || '∅'}</span>
+                      <span className={styles.nodeLabel} title={visibleText(node.label)}>{visibleText(node.label) || '∅'}</span>
                       <code>{compactId(node.id_hex)}</code>
                       <span className={styles.radius}>r {node.radius.toFixed(3)}</span>
                     </button>
@@ -881,7 +881,7 @@ export function StorageProofView() {
                     >
                       <td>{node.ordinal}</td>
                       <td>T{node.tier}</td>
-                      <td title={node.label}>{node.label || '∅'}</td>
+                      <td title={visibleText(node.label)}>{visibleText(node.label) || '∅'}</td>
                       <td>{node.parent_ordinal ?? '—'}</td>
                       <td><code title={node.id_hex}>{compactId(node.id_hex)}</code></td>
                       <td><code>{prettyNumber(node.x, 7)}</code></td>
@@ -1005,4 +1005,15 @@ export function StorageProofView() {
       ) : null}
     </div>
   );
+}
+
+/** Whitespace is content too: draw it so a space node is not an empty box. */
+export function visibleText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(/ /g, '␠')
+    .replace(/\r\n|\n/g, '↵')
+    .replace(/\r/g, '␍')
+    .replace(/\t/g, '⇥')
+    .replace(/ /g, '⍽');
 }

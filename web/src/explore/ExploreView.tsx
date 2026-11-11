@@ -79,7 +79,7 @@ function ExploreBreadcrumb() {
   if (pathname.startsWith('/explore/constellation')) segments.push({ label: 'Constellation' });
   if (pathname.startsWith('/unicode')) segments.push({ label: 'Unicode Glome' });
   if (pathname.startsWith('/proof')) segments.push({ label: 'Storage Proof' });
-  if (pathname.startsWith('/explore/walk')) segments.push({ label: 'Forward Trace' });
+  if (pathname.startsWith('/explore/walk')) segments.push({ label: 'Reasoning trace' });
   if (pathname === '/explore/mesh' || pathname.startsWith('/explore/mesh/')) segments.push({ label: 'Mesh', to: '/explore/mesh' });
   if (pathname === '/explore/matchup' || pathname.startsWith('/explore/matchup/')) segments.push({ label: 'Matchup', to: '/explore/matchup' });
   if (pathname.startsWith('/explore/audit')) segments.push({ label: 'Audit' });

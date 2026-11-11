@@ -5,6 +5,7 @@ import { queryLeaders, relationBands } from '../../query/api';
 import type { BandLeaders, RelationBand } from '../../query/types';
 import { SearchBar } from '../components/SearchBar';
 import { findLayer } from './layers';
+import { relationWords } from '../../domain/Strand/StrandList';
 import styles from './Highway.module.css';
 
 /**
@@ -52,25 +53,24 @@ export function LayerPage() {
       </header>
 
       <div className={styles.grid}>
-        <Panel title="The standardized read">
-          <code className={styles.read}>{layer.read}</code>
-          {layer.relations.length > 0 && (
-            <>
-              <div className={styles.subhead}>Relation types in this division</div>
-              <ul className={styles.relList}>
-                {layer.relations.map((r) => <li key={r}><code>{r}</code></li>)}
-              </ul>
-            </>
-          )}
+        <Panel title="Relations in this division">
+          {layer.relations.length > 0 ? (
+            <ul className={styles.relList}>
+              {layer.relations.map((r) => <li key={r}>{relationWords(r)}</li>)}
+            </ul>
+          ) : <Muted>This division is read through identifiers rather than named relations.</Muted>}
+          <details className={styles.subhead}>
+            <summary>For developers: the API read</summary>
+            <code className={styles.read}>{layer.read}</code>
+          </details>
         </Panel>
 
         <Panel title="What it contributes">
           <p className={styles.contributes}>{layer.contributes}</p>
           {band && (
             <Muted className={styles.bandNote}>
-              Band {band.band} · {band.name} · rank {band.rank} ·{' '}
-              {band.consensus_rows.toLocaleString()} consensus edges across{' '}
-              {band.relation_types} relation type{band.relation_types === 1 ? '' : 's'}.
+              {band.consensus_rows.toLocaleString()} rated {band.consensus_rows === 1 ? 'strand' : 'strands'} across{' '}
+              {band.relation_types} {band.relation_types === 1 ? 'relation' : 'relations'}.
             </Muted>
           )}
         </Panel>
@@ -81,7 +81,7 @@ export function LayerPage() {
           <p className={styles.gap}>{layer.readGap}</p>
         </Panel>
       ) : (
-        <Panel title="Standings — strongest witnessed edges in this division">
+        <Panel title="Strongest strands in this division">
           {/* No band means no leaders read; the effect never fetches for it. */}
           {bandNo == null ? (
             <Muted>
@@ -92,8 +92,9 @@ export function LayerPage() {
             : leaders == null ? <LoadingText>Reading the band…</LoadingText>
             : rows.length === 0 ? (
               <Muted>
-                No consensus edges witnessed in this band yet. The division exists; nothing has
-                been folded into it.
+                {band && band.consensus_rows > 0
+                  ? `None of the ${band.consensus_rows.toLocaleString()} rated strands here has enough standing to rank yet: each needs more sources agreeing before it counts as established.`
+                  : 'Nothing has been rated in this division yet.'}
               </Muted>
             ) : (
               <table className={styles.standings}>
@@ -106,11 +107,11 @@ export function LayerPage() {
                     <th
                       scope="col"
                       className={styles.num}
-                      title="Conservative standing (rating − 2×RD); not the underlying rating"
+                      title="Cautious standing: rating minus twice its uncertainty"
                     >
-                      Conservative
+                      Standing
                     </th>
-                    <th scope="col" className={styles.num} title="Witnessed observations">Wit</th>
+                    <th scope="col" className={styles.num}>Witnesses</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -120,11 +121,11 @@ export function LayerPage() {
                       <td>
                         <Link className={styles.entLink} to={`/explore/entity/${r.subject_id}`}>{r.subject}</Link>
                       </td>
-                      <td><span className={styles.rel}>{r.relation}</span></td>
+                      <td><span className={styles.rel}>{relationWords(r.relation)}</span></td>
                       <td>
                         <Link className={styles.entLink} to={`/explore/entity/${r.object_id}`}>{r.object}</Link>
                       </td>
-                      <td className={styles.num}>{Number(r.eff_mu).toFixed(1)}</td>
+                      <td className={styles.num}>{Number(r.eff_mu).toFixed(0)}</td>
                       <td className={styles.num}>{r.witnesses.toLocaleString()}</td>
                     </tr>
                   ))}

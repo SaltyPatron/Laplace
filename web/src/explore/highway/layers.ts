@@ -100,7 +100,7 @@ export const HIGHWAY_LAYERS: HighwayLayer[] = [
     name: 'Taxonomy',
     tag: 'is-a',
     blurb:
-      'The IS_A ladder and its hypernym/hyponym inverses. How a concept generalises upward and specialises downward.',
+      'The is-a ladder and its hypernym/hyponym inverses. How a concept generalises upward and specialises downward.',
     relations: [
       'IS_A', 'HAS_HYPERNYM', 'HAS_HYPONYM', 'IS_HYPERNYM_OF', 'IS_HYPONYM_OF',
       'IS_INSTANCE_OF', 'HAS_INSTANCE',
