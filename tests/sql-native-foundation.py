@@ -73,6 +73,9 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
             receipt["cases"].append({"name": name, "exit_code": result,
                 "elapsed_ms": round((time.monotonic() - started) * 1000)})
             print(f"{name}: {'passed' if result == 0 else 'FAILED'}", flush=True)
+            if result:   # the runner's temp directory is gone after the job: the failing case's error is told here
+                print("".join((args.results / (name + ".log")).read_text(encoding="utf-8", errors="replace")
+                              .splitlines(keepends=True)[-25:]), flush=True)
             if name == "bootstrap" and result:
                 break
         if receipt["cases"][0]["exit_code"] == 0:
