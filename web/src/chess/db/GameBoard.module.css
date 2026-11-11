@@ -1,7 +1,7 @@
 .replay {
   display: grid;
   grid-template-columns: minmax(24rem, min(46rem, 60vw)) minmax(18rem, 1fr);
-  gap: 1.25rem;
+  gap: var(--space-4);
   align-items: start;
   width: 100%;
 }

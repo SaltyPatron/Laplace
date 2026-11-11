@@ -35,7 +35,7 @@
     writing-mode: vertical-rl;
     transform: rotate(180deg);
     cursor: pointer;
-    padding: .65rem .35rem;
+    padding: var(--space-3) var(--space-1);
   }
 
   .reopen:hover,
@@ -68,7 +68,7 @@
   .body {
     flex: 1;
     min-width: 0;
-    padding: .85rem;
+    padding: var(--space-3);
     overflow-y: auto;
     overflow-x: hidden;
   }
@@ -78,16 +78,16 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    margin-bottom: .25rem;
+    margin-bottom: var(--space-1);
   }
 
   .body h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--text-base);
   }
 
   .evidence h3 {
-    font-size: 0.95rem;
+    font-size: var(--text-base);
     margin: 0;
   }
 }

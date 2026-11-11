@@ -5,7 +5,7 @@
     color: var(--color-text-primary);
     border-radius: var(--radius-sm);
     min-height: 2.65rem;
-    padding: 0.55rem 0.75rem;
+    padding: var(--space-2) var(--space-3);
     font-size: var(--text-base);
     font-family: inherit;
     min-width: 0;

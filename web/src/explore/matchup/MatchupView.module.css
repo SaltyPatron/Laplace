@@ -50,7 +50,7 @@
   .right .facts { text-align: right; }
 
   .sideName {
-    font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+    font-size: var(--heading-display);
     font-weight: 700;
     color: var(--color-text-primary);
     text-decoration: none;
@@ -87,7 +87,7 @@
   .topMu {
     font-variant-numeric: tabular-nums;
     font-weight: 700;
-    font-size: 1.6rem;
+    font-size: var(--text-2xl);
     color: var(--color-accent);
   }
   .topLabel { font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -98,7 +98,7 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
     font-size: var(--text-sm);
     color: var(--color-text-primary);
   }
@@ -118,7 +118,7 @@
     min-width: 12rem;
   }
   .vsBig {
-    font-size: 1.4rem;
+    font-size: var(--text-xl);
     font-weight: 700;
     color: var(--color-text-muted);
     text-transform: uppercase;
@@ -172,7 +172,7 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
     font-size: var(--text-sm);
     color: var(--color-text-primary);
     min-width: 0;
@@ -190,8 +190,8 @@
   }
 }
 .readings { text-align: left; line-height: 1.55; }
-.readings h2 { font-size: 1rem; font-weight: 600; }
-.readings ol { padding-left: 1.4rem; }
-.readings li { margin-bottom: 1.25rem; }
-.readings p { margin: .4rem 0; overflow-wrap: anywhere; }
-.readings details { font-size: .85rem; }
+.readings h2 { font-size: var(--text-base); font-weight: 600; }
+.readings ol { padding-left: var(--space-5); }
+.readings li { margin-bottom: var(--space-4); }
+.readings p { margin: var(--space-2) 0; overflow-wrap: anywhere; }
+.readings details { font-size: var(--text-sm); }

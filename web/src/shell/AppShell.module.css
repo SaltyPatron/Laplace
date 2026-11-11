@@ -35,7 +35,7 @@
   }
   .mark { color: var(--viz-signal); }
   .navList, .subList { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
-  .subList { margin: var(--space-1) 0 var(--space-2) calc(20px + var(--space-3) + var(--space-2)); }
+  .subList { margin: var(--space-1) 0 var(--space-2) calc(var(--space-4) + var(--space-3) + var(--space-2)); }
   .navItem {
     display: flex; align-items: center; gap: var(--space-3);
     padding: var(--space-2) var(--space-2);

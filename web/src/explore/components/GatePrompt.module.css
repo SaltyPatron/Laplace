@@ -1,7 +1,7 @@
 @layer components {
   .gate {
     margin: var(--space-4) 0;
-    padding: 1rem;
+    padding: var(--space-4);
     background: var(--color-bg-panel);
     border: 1px dashed var(--color-border-default);
     border-radius: var(--radius-md);

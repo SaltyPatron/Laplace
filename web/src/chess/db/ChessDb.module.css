@@ -6,7 +6,7 @@
   .dbPage {
     width: min(100%, 1380px);
     margin: 0 auto;
-    padding: clamp(1rem, 3vw, 2rem);
+    padding: clamp(var(--space-4), 3vw, var(--space-6));
     overflow-y: auto;
   }
 
@@ -15,7 +15,7 @@
   }
 
   .hero {
-    padding: 1.25rem;
+    padding: var(--space-4);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-lg);
     background: var(--color-bg-panel);
@@ -57,11 +57,11 @@
 
   .crumbs {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-2);
     align-items: center;
     font-size: var(--text-sm);
     color: var(--color-text-muted);
-    margin-bottom: 0.35rem;
+    margin-bottom: var(--space-1);
   }
 
   .crumbs a {
@@ -74,9 +74,9 @@
 
   .searchRow {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     align-items: center;
-    margin-top: 0.75rem;
+    margin-top: var(--space-3);
     flex-wrap: wrap;
   }
 
@@ -88,7 +88,7 @@
   .statGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-3);
   }
 
   .profileGrid {
@@ -247,7 +247,7 @@
   .filterField select {
     min-height: 2.3rem;
     width: 100%;
-    padding: 0.45rem 0.7rem;
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-sm);
     background: var(--color-bg-elevated);
@@ -261,8 +261,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    margin-top: 0.75rem;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
     flex-wrap: wrap;
   }
 
@@ -270,7 +270,7 @@
   .recordCell {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
     min-width: 7rem;
   }
 
@@ -322,7 +322,7 @@
     font-weight: 600;
     font-size: var(--text-sm);
     border-radius: var(--radius-sm);
-    padding: 0 0.25rem;
+    padding: 0 var(--space-1);
   }
 
   .outcomeWin {
@@ -350,7 +350,7 @@
   .matchup {
     display: flex;
     align-items: baseline;
-    gap: 0.6rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
 
@@ -360,13 +360,13 @@
     color: var(--color-text-muted);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-sm);
-    padding: 0.1rem 0.5rem;
+    padding: var(--space-half) var(--space-2);
   }
 
   .headerGrid {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 0.35rem 1rem;
+    gap: var(--space-1) var(--space-4);
     margin: 0;
   }
 
@@ -385,13 +385,13 @@
   }
 
   .note {
-    margin-top: 0.75rem;
+    margin-top: var(--space-3);
     font-size: var(--text-sm);
   }
 
   .movetext {
     margin: 0;
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--color-bg-panel-2);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
@@ -410,7 +410,7 @@
   .replay {
     display: grid;
     grid-template-columns: minmax(18rem, 32rem) minmax(12rem, 1fr);
-    gap: 1.25rem;
+    gap: var(--space-4);
     align-items: start;
   }
 
@@ -423,7 +423,7 @@
   .boardCol {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
     min-width: 0;
   }
 
@@ -431,7 +431,7 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-3);
   }
 
   .sideName {
@@ -441,8 +441,8 @@
   .clock {
     font-variant-numeric: tabular-nums;
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 1.1rem;
-    padding: 0.1rem 0.5rem;
+    font-size: var(--text-lg);
+    padding: var(--space-half) var(--space-2);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-sm);
     background: var(--color-bg-panel-2);
@@ -450,7 +450,7 @@
 
   .transport {
     display: flex;
-    gap: 0.3rem;
+    gap: var(--space-1);
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
@@ -464,7 +464,7 @@
   .speedRow {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: var(--space-1);
   }
 
   .speedNote {
@@ -474,14 +474,14 @@
   .movesCol {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
     min-width: 0;
   }
 
   .movesHead {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: var(--space-half);
     font-size: var(--text-sm);
   }
 
@@ -489,10 +489,10 @@
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.15rem 0.3rem;
+    gap: var(--space-half) var(--space-1);
     list-style: none;
     margin: 0;
-    padding: 0.5rem;
+    padding: var(--space-2);
     max-height: 26rem;
     overflow-y: auto;
     border: 1px solid var(--color-border-default);
@@ -507,20 +507,20 @@
   .moveNo {
     color: var(--color-text-muted);
     font-variant-numeric: tabular-nums;
-    padding-left: 0.35rem;
+    padding-left: var(--space-1);
   }
 
   .moveBtn {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.3rem;
+    gap: var(--space-1);
     background: none;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--color-text-primary);
     font: inherit;
     font-variant-numeric: tabular-nums;
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-hair) var(--space-1);
     cursor: pointer;
   }
 
@@ -535,7 +535,7 @@
   }
 
   .moveClock {
-    font-size: 0.75em;
+    font-size: var(--text-xs);
     opacity: 0.7;
   }
 }
@@ -544,13 +544,13 @@
   .alphabet {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.15rem;
-    margin-top: 0.75rem;
+    gap: var(--space-half);
+    margin-top: var(--space-3);
   }
 
   .letter {
     min-width: 1.75rem;
-    padding: 0.2rem 0.35rem;
+    padding: var(--space-1) var(--space-1);
     background: none;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);

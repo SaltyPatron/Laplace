@@ -8,7 +8,7 @@
     min-height: 0;
     width: min(100%, 1380px);
     margin: 0 auto;
-    padding: clamp(1rem, 3vw, 2rem);
+    padding: clamp(var(--space-4), 3vw, var(--space-6));
     overflow-y: auto;
   }
 
@@ -116,7 +116,7 @@
   .errorPage {
     width: min(100%, 1380px);
     margin: 0 auto;
-    padding: clamp(1rem, 3vw, 2rem);
+    padding: clamp(var(--space-4), 3vw, var(--space-6));
   }
 
   @media (max-width: 64rem) {

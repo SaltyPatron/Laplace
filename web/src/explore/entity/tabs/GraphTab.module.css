@@ -5,13 +5,13 @@
     flex: 1 1 auto;
     min-height: 0;
     min-width: 0;
-    gap: 0.35rem;
+    gap: var(--space-1);
   }
 
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-2);
     align-items: center;
   }
 
@@ -22,9 +22,9 @@
   .settingsSummary {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-2);
     min-height: 2rem;
-    padding: 0.28rem 0.58rem;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-sm);
     background: var(--color-bg-panel-2);
@@ -61,9 +61,9 @@
     left: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(8rem, 1fr));
-    gap: 0.65rem 1rem;
+    gap: var(--space-3) var(--space-4);
     min-width: min(32rem, 80vw);
-    padding: 0.8rem;
+    padding: var(--space-3);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     background: var(--color-bg-panel);
@@ -72,7 +72,7 @@
 
   .note {
     flex: 0 0 auto;
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
   }
 }
 
@@ -89,6 +89,6 @@
     position: static;
     grid-template-columns: 1fr;
     min-width: 0;
-    margin-top: 0.4rem;
+    margin-top: var(--space-2);
   }
 }

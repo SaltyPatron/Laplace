@@ -37,8 +37,9 @@ record('DS-1', [
   ...count(css, /#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d|hsla?\(\s*\d/, (f) => rel(f) === 'ui/theme.css'),
   ...count(code, /['"`]#[0-9a-fA-F]{3,8}['"`]/),
 ]);
-record('DS-2', count(css, /font-size:\s*(?!var\()[^;]*\d/));
-record('DS-3', count(css, /(?:^|[\s;{])(padding|margin|gap)[a-z-]*:\s*[^;]*\d(rem|px)/, (f) => rel(f) === 'ui/theme.css'));
+// Container-relative glyph sizes (cqw/cqi: chess pieces scale with their board) are geometry, not type.
+record('DS-2', count(css, /font-size:(?!\s*var\()(?![^;}]*cq[wi])[^;}]*\d/, (f) => rel(f) === 'ui/theme.css'));
+record('DS-3', count(css, /(?:^|[\s;{])(padding|margin|gap)[a-z-]*:\s*[^;}]*\d(rem|px)/, (f) => rel(f) === 'ui/theme.css'));
 {
   const bps = new Set();
   for (const f of css) for (const m of read(f).matchAll(/@media[^{]*?width:\s*(\d+(?:\.\d+)?)(px|rem)/g)) bps.add(m[2] === 'rem' ? Number(m[1]) * 16 : Number(m[1]));

@@ -2,18 +2,18 @@
   .root {
     width: min(100%, 1280px);
     margin: 0 auto;
-    padding: clamp(1rem, 3vw, 2.25rem);
+    padding: clamp(var(--space-4), 3vw, var(--space-6));
     overflow-y: auto;
     height: 100%;
   }
 
   .root h2 {
-    font-size: 1.15rem;
-    margin: 1.8rem 0 0.8rem;
+    font-size: var(--text-lg);
+    margin: var(--space-6) 0 var(--space-3);
   }
 
   .principle {
-    padding: 1rem 1.1rem;
+    padding: var(--space-4) var(--space-4);
     border-inline-start: .3rem solid var(--color-signal);
     background: var(--color-bg-panel-2);
     line-height: 1.55;
@@ -23,18 +23,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
   .sectionHead h2 { margin: 0; }
 
-  .current { margin-top: 1.5rem; }
+  .current { margin-top: var(--space-5); }
 
   .entitlement {
     display: grid;
-    gap: .45rem;
-    padding: 1rem;
+    gap: var(--space-2);
+    padding: var(--space-4);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     background: var(--color-bg-panel);
@@ -43,17 +43,17 @@
   .planGrid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-    gap: 1rem;
+    gap: var(--space-4);
   }
 
   .planCard {
     background: var(--color-bg-panel);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-lg);
-    padding: 1.25rem;
+    padding: var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
     box-shadow: var(--shadow-instrument);
   }
 
@@ -63,7 +63,7 @@
   }
 
   .price {
-    font-size: 1.65rem;
+    font-size: var(--text-2xl);
     margin: 0;
   }
 
@@ -71,17 +71,17 @@
     list-style: none;
     padding: 0;
     margin: 0;
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     color: var(--color-text-muted);
     flex: 1;
   }
 
-  .allowanceTitle { font-size: .82rem; }
+  .allowanceTitle { font-size: var(--text-sm); }
 
   .credits li {
     display: flex;
     justify-content: space-between;
-    padding: 0.12rem 0;
+    padding: var(--space-half) 0;
   }
 
   .catalog {

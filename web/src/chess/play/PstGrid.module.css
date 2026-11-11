@@ -1,7 +1,7 @@
 @layer components {
   .pieces {
     display: flex;
-    gap: 0.2rem;
+    gap: var(--space-1);
   }
 
   .pieceActive {
@@ -9,7 +9,7 @@
   }
 
   .grid {
-    margin-top: 0.6rem;
+    margin-top: var(--space-2);
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     aspect-ratio: 1 / 1;
@@ -23,13 +23,13 @@
     align-items: center;
     justify-content: center;
     border: 0.5px solid var(--color-border-default);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--color-text-primary);
     min-height: 0;
   }
 
   .foot {
-    margin: 0.5rem 0 0;
+    margin: var(--space-2) 0 0;
   }
 }

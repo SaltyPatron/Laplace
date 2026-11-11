@@ -2,7 +2,7 @@
   .content {
     z-index: var(--z-tooltip);
     max-width: 18rem;
-    padding: 0.4rem 0.6rem;
+    padding: var(--space-2) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--tooltip-bg);
     color: var(--tooltip-fg);

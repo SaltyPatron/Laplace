@@ -7,13 +7,13 @@
 
   .label {
     color: var(--color-text-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
   }
 
   .input {
     width: 11rem;
-    font-size: 0.85rem;
-    padding: 0.3rem 0.55rem;
+    font-size: var(--text-sm);
+    padding: var(--space-1) var(--space-2);
   }
 
   @media (max-width: 40rem) {

@@ -8,7 +8,7 @@
     border: 1px solid color-mix(in srgb, var(--color-signal) 50%, var(--color-accent-fill));
     border-radius: var(--radius-sm);
     min-height: 2.45rem;
-    padding: 0.48rem 1rem;
+    padding: var(--space-2) var(--space-4);
     font-size: var(--text-base);
     font-family: inherit;
     cursor: pointer;
@@ -63,7 +63,7 @@
     box-shadow: none;
     color: var(--color-text-muted);
     min-height: 2rem;
-    padding: 0.32rem 0.8rem;
+    padding: var(--space-1) var(--space-3);
   }
 
   .nav:link,
@@ -106,13 +106,13 @@
   }
 
   .icon {
-    padding: 0.35rem 0.55rem;
+    padding: var(--space-1) var(--space-2);
     min-width: 2rem;
     min-height: 2rem;
   }
 
   .sm {
-    padding: 0.28rem 0.6rem;
+    padding: var(--space-1) var(--space-2);
     font-size: var(--text-sm);
   }
 
