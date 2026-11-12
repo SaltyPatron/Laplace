@@ -1,0 +1,44 @@
+-- The source catalogue is a bounded read. Its witnesses come from the
+-- (witness, lineage) skip scan and its per-source counts from planner statistics;
+-- it never scans every attestation, so the read stays fast as sources grow.
+-- No SET search_path: every name is purpose- or storage-qualified.
+BEGIN;
+CREATE TEMP TABLE catalog_witness(id public.blake3, n integer);
+INSERT INTO catalog_witness VALUES
+    (md5('catalog-witness-a')::public.blake3, 30),
+    (md5('catalog-witness-b')::public.blake3, 10);
+INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+SELECT md5('catalog-claim-'||w.id::text||'-'||g)::public.blake3, w.id, NULL, 1, 1, 1.0, NULL, 0.85
+FROM catalog_witness w, generate_series(1, w.n) g;
+ANALYZE public.attestation;
+-- An estimate, not a count: a witness outside a partition's MCV list takes that
+-- partition's residual share, so it may read a little high, never below its rows here.
+SELECT count(*) = 2 AS every_witness_listed,
+       bool_and(s.evidence_approx BETWEEN w.n AND w.n * 1.25) AS counts_from_statistics
+FROM ops.source_counts_approx() s
+JOIN catalog_witness w ON s.source_id = public.blake3_send(w.id);
+ every_witness_listed | counts_from_statistics 
+----------------------+------------------------
+ t                    | t
+(1 row)
+
+SELECT count(*) = 2 AS catalog_lists_each_witness,
+       bool_and(c.trust = 0.85) AS catalog_carries_trust
+FROM ops.witness_catalog(ARRAY(SELECT id FROM catalog_witness)) c;
+ catalog_lists_each_witness | catalog_carries_trust 
+----------------------------+-----------------------
+ t                          | t
+(1 row)
+
+SELECT pg_get_functiondef('ops.source_counts_approx()'::regprocedure) LIKE '%laplace_witness_trust()%'
+       AND pg_get_functiondef('ops.source_counts_approx()'::regprocedure) NOT LIKE '%FROM public.attestation%'
+       AS source_counts_scan_no_attestations,
+       pg_get_functiondef('ops.witness_catalog(public.blake3[])'::regprocedure) LIKE '%laplace_witness_trust(%'
+       AND pg_get_functiondef('ops.witness_catalog(public.blake3[])'::regprocedure) NOT LIKE '%DISTINCT ON%'
+       AS witness_catalog_uses_skip_scan;
+ source_counts_scan_no_attestations | witness_catalog_uses_skip_scan 
+------------------------------------+--------------------------------
+ t                                  | t
+(1 row)
+
+ROLLBACK;

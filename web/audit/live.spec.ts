@@ -339,9 +339,12 @@ test('[CHESS-4] substrate move scores are truthful', async ({ page }) => {
 });
 
 test('[LAB-1] calibration can be selected', async ({ page }) => {
+  // Never a dead end: either a measured calibration is shown, or the page says what is
+  // missing and how an operator produces and selects one.
   await open(page, '/lab/calibration', 4000);
   expect(await mainText(page)).not.toMatch(/No installed calibration has been selected\.\s*$/m);
-  await expect(page.getByRole('combobox').or(page.getByRole('link', { name: /run calibration|produce/i })).first()).toBeVisible();
+  await expect(page.getByRole('table', { name: /Stockfish search calibration/i })
+    .or(page.getByRole('region', { name: /produce a calibration/i })).first()).toBeVisible();
 });
 
 test('[LAB-2] lichess routing says who may change it', async ({ page }) => {

@@ -4,8 +4,28 @@ CREATE OR REPLACE FUNCTION ops.source_counts_approx()
 AS $source_counts$
 BEGIN
     IF to_regclass('public.entity') IS NOT NULL THEN
+        -- Witnesses come from the (witness, lineage) skip scan; each one's attestation
+        -- count is the planner-statistics estimate summed over the claim partitions:
+        -- its witness MCV frequency, else the non-MCV residual share, times the
+        -- partition's reltuples. Nothing here scans attestations, so the read stays
+        -- bounded as sources grow. A partition never analyzed is left out of the sum.
         RETURN QUERY EXECUTE
-            'WITH w AS (SELECT witness AS id, count(DISTINCT claim) AS attestations FROM public.attestation GROUP BY witness)
+            'WITH t AS MATERIALIZED (SELECT witness FROM public.laplace_witness_trust()),
+             p AS MATERIALIZED (
+                SELECT c.reltuples::float8 AS rows, s.null_frac::float8 AS nulls,
+                       (CASE WHEN s.n_distinct < 0 THEN -s.n_distinct * c.reltuples ELSE s.n_distinct END)::float8 AS distinct_values,
+                       s.most_common_vals::text::text[] AS vals, s.most_common_freqs::float8[] AS freqs
+                FROM pg_catalog.pg_inherits i
+                JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                LEFT JOIN pg_catalog.pg_stats s
+                  ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = ''witness''
+                WHERE i.inhparent = ''public.attestation''::regclass),
+             w AS (
+                SELECT t.witness AS id, sum(p.rows * coalesce(p.freqs[array_position(p.vals, t.witness::text)],
+                         greatest(1 - p.nulls - (SELECT coalesce(sum(f), 0) FROM unnest(p.freqs) f), 0)
+                         / greatest(p.distinct_values - coalesce(cardinality(p.vals), 0), 1)))::bigint AS attestations
+                FROM t CROSS JOIN p GROUP BY t.witness)
              SELECT coalesce(j.source_name,c.source_label,w.id::text),public.blake3_send(w.id),w.attestations
              FROM w LEFT JOIN ops.witness_catalog() c ON c.id=w.id
              LEFT JOIN LATERAL (SELECT source_name FROM laplace.ingest_run_journal
