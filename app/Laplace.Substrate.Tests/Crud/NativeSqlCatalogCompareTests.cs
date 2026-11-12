@@ -137,6 +137,11 @@ public sealed partial class NativeSqlCatalogPreparationTests
             selected.Parameters.AddWithValue(predicate.Id.ToBytes());
             Assert.Equal(3L, await selected.ExecuteScalarAsync());
         }
+        // The catalogue count is the planner-statistics estimate (ops.source_counts_approx); a partition
+        // never analyzed is left out, so the published attestations are analyzed first. ANALYZE counts
+        // this transaction's own inserts as live.
+        await using (var analyze = new NpgsqlCommand("ANALYZE public.attestation", connection, transaction))
+            await analyze.ExecuteNonQueryAsync();
         var inventory = await NpgsqlSubstrateReads.SourceCountsAsync(connection, CancellationToken.None);
         Assert.Equal(6L, Assert.Single(inventory).Evidence);
         Assert.Null(inventory[0].Content);
