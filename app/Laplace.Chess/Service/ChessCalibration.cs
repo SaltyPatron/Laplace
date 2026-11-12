@@ -18,12 +18,16 @@ public static class ChessCalibration
     internal static async Task<Snapshot> ReadInstalledAsync(
         string? prefix, string? stockfish, CancellationToken ct = default)
     {
+        // Each "nothing to show" state names what is missing, so the page can say
+        // which provisioning step produces a calibration rather than ending there.
         if (string.IsNullOrWhiteSpace(prefix))
-            return new("not-selected", "No installed calibration has been selected.");
+            return new("not-provisioned",
+                "This installation declares no chess lab install prefix (LAPLACE_INSTALL_PREFIX), so it holds no machine calibration.");
         var directory = Path.Combine(prefix, "share", "laplace");
         var manifestPath = Path.Combine(directory, "cutechess-desktop.json");
         if (!File.Exists(manifestPath))
-            return new("not-selected", "No installed calibration has been selected.");
+            return new("not-provisioned",
+                "The chess lab under this install prefix has no CuteChess desktop installation, so no calibration is selected.");
         try
         {
             var manifest = JsonSerializer.Deserialize<DesktopManifest>(

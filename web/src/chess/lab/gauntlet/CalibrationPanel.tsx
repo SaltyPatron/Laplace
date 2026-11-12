@@ -35,6 +35,33 @@ function numeric(value: number | undefined, digits = 0) {
     ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '—';
 }
 
+/**
+ * What an operator runs when this installation has no measured calibration. Opening the page
+ * never starts a benchmark: measuring occupies the machine's CPUs, so it is an operator step.
+ */
+function ProduceCalibration() {
+  return (
+    <section className={styles.produce} aria-label="Produce a calibration">
+      <h3 className={styles.produceHeading}>Produce a calibration</h3>
+      <ol>
+        <li>
+          Provision the chess lab on the host (Stockfish, CuteChess and its desktop install under the
+          {' '}install prefix): <code>scripts/bootstrap-chess-lab.sh</code>.
+        </li>
+        <li>
+          Measure this machine while it is otherwise idle:
+          {' '}<code>python3 scripts/benchmark-chess-environment.py --output-dir &lt;directory&gt;</code>.
+        </li>
+        <li>
+          Select the completed report by its SHA-256 when installing the CuteChess desktop:
+          {' '}<code>scripts/provision-cutechess.py --install-desktop &lt;prefix&gt; --calibration-report &lt;directory&gt;/report.json --calibration-sha256 &lt;sha256&gt;</code>.
+        </li>
+      </ol>
+      <Muted>Then choose Refresh. The report is checked against its SHA-256 and the current Stockfish binary.</Muted>
+    </section>
+  );
+}
+
 export function CalibrationPanel() {
   const [value, setValue] = useState<Calibration | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +91,7 @@ export function CalibrationPanel() {
       </div>
       {error && <Alert>{error}</Alert>}
       {value && value.status !== 'available' && <Muted>{value.message ?? 'No calibration report is available.'}</Muted>}
+      {value && (value.status === 'not-provisioned' || value.status === 'not-selected') && <ProduceCalibration />}
       {report && (
         <>
           <p>

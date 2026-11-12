@@ -112,9 +112,29 @@ public sealed class ChessCalibrationTests : IDisposable
     public async Task MissingCalibrationHasExplicitUnmeasuredState()
     {
         var result = await ChessCalibration.ReadInstalledAsync(_root, null);
-        Assert.Equal("not-selected", result.Status);
+        Assert.Equal("not-provisioned", result.Status);
+        Assert.Contains("CuteChess desktop installation", result.Message);
         Assert.Null(result.Report);
         Assert.Null(result.CurrentEngineMatches);
+    }
+
+    [Fact]
+    public async Task NoInstallPrefixSaysWhatIsMissing()
+    {
+        var result = await ChessCalibration.ReadInstalledAsync(null, null);
+        Assert.Equal("not-provisioned", result.Status);
+        Assert.Contains("LAPLACE_INSTALL_PREFIX", result.Message);
+        Assert.Null(result.Report);
+    }
+
+    [Fact]
+    public async Task InstallWithoutSelectionIsNotSelected()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "share", "laplace"));
+        File.WriteAllText(Path.Combine(_root, "share", "laplace", "cutechess-desktop.json"), "{}");
+        var result = await ChessCalibration.ReadInstalledAsync(_root, _engine);
+        Assert.Equal("not-selected", result.Status);
+        Assert.Null(result.Report);
     }
 
     [Fact]

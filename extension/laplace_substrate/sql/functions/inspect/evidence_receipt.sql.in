@@ -5,9 +5,7 @@ RETURNS TABLE(id @extschema:laplace@.blake3,source_label text,trust double preci
 LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH sources AS MATERIALIZED (
- SELECT DISTINCT ON (a.witness) a.witness AS id,a.trust,a.lineage FROM @extschema:laplace@.attestation a
- WHERE p_ids IS NULL OR a.witness OPERATOR(@extschema:laplace@.=) ANY(p_ids)
- ORDER BY a.witness,a.lineage NULLS FIRST
+ SELECT w.witness AS id,w.trust,w.lineage FROM @extschema:laplace@.laplace_witness_trust(p_ids) w
 ), names AS MATERIALIZED (
  SELECT r.entity,(@extschema:laplace@.laplace_vertex_ids(@extschema:postgis@.ST_PointN(r.path,1)))[1] AS child
  FROM @extschema:laplace@.laplace_physicalities(ARRAY(SELECT id FROM sources ORDER BY id)) r
