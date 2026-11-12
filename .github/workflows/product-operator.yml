@@ -34,7 +34,7 @@ jobs:
   access-contract:
     name: Validate platform access maintenance
     if: github.event_name == 'push' || inputs.operation == 'access-audit' || inputs.operation == 'access-enroll' || inputs.operation == 'owner-enroll'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -46,6 +46,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - run: python3 scripts/test-platform-access-audit.py
       - run: python3 scripts/test-platform-access-enroll.py
       - run: python3 scripts/test-platform-owner-enroll.py
@@ -248,7 +251,7 @@ jobs:
   unsupported-deployment:
     name: Reject a database host as an application deployment target
     if: inputs.operation == 'deploy' && inputs.target == 'cloud'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, laplace, Laplace, staging]
     steps:
       - run: |
           echo 'Application deployment supports staging or production. Select qualify-cloud for isolated cloud-host qualification.' >&2
@@ -257,7 +260,7 @@ jobs:
   unsupported-access-target:
     name: Reject a database host as a browser access audit target
     if: inputs.operation == 'access-audit' && inputs.target == 'cloud'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, laplace, Laplace, staging]
     steps:
       - run: |
           echo 'Browser access audit supports staging or production; hart-cloud is a database host.' >&2
@@ -478,7 +481,7 @@ jobs:
 
   storage-select:
     if: inputs.operation == 'clean' || inputs.operation == 'storage'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 5
     permissions:
       contents: read

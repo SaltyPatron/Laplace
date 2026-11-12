@@ -274,7 +274,8 @@ jobs:
     name: Cloud qualification — start the explicitly requested host
     needs: deliver
     if: needs.deliver.result == 'success' && inputs.qualify_cloud == true
-    runs-on: ubuntu-24.04
+    # The lease is taken and released from hart-server's runner; the cloud host itself may be stopped.
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 20
     steps:
       - name: Authenticate to GCP by workload identity (no stored key)
@@ -404,7 +405,8 @@ jobs:
     name: Cloud qualification — release the host to stop when idle
     needs: [cloud-host, production-build]
     if: always() && needs.cloud-host.result == 'success'
-    runs-on: ubuntu-24.04
+    # The lease is taken and released from hart-server's runner; the cloud host itself may be stopped.
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 10
     steps:
       - name: Authenticate to GCP by workload identity (no stored key)

@@ -9,12 +9,17 @@ permissions:
   contents: read
 jobs:
   workflows:
-    runs-on: ubuntu-24.04
+    # This repository's own runner; never for a fork's pull request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          clean: false
+      - name: Prepare exact candidate while retaining verified build inputs
+        run: bash scripts/ci/prepare-checkout.sh
       - name: Read the qualified recipe catalog
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

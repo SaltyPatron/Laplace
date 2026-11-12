@@ -62,10 +62,12 @@ class SiteWorkflow < Minitest::Test
     assert (operator['on'] || operator[true]).key?('workflow_dispatch')
   end
 
-  def test_policy_pull_requests_run_on_hosted_runner
+  def test_policy_pull_requests_run_on_the_repository_runner_and_never_for_forks
     policy = YAML.load_file(File.expand_path('../.github/workflows/ci-contract.yml', __dir__))
     assert (policy['on'] || policy[true]).key?('pull_request')
-    assert_equal 'ubuntu-24.04', policy.fetch('jobs').fetch('contract').fetch('runs-on')
+    contract = policy.fetch('jobs').fetch('contract')
+    assert_equal ['self-hosted', 'laplace', 'Laplace', 'staging'], contract.fetch('runs-on')
+    assert_includes contract.fetch('if'), 'github.event.pull_request.head.repo.full_name == github.repository'
     assert_equal 'read', policy.fetch('permissions').fetch('contents')
   end
 
