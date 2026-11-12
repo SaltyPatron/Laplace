@@ -20,7 +20,7 @@ public class TextDecomposerTests
         foreach (var segment in segments)
             Assert.Equal(TextDecomposer.ContentRootId(utf8.AsSpan(segment.Offset, segment.Length)), segment.Id);
         using var word = TextDecomposer.Run("mississippi");
-        Assert.Equal(1, word.GetNode(word.NaturalUnitIndex()).Tier); // Merkle height over codepoints; repeats do not add height.
+        Assert.Equal(2, word.GetNode(word.NaturalUnitIndex()).Tier); // Merkle height: m [iss]x2 i p p i stands one above its block [iss].
         Assert.Equal(word.GetNode(word.NaturalUnitIndex()).Id, segments[1].Id);
     }
 

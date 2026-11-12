@@ -13,23 +13,29 @@ public sealed class NativeTextIdentityTests
     [Theory]
     [InlineData("abandon.01", "2d25f2d444594c0115ab1bdab872167b")]
     [InlineData("New York", "7400a4cd15dfbd2acd2ceebfbae264c9")]
-    [InlineData("mississippi", "8e6d5bf8d0c8be55f1e5ae1f87465581")]
+    [InlineData("mississippi", "5dedbc2e6df582f50aee2224d8ec8cd0")]
+    [InlineData("banana", "2a2d99807023164b7dd2681b8f323270")]
+    [InlineData("abababab", "ddae338c90120fb1503e072bed368738")]
+    [InlineData("aaaa", "9096bff32447771d65f677a957bcd4d0")]
     public void TextMatchesIndependentEngineComposition(string text, string expected)
     {
         Assert.Equal(expected, Hash128.Text(text).ToHex());
         Assert.NotEqual(Hash128.Blake3(Encoding.UTF8.GetBytes(text)), Hash128.Text(text));
     }
 
+    // Repeats factor from the content alone (Native lp_factor): a block of two or more constituents repeated
+    // adjacently is its own composition and stands once per repeat, so banana is b [an]x2 a and not the flat
+    // composition of its six codepoints. A repeated single constituent is a run already: aaaa stays flat.
     [Theory]
-    [InlineData("banana")]
-    [InlineData("mississippi")]
-    [InlineData("aaaa")]
-    [InlineData("abababab")]
-    public void RepeatedSubstringsDoNotAddBoundariesInsideOneWord(string text)
+    [InlineData("banana", false)]
+    [InlineData("mississippi", false)]
+    [InlineData("abababab", false)]
+    [InlineData("aaaa", true)]
+    public void RepeatedBlocksFactorAndRepeatedConstituentsStayRuns(string text, bool flat)
     {
         var scalars = text.EnumerateRunes()
             .Select(scalar => Hash128.Blake3(Encoding.UTF8.GetBytes(scalar.ToString()))).ToArray();
-        Assert.Equal(Hash128.Merkle(1, scalars), Hash128.Text(text));
+        Assert.Equal(flat, Hash128.Merkle(1, scalars) == Hash128.Text(text));
     }
 
     [Fact]
