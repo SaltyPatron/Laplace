@@ -72,7 +72,7 @@ class WorkflowArchitecture(unittest.TestCase):
         maintenance = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         validation = maintenance.split("\n  access-contract:\n", 1)[1].split("\n  access-audit:\n", 1)[0]
         observer = maintenance.split("\n  access-audit:\n", 1)[1].split("\n  unsupported-deployment:\n", 1)[0]
-        self.assertIn("runs-on: ubuntu-24.04", validation)
+        self.assertIn("runs-on: [self-hosted, laplace, Laplace, staging]", validation)
         self.assertIn("python3 scripts/test-platform-access-audit.py", validation)
         self.assertIn("needs: [access-contract, access-enroll, owner-enroll]", observer)
         self.assertIn("inputs.target != 'cloud'", observer)
@@ -162,12 +162,25 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('LAPLACE_CHESS_PGN_CACHE="$LAPLACE_WORK_ROOT/chess-pgn-validation"', checks)
         self.assertIn('mkdir -p "$ci_tmp" "$LAPLACE_WORK_ROOT" "$LAPLACE_CHESS_PGN_CACHE"', checks)
 
-    def test_ci_contract_is_an_explicit_lightweight_hosted_lane(self):
+    def test_ci_contract_is_an_explicit_lightweight_lane_on_the_repository_runner(self):
+        # No Linux job runs on a GitHub-hosted image: the policy lane is hart-server's runner, never for a fork's
+        # pull request, and its PostgreSQL fixture is a private cluster rather than a service container.
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", text)
         self.assertNotIn("\n  push:\n", text)
-        self.assertIn("runs-on: ubuntu-24.04", text)
-        self.assertNotIn("self-hosted", text)
+        self.assertNotIn("\n    services:\n", text)
+        linux = (text.count("runs-on: [self-hosted, laplace, Laplace, staging]")
+                 + text.count("runner: [self-hosted, laplace, Laplace, staging]"))
+        self.assertEqual(linux, 8)
+        self.assertEqual(text.count("github.event.pull_request.head.repo.full_name == github.repository"), 6)
+        self.assertEqual(text.count("bash scripts/ci/private-postgres.sh start"), 2)
+        self.assertEqual(text.count("bash scripts/ci/private-postgres.sh stop"), 2)
+        # Windows coverage is kept; it leaves the hosted image when a self-hosted Windows runner exists.
+        self.assertIn("runs-on: windows-2025", text)
+        self.assertIn("runner: windows-2025", text)
+        for path in WORKFLOWS.glob("*.yml"):
+            runners = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if "runs-on:" in line)
+            self.assertNotIn("ubuntu-", runners, path.name)
         self.assertIn("bash scripts/product-ci.sh check", text)
         self.assertIn("bash tests/identity-law.sh", text)   # the identity law gates every pull request
         self.assertIn("laplace-actions-history-{0}", text)
