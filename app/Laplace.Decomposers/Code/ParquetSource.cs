@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Code;
 
 /// <summary>
 /// Source identity for <see cref="ParquetDecomposer"/>, under the same trust class as
-/// <see cref="TabularSource"/>. Parquet columns/rows use the same column/value grammar as
+/// the tabular lane. Parquet columns/rows use the same column/value grammar as
 /// CSV tables, so both converge on the shared <c>TabularColumn</c>/<c>TabularValue</c> types.
 /// </summary>
 public readonly struct ParquetSource : ISeedSource

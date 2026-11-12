@@ -392,12 +392,6 @@ SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
     "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
 SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz,bytea,int8,int4,int8",
     "SELECT converse.session_append_turns($1,$2,$3,$4,$5,$6,$7)")
-SQL_QUERY("conversation.register_projection_sources", "bytea[],text[]",
-    "WITH requested AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::text[]) r(id,name)),"
-    "inserted AS (INSERT INTO laplace.canonical_names(id,name) SELECT id,name FROM requested "
-    "ON CONFLICT(id) DO NOTHING RETURNING id,name) "
-    "SELECT count(*) FROM requested r WHERE EXISTS(SELECT FROM inserted i WHERE i.id=r.id AND i.name=r.name) "
-    "OR EXISTS(SELECT FROM laplace.canonical_names c WHERE c.id=r.id AND c.name=r.name)")
 SQL_QUERY("conversation.manifest", "bytea,bytea",
     "SELECT public.ST_AsBinary(p.trajectory,'NDR'),p.type,public.ST_X(p.coord),public.ST_Y(p.coord),"
     "public.ST_Z(p.coord),public.ST_M(p.coord),p.hilbert_index,p.n_constituents,"

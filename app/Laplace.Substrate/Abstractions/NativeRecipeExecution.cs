@@ -46,6 +46,8 @@ public sealed class NativeRecipeExecution
         start.Environment["LAPLACE_RECIPES"] = Recipes;
         start.Environment["LAPLACE_TIER0"] = Tier0;
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
+        // A source kept under the operator's home ($HOME) resolves on Windows too.
+        start.Environment["HOME"] = HomeDirectory();
         start.Environment["LAPLACE_GRAMMARS"] = Grammars;
         using var output = new MemoryStream();
         using var error = new MemoryStream();
@@ -127,6 +129,11 @@ public sealed class NativeRecipeExecution
         return string.Join(" ", fields);
     }
 
+    /// <summary>The operator's home directory, as recipes name it ($HOME).</summary>
+    public static string HomeDirectory()
+        => Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } home
+            ? home : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
     internal ProcessStartInfo StartInfo(NativeRecipeRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -153,6 +160,8 @@ public sealed class NativeRecipeExecution
         start.Environment.Remove("LAPLACE_INGEST_ONE");
         if (!request.ExpandPrerequisites) start.Environment["LAPLACE_INGEST_ONE"] = "1";
         start.Environment["LAPLACE_HIGHWAY"] = Highway;
+        // A source kept under the operator's home ($HOME) resolves on Windows too.
+        start.Environment["HOME"] = HomeDirectory();
         start.Environment["LAPLACE_GRAMMARS"] = Grammars;
         // Share the host resource plan with the Native working window. File
         // boundaries and parser feed sizes do not own persistence budgets.

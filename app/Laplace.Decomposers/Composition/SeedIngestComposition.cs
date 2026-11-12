@@ -2,7 +2,6 @@ using Laplace.Engine.Core;
 using Laplace.Decomposers.Code;
 using Laplace.Decomposers.Media;
 using Laplace.Decomposers.Model;
-using Laplace.Decomposers.Operational;
 using Laplace.Decomposers.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,18 +18,13 @@ public static class SeedIngestComposition
     // This registry contains only the remaining explicit operator/format lanes.
     internal static readonly (string Key, Type Decomposer)[] Registry =
     [
-        ("operational", typeof(OperationalDecomposer)),
-        ("code", typeof(CodeDecomposer)),
         ("repo", typeof(RepoDecomposer)),
-        ("tabular", typeof(TabularDecomposer)),
         ("parquet", typeof(ParquetDecomposer)),
         ("tiny-codes", typeof(TinyCodesDecomposer)),
         ("stack", typeof(StackDecomposer)),
-        ("document", typeof(DocumentDecomposer)),
         ("rgba-image", typeof(RgbaImageDecomposer)),
         ("track-audio", typeof(TrackAudioDecomposer)),
         ("frame-video", typeof(FrameVideoDecomposer)),
-        ("agents", typeof(AgentTrace.AgentTraceDecomposer)),
     ];
 
     public static IServiceCollection AddLaplaceSeedIngest(this IServiceCollection services)

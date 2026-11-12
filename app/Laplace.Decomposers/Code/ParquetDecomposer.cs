@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Code;
 /// <summary>
 /// Provider for arbitrary Parquet files/datasets. The container (row groups, columns) is
 /// packaging; each cell is recorded with the same column/value grammar as
-/// <see cref="TabularDecomposer"/>. Cells are recorded observations, with no
+/// the CSV/TSV lane. Cells are recorded observations, with no
 /// target/outcome interpretation.
 ///
 /// Column names and cell values are ordinary decomposed content. A tabular value is

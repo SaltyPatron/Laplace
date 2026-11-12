@@ -344,38 +344,6 @@ internal static partial class IngestCommands
         return 0;
     }
 
-    internal static async Task<int> IngestDocumentAsync(IngestCliArgs cli)
-    {
-        string docPath = string.IsNullOrEmpty(cli.Path)
-            ? IngestDataPaths.Resolve("document")
-            : cli.Path;
-        if (!File.Exists(docPath) && !Directory.Exists(docPath))
-            return Fail($"ingest document: path not found: {docPath}");
-
-        // The document decomposer records completion per file; skipSourceCompletion stays
-        // false so the terminal source-level marker is also written for layer ordering.
-        return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("document"),
-            Path.GetFullPath(docPath),
-            skipLayerCheck: true,
-            cli,
-            skipSourceCompletion: false);
-    }
-
-    internal static async Task<int> IngestProjectGutenbergAsync(IngestCliArgs cli)
-    {
-        string docPath = IngestDataPaths.Resolve("project-gutenberg", cli.Path);
-        if (!File.Exists(docPath) && !Directory.Exists(docPath))
-            return Fail($"ingest project-gutenberg: path not found: {docPath}");
-
-        return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("document"),
-            Path.GetFullPath(docPath),
-            skipLayerCheck: true,
-            cli,
-            skipSourceCompletion: false);
-    }
-
     internal static async Task<int> IngestRecipeAsync(IngestCliArgs cli)
     {
         if (string.IsNullOrEmpty(cli.Path))
@@ -404,15 +372,6 @@ internal static partial class IngestCommands
     // source-level completion marker would turn every later run into a no-op regardless
     // of path. That marker belongs to fixed global corpora (wordnet, conceptnet, ...).
 
-    internal static async Task<int> IngestCodeAsync(IngestCliArgs cli)
-    {
-        var path = ResolveRequiredIngestPath(cli.Path);
-        if (path is null)
-            return Fail("usage: laplace-mono ingest code <file-or-directory>");
-        return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("code"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
-    }
-
     internal static async Task<int> IngestRepoAsync(IngestCliArgs cli)
     {
         ValidateVerifiedGitArguments(cli);
@@ -437,26 +396,6 @@ internal static partial class IngestCommands
         }
         return await IngestViaRunnerAsync(
             decomposer, path, skipLayerCheck: true, cli, skipSourceCompletion: true);
-    }
-
-    internal static async Task<int> IngestAgentsAsync(IngestCliArgs cli)
-    {
-        // Path optional: an explicit file/dir is the witness boundary; empty discovers
-        // the current user's provider roots (~/.claude, ~/.codex, ~/.gemini, …).
-        var path = cli.Path is { Length: > 0 } p ? Path.GetFullPath(p) : "";
-        if (path.Length > 0 && !File.Exists(path) && !Directory.Exists(path))
-            return Fail($"agents: path not found: {path}");
-        return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("agents"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
-    }
-
-    internal static async Task<int> IngestTabularAsync(IngestCliArgs cli)
-    {
-        var path = ResolveRequiredIngestPath(cli.Path);
-        if (path is null)
-            return Fail("usage: laplace-mono ingest tabular <file-or-directory>");
-        return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("tabular"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     internal static async Task<int> IngestParquetAsync(IngestCliArgs cli)

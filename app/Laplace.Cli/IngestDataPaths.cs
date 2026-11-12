@@ -10,8 +10,6 @@ internal static class IngestDataPaths
     public static string Resolve(string cliSource, string? cliPath = null)
     {
         if (!string.IsNullOrWhiteSpace(cliPath)) return Path.GetFullPath(cliPath);
-        if (cliSource.Equals("operational", StringComparison.OrdinalIgnoreCase))
-            return Laplace.Decomposers.Operational.OperationalDecomposer.BundledPath;
 
         // Operator-supplied media/model lanes are not corpus-order entries.
         var utility = cliSource.ToLowerInvariant() switch
@@ -79,6 +77,8 @@ internal static class IngestDataPaths
                 "MODELS" or "LAPLACE_MODELS" => LaplaceInstall.DeclaredModelsRoot(),
                 "SRC" or "LAPLACE_SRC" => Environment.GetEnvironmentVariable("LAPLACE_SRC")
                     ?? throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code."),
+                // The agent transcripts are kept under the operator's home directory.
+                "HOME" => NativeRecipeExecution.HomeDirectory(),
                 _ => Environment.GetEnvironmentVariable(name),
             };
             if (string.IsNullOrEmpty(value)) { resolved = false; return ""; }
