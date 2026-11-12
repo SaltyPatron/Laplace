@@ -37,7 +37,8 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
             Assert.True(await row.ReadAsync());
             coordinates = Enumerable.Range(0,4).Select(row.GetDouble).ToArray();
             trajectory = row.GetString(4);
-            Assert.Equal(11, row.GetInt32(5));
+            // mississippi is m [iss]x2 i p p i: seven constituents, the block standing once per repeat.
+            Assert.Equal(7, row.GetInt32(5));
         }
         var neighbors = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
             connection, coordinates[0], coordinates[1], coordinates[2], coordinates[3],
@@ -68,7 +69,7 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
         var rows = await NpgsqlBrowseReads.NamedEntitiesAsync(connection,
             [word.Id.ToBytes()], word.Id.ToBytes(), 0, 20, 0, CancellationToken.None);
         var selected = Assert.Single(rows, r => r.IdHex == word.Id.ToHex());
-        Assert.Equal((short)1, selected.Tier);
+        Assert.Equal((short)2, selected.Tier);
         Assert.Equal("word", selected.Type);
         Assert.Equal("surface", selected.MatchKind);
     }
@@ -81,9 +82,9 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
             [new OrderedCompositionRequest(Components(tree), role, source, 0)], result);
         var root = tree.GetNode(tree.NaturalUnitIndex());
         Assert.Equal(root.Id, result[0].Id);
-        // The decomposer's word tier is a recipe floor. This fixture collapses
-        // singleton graphemes to atoms and records their composition at height 1.
-        Assert.Equal((byte)1, result[0].Tier);
+        // A tier is a height. Singleton graphemes collapse to their codepoints, and the repeated
+        // block [iss] is a composition of its own, so the word stands one above it: height 2.
+        Assert.Equal((byte)2, result[0].Tier);
         return result[0];
     }
 
