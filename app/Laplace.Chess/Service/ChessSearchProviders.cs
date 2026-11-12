@@ -12,19 +12,6 @@ namespace Laplace.Chess.Service;
 /// </summary>
 public sealed record ChessSearchProviderReceipt(
     bool SubstrateSelected,
-    int PositionAtomsLoaded,
-    long PositionEvidenceReads,
-    long PositionEvidenceContributions,
-    bool LearnedPstSelected,
-    bool LearnedPstContributes,
-    int LearnedPstNonZeroCells,
-    long LearnedPstReads,
-    long LearnedPstContributions,
-    bool TacticSelected,
-    bool TacticContributes,
-    int TacticPatternsLoaded,
-    long TacticReads,
-    long TacticContributions,
     long RootSteerReads,
     long RootMovesInfluenced,
     int SyzygyLargestMen,
@@ -34,46 +21,26 @@ public sealed record ChessSearchProviderReceipt(
     // Root work is the shared provider's counter change during this configuration's calls.
     // Concurrent API callers can overlap these deltas; serial UCI searches do not.
     // Inclusive root time already contains frontier/read time: never sum them together.
-    // Snapshot preparation is outside Search's iteration clock, inside UCI's final go time.
     public string RootWorkScope { get; init; } = "unavailable";
     public long RootBackendReads { get; init; }
     public long RootEvidenceCacheHits { get; init; }
     public long RootFrontierBuilds { get; init; }
-    public long RootTransitionPerfcacheHits { get; init; }
-    public long RootTransitionNovelHits { get; init; }
-    public long RootTransitionCompositions { get; init; }
     public double RootInclusiveMilliseconds { get; init; }
     public double RootFrontierMilliseconds { get; init; }
     public double RootEvidenceReadMilliseconds { get; init; }
-    public long SnapshotPreparations { get; init; }
-    public double SnapshotPreparationMilliseconds { get; init; }
 
     private static string Ms(double value) => value.ToString("F3", CultureInfo.InvariantCulture);
 
-    public static ChessSearchProviderReceipt Classical { get; } = new(
-        false,
-        0, 0, 0,
-        false, false, 0, 0, 0,
-        false, false, 0, 0, 0,
-        0, 0,
-        0, 0, 0);
+    public static ChessSearchProviderReceipt Classical { get; } = new(false, 0, 0, 0, 0, 0);
 
     public string Summary => SubstrateSelected
         ? $"root={RootSteerReads}/{RootMovesInfluenced} " +
-          $"position={PositionEvidenceReads}/{PositionEvidenceContributions}" +
-          $"(atoms:{PositionAtomsLoaded}) " +
-          $"learned-pst={LearnedPstReads}/{LearnedPstContributions}" +
-          $"(cells:{LearnedPstNonZeroCells}) " +
-          $"tactics={TacticReads}/{TacticContributions}" +
-          $"(patterns:{TacticPatternsLoaded}) " +
           $"syzygy={SyzygyHits}/{SyzygyProbes}({SyzygyLargestMen}-men) " +
           $"root-work-scope={RootWorkScope} " +
           $"root-backend={RootBackendReads} root-cache={RootEvidenceCacheHits} " +
           $"root-frontiers={RootFrontierBuilds} " +
-          $"root-transitions={RootTransitionPerfcacheHits}/{RootTransitionNovelHits}/{RootTransitionCompositions} " +
           $"root-ms-inclusive={Ms(RootInclusiveMilliseconds)} " +
-          $"frontier-ms={Ms(RootFrontierMilliseconds)} evidence-read-ms={Ms(RootEvidenceReadMilliseconds)} " +
-          $"snapshot-prepare={SnapshotPreparations}/{Ms(SnapshotPreparationMilliseconds)}ms"
+          $"frontier-ms={Ms(RootFrontierMilliseconds)} evidence-read-ms={Ms(RootEvidenceReadMilliseconds)}"
         : "classical-only";
 }
 
@@ -89,18 +56,10 @@ public sealed class ChessSearchConfiguration
     {
         public long RootReads;
         public long RootMoves;
-        public long PositionReads;
-        public long PositionContributions;
-        public long LearnedReads;
-        public long LearnedContributions;
-        public long TacticReads;
-        public long TacticContributions;
         public long TablebaseProbes;
         public long TablebaseHits;
         public long RootBackendReads, RootEvidenceCacheHits, RootFrontierBuilds;
-        public long RootTransitionPerfcacheHits, RootTransitionNovelHits, RootTransitionCompositions;
         public long RootTicks, RootFrontierTicks, RootEvidenceReadTicks;
-        public long SnapshotPreparations, SnapshotPreparationTicks;
     }
 
     private sealed class CountingRootBias(IRootBias inner, Counters counters) : IRootBias
@@ -130,9 +89,6 @@ public sealed class ChessSearchConfiguration
                     Interlocked.Add(ref counters.RootBackendReads, after.BackendReads - prior.BackendReads);
                     Interlocked.Add(ref counters.RootEvidenceCacheHits, after.EvidenceCacheHits - prior.EvidenceCacheHits);
                     Interlocked.Add(ref counters.RootFrontierBuilds, after.FrontierBuilds - prior.FrontierBuilds);
-                    Interlocked.Add(ref counters.RootTransitionPerfcacheHits, after.TransitionPerfcacheHits - prior.TransitionPerfcacheHits);
-                    Interlocked.Add(ref counters.RootTransitionNovelHits, after.TransitionNovelHits - prior.TransitionNovelHits);
-                    Interlocked.Add(ref counters.RootTransitionCompositions, after.TransitionCompositions - prior.TransitionCompositions);
                     Interlocked.Add(ref counters.RootFrontierTicks, after.FrontierTicks - prior.FrontierTicks);
                     Interlocked.Add(ref counters.RootEvidenceReadTicks, after.EvidenceReadTicks - prior.EvidenceReadTicks);
                 }
@@ -140,114 +96,21 @@ public sealed class ChessSearchConfiguration
         }
     }
 
-    private sealed class CountingPositionEvaluator(
-        ISearchPositionEvaluator inner,
-        Counters counters,
-        bool atomActive,
-        bool learnedActive,
-        bool tacticActive) : ISearchPositionEvaluator
-    {
-        public long Version => inner.Version;
-
-        public ISearchPositionEvaluator PrepareSearch()
-        {
-            Interlocked.Increment(ref counters.SnapshotPreparations);
-            long started = Stopwatch.GetTimestamp();
-            try
-            {
-                return new CountingPositionEvaluator(
-                    inner.PrepareSearch(), counters, atomActive, learnedActive, tacticActive);
-            }
-            finally
-            {
-                Interlocked.Add(ref counters.SnapshotPreparationTicks, Stopwatch.GetTimestamp() - started);
-            }
-        }
-
-        public int Evaluate(Board board)
-        {
-            if (inner is IChessSearchPositionPlanes planes)
-            {
-                var score = planes.EvaluatePlanes(board);
-                if (atomActive)
-                {
-                    Interlocked.Increment(ref counters.PositionReads);
-                    if (score.AtomOutcomeCp != 0)
-                        Interlocked.Increment(ref counters.PositionContributions);
-                }
-                if (learnedActive)
-                {
-                    Interlocked.Increment(ref counters.LearnedReads);
-                    if (score.LearnedPstCp != 0)
-                        Interlocked.Increment(ref counters.LearnedContributions);
-                }
-                if (tacticActive)
-                {
-                    Interlocked.Increment(ref counters.TacticReads);
-                    if (score.TacticOutcomeCp != 0)
-                        Interlocked.Increment(ref counters.TacticContributions);
-                }
-                return score.TotalCp;
-            }
-
-            // Non-plane evaluators still count as the generic position-evidence provider.
-            if (atomActive) Interlocked.Increment(ref counters.PositionReads);
-            int cp = inner.Evaluate(board);
-            if (atomActive && cp != 0)
-                Interlocked.Increment(ref counters.PositionContributions);
-            return cp;
-        }
-    }
-
     private readonly Counters _counters = new();
     private readonly bool _substrate;
-    private readonly int _positionAtomsLoaded;
-    private readonly bool _learnedSelected;
-    private readonly bool _learnedContributes;
-    private readonly int _learnedNonZeroCells;
-    private readonly bool _tacticSelected;
-    private readonly bool _tacticContributes;
-    private readonly int _tacticPatternsLoaded;
     private readonly int _syzygyLargest;
     private readonly bool _rootWorkAvailable;
 
-    internal ChessSearchConfiguration(
-        bool substrate,
-        IRootBias? rootBias,
-        ISearchPositionEvaluator? positionEvaluator,
-        bool learnedSelected,
-        bool learnedContributes,
-        int learnedNonZeroCells,
-        int positionAtomsLoaded = 1,
-        bool tacticSelected = false,
-        bool tacticContributes = false,
-        int tacticPatternsLoaded = 0)
+    internal ChessSearchConfiguration(bool substrate, IRootBias? rootBias)
     {
         _substrate = substrate;
         _rootWorkAvailable = substrate && rootBias is SubstrateRootBias;
-        _positionAtomsLoaded = substrate ? Math.Max(0, positionAtomsLoaded) : 0;
-        _learnedSelected = substrate && learnedSelected;
-        _learnedContributes = substrate && learnedContributes;
-        _learnedNonZeroCells = substrate ? Math.Max(0, learnedNonZeroCells) : 0;
-        _tacticSelected = substrate && tacticSelected;
-        _tacticContributes = substrate && tacticContributes;
-        _tacticPatternsLoaded = substrate ? Math.Max(0, tacticPatternsLoaded) : 0;
         _syzygyLargest = substrate ? ChessTablebaseRuntime.Largest : 0;
-
         RootBias = rootBias is null ? null : new CountingRootBias(rootBias, _counters);
-        PositionEvaluator = positionEvaluator is null
-            ? null
-            : new CountingPositionEvaluator(
-                positionEvaluator,
-                _counters,
-                atomActive: _positionAtomsLoaded > 0,
-                learnedActive: _learnedContributes,
-                tacticActive: _tacticContributes);
         Tablebase = substrate ? ProbeTablebase : null;
     }
 
     public IRootBias? RootBias { get; }
-    public ISearchPositionEvaluator? PositionEvaluator { get; }
     public Func<Board, SearchTablebaseVerdict?>? Tablebase { get; }
 
     /// <summary>Seeded before Think. Replacing it does not clear the transposition table unless its evaluations change.</summary>
@@ -256,31 +119,17 @@ public sealed class ChessSearchConfiguration
     public Search BuildSearch(int ttBits = 20)
         => new(
             EvalTerm.All, RootBias, ttBits,
-            positionEvaluator: PositionEvaluator,
             tablebase: Tablebase,
             continuations: Continuations);
 
     public void ApplyTo(Search search)
-        => search.Reconfigure(RootBias, null, null, PositionEvaluator, Tablebase, Continuations);
+        => search.Reconfigure(RootBias, null, null, null, Tablebase, Continuations);
 
     public ChessSearchProviderReceipt Receipt()
         => !_substrate
             ? ChessSearchProviderReceipt.Classical
             : new ChessSearchProviderReceipt(
                 true,
-                _positionAtomsLoaded,
-                Volatile.Read(ref _counters.PositionReads),
-                Volatile.Read(ref _counters.PositionContributions),
-                _learnedSelected,
-                _learnedContributes,
-                _learnedNonZeroCells,
-                Volatile.Read(ref _counters.LearnedReads),
-                Volatile.Read(ref _counters.LearnedContributions),
-                _tacticSelected,
-                _tacticContributes,
-                _tacticPatternsLoaded,
-                Volatile.Read(ref _counters.TacticReads),
-                Volatile.Read(ref _counters.TacticContributions),
                 Volatile.Read(ref _counters.RootReads),
                 Volatile.Read(ref _counters.RootMoves),
                 _syzygyLargest,
@@ -291,14 +140,9 @@ public sealed class ChessSearchConfiguration
                 RootBackendReads = Volatile.Read(ref _counters.RootBackendReads),
                 RootEvidenceCacheHits = Volatile.Read(ref _counters.RootEvidenceCacheHits),
                 RootFrontierBuilds = Volatile.Read(ref _counters.RootFrontierBuilds),
-                RootTransitionPerfcacheHits = Volatile.Read(ref _counters.RootTransitionPerfcacheHits),
-                RootTransitionNovelHits = Volatile.Read(ref _counters.RootTransitionNovelHits),
-                RootTransitionCompositions = Volatile.Read(ref _counters.RootTransitionCompositions),
                 RootInclusiveMilliseconds = Milliseconds(ref _counters.RootTicks),
                 RootFrontierMilliseconds = Milliseconds(ref _counters.RootFrontierTicks),
                 RootEvidenceReadMilliseconds = Milliseconds(ref _counters.RootEvidenceReadTicks),
-                SnapshotPreparations = Volatile.Read(ref _counters.SnapshotPreparations),
-                SnapshotPreparationMilliseconds = Milliseconds(ref _counters.SnapshotPreparationTicks),
             };
 
     private static double Milliseconds(ref long ticks)
@@ -315,51 +159,20 @@ public sealed class ChessSearchConfiguration
 }
 
 /// <summary>
-/// Provider state prepared before the move clock and shared by API Play, Lichess and UCI.
-/// Atom, learned-PST and tactical-pattern state is prepared in <see cref="SubstrateBoardEvaluator"/>,
-/// so every substrate-enabled Search reads the same provider set.
+/// Provider state prepared before the move clock and shared by API Play, Lichess and UCI: the Native
+/// standings of the moves recorded games played (<see cref="SubstrateRootBias"/>). No leaf evaluator reads
+/// the substrate.
 /// </summary>
 public sealed class ChessSearchProviders
 {
     private readonly SubstrateRootBias _rootBias;
-    private readonly SubstrateBoardEvaluator _positionEvaluator;
 
     public ChessSearchProviders(NpgsqlDataSource ds)
     {
         ArgumentNullException.ThrowIfNull(ds);
         _rootBias = new SubstrateRootBias(ds);
-        _positionEvaluator = new SubstrateBoardEvaluator(ds);
     }
 
     public ChessSearchConfiguration Configure(bool substrate)
-    {
-        if (!substrate)
-            return new ChessSearchConfiguration(
-                false, null, null,
-                learnedSelected: false,
-                learnedContributes: false,
-                learnedNonZeroCells: 0,
-                positionAtomsLoaded: 0);
-
-        int learnedCells = _positionEvaluator.LearnedPstNonZeroCells;
-        int tacticPatterns = _positionEvaluator.LoadedTacticPatterns;
-        return new ChessSearchConfiguration(
-            true,
-            _rootBias,
-            _positionEvaluator,
-            learnedSelected: true,
-            learnedContributes: learnedCells != 0,
-            learnedNonZeroCells: learnedCells,
-            positionAtomsLoaded: _positionEvaluator.LoadedAtoms,
-            tacticSelected: true,
-            tacticContributes: tacticPatterns != 0,
-            tacticPatternsLoaded: tacticPatterns);
-    }
-
-    /// <summary>
-    /// Force a fresh immutable leaf snapshot outside the next move clock. This is used by UCI
-    /// ucinewgame for updates that may have arrived from another process; in-process live games
-    /// also advance the normal evidence epoch and refresh automatically on PrepareSearch.
-    /// </summary>
-    public void RefreshLearnedPst() => _positionEvaluator.Refresh();
+        => substrate ? new ChessSearchConfiguration(true, _rootBias) : new ChessSearchConfiguration(false, null);
 }

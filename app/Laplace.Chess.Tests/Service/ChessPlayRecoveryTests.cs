@@ -39,7 +39,6 @@ public sealed class ChessPlayRecoveryTests
         var session = game.Restore();
         Assert.Equal("declared-context", session.LearnContext);
         Assert.Equal("Recorded White", session.WhitePlayerName);
-        Assert.Null(session.WhitePlayerId);
         Assert.Equal("60+1", session.Metadata!.TimeControl);
         Assert.Equal(2, game.ReplayStates().Count());
     }

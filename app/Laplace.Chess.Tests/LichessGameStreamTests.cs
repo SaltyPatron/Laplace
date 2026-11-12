@@ -23,9 +23,9 @@ public sealed class LichessGameStreamTests
             () => Response(Full("e2e4 e7e5") + State("e2e4 e7e5 g1f3", "draw")));
         using var http = Client(handler);
         var replay = new LichessGameReplay("startpos");
-        var host = new ChessLiveGameHost(null!, null!, null!);
+        var host = new ChessLiveGameHost(null!, null!);
         var id = ChessLiveGameHost.LichessGameId("reconnect-fixture");
-        await host.OpenGameAsync(id, "chess/test/reconnect");
+        await host.OpenGameAsync(id);
         var scope = host.CaptureGameScope(id);
         Assert.NotNull(scope);
         var written = new List<string>();
@@ -39,7 +39,7 @@ public sealed class LichessGameStreamTests
                 await replay.ObserveAsync(GameState(ev), async (ply, token) =>
                 {
                     await host.RecordPlyAsync(id, ply.Ply, modality.StateKey(ply.Before),
-                        modality.StateKey(ply.After), ply.Uci, null, token);
+                        modality.StateKey(ply.After), ply.Uci, token);
                     written.Add(ply.Uci);
                 });
                 if (replay.Disposition.Stopped) break;

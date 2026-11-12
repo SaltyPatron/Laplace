@@ -1,10 +1,10 @@
 /**
- * Chess read responses. Every id is a content address, so each one also opens at
- * /explore/entity/:id as the same entity with its witnesses.
+ * Chess reads served by the modular host under /modular/api/chess. A player is a name
+ * exactly as a PGN White/Black tag writes it; a game is its record's 32-hex id.
  */
 
 /**
- * A record over witnessed games. `unscored` is games whose source never asserted
+ * A record over recorded games. `unscored` is games whose source never asserted
  * a result: abstentions, reported rather than folded into the score. `score` is
  * the chess convention (wins + draws/2) over the games that were scored.
  */
@@ -17,115 +17,85 @@ export interface ChessRecord {
   score: number | null;
 }
 
-/**
- * A player with Laplace consensus standing over witnessed results. `games` is the fold's own witness count;
- * `eff_mu` (rating − 2·rd) is the conservative estimate everything ranks by. Not a win
- * percentage or source Elo: rd expresses uncertainty in the witnessed standing.
- */
+/** One name of the player search. `games_complete: false` means the count hit a cap. */
 export interface ChessPlayerRow {
-  rank: number;
-  id: string;
   name: string;
   games: number;
-  rating: number;
-  rd: number;
-  eff_mu: number;
+  games_complete: boolean;
 }
 
 export interface ChessPlayersResponse {
-  object: string;
-  total: number;
+  search: string;
   offset: number;
+  total: number;
   players: ChessPlayerRow[];
 }
 
+/** A source Elo tag (WhiteElo/BlackElo) the player carried, and the games that carried it. */
 export interface ChessRatingRow {
   rating: number;
   games: number;
 }
 
-/** A head-to-head line read from the folded pairing cell: `games` is its witness count. */
-export interface ChessOpponentRow {
-  id: string;
+/** A head-to-head line. Wins and losses are the page's player's. */
+export interface ChessOpponentRow extends ChessRecord {
   name: string;
-  games: number;
-  rating: number;
-  rd: number;
-  eff_mu: number;
 }
 
-export interface ChessIdentityProfile {
+/** A game as a list row. `date` is "YYYY.MM.DD" as the source wrote it. */
+export interface ChessGameRow {
   id: string;
-  provider: string;
-  provider_id: string;
-  display_name: string;
-  aliases: string[];
-  title: string | null;
-  federation: string | null;
-  biography: string | null;
-  avatar_url: string | null;
-  links: string[];
-  ratings: Record<string, number>;
-  facts: Record<string, string>;
+  line: string | null;
+  white: string | null;
+  black: string | null;
+  result: string | null;
+  date: string | null;
+  event: string | null;
+  eco: string | null;
+  /** The game's movetext, which the opening read takes; null when the game carries none. */
+  movetext: string | null;
+}
+
+/** A game row of the player read. `outcome` is the page's player's: 2 win, 1 draw, 0 loss, null unscored. */
+export interface ChessPlayerGameRow extends ChessGameRow {
+  as_white: boolean;
+  opponent: string | null;
+  outcome: number | null;
 }
 
 export interface ChessPlayerResponse {
-  object: string;
-  id: string;
   name: string;
   overall: ChessRecord;
   as_white: ChessRecord;
   as_black: ChessRecord;
   peak_rating: number | null;
   ratings: ChessRatingRow[];
+  opponents_total: number;
   opponents: ChessOpponentRow[];
-  profiles: ChessIdentityProfile[];
+  /** All the player's games; `games` is one page of them, newest first. */
+  total: number;
+  offset: number;
+  games: ChessPlayerGameRow[];
 }
 
-/** `outcome` is the substrate's own enum — 2 win, 1 draw, 0 loss, null unscored. */
-export interface ChessGameRow {
-  id: string;
-  played_on: string | null;
-  event: string | null;
-  eco: string | null;
-  as_white: boolean;
-  opponent_id: string | null;
-  opponent: string;
-  result: string | null;
-  outcome: number | null;
-  /** The game's movetext, which the opening read takes; null when the game carries none. */
-  movetext?: string | null;
-}
-
+/** The games one witness recorded, newest first. */
 export interface ChessGamesResponse {
-  object: string;
-  player_id: string;
+  witness: string;
+  total: number;
   offset: number;
   games: ChessGameRow[];
 }
 
-export interface ChessGameResponse {
-  object: string;
-  id: string;
-  white_id: string | null;
-  white: string;
-  black_id: string | null;
-  black: string;
-  result: string | null;
-  played_on: string | null;
-  event: string | null;
-  eco: string | null;
-  termination: string | null;
-  time_control: string | null;
-  tc_class: string | null;
-  movetext: string | null;
+/** One PGN tag as written. */
+export interface ChessTag {
+  name: string;
+  value: string | null;
 }
 
 /**
- * One ply of a replayed game. `position_id` is the content address of the board AFTER the
- * move — a real Chess_Position entity shared with every other game that reached the same
- * board — so any ply opens into the rated web around it. `clock_seconds` is what the
- * source recorded, present only when it recorded a reading for every ply.
+ * One ply of a replayed game. `position` is the id of the board after the move, shared
+ * with every other game that reached the same board. `clock` is the mover's remaining
+ * clock exactly as the PGN comment wrote it.
  */
 export interface ChessPlyRow {
   ply: number;
@@ -133,16 +103,15 @@ export interface ChessPlyRow {
   uci: string;
   fen: string;
   white_moved: boolean;
-  clock_seconds: number | null;
-  position_id: string;
+  position: string;
+  clock: string | null;
 }
 
-export interface ChessGamePliesResponse {
-  object: string;
-  game_id: string;
-  start_fen: string;
-  has_clocks: boolean;
-  /** Non-null when a token would not resolve: the walk stops rather than inventing boards. */
-  truncated: string | null;
+/** One game: its tags in the source's order and its replayed plies. */
+export interface ChessGameResponse extends ChessGameRow {
+  tags: ChessTag[];
+  start_fen: string | null;
+  /** False when the game did not replay; plies may then be partial or empty. */
+  complete: boolean;
   plies: ChessPlyRow[];
 }

@@ -62,14 +62,14 @@ public static class OpeningClassifier
         var uci = new List<string>(sans.Count);
         var positions = new List<Hash128>(sans.Count + 1);
         var state = m.Initial();
-        positions.Add(ChessCompose.PositionId(state.Board));
+        positions.Add(ChessPositionIdentity.PositionId(state.Board));
         foreach (var san in sans)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), san);
             if (mv is null) break;
             uci.Add(mv.Value.ToUci());
             state = m.Apply(state, mv.Value);
-            positions.Add(ChessCompose.PositionId(state.Board));
+            positions.Add(ChessPositionIdentity.PositionId(state.Board));
         }
         if (uci.Count == 0) return default;
 
@@ -93,46 +93,6 @@ public static class OpeningClassifier
         if (byPosition is { } transposed && (best is null || transposed.Moves > best.Value.Moves))
             best = transposed;
         return best is { } row ? new OpeningMatch(row.Name, row.Eco) : default;
-    }
-
-    internal static void Attest(
-        SubstrateChangeBuilder b, Hash128 subject, OpeningMatch match, double weight, Hash128 sourceId)
-    {
-        if (match.Eco is { } eco)
-            ChessGraph.AppendGameMeta(b, subject, ChessSeedManifest.HasEco, eco, weight, sourceId);
-        if (match.Name is { } name)
-            ChessGraph.AppendGameMeta(b, subject, ChessSeedManifest.OpeningName, name, weight, sourceId);
-        AttestStructure(b, subject, match.Name, weight, sourceId);
-    }
-
-    internal static void AttestStructure(
-        SubstrateChangeBuilder b, Hash128 subject, string? name, double weight, Hash128 sourceId)
-    {
-        var match = new OpeningMatch(name, null);
-        if (match.Family is { } family)
-            AttestFeature(b, subject, family, weight, sourceId);
-        if (match.Variation is { } variation)
-            AttestFeature(b, subject, variation, weight, sourceId);
-        if (string.IsNullOrWhiteSpace(name)) return;
-        foreach (var concept in ChessConcepts.All)
-        {
-            if (!concept.MatchesOpening(name)) continue;
-            var member = concept.Member(ChessConcepts.Domain.Opening);
-            b.AddEntity(concept.Id, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
-            b.AddEntity(member, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
-            b.AddAttestation(NativeAttestation.Categorical(
-                member, "IS_EXAMPLE_OF", concept.Id, sourceId, null, weight));
-            b.AddAttestation(NativeAttestation.Categorical(
-                subject, "HAS_FEATURE", concept.Id, sourceId, member, weight));
-        }
-    }
-
-    private static void AttestFeature(
-        SubstrateChangeBuilder b, Hash128 subject, string text, double weight, Hash128 sourceId)
-    {
-        if (ContentEmitter.Emit(b, text, sourceId) is not { } id) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            subject, "HAS_FEATURE", id, sourceId, null, weight));
     }
 
     internal static void SetLinesForTest(IEnumerable<(string Eco, string Name, List<string> Sans)> lines)
@@ -182,7 +142,7 @@ public static class OpeningClassifier
             state = modality.Apply(state, mv.Value);
         }
         if (uci.Count == 0) return false;
-        end = ChessCompose.PositionId(state.Board);
+        end = ChessPositionIdentity.PositionId(state.Board);
         return true;
     }
 
@@ -193,8 +153,8 @@ public static class OpeningClassifier
         foreach (var file in OpeningSeedFiles(path))
             foreach (var line in File.ReadLines(file))
             {
-                if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
-                var sans = ChessOpeningsDecomposer.ExtractSans(row.Movetext);
+                if (OpeningRows.ParseRow(line) is not { } row) continue;
+                var sans = OpeningRows.ExtractSans(row.Movetext);
                 if (sans.Count == 0) continue;
                 list.Add((row.Eco, row.Name, sans));
             }

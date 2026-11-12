@@ -170,20 +170,4 @@ public sealed class PgnGamesTests
         Assert.Equal("!?", nc6.StandaloneAnnotation);
     }
 
-    [Fact]
-    public void PgnEvals_ParseToken_DecimalPawns()
-        => Assert.Equal(35, PgnEvals.ParseToken("0.35"));
-
-    [Fact]
-    public void PgnEvals_Centipawns_AlignedWithMoves()
-    {
-        const string game = """
-            [Event "Test"]
-            1. e4 {[%eval 0.35]} e5 {[%eval -0.12]} 1-0
-            """;
-        var cp = PgnEvals.Centipawns(game, 2);
-        Assert.NotNull(cp);
-        Assert.Equal(35, cp![0]);
-        Assert.Equal(-12, cp[1]);
-    }
 }

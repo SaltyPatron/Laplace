@@ -83,6 +83,34 @@ public sealed class NativeRecipeExecutionTests
         => Assert.Throws<InvalidDataException>(() => NativeQueryProgram.Parse(Encoding.UTF8.GetBytes(json)));
 
     [Fact]
+    public void ARuntimeWitnessStatesItsFilesThroughTheEnginesWitnessCommand()
+    {
+        var execution = NativeRecipeExecution.Configured();
+        string file = Path.GetTempFileName();
+        try
+        {
+            var start = execution.StartInfo(new NativeRecipeRequest(NativeRecipeMode.Ingest, null, [file],
+                ExpandPrerequisites: false, Witness: new NativeRuntimeWitness("Laplace", "AppDerived")));
+            var arguments = start.ArgumentList.ToArray();
+            Assert.Equal("witness", arguments[0]);
+            int at = Array.IndexOf(arguments, "--as");
+            Assert.Equal(new[] { "--as", "Laplace", "--class", "AppDerived" }, arguments[at..(at + 4)]);
+            Assert.DoesNotContain("--lineage", arguments);
+            Assert.DoesNotContain("-s", arguments);
+            Assert.Equal(Path.GetFullPath(file), arguments[^1]);
+
+            // A witness states files: never a source, a preview, or a name that breaks its line.
+            Assert.Throws<ArgumentException>(() => execution.StartInfo(new NativeRecipeRequest(
+                NativeRecipeMode.Ingest, "propbank", [file], Witness: new NativeRuntimeWitness("Laplace", "AppDerived"))));
+            Assert.Throws<ArgumentException>(() => execution.StartInfo(new NativeRecipeRequest(
+                NativeRecipeMode.Plan, null, [file], Witness: new NativeRuntimeWitness("Laplace", "AppDerived"))));
+            Assert.Throws<ArgumentException>(() => execution.StartInfo(new NativeRecipeRequest(
+                NativeRecipeMode.Ingest, null, [file], Witness: new NativeRuntimeWitness("La"+(char)10+"place", "AppDerived"))));
+        }
+        finally { File.Delete(file); }
+    }
+
+    [Fact]
     public void NativeRuntimeWritesBelongToTheDeclaredWorkDirectory()
     {
         var execution = NativeRecipeExecution.Configured();

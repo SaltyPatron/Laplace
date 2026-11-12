@@ -17,7 +17,7 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
     private ChessLiveGameHost? _host;
 
     public ChessRuntimeService(ILogger<ChessRuntimeService> log, double witnessWeight)
-        : this(log, ct => ChessLiveGameHost.CreateAsync(witnessWeight, ct: ct))
+        : this(log, ct => ChessLiveGameHost.CreateAsync(ct))
     {
     }
 

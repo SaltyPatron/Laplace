@@ -26,7 +26,7 @@ public sealed class ChessLabRecorder : IAsyncDisposable
     public static async Task<ChessLabRecorder> OpenAsync(
         string learnContext, double witnessWeight = 0.5d, CancellationToken ct = default)
     {
-        var host = await ChessLiveGameHost.CreateAsync(witnessWeight, learnContext, ct);
+        var host = await ChessLiveGameHost.CreateAsync(ct);
         return new ChessLabRecorder(host, learnContext, ownsHost: true);
     }
 

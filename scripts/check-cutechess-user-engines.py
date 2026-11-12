@@ -265,12 +265,10 @@ def provider_receipt(lines):
     require(len(rows) == 1, "Laplace must emit one final search provider receipt")
     value = rows[0]
     root = re.search(r"(?:^| )root=(\d+)/(\d+)(?: |$)", value)
-    position = re.search(r"(?:^| )position=(\d+)/(\d+)\(atoms:(\d+)\)(?: |$)", value)
-    require(root is not None and position is not None
-            and int(root[1]) > 0 and int(position[1]) > 0
+    require(root is not None and int(root[1]) > 0
             and "root-work-scope=provider-instance-deltas" in value,
             "Laplace search did not exercise its selected substrate providers")
-    return {"summary": value, "root_reads": int(root[1]), "position_reads": int(position[1]),
+    return {"summary": value, "root_reads": int(root[1]),
             "scope": "one fresh UCI process; provider-instance deltas, not recorded games"}
 
 

@@ -100,8 +100,7 @@ public sealed class ManagedSearchBackend : IChessBackend
         var state = new ChessState(Board.FromFen(_state.Board.ToFen()), _state.RepetitionHistory);
         var limits = ToSearchLimits(uciLimits);
         var search = _search;
-        var continuations = SearchContinuationSeed.ForUci(
-            _modality, _positionFen, _positionMoves, _substrateMode != "off" ? _ds : null);
+        var continuations = SearchContinuationSeed.ForUci(_modality, _positionFen, _positionMoves);
         ChessSearchConfiguration? configured = null;
         if (_substrateMode != "off" && _providers is not null)
         {
@@ -188,7 +187,6 @@ public sealed class ManagedSearchBackend : IChessBackend
             _substrateTried = true;
             try
             {
-                CodepointPerfcache.LoadDefault();
                 if (_ds is null)
                 {
                     var basis = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
@@ -222,9 +220,8 @@ public sealed class ManagedSearchBackend : IChessBackend
         _builtMode = _substrateMode;
         _searchStale = false;
         var prepared = configured.Receipt();
-        info($"substrate provider stack prepared (learned-pst " +
-             $"{(prepared.LearnedPstContributes ? $"active:{prepared.LearnedPstNonZeroCells}" : "selected:no-delta")}, " +
-             $"syzygy {prepared.SyzygyLargestMen}-men); per-search usage is receipted after go");
+        info($"substrate provider stack prepared (recorded-move standings, syzygy {prepared.SyzygyLargestMen}-men); " +
+             "per-search usage is receipted after go");
         return true;
     }
 

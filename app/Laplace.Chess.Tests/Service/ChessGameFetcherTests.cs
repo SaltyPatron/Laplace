@@ -11,7 +11,6 @@ public sealed class ChessGameFetcherTests
         const string decomposed = "Jose\u0301 Rau\u0301l Capablanca";
 
         Assert.Equal(PlayerAlias.Canonical(composed), PlayerAlias.Canonical(decomposed));
-        Assert.Equal(ChessVocabulary.PlayerId(composed), ChessVocabulary.PlayerId(decomposed));
     }
 
     [Fact]

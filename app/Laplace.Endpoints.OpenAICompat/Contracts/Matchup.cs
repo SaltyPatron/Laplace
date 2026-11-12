@@ -50,29 +50,11 @@ public sealed record TapeRow(
     [property: JsonPropertyName("fact")] string Fact,
     [property: JsonPropertyName("eff_mu")] decimal? EffMu);
 
-/// <summary>
-/// Source-observed chess career facts. A source Elo tag is testimony carried on the game
-/// headers; it is distinct from consensus eff_mu, which rates an edge.
-/// </summary>
-public sealed record ChessMatchupSide(
-    [property: JsonPropertyName("peak_source_elo")] int? PeakSourceElo,
-    [property: JsonPropertyName("games")] long Games,
-    [property: JsonPropertyName("wins")] long Wins,
-    [property: JsonPropertyName("draws")] long Draws,
-    [property: JsonPropertyName("losses")] long Losses,
-    [property: JsonPropertyName("unscored")] long Unscored,
-    [property: JsonPropertyName("score")] double? Score);
-
 public sealed record MatchupSide(
     [property: JsonPropertyName("id")] string IdHex,
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("record")] EntityRecordResponse Record,
     [property: JsonPropertyName("top_facts")] IReadOnlyList<SalientFactRow> TopFacts,
-    // Source-tagged ratings, kept apart from the consensus standing in Record.
-    [property: JsonPropertyName("entity_type")] string? EntityType = null,
-    [property: JsonPropertyName("source_rating_peak")] int? SourceRatingPeak = null,
-    [property: JsonPropertyName("source_rating_observations")] long SourceRatingObservations = 0,
-    [property: JsonPropertyName("chess")] ChessMatchupSide? Chess = null,
     [property: JsonPropertyName("readings")] IReadOnlyList<MatchupReading>? Readings = null);
 
 public sealed record MatchupReading(

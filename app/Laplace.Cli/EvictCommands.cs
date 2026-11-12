@@ -22,10 +22,6 @@ internal static class EvictCommands
     private static readonly Dictionary<string, string> KnownLanes =
         new(StringComparer.Ordinal)
         {
-            ["ChessAnalysis"] = "chess-analyze",
-            ["ChessTrajectory"] = "chess-trajectory",
-            ["ChessStockfish"] = "chess-eval",
-            ["ChessTransitions"] = "chess-transitions",
         };
 
     public static async Task<int> EvictAsync(string[] args)

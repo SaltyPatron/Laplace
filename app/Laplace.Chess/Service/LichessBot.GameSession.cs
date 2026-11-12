@@ -26,7 +26,7 @@ public sealed partial class LichessBot
 
         if (_record)
             await _host.OpenGameAsync(
-                substrateGameId, "chess/lichess/game",
+                substrateGameId,
                 metadata: new ChessLiveGameMetadata(
                     Event: "Lichess",
                     Site: "lichess.org",
@@ -65,10 +65,7 @@ public sealed partial class LichessBot
                     var sourceBlack = ReadPlayerName(ev, "black") ?? "Lichess player";
                     var whiteName = weAreWhite ? (_botUsername ?? sourceWhite) : sourceWhite;
                     var blackName = weAreWhite ? sourceBlack : (_botUsername ?? sourceBlack);
-                    _host.SetGamePlayers(
-                        substrateGameId,
-                        weAreWhite ? ChessVocabulary.LaplacePlayerId : ChessVocabulary.PlayerId(whiteName), whiteName,
-                        weAreWhite ? ChessVocabulary.PlayerId(blackName) : ChessVocabulary.LaplacePlayerId, blackName);
+                    _host.SetGamePlayers(substrateGameId, whiteName, blackName);
                     stateEl = ev.GetProperty("state");
                     wtime = stateEl.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
                     btime = stateEl.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
@@ -110,13 +107,12 @@ public sealed partial class LichessBot
                 var observed = await replay.ObserveAsync(stateEl,
                     (ply, token) => _record
                         ? _host.RecordPlyAsync(substrateGameId, ply.Ply,
-                            modality.StateKey(ply.Before), modality.StateKey(ply.After), ply.Uci,
-                            PlayerIdForSide(modality.SideToMove(ply.Before), weAreWhite), token)
+                            modality.StateKey(ply.Before), modality.StateKey(ply.After), ply.Uci, token)
                         : Task.CompletedTask, ct);
 
                 // These side observations follow a successfully accepted ply. Keep them
                 // outside the append callback so replay cannot retry a recorded move if
-                // analysis or commentary fails.
+                // analysis fails.
                 if (_record)
                 {
                     foreach (var ply in observed)
@@ -127,28 +123,6 @@ public sealed partial class LichessBot
                             : new ChessLivePlyAnalysis(Motifs: motifs);
                         if (ply.SubmittedAnalysis is not null || motifs.Count > 0)
                             await _host.RecordPlyAnalysisAsync(substrateGameId, ply.Ply, analysis, ct);
-
-                        if (ply.SubmittedAnalysis?.ScoreCpSideToMove is int score)
-                        {
-                            try
-                            {
-                                int whiteCp = ply.Before.Board.WhiteToMove ? score : -score;
-                                string comment = await ChessMoveCommentary.BuildAsync(
-                                    _host.DataSource,
-                                    new ChessMoveCommentary.Inputs(whiteCp, analysis.Depth,
-                                        analysis.Pv ?? Array.Empty<string>(), motifs,
-                                        PositionSurface: modality.StateKey(ply.After),
-                                        UciMoves: replay.AcceptedMoves,
-                                        StartFen: replay.InitialFen),
-                                    ct);
-                                if (!string.IsNullOrWhiteSpace(comment))
-                                    await PostChatAsync(lichessGameId, "player", comment, ct);
-                            }
-                            catch (Exception ex) when (!ct.IsCancellationRequested)
-                            {
-                                _log.LogDebug(ex, "game {Id}: commentary/chat skipped", lichessGameId);
-                            }
-                        }
                     }
 
                     if (replay.AcceptedPlies > 0)
@@ -237,13 +211,6 @@ public sealed partial class LichessBot
         _log.LogInformation("game {Id} finished", lichessGameId);
     }
 
-    private Hash128? PlayerIdForSide(int moverSide, bool weAreWhite)
-    {
-        bool botMove = (moverSide == 0) == weAreWhite;
-        if (botMove) return ChessVocabulary.LaplacePlayerId;
-        return null;
-    }
-
     private static string? ReadPlayerName(JsonElement game, string side)
     {
         if (!game.TryGetProperty(side, out var player)) return null;
@@ -309,9 +276,13 @@ public sealed partial class LichessBot
         };
     }
 
+    /// <summary>The most characters a Lichess chat line takes.</summary>
+    internal const int LichessChatMaxChars = 140;
+
     public async Task PostChatAsync(string lichessGameId, string room, string text, CancellationToken ct = default)
     {
-        text = ChessMoveCommentary.Truncate(text, ChessMoveCommentary.LichessMaxChars);
+        text = text.Trim();
+        if (text.Length > LichessChatMaxChars) text = text[..LichessChatMaxChars];
         if (string.IsNullOrWhiteSpace(text)) return;
         try
         {

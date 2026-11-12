@@ -32,11 +32,10 @@ public sealed record ChessTrainStatus(
     string LastOutcome, double Temperature, double Weight, int MaxPlies);
 
 public sealed record ChessExploreMove(
-    string Uci, string San, double EffMu, double Rd, long Witnesses,
-    long PlayerGames, double? PlayerScore);
+    string Uci, string San, double EffMu, double Rd, long Witnesses);
 
 public sealed record ChessExploreResponse(
-    string Fen, string? Player, IReadOnlyList<ChessExploreMove> Moves);
+    string Fen, IReadOnlyList<ChessExploreMove> Moves);
 
 public sealed record ChessPlayStart(Guid SessionId, string Fen, string Status = "ongoing", int Ply = 0,
     string TenantId = "public", string? UserId = null, string GameId = "", OperationPrincipal? Requester = null);
@@ -53,9 +52,7 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     private readonly ILogger _log;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
-    private readonly SemaphoreSlim _writeInitGate = new(1, 1);
     private NpgsqlDataSource? _ds;
-    private SubstrateTurnHost? _host;
     private ChessModality? _modality;
     private ModalityEngine<ChessState, ChessMove>? _engine;
 
@@ -108,22 +105,6 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     private async Task<ChessLiveGameHost> LiveHostAsync(CancellationToken ct)
         => _liveHost ??= await _getLiveHost(ct).ConfigureAwait(false);
 
-    private async Task<SubstrateTurnHost> WriteHostAsync(CancellationToken ct)
-    {
-        if (_host is not null) return _host;
-        await _writeInitGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_host is not null) return _host;
-            var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
-            _host = new SubstrateTurnHost(
-                liveHost.DataSource, liveHost.Writer,
-                new NpgsqlSubstrateReader(liveHost.DataSource), _trainWeight);
-            return _host;
-        }
-        finally { _writeInitGate.Release(); }
-    }
-
     private async Task<ModalityEngine<ChessState, ChessMove>> EngineAsync(CancellationToken ct)
     {
         if (_engine is not null) return _engine;
@@ -143,21 +124,18 @@ public sealed partial class ChessEngineService : IAsyncDisposable
                 ds = liveHost.DataSource;
             }
 
-            var host = new SubstrateTurnReadHost(ds);
-            LoadPerfcache();
+            var ratings = new ChessNativeRatings(ds);
             var modality = _modality ??= new ChessModality();
+            // Every move is the Engine's [position, move, position] claim; no relation type names it.
             var engine = new ModalityEngine<ChessState, ChessMove>(
-                modality, ChessVocabulary.MoveType, host, host);
+                modality, Hash128.Zero, ratings, ratings, ChessNativeRatings.Claim);
             _ds = ds;
             _engine = engine;
-            ScheduleLearnedRefresh();
-            _log.LogInformation("chess inference initialized on read-only substrate host");
+            _log.LogInformation("chess inference initialized on the Native substrate's recorded standings");
             return engine;
         }
         finally { _initGate.Release(); }
     }
-
-    private static void LoadPerfcache() => CodepointPerfcache.LoadDefault();
 
     public async Task<ChessLegalResponse> LegalAsync(string fen, CancellationToken ct = default)
     {
@@ -179,69 +157,36 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         return (await LegalAsync(fen, ct)).Moves;
     }
 
+    /// <summary>
+    /// The recorded games' moves from a position: each legal move's [position, move, position] claim and its
+    /// Native standing, the most played first.
+    /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
-        string fen, string? player = null, int limit = 12, CancellationToken ct = default)
+        string fen, int limit = 12, CancellationToken ct = default)
     {
         await EngineAsync(ct);
         var state = _modality!.FromFen(fen);
         var legal = _modality.LegalActions(state);
+        var claims = new Hash128[legal.Count];
+        for (int i = 0; i < legal.Count; i++)
+            claims[i] = ChessNativeRatings.Claim(state, legal[i], _modality.Apply(state, legal[i]));
+        var standings = await NpgsqlChessTransitionStandings.ReadAsync(
+            _ds!, claims.Where(static id => id != Hash128.Zero).Distinct().ToArray(), ct);
 
-        var byChild = new Dictionary<Hash128, (string Uci, string San)>(legal.Count);
-        Hash128 rootId;
-        lock (ChessCompose.Gate)
+        var rows = new List<ChessExploreMove>(legal.Count);
+        for (int i = 0; i < legal.Count; i++)
         {
-            rootId = ChessCompose.PositionId(state.Board);
-            foreach (var mv in legal)
-            {
-                var next = _modality.Apply(state, mv);
-                var childId = ChessCompose.PositionId(next.Board);
-                byChild[childId] = (mv.ToUci(), San.ToSan(state.Board, mv));
-            }
-        }
-
-        int candidateLimit = Math.Max(limit, legal.Count);
-        var materializedTask = NpgsqlSubstrateReads.ChessMovesAsync(
-            _ds!, rootId.ToBytes(), candidateLimit, ct);
-        Task<IReadOnlyList<NpgsqlSubstrateReads.ChessPlayerMoveRow>>? playerTask = null;
-        if (!string.IsNullOrWhiteSpace(player))
-            playerTask = NpgsqlSubstrateReads.ChessPlayerMovesAsync(
-                _ds!, rootId.ToBytes(), ChessVocabulary.PlayerId(player).ToBytes(),
-                state.Board.WhiteToMove, candidateLimit, ct);
-
-        var materializedRows = await materializedTask;
-        var rows = new List<ChessExploreMove>(candidateLimit);
-        var playerStats = new Dictionary<Hash128, (long Games, double Score)>();
-
-        if (playerTask is not null)
-        {
-            var playerRows = await playerTask;
-            foreach (var pr in playerRows)
-                playerStats[Hash128.FromBytes(pr.NextPosition)] = (pr.Games, pr.Score);
-        }
-
-        foreach (var mr in materializedRows)
-        {
-            var childId = Hash128.FromBytes(mr.NextPosition);
-            if (!byChild.TryGetValue(childId, out var mv)) continue;
-            var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
+            if (!standings.TryGetValue(claims[i], out var standing)) continue;
             rows.Add(new ChessExploreMove(
-                mv.Uci, mv.San, mr.EffMu - GlickoPriors.NeutralMu / 1e9,
-                mr.Rd, mr.WitnessCount, ps.Games, ps.Games > 0 ? ps.Score : null));
+                legal[i].ToUci(), San.ToSan(state.Board, legal[i]),
+                standing.Confidence - GlickoPriors.NeutralMu / 1e9, standing.Deviation, standing.Matches));
         }
-
-        var seen = new HashSet<string>(rows.Select(x => x.Uci));
-        foreach (var (childId, s) in playerStats)
-        {
-            if (!byChild.TryGetValue(childId, out var known) || !seen.Add(known.Uci)) continue;
-            rows.Add(new ChessExploreMove(known.Uci, known.San, 0d, 0d, 0, s.Games, s.Score));
-        }
-
         var ranked = rows
-            .OrderByDescending(r => playerTask is null ? r.Witnesses : r.PlayerGames)
-            .ThenByDescending(r => r.EffMu)
-            .Take(limit)
+            .OrderByDescending(static r => r.Witnesses)
+            .ThenByDescending(static r => r.EffMu)
+            .Take(Math.Max(1, limit))
             .ToList();
-        return new ChessExploreResponse(fen, player, ranked);
+        return new ChessExploreResponse(fen, ranked);
     }
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
@@ -252,66 +197,19 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     }
 
     private SubstrateRootBias? _rootBias;
-    private SubstrateBoardEvaluator? _boardEvaluator;
-    private bool _learnedTried;
-    private int[][]? _lpMg, _lpEg;
-    private Task? _learnedRefresh;
-    private readonly object _learnedGate = new();
-
-    private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
-    {
-        if (refresh)
-        {
-            lock (_learnedGate) { _learnedTried = false; _learnedCells = null; }
-        }
-        if (!_learnedTried) ScheduleLearnedRefresh();
-        return (_lpMg, _lpEg);
-    }
-
-    private void ScheduleLearnedRefresh()
-    {
-        lock (_learnedGate)
-        {
-            if (_learnedTried || _learnedRefresh is { IsCompleted: false }) return;
-            _learnedTried = true;
-            _learnedRefresh = Task.Run(() =>
-            {
-                try
-                {
-                    var cells = LearnedPst.ReadWhite(_ds!);
-                    var (lm, le) = LearnedPst.BuildTables(_ds!);
-                    var blended = Evaluation.BlendPeStoWith(lm, le);
-                    lock (_learnedGate)
-                    {
-                        _learnedCells = cells;
-                        (_lpMg, _lpEg) = blended;
-                    }
-                }
-                catch (Exception error)
-                {
-                    lock (_learnedGate) { _lpMg = null; _lpEg = null; }
-                    _log.LogWarning(error, "Learned piece-square refresh failed; learned tables are unavailable.");
-                }
-            });
-        }
-    }
 
     private readonly System.Collections.Concurrent.ConcurrentBag<Search> _searchPool = new();
 
     private Search BuildEngine(bool substrate, int ttBits = 20, SearchContinuationTable? continuations = null)
     {
         IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds!)) : null;
-        ISearchPositionEvaluator? evaluator = substrate
-            ? (_boardEvaluator ??= new SubstrateBoardEvaluator(_ds!)) : null;
         if (_searchPool.TryTake(out var pooled) && pooled.TtBits == ttBits)
         {
-            pooled.Reconfigure(
-                bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch, continuations);
+            pooled.Reconfigure(bias, null, null, null, ChessTablebaseRuntime.ProbeSearch, continuations);
             return pooled;
         }
         return new Search(
             EvalTerm.All, bias, ttBits,
-            positionEvaluator: evaluator,
             tablebase: ChessTablebaseRuntime.ProbeSearch,
             continuations: continuations);
     }
@@ -365,7 +263,7 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     /// <summary>
     /// Whether the side to move has a legal move that ends the game in its favour. No
     /// substrate evidence can outrank a mate, so selection skips its substrate reads here
-    /// (continuation seed, root bias, board evaluator); the search still makes the choice
+    /// (the root bias); the search still makes the choice
     /// and finds the mate at depth one. Move generation only, no database read.
     /// </summary>
     internal static bool HasImmediateMate(ChessModality modality, ChessState state)
@@ -380,9 +278,9 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     private SearchContinuationTable ContinuationsFor(
         string? fen, IReadOnlyList<string>? moves, bool substrate, bool movesIgnoreFen = false)
     {
+        _ = substrate;
         string? origin = movesIgnoreFen && moves is { Count: > 0 } ? null : fen;
-        return SearchContinuationSeed.ForUci(
-            _modality!, origin, moves, substrate ? _ds : null);
+        return SearchContinuationSeed.ForUci(_modality!, origin, moves);
     }
 
     private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves)

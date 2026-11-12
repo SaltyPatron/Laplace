@@ -514,33 +514,6 @@ SQL_QUERY("converse.astar_path_rendered", "bytea,bytea,int4,bool,bool",
 SQL_QUERY("generation.walk_continuations_rendered", "bytea,int4,int4,float8,int4,int8",
     "SELECT converse.label_or_hex(w.entity) AS reply, NULL::numeric, NULL::bigint\nFROM generation.walk_continuations(ARRAY[$1]::bytea[], $2, $3,\n                                $4, $5, $6) w\nORDER BY w.step")
 
-SQL_QUERY("chess.ranked", "int4,int4,text,text",
-    "SELECT rank, encode(player_id, 'hex'), name, games, rating, rd, eff_mu\nFROM chess.ranked($1, $2, $3, $4)")
-
-SQL_QUERY("chess.players_by_initial", "text[],int4,int4,text,text",
-    "SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu\nFROM chess.players_by_initial($1, $2, $3, $4, $5)")
-
-SQL_QUERY("chess.find_player", "text",
-    "WITH p AS (SELECT chess.player_id($1) AS id)\nSELECT encode(p.id, 'hex'), converse.label_or_hex(p.id),\n       COALESCE(o.witness_count, 0),\n       round((COALESCE(o.rating, consensus.glicko2_neutral_mu_fp1e9()) / 1e9)::numeric, 3)::double precision,\n       round((COALESCE(o.rd, consensus.glicko2_initial_rd_fp1e9()) / 1e9)::numeric, 3)::double precision,\n       consensus.eff_mu_display(\n           COALESCE(o.rating, consensus.glicko2_neutral_mu_fp1e9()),\n           COALESCE(o.rd, consensus.glicko2_initial_rd_fp1e9()))::double precision\nFROM p\nJOIN laplace.entities pe\n  ON pe.id = p.id\n AND pe.type_id = laplace.entity_type_id('Chess_Player')\nLEFT JOIN LATERAL consensus.edges_raw(\n    p.id, 'out',\n    ARRAY[laplace.relation_type_id('OUTCOME')],\n    1, true, 'eff_mu') o ON true")
-
-SQL_QUERY("chess.player_record", "bytea",
-    "SELECT as_white, games, wins, draws, losses, unscored, score\nFROM chess.player_record($1)")
-
-SQL_QUERY("chess.player_ratings", "bytea",
-    "SELECT rating, games FROM chess.player_ratings($1)")
-
-SQL_QUERY("chess.player_profile_edges_rendered", "bytea",
-    "WITH profile AS MATERIALIZED (\n    SELECT p.*,\n           row_number() OVER (\n               ORDER BY p.subject_id, p.type_id, p.object_id) AS rn\n    FROM chess.player_profile_edges($1) p\n), rendered AS MATERIALIZED (\n    SELECT realize.render_batch(array_agg(type_id ORDER BY rn)) AS relations,\n           realize.render_batch(array_agg(object_id ORDER BY rn)) AS values\n    FROM profile\n)\nSELECT encode(p.subject_id, 'hex'),\n       r.relations[p.rn::integer], r.values[p.rn::integer]\nFROM profile p\nCROSS JOIN rendered r\nORDER BY p.rn")
-
-SQL_QUERY("chess.head_to_head", "bytea,int4",
-    "SELECT encode(opponent_id, 'hex'), opponent, games, rating, rd, eff_mu\nFROM chess.head_to_head($1, $2)")
-
-SQL_QUERY("chess.player_games", "bytea,int4,int4",
-    "SELECT encode(event_id, 'hex'), played_on, event, eco, as_white,\n       encode(opponent_id, 'hex'), opponent, result, outcome\nFROM chess.player_games($1, $2, $3)")
-
-SQL_QUERY("chess.game", "bytea",
-    "SELECT encode(white_id, 'hex'), white, encode(black_id, 'hex'), black,\n       result, played_on, event, eco, termination, time_control,\n       tc_class\nFROM chess.game($1)")
-
 SQL_QUERY("generation.content_trajectory_constituents", "bytea[]",
     "SELECT d.id, p.entity_id, p.ordinal::integer\nFROM generation.typed_trajectory_points($1, ARRAY[1::smallint]) p\nJOIN unnest($1) d(id) ON d.id = p.parent_id\nORDER BY d.id, p.ordinal")
 

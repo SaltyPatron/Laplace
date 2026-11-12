@@ -200,8 +200,6 @@ app.MapIdentityEndpoints();
 app.MapAccountEndpoints();
 app.MapAccessEndpoints();
 app.MapChessEndpoints();
-app.MapChessPlayerModelEndpoints();
-app.MapChessReadEndpoints();
 app.MapFeedbackEndpoints();
 app.MapUserContentEndpoints();
 app.MapMcpEndpoints();

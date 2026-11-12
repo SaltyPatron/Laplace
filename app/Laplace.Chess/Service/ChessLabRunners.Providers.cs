@@ -53,30 +53,12 @@ public static partial class ChessLabRunners
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
 
-        ChessPgnIngestor? ingestor = null;
-        ChessLabIngestRun? journal = null;
-        ChessPgnIngestor.ProfileResult profileResult = default;
         string? spoolDir = null;
         string? outPath = null;
         bool completed = false;
+        ChessLabIngestRun? journal = null;
         try
         {
-            if (ingest)
-            {
-                var liveHost = await lab.GetLiveHostAsync(ct);
-                // A web import is an ingest run like `laplace-mono ingest chess`: the same
-                // run/file journal rows and one terminal status (with its error) per job.
-                journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
-                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}", ct);
-                lab.Publish(slot, new ChessLabLogEvent("info",
-                    $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
-                ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-                journal.Attach(ingestor);
-                profileResult = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
-                lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", profileResult.Profiles));
-                lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
-            }
-
             string fileName = $"{ChessGameFetcher.Sanitize(online.ProviderId)}_{ChessGameFetcher.Sanitize(site)}.pgn";
             if (persistPgn)
             {
@@ -89,93 +71,24 @@ public static partial class ChessLabRunners
                 outPath = Path.Combine(spoolDir, fileName);
             }
 
-            int parsedWhileFetching = 0;
-            int novelWhileFetching = 0;
-            int appliedWhileFetching = 0;
-            int repairedWhileFetching = 0;
-            int verifiedWhileFetching = 0;
-            long verifiedPliesWhileFetching = 0;
             int games = await ChessGameFetcher.FetchAsync(online.ProviderId, site, max, 0, outPath,
-                msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                ingest && site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
-                    ? async (archive, batch, token) =>
-                    {
-                        var part = await journal!.IngestUnitAsync(archive, batch.Count, () => ingestor!.IngestGamesAsync(
-                            batch, $"Chess.com monthly archive {archive}",
-                            msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), token,
-                            requireCompleteSource: true));
-                        parsedWhileFetching += part.Parsed;
-                        novelWhileFetching += part.Novel;
-                        appliedWhileFetching += part.Applied;
-                        repairedWhileFetching += part.Repaired;
-                        verifiedWhileFetching += part.Verified;
-                        verifiedPliesWhileFetching += part.VerifiedPlies;
-                        lab.UpdateSummary(slot, new ChessLabJobSummary(
-                            appliedWhileFetching, 0, $"{appliedWhileFetching} new games recorded while downloading"));
-                    }
-                    : null);
+                msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct, null);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
             {
-                bool chessCom = site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase);
-                var gameResult = chessCom
-                    ? new ChessPgnIngestor.Result(
-                        parsedWhileFetching, novelWhileFetching, appliedWhileFetching,
-                        repairedWhileFetching, verifiedWhileFetching, verifiedPliesWhileFetching)
-                    : await journal!.IngestUnitAsync(fileName, games, () => ingestor!.IngestFileAsync(outPath,
-                        msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                        requireCompleteSource: true));
-                if (gameResult.Parsed != games)
-                    throw new InvalidDataException(
-                        $"provider returned {games} games but only {gameResult.Parsed} complete legal games validated");
-                if (gameResult.Verified != games)
-                    throw new InvalidDataException(
-                        $"provider returned {games} games but exact persisted readback verified only {gameResult.Verified}");
-                lab.Publish(slot, new ChessLabMetricEvent("games_validated", gameResult.Parsed));
-                lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
-                lab.Publish(slot, new ChessLabMetricEvent("games_repaired", gameResult.Repaired));
-                lab.Publish(slot, new ChessLabMetricEvent("games_persisted_verified", gameResult.Verified));
-                lab.Publish(slot, new ChessLabMetricEvent("plies_persisted_verified", gameResult.VerifiedPlies));
-
-                long pgnBytes = new FileInfo(outPath).Length;
-                string pgnSha256;
-                await using (var pgnStream = File.OpenRead(outPath))
-                using (var sha256 = System.Security.Cryptography.SHA256.Create())
-                    pgnSha256 = Convert.ToHexStringLower(await sha256.ComputeHashAsync(pgnStream, ct));
-
-                string proofPath = Path.Combine(LabDir, slot.Job.Id, "recording-proof.json");
-                Directory.CreateDirectory(Path.GetDirectoryName(proofPath)!);
-                await File.WriteAllTextAsync(proofPath, JsonSerializer.Serialize(new
-                {
-                    schema = "laplace.chess-provider-recording/v1",
-                    jobId = slot.Job.Id,
-                    provider = site.Trim().ToLowerInvariant(),
-                    providerUser = online.ProviderId,
-                    sourcePgnBytes = pgnBytes,
-                    sourcePgnSha256 = pgnSha256,
-                    fetchedGames = games,
-                    parsedGames = gameResult.Parsed,
-                    novelGames = gameResult.Novel,
-                    newlyAppliedGames = gameResult.Applied,
-                    repairedGames = gameResult.Repaired,
-                    persistedVerifiedGames = gameResult.Verified,
-                    persistedVerifiedPlies = gameResult.VerifiedPlies,
-                    exactPersistedReadback = gameResult.Verified == games,
-                    profiles = profileResult.Profiles,
-                    identityLinks = profileResult.Links,
-                }, new JsonSerializerOptions { WriteIndented = true }), ct);
-                lab.AddArtifact(slot, "recording-proof.json", proofPath);
-                lab.Publish(slot, new ChessLabMetricEvent("source_pgn_bytes", pgnBytes));
-                lab.Publish(slot, new ChessLabLogEvent("info",
-                    $"recording proof: {gameResult.Verified} games / {gameResult.VerifiedPlies} plies exact-readback verified · "
-                    + $"PGN sha256 {pgnSha256}"));
-
+                // A fetched archive is a PGN of no corpus: the generic pgn recipe reads it, its file its own
+                // witness. (A sample of a source's files publishes no source witness.)
+                const string? source = null;
+                var liveHost = await lab.GetLiveHostAsync(ct);
+                journal = await ChessLabIngestRun.StartAsync(liveHost, lab.Log, slot.Job.Id,
+                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}",
+                    source, ct);
+                lab.Publish(slot, new ChessLabLogEvent("info", $"ingest run {journal.RunId} ({journal.SourceName}) journaled"));
+                await journal.IngestUnitAsync(fileName, outPath, ct);
+                lab.Publish(slot, new ChessLabMetricEvent("games_ingested", games));
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
-                    gameResult.Verified, games,
-                    $"{profileResult.Profiles} profiles · {profileResult.Links} identity links · "
-                    + $"{games} provider games fetched and exact-readback verified · "
-                    + $"{gameResult.Applied} new · {gameResult.Repaired} repaired"));
+                    games, games, $"{profiles.Count} profiles acquired · {games} provider games read by the Engine"));
             }
             else
             {
@@ -196,8 +109,7 @@ public static partial class ChessLabRunners
         catch (Exception ex)
         {
             journal?.Fail(ex);
-            // Keep the exact downloaded input reachable from the failed job, including
-            // the archive that did not finish admission. Successful prior commits remain.
+            // Keep the exact downloaded input reachable from the failed job.
             if (outPath is not null && File.Exists(outPath))
             {
                 if (!persistPgn)
@@ -209,7 +121,6 @@ public static partial class ChessLabRunners
         }
         finally
         {
-            if (ingestor is not null) await ingestor.DisposeAsync();
             if (!persistPgn && completed && outPath is not null)
                 ChessLabStorage.DeleteFile(outPath);
             if (spoolDir is not null)
@@ -224,7 +135,6 @@ public static partial class ChessLabRunners
         string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
-        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
         var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);
@@ -234,44 +144,10 @@ public static partial class ChessLabRunners
 
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
-
-        if (!ingest)
-        {
-            lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
-                $"{profiles.Count} profiles acquired · not ingested"));
-            Finish(lab, slot, ChessLabJobState.Completed);
-            return;
-        }
-
-        var liveHost = await lab.GetLiveHostAsync(ct);
-        // A profile import is an ingest run like every other Lab import: one ingest_run_journal
-        // row and exactly one terminal ok|failed|cancelled status (with its error).
-        var journal = await ChessLabIngestRun.StartAsync(liveHost.DataSource, lab.Log, slot.Job.Id,
-            $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}/profile", ct);
-        lab.Publish(slot, new ChessLabLogEvent("info",
-            $"ingest run {journal.RunId} ({ChessLabIngestRun.SourceName}) journaled"));
-        ChessPgnIngestor.ProfileResult result;
-        try
-        {
-            await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-            journal.Attach(ingestor);
-            result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
-            journal.Complete();
-        }
-        catch (OperationCanceledException)
-        {
-            journal.Cancel();
-            throw;
-        }
-        catch (Exception ex)
-        {
-            journal.Fail(ex);
-            throw;
-        }
-        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
-        lab.Publish(slot, new ChessLabMetricEvent("identity_links", result.Links));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(result.Profiles, profiles.Count,
-            $"{result.Profiles} profiles · {result.Links} identity links"));
+        // A player is a highway node named by a FIDE id (Sequence 27.3); no profile mints one, so profiles
+        // are kept as the job's artifacts and recorded nowhere.
+        lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
+            $"{profiles.Count} profiles acquired"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 

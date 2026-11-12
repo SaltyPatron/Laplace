@@ -2,42 +2,32 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { WorldLink as Link } from '../../world/WorldLink';
 import { ErrorText, LoadingText, Muted, Panel, ReadStatus, Stack, useReadResource } from '@ui';
-import { chessGame, chessGamePlies } from './api';
+import { chessGame, playerPath, tagValue } from './api';
 import { GameBoard } from './GameBoard';
 import { gameOpenings } from '../openings/api';
 import { OpeningName } from '../openings/Openings';
-import type { ChessGamePliesResponse, ChessGameResponse } from './types';
+import type { ChessGameResponse } from './types';
 import styles from './ChessDb.module.css';
 
 /**
- * One game entity: its source headers, both players linked to their player pages, the
- * game itself linked to its entity page, and the replayed ply trajectory.
- *
- * Headers are source testimony. Movetext is reconstructed from the stored move trajectory,
- * so its SAN is not presented as a byte copy of the source PGN.
+ * One recorded game: its source tags, both players linked to their player pages by name,
+ * the game itself linked to its entity page, and the replayed ply sequence. One read
+ * gives the tags and the plies.
  */
 export function GamePage({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
   const { idHex: routeId } = useParams();
   const idHex = selectedId ?? routeId;
   const [game, setGame] = useState<ChessGameResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [plies, setPlies] = useState<ChessGamePliesResponse | null>(null);
-  const [pliesErr, setPliesErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!idHex) return;
     let stale = false;
     setGame(null);
     setErr(null);
-    setPlies(null);
-    setPliesErr(null);
     chessGame(idHex)
       .then((g) => { if (!stale) setGame(g); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
-    // Plies are a separate read so the headers render without waiting for the replay.
-    chessGamePlies(idHex)
-      .then((p) => { if (!stale) setPlies(p); })
-      .catch((e) => { if (!stale) setPliesErr(e instanceof Error ? e.message : String(e)); });
     return () => { stale = true; };
   }, [idHex]);
 
@@ -54,7 +44,7 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
   if (err) return <ErrorText>{err}</ErrorText>;
   if (!game) return <LoadingText>Reading the game…</LoadingText>;
   const leaves = openings.data?.out_of_book_at ?? null;
-  const leavingMove = leaves != null && plies ? plies.plies[leaves - 1] : null;
+  const leavingMove = leaves != null ? game.plies[leaves - 1] : null;
 
   return (
     <Stack gap={4}>
@@ -63,12 +53,12 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
           {!embedded && <><Link to="/chess">Players</Link> <span>/</span> <span>Game</span></>}
         </nav>
         <h2 className={styles.matchup}>
-          <Side id={game.white_id} name={game.white} />
+          <Side name={game.white} />
           <span className={styles.versus}>{game.result ?? 'vs'}</span>
-          <Side id={game.black_id} name={game.black} />
+          <Side name={game.black} />
         </h2>
         <Muted>
-          {[game.played_on, game.event].filter(Boolean).join(' · ') || 'undated'} ·{' '}
+          {[game.date, game.event].filter(Boolean).join(' · ') || 'undated'} ·{' '}
           <Link to={`/explore/entity/${game.id}`}>see this game as a substrate entity ›</Link>
         </Muted>
       </header>
@@ -76,12 +66,11 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
       <Panel title="Headers">
         <dl className={styles.headerGrid}>
           <Header label="Result" value={game.result} />
-          <Header label="Date" value={game.played_on} />
+          <Header label="Date" value={game.date} />
           <Header label="Event" value={game.event} />
           <Header label="ECO" value={game.eco} />
-          <Header label="Termination" value={game.termination} />
-          <Header label="Time control" value={game.time_control} />
-          <Header label="Class" value={game.tc_class} />
+          <Header label="Termination" value={tagValue(game.tags, 'Termination')} />
+          <Header label="Time control" value={tagValue(game.tags, 'TimeControl')} />
         </dl>
         <Muted className={styles.note}>
           Every field above is a tag the source wrote, transcribed verbatim. Anything the
@@ -114,20 +103,17 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
       </Panel>
 
       <Panel title="Replay">
-        {pliesErr ? <ErrorText>{pliesErr}</ErrorText> : null}
-        {!pliesErr && plies === null ? <LoadingText>Replaying the game…</LoadingText> : null}
-        {plies ? <GameBoard data={plies} white={game.white} black={game.black}
-          openingsAt={openings.data ? (ply) => byPly.get(ply) : undefined} /> : null}
+        <GameBoard game={game} openingsAt={openings.data ? (ply) => byPly.get(ply) : undefined} />
       </Panel>
 
-      <Panel title="Reconstructed movetext">
+      <Panel title="Movetext">
         <Muted className={styles.lede}>
-          Generated from the recorded typed move trajectory used by the replay above.
-          Source headers are shown separately and are not inferred from this rendering.
+          The movetext recorded for this game. Source headers are shown separately.
         </Muted>
-        {plies?.truncated ? (
-          <Muted>Movetext unavailable: {plies.truncated}</Muted>
-        ) : game.movetext ? (
+        {!game.complete ? (
+          <Muted>This game did not replay completely, so the board above may stop before the movetext does.</Muted>
+        ) : null}
+        {game.movetext ? (
           <pre className={styles.movetext}>{game.movetext}</pre>
         ) : (
           <Muted>This game carries no movetext.</Muted>
@@ -137,9 +123,10 @@ export function GamePage({ selectedId, embedded = false }: { selectedId?: string
   );
 }
 
-function Side({ id, name }: { id: string | null; name: string }) {
-  if (!id) return <span>{name || 'unknown'}</span>;
-  return <Link className={styles.playerLink} to={`/chess/players/${id}`}>{name}</Link>;
+/** A player as the game's tag writes the name, linked to that name's page. */
+function Side({ name }: { name: string | null }) {
+  if (!name) return <span>unknown</span>;
+  return <Link className={styles.playerLink} to={playerPath(name)}>{name}</Link>;
 }
 
 function Header({ label, value }: { label: string; value: string | null }) {

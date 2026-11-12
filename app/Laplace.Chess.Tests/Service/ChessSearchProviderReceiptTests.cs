@@ -20,28 +20,10 @@ public sealed class ChessSearchProviderReceiptTests
         }
     }
 
-    private sealed class PositionPlanes : IChessSearchPositionPlanes
-    {
-        public long Version => 7;
-        public int Evaluate(Board board) => EvaluatePlanes(board).TotalCp;
-        public ChessPositionPlaneScore EvaluatePlanes(Board board)
-            => new(TotalCp: 20, AtomOutcomeCp: 5, LearnedPstCp: 12, TacticOutcomeCp: 3);
-    }
-
     [Fact]
     public void ReceiptCountsProvidersOnlyWhenSearchConsumesThem()
     {
-        var configured = new ChessSearchConfiguration(
-            substrate: true,
-            rootBias: new RootBias(),
-            positionEvaluator: new PositionPlanes(),
-            learnedSelected: true,
-            learnedContributes: true,
-            learnedNonZeroCells: 42,
-            positionAtomsLoaded: 12,
-            tacticSelected: true,
-            tacticContributes: true,
-            tacticPatternsLoaded: 7);
+        var configured = new ChessSearchConfiguration(substrate: true, rootBias: new RootBias());
         var search = configured.BuildSearch(ttBits: 10);
 
         var result = search.Think(
@@ -56,18 +38,8 @@ public sealed class ChessSearchProviderReceiptTests
         Assert.NotNull(solved.BestMove);
         Assert.True(receipt.RootSteerReads > 0);
         Assert.True(receipt.RootMovesInfluenced > 0);
-        Assert.True(receipt.PositionEvidenceReads > 0);
-        Assert.True(receipt.PositionEvidenceContributions > 0);
-        Assert.Equal(12, receipt.PositionAtomsLoaded);
-        Assert.True(receipt.LearnedPstReads > 0);
-        Assert.True(receipt.LearnedPstContributions > 0);
-        Assert.Equal(42, receipt.LearnedPstNonZeroCells);
-        Assert.True(receipt.TacticReads > 0);
-        Assert.True(receipt.TacticContributions > 0);
-        Assert.Equal(7, receipt.TacticPatternsLoaded);
-        Assert.True(receipt.SyzygyProbes > 0);
-        Assert.Contains("learned-pst=", receipt.Summary);
-        Assert.Contains("tactics=", receipt.Summary);
+        Assert.Contains("syzygy=", receipt.Summary);
+        Assert.DoesNotContain("position=", receipt.Summary);
     }
 
     [Fact]
@@ -75,9 +47,7 @@ public sealed class ChessSearchProviderReceiptTests
     {
         var start = Board.FromFen(ChessModality.StartFen);
         var limits = new Search.Limits(MaxDepth: 3);
-        var configured = new ChessSearchConfiguration(
-            substrate: false, rootBias: null, positionEvaluator: null,
-            learnedSelected: false, learnedContributes: false, learnedNonZeroCells: 0);
+        var configured = new ChessSearchConfiguration(substrate: false, rootBias: null);
         var search = configured.BuildSearch(ttBits: 12);
         var cold = search.Think(start, limits);
 
@@ -95,24 +65,11 @@ public sealed class ChessSearchProviderReceiptTests
     }
 
     [Fact]
-    public void WitnessedEvalSum_RoundTripsToCentipawns()
-    {
-        long sum = Laplace.Chess.Service.PgnEvals.EvalSumFp1e9(120, games: 3);
-        int? cp = SearchContinuationSeed.Centipawns(sum, 3);
-        Assert.NotNull(cp);
-        Assert.InRange(cp!.Value, 119, 121);
-        Assert.Null(SearchContinuationSeed.Centipawns(0, 0));
-    }
-
-    [Fact]
     public void ClassicalReceiptDoesNotClaimProviders()
     {
         var receipt = ChessSearchProviderReceipt.Classical;
         Assert.False(receipt.SubstrateSelected);
-        Assert.False(receipt.LearnedPstSelected);
-        Assert.False(receipt.TacticSelected);
         Assert.Equal(0, receipt.RootSteerReads);
-        Assert.Equal(0, receipt.PositionEvidenceReads);
         Assert.Equal(0, receipt.SyzygyProbes);
         Assert.Equal("classical-only", receipt.Summary);
     }
@@ -121,10 +78,10 @@ public sealed class ChessSearchProviderReceiptTests
     {
         long clock = 0;
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _, _, _) =>
+        var bias = new SubstrateRootBias(_ =>
         {
             reads++;
-            return (Empty(), Empty(), Empty());
+            return Empty();
         }, clock: () => clock);
         var board = Board.FromFen(ChessModality.StartFen);
         var moves = MoveGen.Legal(board);
@@ -136,8 +93,6 @@ public sealed class ChessSearchProviderReceiptTests
         Assert.Equal(1, cold.RootBackendReads);
         Assert.Equal(0, cold.RootEvidenceCacheHits);
         Assert.Equal(1, cold.RootFrontierBuilds);
-        Assert.Equal(moves.Count, cold.RootTransitionPerfcacheHits
-            + cold.RootTransitionNovelHits + cold.RootTransitionCompositions);
         Assert.True(cold.RootFrontierMilliseconds > 0);
         Assert.True(cold.RootEvidenceReadMilliseconds > 0);
         Assert.True(cold.RootInclusiveMilliseconds >=
@@ -151,8 +106,6 @@ public sealed class ChessSearchProviderReceiptTests
         Assert.Equal(0, hit.RootBackendReads);
         Assert.Equal(1, hit.RootEvidenceCacheHits);
         Assert.Equal(0, hit.RootFrontierBuilds);
-        Assert.Equal(0, hit.RootTransitionPerfcacheHits
-            + hit.RootTransitionNovelHits + hit.RootTransitionCompositions);
         Assert.Equal(0, hit.RootFrontierMilliseconds);
         Assert.Equal(0, hit.RootEvidenceReadMilliseconds);
 
@@ -179,10 +132,10 @@ public sealed class ChessSearchProviderReceiptTests
     public void FailedEvidenceReadRemainsInItsConfigurationAndRetryStartsAtZero()
     {
         int reads = 0;
-        var bias = new SubstrateRootBias((_, _, _, _, _, _) =>
+        var bias = new SubstrateRootBias(_ =>
         {
             if (++reads == 1) throw new InvalidOperationException("controlled backend failure");
-            return (Empty(), Empty(), Empty());
+            return Empty();
         });
         var board = Board.FromFen(ChessModality.StartFen);
         var moves = MoveGen.Legal(board);
@@ -202,33 +155,6 @@ public sealed class ChessSearchProviderReceiptTests
     }
 
     [Fact]
-    public void SnapshotPreparationCountsActualRefreshOutsideLeafEvaluationAndResetsPerConfiguration()
-    {
-        long epoch = 0;
-        int loads = 0;
-        var evaluator = new SubstrateBoardEvaluator(() =>
-        {
-            loads++;
-            return new Dictionary<Hash128, (double EffMu, double Rd, double Witnesses)>();
-        }, () => epoch);
-        Assert.Equal(1, loads);
-        var first = Configuration(null, evaluator);
-        Assert.Equal(0, first.Receipt().SnapshotPreparations);
-        epoch++;
-        _ = first.PositionEvaluator!.PrepareSearch();
-        var refreshed = first.Receipt();
-        Assert.Equal(2, loads);
-        Assert.Equal(1, refreshed.SnapshotPreparations);
-        Assert.True(refreshed.SnapshotPreparationMilliseconds > 0);
-        Assert.Equal(0, refreshed.PositionEvidenceReads);
-        var second = Configuration(null, evaluator);
-        _ = second.PositionEvaluator!.PrepareSearch();
-        Assert.Equal(2, loads);
-        Assert.Equal(1, second.Receipt().SnapshotPreparations);
-        Assert.Equal(refreshed, first.Receipt());
-    }
-
-    [Fact]
     public void ProfilingSummaryUsesInvariantMilliseconds()
     {
         var previous = CultureInfo.CurrentCulture;
@@ -237,20 +163,17 @@ public sealed class ChessSearchProviderReceiptTests
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
             var receipt = ChessSearchProviderReceipt.Classical with
             {
-                SubstrateSelected = true, RootInclusiveMilliseconds = 1.25,
-                SnapshotPreparations = 1, SnapshotPreparationMilliseconds = 2.5,
+                SubstrateSelected = true, RootInclusiveMilliseconds = 1.25, RootEvidenceReadMilliseconds = 2.5,
             };
             Assert.Contains("root-ms-inclusive=1.250", receipt.Summary);
-            Assert.Contains("snapshot-prepare=1/2.500ms", receipt.Summary);
+            Assert.Contains("evidence-read-ms=2.500", receipt.Summary);
         }
         finally { CultureInfo.CurrentCulture = previous; }
     }
 
-    private static ChessSearchConfiguration Configuration(
-        IRootBias? bias, ISearchPositionEvaluator? evaluator = null)
-        => new(true, bias, evaluator, false, false, 0, positionAtomsLoaded: 0);
+    private static ChessSearchConfiguration Configuration(IRootBias? bias) => new(true, bias);
 
-    private static IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Empty()
-        => new Dictionary<Hash128, NpgsqlConsensusByIds.Row>();
+    private static IReadOnlyDictionary<Hash128, NpgsqlChessTransitionStandings.Row> Empty()
+        => new Dictionary<Hash128, NpgsqlChessTransitionStandings.Row>();
 
 }

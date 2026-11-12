@@ -10,7 +10,6 @@ public enum ChessLabJobKind
     Ladder,
     Tactics,
     Review,
-    LearnedPst,
     Cutechess,
     LichessBot,
     LichessFetch,

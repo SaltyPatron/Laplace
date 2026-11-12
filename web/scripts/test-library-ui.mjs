@@ -18,10 +18,9 @@ const sources = [
 ];
 const catalog = { sources, stages: [], counts: [], featured_refs: [], top_relations: [], consensus: { consensusRows: 0 } };
 const hits = ids.slice(0, 2).map((id, index) => ({ id_hex: id, label: `Entity ${index + 1}`, tier: 2, type: 'noun', match_kind: 'name', witnesses: 2, rating: 1500, rd: 50, eff_mu: 1400 }));
-const playerId = 'e'.repeat(32), gameId = 'f'.repeat(32), positionId = '1'.repeat(32);
+const gameId = 'f'.repeat(32), positionId = '1'.repeat(32);
 const unresolvedId = '7'.repeat(32);
 const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-const record = { games: 60, wins: 30, draws: 10, losses: 20, unscored: 0, score: .5833 };
 let browser;
 let passed = false;
 const errors = [], checks = [], accessibility = [];
@@ -35,6 +34,10 @@ try {
   let failCatalog = false, browseReads = 0, previewReads = 0, entityReads = 0, resolveReads = 0;
   const queryReads = [], comparisonReads = [];
   await page.route('**/health/**', route => route.fulfill({ json: { ready: true } }));
+  // Recorded games are read from the modular host, not the monorepo API.
+  await page.route('**/modular/api/chess/game?**', route => new URL(route.request().url()).searchParams.get('id') === gameId
+    ? route.fulfill({ json: { id: gameId, line: null, tags: [{ name: 'Event', value: 'Fixture event' }], white: 'Fixture player', black: 'Fixture opponent', result: '1-0', date: '2026.01.01', event: 'Fixture event', eco: 'A00', start_fen: startFen, movetext: '1. e4', complete: true, plies: [{ ply: 1, san: 'e4', uci: 'e2e4', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', white_moved: true, position: positionId, clock: null }] } })
+    : route.fulfill({ status: 400, json: { error: 'unknown game' } }));
   await page.route('**/v1/**', route => {
     const url = new URL(route.request().url()), path = url.pathname;
     if (path === '/v1/auth/me') return route.fulfill({ json: { authenticated: false, user: null, providers: [] } });
@@ -71,10 +74,6 @@ try {
       return route.fulfill({ json: { x: side(ids[0], 'Comparison entity A'), y: side(ids[1], 'Comparison entity B'), tape: [] } });
     }
     if (path === '/v1/explore/matchup/verdict') return route.fulfill({ json: {} });
-    if (path === `/v1/chess/players/${playerId}`) return route.fulfill({ json: { object: 'chess.player', id: playerId, name: 'Fixture player', overall: record, as_white: record, as_black: record, peak_rating: 2300, profiles: [], ratings: [], opponents: [] } });
-    if (path === `/v1/chess/players/${playerId}/games`) return route.fulfill({ json: { object: 'chess.games', player_id: playerId, offset: Number(url.searchParams.get('offset')), games: [{ id: gameId, played_on: '2026-01-01', event: 'Fixture event', eco: 'A00', as_white: true, opponent_id: playerId, opponent: 'Fixture player', result: '1-0', outcome: 2 }] } });
-    if (path === `/v1/chess/games/${gameId}`) return route.fulfill({ json: { object: 'chess.game', id: gameId, white_id: playerId, white: 'Fixture player', black_id: null, black: 'Fixture opponent', result: '1-0', played_on: '2026-01-01', event: 'Fixture event', eco: 'A00', termination: null, time_control: null, tc_class: null, movetext: '1. e4' } });
-    if (path === `/v1/chess/games/${gameId}/plies`) return route.fulfill({ json: { object: 'chess.plies', game_id: gameId, start_fen: startFen, has_clocks: false, truncated: null, plies: [{ ply: 1, san: 'e4', uci: 'e2e4', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', white_moved: true, clock_seconds: null, position_id: positionId }] } });
     if (path.endsWith('/preview')) {
       previewReads++;
       const id = path.split('/').at(-2), index = ids.indexOf(id);
@@ -308,14 +307,7 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('presentation'), null);
   mark('Header search preserves the full observation and peer criteria while clearing the previous selection');
 
-  await page.goto(base + scopeAddress + `&selected=${playerId}&presentation=chess-player`);
-  await expect(page.getByRole('heading', { name: 'Fixture player', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Older ›', exact: true }).click();
-  assert.equal(new URL(page.url()).searchParams.get('games_offset'), '25');
-  assert.equal(new URL(page.url()).searchParams.get('offset'), null);
-  await page.getByRole('link', { name: '2026-01-01', exact: true }).click();
-  assert.equal(new URL(page.url()).searchParams.get('selected'), gameId);
-  assert.equal(new URL(page.url()).searchParams.get('presentation'), 'chess-game');
+  await page.goto(base + scopeAddress + `&selected=${gameId}&presentation=chess-game`);
   await expect(page.getByRole('heading', { name: 'Headers', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Next move', exact: true }).click();
   const board = page.getByRole('table', { name: 'Chess position. Black to move.', exact: true });
@@ -338,13 +330,11 @@ try {
   assert.equal(new URL(page.url()).searchParams.get('presentation'), 'knowledge');
   assert.equal(new URL(page.url()).searchParams.get('epoch'), '2026');
   await page.goBack();
-  await page.getByRole('link', { name: 'Fixture player', exact: true }).click();
-  assert.equal(new URL(page.url()).searchParams.get('selected'), playerId);
-  assert.equal(new URL(page.url()).searchParams.get('presentation'), 'chess-player');
-  await expect(page.getByRole('heading', { name: 'Fixture player', exact: true })).toBeVisible();
+  // A player is a name, not an entity of this collection: the link opens the name's own page.
+  assert.equal(await page.getByRole('link', { name: 'Fixture player', exact: true }).getAttribute('href'), '/chess/players/Fixture%20player');
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
-  await page.screenshot({ path: resolve(output, 'mono-world-player-fixture.png'), fullPage: true });
-  mark('Player records, separately paged games, game headers and board-position pivots retain the originating collection and scope');
+  await page.screenshot({ path: resolve(output, 'mono-world-game-fixture.png'), fullPage: true });
+  mark('Game headers and board-position pivots retain the originating collection and scope; players link by name');
   await page.goto(base + 'explore/notfound/calculated-fixture?epoch=2026');
   await expect(page.getByText('calculated identity · not reported present', { exact: true })).toBeVisible();
   await expect(page.getByText('A calculated address does not establish admission', { exact: false })).toBeVisible();

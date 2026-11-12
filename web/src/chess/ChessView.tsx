@@ -9,8 +9,6 @@ import { MoveNav } from './play/MoveNav';
 
 import { EnginePanel } from './play/EnginePanel';
 
-import { PstGrid } from './play/PstGrid';
-
 import { GameControls } from './play/GameControls';
 
 import { Sidebar } from './play/Sidebar';
@@ -320,8 +318,6 @@ export function ChessView() {
           onPlayMove={!reviewing && !over ? (uci) => void applyUci(uci) : undefined}
 
         />
-
-        <PstGrid />
 
         <EnginePanel
 

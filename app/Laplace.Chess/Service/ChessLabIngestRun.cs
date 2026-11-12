@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using global::Npgsql;
+using Laplace.Engine.Core;
 using Laplace.Ingestion;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
@@ -7,111 +8,102 @@ using Microsoft.Extensions.Logging;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// One web-triggered chess import (Lab provider fetch, gauntlet PGN loop-closure) as an
-/// ingest run. It drives the same <see cref="IIngestObservability"/> receipts the CLI's
-/// IngestRunner writes - <c>laplace.ingest_run_journal</c> for the run and
-/// <c>laplace.ingest_file_journal</c> for each admitted unit (a Chess.com monthly archive,
-/// a provider PGN, a gauntlet games.pgn) - under the same <c>ChessPgn</c> source and layer as
-/// <c>laplace-mono ingest chess</c>. Every exit path reaches exactly one terminal status:
-/// ok, failed (with the error text), or cancelled. The journal is operational metadata and
-/// never aborts the import; the same lines go to the host log so IIS/journald show them.
+/// One web-triggered chess import (a Lab provider fetch, a gauntlet's games.pgn) as an ingest run: each
+/// PGN file it admits is read by the Engine, stated by the runtime witness it names (Laplace for the games
+/// Laplace played) or, with none, as a file of no corpus by the generic pgn recipe; and the run
+/// keeps the same receipts the CLI writes (<c>laplace.ingest_run_journal</c>, one
+/// <c>laplace.ingest_file_journal</c> row a file). Every exit path reaches exactly one terminal status:
+/// ok, failed (with the error text), or cancelled. The journal is operational metadata and never aborts
+/// the import; the same lines go to the host log.
 /// </summary>
 internal sealed class ChessLabIngestRun
 {
-    internal const string SourceName = ChessPgnDecomposer.PgnSourceName;
-
     private readonly IIngestObservability _journal;
     private readonly ILogger _log;
     private readonly string _jobId;
     private readonly string _label;
+    private readonly string? _source;
+    private readonly Func<string?, string, CancellationToken, Task> _ingest;
     private readonly Func<Guid> _runId;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly object _gate = new();
-    private ChessPgnIngestor? _ingestor;
-    private long _gamesParsed, _gamesApplied, _gamesFailed;
-    private int _unitsDone;
+    private int _unitsDone, _unitsFailed;
     private bool _finished;
 
     internal ChessLabIngestRun(
-        IIngestObservability journal, ILogger log, string jobId, string label, Func<Guid>? runId = null)
+        IIngestObservability journal, ILogger log, string jobId, string label, string? source,
+        Func<string?, string, CancellationToken, Task> ingest, Func<Guid>? runId = null)
     {
         _journal = journal ?? throw new ArgumentNullException(nameof(journal));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _ingest = ingest ?? throw new ArgumentNullException(nameof(ingest));
         _jobId = jobId;
         _label = label;
+        _source = source;
         _runId = runId ?? (static () => Guid.Empty);
     }
 
     internal Guid RunId => _runId();
 
+    /// <summary>The run's name in its receipts: the witness stating its files, or "pgn" for a file of no corpus.</summary>
+    internal string SourceName => _source ?? "pgn";
+
     internal bool IsFinished { get { lock (_gate) return _finished; } }
 
     /// <summary>
-    /// Opens the run on the host's ingest datasource. The journal's run-start writes are
-    /// synchronous (as in the CLI), so they leave the request thread.
+    /// Opens the run on the host's ingest datasource. The journal's run-start writes are synchronous (as in
+    /// the CLI), so they leave the request thread.
     /// </summary>
     internal static async Task<ChessLabIngestRun> StartAsync(
-        NpgsqlDataSource dataSource, ILogger log, string jobId, string label, CancellationToken ct)
+        ChessLiveGameHost host, ILogger log, string jobId, string label, string? source, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(dataSource);
+        ArgumentNullException.ThrowIfNull(host);
         ct.ThrowIfCancellationRequested();
-        var journal = new NpgsqlIngestObservability(dataSource, logger: log);
-        var run = new ChessLabIngestRun(journal, log, jobId, label, () => journal.RunId);
+        var journal = new NpgsqlIngestObservability(host.DataSource, logger: log);
+        var run = new ChessLabIngestRun(journal, log, jobId, label, source, host.IngestFileAsync, () => journal.RunId);
         await Task.Run(run.Start, CancellationToken.None).ConfigureAwait(false);
         return run;
     }
 
     internal void Start()
     {
-        _journal.OnRunStart(SourceName, ChessPgnDecomposer.PgnLayerOrder, inventory: null);
+        // Native admission follows the recipe dependency DAG; it has no managed layer.
+        _journal.OnRunStart(SourceName, -1, inventory: null);
         _log.LogInformation(
             "CHESS_IMPORT_RUN_START job={JobId} run={RunId} source={Source} label={Label}",
             _jobId, RunId, SourceName, _label);
     }
 
-    /// <summary>Row counters are read from the ingestor's acknowledged applies.</summary>
-    internal void Attach(ChessPgnIngestor ingestor) => _ingestor = ingestor;
-
     internal string FileLabel(string unit) => $"{_label}/{unit}";
 
     /// <summary>
-    /// One admitted unit as one file row: running, then ok/failed/cancelled with the error.
-    /// A failure is rethrown unchanged; journaling only observes it.
+    /// One PGN file as one file row: running, then ok/failed/cancelled with the error. A failure is
+    /// rethrown unchanged; journaling only observes it.
     /// </summary>
-    internal async Task<ChessPgnIngestor.Result> IngestUnitAsync(
-        string unit, int games, Func<Task<ChessPgnIngestor.Result>> ingest)
+    internal async Task IngestUnitAsync(string unit, string path, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(ingest);
         string file = FileLabel(unit);
         _journal.OnFileStarted(SourceName, file);
-        ChessPgnIngestor.Result result;
         try
         {
-            result = await ingest().ConfigureAwait(false);
+            await _ingest(_source, path, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             bool cancelled = ex is OperationCanceledException;
-            Interlocked.Add(ref _gamesFailed, games);
+            Interlocked.Increment(ref _unitsFailed);
             _journal.OnFileFinished(SourceName, file, cancelled ? "cancelled" : "failed", Describe(ex));
             if (cancelled)
                 _log.LogInformation("CHESS_IMPORT_UNIT job={JobId} run={RunId} unit={Unit} status=cancelled",
                     _jobId, RunId, file);
             else
-                _log.LogWarning("CHESS_IMPORT_UNIT job={JobId} run={RunId} unit={Unit} status=failed games={Games} error={Error}",
-                    _jobId, RunId, file, games, Describe(ex));
+                _log.LogWarning("CHESS_IMPORT_UNIT job={JobId} run={RunId} unit={Unit} status=failed error={Error}",
+                    _jobId, RunId, file, Describe(ex));
             throw;
         }
-        Interlocked.Add(ref _gamesParsed, result.Parsed);
-        Interlocked.Add(ref _gamesApplied, result.Applied);
         Interlocked.Increment(ref _unitsDone);
-        _journal.OnFileProgress(SourceName, file, result.Parsed, 0, 0, 0);
         _journal.OnFileFinished(SourceName, file, "ok");
-        _log.LogInformation(
-            "CHESS_IMPORT_UNIT job={JobId} run={RunId} unit={Unit} status=ok games={Games} parsed={Parsed} "
-            + "novel={Novel} applied={Applied} repaired={Repaired} verified={Verified}",
-            _jobId, RunId, file, games, result.Parsed, result.Novel, result.Applied, result.Repaired, result.Verified);
-        return result;
+        _log.LogInformation("CHESS_IMPORT_UNIT job={JobId} run={RunId} unit={Unit} status=ok", _jobId, RunId, file);
     }
 
     internal void Complete() => Finish("ok", null);
@@ -128,41 +120,32 @@ internal sealed class ChessLabIngestRun
             if (_finished) return;
             _finished = true;
         }
-        var inserted = _ingestor?.Inserted ?? default;
-        long parsed = Interlocked.Read(ref _gamesParsed);
-        long failed = Interlocked.Read(ref _gamesFailed);
+        int done = Volatile.Read(ref _unitsDone), failed = Volatile.Read(ref _unitsFailed);
         var result = new IngestRunResult(
-            ChessVocabulary.PgnSourceId, SourceName,
-            UnitsAttempted: parsed + failed,
-            UnitsApplied: Interlocked.Read(ref _gamesApplied),
+            Hash128.Zero, SourceName,
+            UnitsAttempted: done + failed,
+            UnitsApplied: done,
             UnitsFailed: failed,
-            EntitiesInserted: inserted.Entities,
-            PhysicalitiesInserted: inserted.Physicalities,
-            AttestationsInserted: inserted.Attestations,
+            EntitiesInserted: 0,
+            PhysicalitiesInserted: 0,
+            AttestationsInserted: 0,
             TotalRoundTrips: 0,
             WallClock: _clock.Elapsed,
             Failures: [],
-            FilesDone: Volatile.Read(ref _unitsDone),
-            InputUnitsDone: parsed,
-            InputUnitsTotal: parsed + failed);
+            FilesDone: done,
+            InputUnitsDone: done,
+            InputUnitsTotal: done + failed);
         _journal.OnRunFinished(SourceName, result, status, error);
-        int retries = _ingestor?.ConcurrentLandingRetries ?? 0;
         if (status == "failed")
             _log.LogWarning(
-                "CHESS_IMPORT_RUN_END job={JobId} run={RunId} source={Source} status={Status} games={Games} "
-                + "applied={Applied} failed_games={Failed} units={Units} rows_new={Ent}e+{Phys}p+{Att}a "
-                + "concurrent_landing_retries={Retries} elapsed_ms={Ms} error={Error}",
-                _jobId, RunId, SourceName, status, parsed, result.UnitsApplied, failed, result.FilesDone,
-                inserted.Entities, inserted.Physicalities, inserted.Attestations, retries,
-                (long)_clock.Elapsed.TotalMilliseconds, error);
+                "CHESS_IMPORT_RUN_END job={JobId} run={RunId} source={Source} status={Status} files={Files} "
+                + "failed_files={Failed} elapsed_ms={Ms} error={Error}",
+                _jobId, RunId, SourceName, status, done, failed, (long)_clock.Elapsed.TotalMilliseconds, error);
         else
             _log.LogInformation(
-                "CHESS_IMPORT_RUN_END job={JobId} run={RunId} source={Source} status={Status} games={Games} "
-                + "applied={Applied} failed_games={Failed} units={Units} rows_new={Ent}e+{Phys}p+{Att}a "
-                + "concurrent_landing_retries={Retries} elapsed_ms={Ms}",
-                _jobId, RunId, SourceName, status, parsed, result.UnitsApplied, failed, result.FilesDone,
-                inserted.Entities, inserted.Physicalities, inserted.Attestations, retries,
-                (long)_clock.Elapsed.TotalMilliseconds);
+                "CHESS_IMPORT_RUN_END job={JobId} run={RunId} source={Source} status={Status} files={Files} "
+                + "failed_files={Failed} elapsed_ms={Ms}",
+                _jobId, RunId, SourceName, status, done, failed, (long)_clock.Elapsed.TotalMilliseconds);
     }
 
     internal static string Describe(Exception error)

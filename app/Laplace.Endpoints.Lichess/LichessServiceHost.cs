@@ -46,7 +46,7 @@ internal static class LichessServiceHost
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(failed ?? (() => Environment.ExitCode = 1));
         builder.Services.AddSingleton<ILichessConnection>(sp => connection ?? new LichessConnectivityService(
-            ct => ChessLiveGameHost.CreateAsync(0.5, ct: ct, connString: database),
+            ct => ChessLiveGameHost.CreateAsync(ct, connString: database),
             sp.GetRequiredService<ILoggerFactory>().CreateLogger("lichess"), ownsHost: true));
         builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(40));
         builder.Services.AddHostedService<LichessWorker>();

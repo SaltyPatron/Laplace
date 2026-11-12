@@ -1,7 +1,7 @@
 /**
  * Lens registry. A lens renders one view of any entity, anywhere (page, drawer, comparison, citation).
  * Facet lenses render strands from the entity contract; visual lenses (graph, placement) render their own
- * component. Type-specific lenses (chess board, player record, code, glyph) register here with `appliesTo`.
+ * component. Type-specific lenses (chess game, code, glyph) register here with `appliesTo`.
  */
 import type { ComponentType } from 'react';
 import type { EntityRef, FacetName } from '../data/contract';
@@ -54,8 +54,6 @@ export const LENSES: LensDef[] = [
 ];
 
 LENSES.unshift(
-  { kind: 'visual', id: 'chess-player', label: 'Player', question: 'Profiles, record and games for this player.',
-    appliesTo: (e) => e.kind === 'Chess_Player', load: () => import('./visual/ChessLenses').then((m) => ({ default: m.PlayerLens })) },
   { kind: 'visual', id: 'chess-game', label: 'Game', question: 'The recorded game: headers and a replayable board.',
     appliesTo: (e) => e.kind === 'Chess_Game', load: () => import('./visual/ChessLenses').then((m) => ({ default: m.GameLens })) },
 );

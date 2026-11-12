@@ -155,8 +155,6 @@ public sealed partial class ChessLabService
                     await ChessLabRunners.RunTacticsAsync(this, slot, ct); return;
                 case ChessLabJobKind.Review:
                     await ChessLabRunners.RunReviewAsync(this, slot, ct); return;
-                case ChessLabJobKind.LearnedPst:
-                    await ChessLabRunners.RunLearnedPstAsync(this, slot, ct); return;
                 case ChessLabJobKind.Cutechess:
                     await ChessLabRunners.RunCutechessAsync(this, slot, ct); return;
                 case ChessLabJobKind.LichessBot:

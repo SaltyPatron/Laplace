@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -6,11 +8,9 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-// DB-coupled tests in this file are INTEGRATION tests: ChessLiveGameHost is a per-ply substrate
-// WRITER, and its default connection resolves to the installed (production) database. They run
-// only when LAPLACE_TEST_DB names an explicit, disposable test database (the chess-platform-seed
-// convention: laplace_chess_test). Missing configuration fails the database tier. Tests never write into the
-// production substrate as a side effect of running the gate.
+// DB-coupled tests in this project are INTEGRATION tests: they run only when LAPLACE_TEST_DB names an
+// explicit, disposable test database. Missing configuration fails the database tier. Tests never read or
+// write the installed substrate as a side effect of running the gate.
 internal static class TestDb
 {
     // LAPLACE_TEST_DB is a database NAME, not a connection string. The runner .env used to
@@ -26,47 +26,31 @@ internal static class TestDb
     }
 }
 
-[Trait("Tier", "fast")]
-public sealed class ChessMoveCommentaryTests
+/// <summary>
+/// The Engine as a game recorder sees it: each read is kept (the runtime witness stating it, the file, the
+/// PGN the file held) and answers with <see cref="ExitCode"/>. No process starts and no database is opened.
+/// </summary>
+internal sealed class RecordingEngine : IDisposable
 {
-    [Fact]
-    public void Truncate_RespectsLichessLimit()
+    public readonly List<(string? Witness, string Path, string Pgn)> Reads = new();
+    public int ExitCode;
+    public string Directory { get; } = System.IO.Directory.CreateTempSubdirectory("laplace-chess-games-").FullName;
+
+    public ChessGameRecorder Recorder()
+        => new("Host=localhost;Database=laplace-chess-test-none", Directory, Execute);
+
+    /// <summary>A host that records through this engine. Its datasource is absent: a search may not read.</summary>
+    public ChessLiveGameHost Host() => new(null!, Recorder());
+
+    private Task<int> Execute(NativeRecipeRequest request, Stream output, Stream error, CancellationToken ct)
     {
-        string longText = new('x', 200);
-        string cut = ChessMoveCommentary.Truncate(longText, ChessMoveCommentary.LichessMaxChars);
-        Assert.Equal(ChessMoveCommentary.LichessMaxChars, cut.Length);
-        Assert.EndsWith("…", cut);
+        Assert.Null(request.Source);
+        lock (Reads) Reads.Add((request.Witness?.Name, request.Paths[0], File.ReadAllText(request.Paths[0])));
+        if (ExitCode != 0) error.Write("fixture: the Engine refused the file"u8);
+        return Task.FromResult(ExitCode);
     }
 
-    [Fact]
-    public void Truncate_ShortTextUnchanged()
-    {
-        const string s = "Fork · Eval +0.3 (d6)";
-        Assert.Equal(s, ChessMoveCommentary.Truncate(s, ChessMoveCommentary.LichessMaxChars));
-    }
-
-    [Theory]
-    [InlineData(150, 4, false)]
-    [InlineData(29_500, 8, true)]
-    [Trait("Category", "RequiresDatabase")]
-    public async Task BuildAsync_IncludesEvalLine(int scoreCp, int depth, bool mating)
-    {
-        var cs = TestDb.RequireConnectionString();
-
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: "chess/test/commentary", connString: cs);
-        var text = await ChessMoveCommentary.BuildAsync(
-            host.DataSource,
-            new ChessMoveCommentary.Inputs(scoreCp, depth, ["e2e4", "e7e5"], ["fork"]),
-            CancellationToken.None,
-            maxChars: 140);
-        Assert.NotNull(text);
-        if (mating)
-            Assert.Contains("Mat", text, StringComparison.OrdinalIgnoreCase);
-        else
-            Assert.Contains("Eval", text);
-        Assert.True(text.Length <= 140);
-    }
+    public void Dispose() => System.IO.Directory.Delete(Directory, recursive: true);
 }
 
 public sealed class ChessLiveGameHostTests
@@ -79,33 +63,6 @@ public sealed class ChessLiveGameHostTests
         var b = ChessLiveGameHost.LichessGameId("abc123");
         Assert.Equal(a, b);
         Assert.NotEqual(ChessLiveGameHost.LichessGameId("other"), a);
-    }
-
-    [Fact]
-    [Trait("Tier", "fast")]
-    public void LivePlayingId_PreservesLegacyIdentityWithoutExternalOccurrence()
-    {
-        var white = ChessVocabulary.PlayerId("A");
-        var black = ChessVocabulary.PlayerId("B");
-        var line = Hash128.Text("line");
-        var expected = Hash128.Text(
-            $"chess/playing/live/{white}|{black}|ctx|{line}|1-0");
-
-        Assert.Equal(expected, ChessVocabulary.LivePlayingId(white, black, "ctx", line, "1-0"));
-    }
-
-    [Fact]
-    [Trait("Tier", "fast")]
-    public void LivePlayingId_ExternalOccurrenceSeparatesIdenticalGames()
-    {
-        var white = ChessVocabulary.PlayerId("A");
-        var black = ChessVocabulary.PlayerId("B");
-        var line = Hash128.Text("same-line");
-
-        var first = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:aaa");
-        var second = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:bbb");
-
-        Assert.NotEqual(first, second);
     }
 
     [Fact]
@@ -131,10 +88,9 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Theory]
-    [InlineData("w", "e2e4", 0, Piece.WPawn)]
-    [InlineData("b", "e7e5", 1, Piece.BPawn)]
-    public void RecordedMoverComesFromResolvedBoardNotPlyParity(
-        string side, string uci, int expectedMover, Piece expectedPiece)
+    [InlineData("w", "e2e4", 0)]
+    [InlineData("b", "e7e5", 1)]
+    public void RecordedMoverComesFromResolvedBoardNotPlyParity(string side, string uci, int expectedMover)
     {
         var modality = new ChessModality();
         var fen = ChessModality.StartFen.Replace(" w ", $" {side} ", StringComparison.Ordinal);
@@ -142,23 +98,22 @@ public sealed class ChessLiveGameHostTests
         var move = Assert.Single(MoveGen.Legal(before.Board), candidate => candidate.ToUci() == uci);
         var after = modality.Apply(before, move);
         var recorded = ChessLiveGameHost.ResolveRecordedPly(
-            modality.StateKey(before), modality.StateKey(after), uci, null);
+            modality.StateKey(before), modality.StateKey(after), uci);
 
         Assert.Equal(expectedMover, recorded.MoverSide);
-        Assert.Equal(expectedPiece, recorded.MovingPiece);
-        Assert.Equal(uci, recorded.MoveToken);
+        Assert.Equal(uci, recorded.Uci);
         Assert.Equal(move, recorded.Move);
+        Assert.Equal(before.Board.ToFen(), recorded.FromFen);
         Assert.Equal(side == "w" ? "e4" : "e5", recorded.San);
     }
 
     [Fact]
-    public async Task LiveScopeReleasesPopulatedSessionWithoutWritingCompletedResult()
+    public async Task LiveScopeReleasesPopulatedSessionWithoutRecordingAGame()
     {
-        // These lifecycle calls own only in-memory live state. Null persistence
-        // dependencies make accidental database/completion work fail immediately.
-        var host = new ChessLiveGameHost(null!, null!, null!);
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
         var id = ChessLiveGameHost.LichessGameId("scope-abandon-fixture");
-        await host.OpenGameAsync(id, "chess/test/scope");
+        await host.OpenGameAsync(id);
         var scope = host.CaptureGameScope(id);
         Assert.NotNull(scope);
         var modality = new ChessModality();
@@ -169,7 +124,7 @@ public sealed class ChessLiveGameHostTests
         {
             using (scope)
             {
-                await host.RecordPlyAsync(id, 1, modality.StateKey(before), modality.StateKey(after), "e2e4", null);
+                await host.RecordPlyAsync(id, 1, modality.StateKey(before), modality.StateKey(after), "e2e4");
                 await host.RecordPlyClockAsync(id, 1, 1000);
                 await host.RecordPlyAnalysisAsync(id, 1, new ChessLivePlyAnalysis(5, 2, 100));
                 throw new IOException("fixture interrupted stream");
@@ -178,19 +133,21 @@ public sealed class ChessLiveGameHostTests
         scope.Dispose();
         Assert.Null(host.CaptureGameScope(id));
         Assert.Equal(0, host.GamesCompleted);
+        Assert.Empty(engine.Reads);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            host.RecordPlyAsync(id, 2, modality.StateKey(before), modality.StateKey(after), "e2e4", null));
+            host.RecordPlyAsync(id, 2, modality.StateKey(before), modality.StateKey(after), "e2e4"));
     }
 
     [Fact]
     public async Task OldScopeCannotAbandonReplacementSessionForSameLichessId()
     {
-        var host = new ChessLiveGameHost(null!, null!, null!);
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
         var id = ChessLiveGameHost.LichessGameId("scope-reconnect-fixture");
-        await host.OpenGameAsync(id, "chess/test/old");
+        await host.OpenGameAsync(id);
         var oldScope = host.CaptureGameScope(id);
         Assert.NotNull(oldScope);
-        await host.OpenGameAsync(id, "chess/test/reconnected");
+        await host.OpenGameAsync(id);
         var newScope = host.CaptureGameScope(id);
         Assert.NotNull(newScope);
 
@@ -201,80 +158,135 @@ public sealed class ChessLiveGameHostTests
         Assert.Equal(0, host.GamesCompleted);
     }
 
-    [Fact]
-    [Trait("Category", "RequiresDatabase")]
-    public async Task RecordPly_ReusesPositionEntity_ForRepeatedSurface()
+    private static async Task<Hash128> PlayAsync(
+        ChessLiveGameHost host, Hash128 id, GameOutcome outcome, int[]? clocksMs, params string[] ucis)
     {
-        var cs = TestDb.RequireConnectionString();
-
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: "chess/test/ply-fold", connString: cs);
-        var gameId = Hash128.Text("chess/test/ply-fold/game-1");
-        await host.OpenGameAsync(gameId, "chess/test/ply-fold");
-
-        var m = new ChessModality();
-        var s0 = m.Initial();
-        var mv = MoveGen.Legal(s0.Board)[0];
-        var s1 = m.Apply(s0, mv);
-        string from = m.StateKey(s0);
-        string to = m.StateKey(s1);
-
-        await host.RecordPlyAsync(gameId, 1, from, to, mv.ToUci(), null);
-        await host.RecordPlyAsync(gameId, 2, to, from, mv.ToUci(), null);
-
-        var id1 = ChessCompose.PositionId(from);
-        var id2 = ChessCompose.PositionId(from);
-        Assert.Equal(id1, id2);
+        var modality = new ChessModality();
+        var state = modality.Initial();
+        for (int i = 0; i < ucis.Length; i++)
+        {
+            var move = Assert.Single(MoveGen.Legal(state.Board), candidate => candidate.ToUci() == ucis[i]);
+            var next = modality.Apply(state, move);
+            await host.RecordPlyAsync(id, i + 1, modality.StateKey(state), modality.StateKey(next), ucis[i]);
+            if (clocksMs is not null) await host.RecordPlyClockAsync(id, i + 1, clocksMs[i]);
+            state = next;
+        }
+        return await host.CompleteGameAsync(id, outcome, adjudicated: false);
     }
 
     [Fact]
-    [Trait("Category", "RequiresDatabase")]
-    public async Task CompleteGame_IncrementsGamesCompleted()
+    public async Task CompleteGame_WritesTheGameAsThePgnTheWitnessLaplaceStates()
     {
-        var cs = TestDb.RequireConnectionString();
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
+        var id = ChessLiveGameHost.SessionHandle(Guid.NewGuid());
+        await host.OpenGameAsync(id, "Alice", "Laplace", new ChessLiveGameMetadata(
+            Event: "Fixture", Site: "Laplace", Date: "2026.11.12", TimeControl: "180+2",
+            ExternalGameId: "lichess:abc", WhiteRating: 1800));
 
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: "chess/test/complete", connString: cs);
-        var gameId = Hash128.Text("chess/test/complete/g1");
-        await host.OpenGameAsync(gameId, "chess/test/complete");
+        var line = await PlayAsync(host, id, GameOutcome.WonBy(0), [180_000, 179_500, 178_000], "e2e4", "e7e5", "g1f3");
 
-        var m = new ChessModality();
-        var s0 = m.Initial();
-        var mv = MoveGen.Legal(s0.Board)[0];
-        var s1 = m.Apply(s0, mv);
-        await host.RecordPlyAsync(gameId, 1, m.StateKey(s0), m.StateKey(s1), mv.ToUci(), null);
-        await host.CompleteGameAsync(gameId, GameOutcome.Draw, adjudicated: false);
+        var read = Assert.Single(engine.Reads);
+        Assert.Equal(ChessGameRecorder.Witness, read.Witness);
+        Assert.Equal(
+            "[Event \"Fixture\"]\n[Site \"Laplace\"]\n[Date \"2026.11.12\"]\n[Round \"-\"]\n[White \"Alice\"]\n"
+            + "[Black \"Laplace\"]\n[Result \"1-0\"]\n[WhiteElo \"1800\"]\n[TimeControl \"180+2\"]\n"
+            + "[Termination \"normal\"]\n[GameId \"lichess:abc\"]\n\n"
+            + "1. e4 {[%clk 0:03:00]} e5 {[%clk 0:02:59.5]} 2. Nf3 {[%clk 0:02:58]} 1-0\n\n",
+            read.Pgn);
+        // One game is one file, named by its text.
+        Assert.Equal(
+            Convert.ToHexStringLower(Hash128.Blake3(Encoding.UTF8.GetBytes(read.Pgn)).ToBytes()) + ".pgn",
+            Path.GetFileName(read.Path));
+        Assert.Equal(engine.Directory, Path.GetDirectoryName(read.Path));
+        Assert.Equal(1, host.GamesCompleted);
 
+        // The id returned is the Engine's id of the line the game played.
+        var board = Board.FromFen(ChessModality.StartFen);
+        var moves = new List<ChessMove>();
+        foreach (var uci in new[] { "e2e4", "e7e5", "g1f3" })
+        {
+            var move = MoveGen.Legal(board).Single(candidate => candidate.ToUci() == uci);
+            moves.Add(move);
+            MoveApply.Make(board, move);
+        }
+        Assert.Equal(
+            ChessEngineIdentity.LineId(ChessEngineIdentity.Trajectory(Board.FromFen(ChessModality.StartFen), moves)),
+            line);
+    }
+
+    [Fact]
+    public async Task TheSameGamePlayedTwiceIsTheSameFile()
+    {
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
+        var metadata = new ChessLiveGameMetadata(Event: "Fixture", Site: "Laplace", Date: "2026.11.12");
+        foreach (var _ in new[] { 0, 1 })
+        {
+            var id = ChessLiveGameHost.SessionHandle(Guid.NewGuid());
+            await host.OpenGameAsync(id, "A", "B", metadata);
+            await PlayAsync(host, id, GameOutcome.Draw, null, "e2e4");
+        }
+        Assert.Equal(2, engine.Reads.Count);
+        Assert.Equal(engine.Reads[0].Path, engine.Reads[1].Path);
+        Assert.Single(Directory.GetFiles(engine.Directory));
+    }
+
+    [Fact]
+    public async Task AGameTheEngineRefusesIsNotReportedRecorded()
+    {
+        using var engine = new RecordingEngine { ExitCode = 3 };
+        var host = engine.Host();
+        var id = ChessLiveGameHost.SessionHandle(Guid.NewGuid());
+        await host.OpenGameAsync(id, "A", "B");
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => PlayAsync(host, id, GameOutcome.Draw, null, "e2e4"));
+        Assert.Contains("the Engine refused the file", failure.Message);
+        Assert.Equal(0, host.GamesCompleted);
+        // The game is still open: a retry records it.
+        engine.ExitCode = 0;
+        Assert.NotEqual(Hash128.Zero, await host.CompleteGameAsync(id, GameOutcome.Draw, adjudicated: false));
         Assert.Equal(1, host.GamesCompleted);
     }
 
     [Fact]
-    [Trait("Category", "RequiresDatabase")]
-    public async Task MatchRunner_LiveHost_RecordsResolvedMoveTokens()
+    public async Task AGameOfNoMovesRecordsNothing()
     {
-        var cs = TestDb.RequireConnectionString();
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
+        var id = ChessLiveGameHost.SessionHandle(Guid.NewGuid());
+        await host.OpenGameAsync(id, "A", "B");
+        Assert.Equal(Hash128.Zero, await host.CompleteGameAsync(id, GameOutcome.Draw, adjudicated: true));
+        Assert.Empty(engine.Reads);
+    }
 
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: "chess/test/match-runner", connString: cs);
+    [Fact]
+    public void MatchRunner_LiveHost_RecordsEachGameOnce()
+    {
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
 
         var result = MatchRunner.Play(
             () => MatchRunner.RandomChooser,
             () => MatchRunner.RandomChooser,
-            games: 1,
+            games: 2,
             maxPlies: 2,
             seed: 17,
             concurrency: 1,
             openingPlies: 0,
             liveHost: host,
-            liveLearnContext: "chess/test/match-runner");
+            liveLearnContext: "chess/test/match-runner",
+            aPlayerName: "A", bPlayerName: "B");
 
-        Assert.Equal(1, result.Games);
-        Assert.Equal(1, host.GamesCompleted);
+        Assert.Equal(2, result.Games);
+        Assert.Equal(2, host.GamesCompleted);
+        Assert.All(engine.Reads, read => Assert.Equal(ChessGameRecorder.Witness, read.Witness));
+        Assert.All(engine.Reads, read => Assert.Contains("[White \"", read.Pgn));
     }
 
     [Fact]
     [Trait("Category", "RequiresDatabase")]
-    public async Task BuildSearch_SubstrateOff_HasNoBias()
+    public async Task BuildSearch_WithAndWithoutRecordedEvidence()
     {
         var cs = TestDb.RequireConnectionString();
 

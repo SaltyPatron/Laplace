@@ -16,15 +16,12 @@ public sealed partial class ChessEngineService
         Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
+        var writeHost = await LiveHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
-            if ((g - 1) % Math.Max(1, reportEvery) == 0)
-                _boardEvaluator = new SubstrateBoardEvaluator(_ds!);
             var search = new Search(
                 EvalTerm.All, _rootBias ??= new SubstrateRootBias(_ds!), ttBits: 18,
-                positionEvaluator: _boardEvaluator,
                 tablebase: ChessTablebaseRuntime.ProbeSearch);
 
             var state = _modality!.Initial();
@@ -51,7 +48,7 @@ public sealed partial class ChessEngineService
             var edges = new RecordedEdge[subjectKeys.Count];
             for (int i = 0; i < edges.Length; i++)
                 edges[i] = new RecordedEdge(subjectKeys[i], objectKeys[i], null, outcome.ForMover(movers[i]));
-            await writeHost.LearnGameAsync(edges, adjudicated, ct);
+            await writeHost.LearnGameAsync(edges, "Laplace self-play", adjudicated, ct);
 
             RecordGame(new PlayedGame<ChessMove>(edges, outcome, plies, adjudicated));
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games)) onReport(Status());
@@ -72,9 +69,7 @@ public sealed partial class ChessEngineService
             recordToSubstrate,
             tenantId: tenantId,
             userId: userId,
-            whitePlayerId: null,
             whitePlayerName: humanName,
-            blackPlayerId: ChessVocabulary.LaplacePlayerId,
             blackPlayerName: "Laplace", requester: requester);
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
@@ -86,14 +81,12 @@ public sealed partial class ChessEngineService
             {
                 if (FindLegalUci(state, uci) is not { } mv) break;
                 string fromKey = _modality.StateKey(state);
-                Hash128? moverId = state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId;
                 var next = _modality.Apply(state, mv);
                 string toKey = _modality.StateKey(next);
                 session.Moves.Add(uci);
                 session.PlyCount = session.Moves.Count;
                 if (session.RecordToSubstrate)
-                    await liveHost.RecordPlayPlyAsync(
-                        id, session.PlyCount, fromKey, toKey, uci, moverId, ct);
+                    await liveHost.RecordPlayPlyAsync(id, session.PlyCount, fromKey, toKey, uci, ct);
                 state = next;
             }
         }
@@ -128,7 +121,6 @@ public sealed partial class ChessEngineService
                 Ply: session.PlyCount);
 
         string fromKey = _modality!.StateKey(state);
-        Hash128? moverId = state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId;
         var next = _modality.Apply(state, mv);
         string toKey = _modality.StateKey(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
@@ -139,8 +131,7 @@ public sealed partial class ChessEngineService
 
         if (session.RecordToSubstrate)
         {
-            await liveHost.RecordPlayPlyAsync(
-                sessionId, session.PlyCount, fromKey, toKey, uci, moverId, ct);
+            await liveHost.RecordPlayPlyAsync(sessionId, session.PlyCount, fromKey, toKey, uci, ct);
             await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
                 analysis, ct);
@@ -185,8 +176,7 @@ public sealed partial class ChessEngineService
 
         if (session.RecordToSubstrate)
         {
-            await liveHost.RecordPlayPlyAsync(
-                sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ChessVocabulary.LaplacePlayerId, ct);
+            await liveHost.RecordPlayPlyAsync(sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ct);
             await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
                 analysis, ct);
@@ -229,17 +219,6 @@ public sealed partial class ChessEngineService
         return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true, Motifs: motifs);
     }
 
-    private IReadOnlyList<LearnedSquare>? _learnedCells;
-
-    public async Task<IReadOnlyList<LearnedSquare>> LearnedPstAsync(CancellationToken ct = default)
-    {
-        await EngineAsync(ct);
-        if (_learnedCells is { } cells) return cells;
-        ScheduleLearnedRefresh();
-        if (_learnedRefresh is { } t) await t.WaitAsync(ct);
-        return _learnedCells ?? [];
-    }
-
     public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
     {
         lock (_statLock)
@@ -274,13 +253,13 @@ public sealed partial class ChessEngineService
         Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
+        var writeHost = await LiveHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         lock (_statLock) { _trainTemp = temperature; _trainMaxPlies = maxPlies; }
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
             var played = await engine.PlayGameAsync(_modality!.Initial(), temperature, rng, maxPlies, ct);
-            await writeHost.LearnGameAsync(played.Edges, played.Adjudicated, ct);
+            await writeHost.LearnGameAsync(played.Edges, "Laplace self-play", played.Adjudicated, ct);
             RecordGame(played);
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games))
                 onReport(Status());
@@ -290,7 +269,7 @@ public sealed partial class ChessEngineService
     private async Task TrainLoopAsync(int maxGames, CancellationToken ct)
     {
         var engine = await EngineAsync(ct);
-        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
+        var writeHost = await LiveHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         int played = 0;
         while (!ct.IsCancellationRequested && (maxGames <= 0 || played < maxGames))
@@ -298,7 +277,7 @@ public sealed partial class ChessEngineService
             try
             {
                 var g = await engine.PlayGameAsync(_modality!.Initial(), _trainTemp, rng, _trainMaxPlies, ct);
-                await writeHost.LearnGameAsync(g.Edges, g.Adjudicated, ct);
+                await writeHost.LearnGameAsync(g.Edges, "Laplace self-play", g.Adjudicated, ct);
                 RecordGame(g);
                 played++;
             }
@@ -333,7 +312,6 @@ public sealed partial class ChessEngineService
             catch (OperationCanceledException) when (_trainCts?.IsCancellationRequested == true) { }
             catch (Exception error) { _log.LogError(error, "Chess training worker failed during shutdown."); }
         }
-        _writeInitGate.Dispose();
         _initGate.Dispose();
     }
 }

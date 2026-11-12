@@ -37,10 +37,6 @@ on:
         type: boolean
         required: false
         default: false
-      chess_derived:
-        type: boolean
-        required: false
-        default: false
       model_preset:
         description: "named model selection resolved on the runner"
         type: string
@@ -83,7 +79,6 @@ jobs:
           CHECKOUT_TOKEN: ${{ github.token }}
           EVICT_BEFORE_INGEST: ${{ inputs.evict_before_ingest && '1' || '0' }}
           CONFIRM_EVICT: ${{ inputs.confirm_evict && '1' || '0' }}
-          CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
           FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
           SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
           RUN_GATE: ${{ inputs.run_gate && '1' || '0' }}
@@ -249,7 +244,6 @@ jobs:
               echo "- Replace existing source first: $EVICT_BEFORE_INGEST"
               echo "- Verify source gate: $RUN_GATE"
               echo "- Verify idempotency: $RUN_IDEMPOTENCY"
-              [[ "$SOURCE_KEY" != chess ]] || echo "- Derive move outcomes/transitions: $CHESS_DERIVED"
             elif [[ "$MODE" == foundation-ladder ]]; then
               echo "- Campaign: ordered foundation ladder"
               echo "- Force every rung: $FORCE_INPUT"
@@ -356,11 +350,6 @@ jobs:
               [[ -n "$SOURCE_KEY" ]] || { echo "::error::mode=source requires source"; exit 2; }
               ingest_one "$SOURCE_KEY" "$PATH_INPUT"
               proof_sources=("$SOURCE_KEY")
-              if [[ "$SOURCE_KEY" == chess && "$CHESS_DERIVED" == 1 ]]; then
-                ingest_one chess-move-outcomes
-                ingest_one chess-transitions
-                proof_sources+=(chess-move-outcomes chess-transitions)
-              fi
               for proof_source in "${proof_sources[@]}"; do
                 verify_source "$proof_source"
               done

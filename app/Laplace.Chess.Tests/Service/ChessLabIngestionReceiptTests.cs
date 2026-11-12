@@ -10,41 +10,35 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessLabIngestionReceiptTests
 {
-    [Theory]
-    [InlineData("malformed")]
-    [InlineData("missing-games")]
-    [InlineData("invalid-state")]
-    public async Task RetainedValidationFailurePersistsReceiptWithoutInventingRecording(string mutation)
+    [Fact]
+    public async Task ARetainedMatchIsStatedByTheWitnessLaplaceAndReceipted()
     {
-        using var fixture = new RetainedJob();
-        string experiment = mutation switch
-        {
-            "malformed" => "{invalid",
-            "missing-games" => "{}",
-            _ => fixture.Experiment.Replace("Completed", "NotAState", StringComparison.Ordinal),
-        };
-        await File.WriteAllTextAsync(fixture.ExperimentPath, experiment);
+        using var engine = new RecordingEngine();
+        using var fixture = new RetainedJob(_ => Task.FromResult(engine.Host()));
 
-        var error = await Assert.ThrowsAsync<InvalidDataException>(
-            () => fixture.Service.IngestArtifactAsync(fixture.Id));
+        var result = await fixture.Service.IngestArtifactAsync(fixture.Id);
 
+        Assert.NotNull(result);
+        Assert.Equal(1, result.Parsed);
+        Assert.Equal("recorded", result.Disposition);
+        var read = Assert.Single(engine.Reads);
+        Assert.Equal(ChessGameRecorder.Witness, read.Witness);
+        Assert.Equal(fixture.PgnPath, read.Path);
         using var receipt = fixture.ReadOnlyReceipt();
-        AssertFailure(receipt.RootElement, error.Message);
-        Assert.Equal(JsonValueKind.Null, receipt.RootElement.GetProperty("recording").ValueKind);
-        var inputs = receipt.RootElement.GetProperty("inputs");
-        Assert.Equal(fixture.PgnPath, inputs.GetProperty("pgnPath").GetString());
-        Assert.Equal(fixture.ExperimentPath, inputs.GetProperty("experimentPath").GetString());
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(experiment))),
-            inputs.GetProperty("experimentTextSha256").GetString());
-        Assert.Equal(0, fixture.HostRequests);
-        Assert.Equal(experiment, await File.ReadAllTextAsync(fixture.ExperimentPath));
+        var root = receipt.RootElement;
+        Assert.Equal("laplace.chess-retained-ingestion/v2", root.GetProperty("schema").GetString());
+        Assert.Equal("completed", root.GetProperty("status").GetString());
+        Assert.Equal("recorded", root.GetProperty("disposition").GetString());
+        Assert.Equal(ChessGameRecorder.Witness, root.GetProperty("witness").GetString());
+        Assert.Equal(1, root.GetProperty("games").GetInt32());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("error").ValueKind);
+        // The retained match is read, never rewritten.
+        Assert.Equal(fixture.Experiment, await File.ReadAllTextAsync(fixture.ExperimentPath));
         Assert.Equal(fixture.Pgn, await File.ReadAllTextAsync(fixture.PgnPath));
-        Assert.Equal(0, fixture.Slot.ActiveIngests);
-        Assert.Equal(1, fixture.Slot.IngestGate.CurrentCount);
     }
 
     [Fact]
-    public async Task FailureAfterValidReceiptPreservesTheStartedRecordingAndInputIdentity()
+    public async Task AFailedReadIsReceiptedAsFailedWithItsInputsAndNeverAsRecorded()
     {
         using var fixture = new RetainedJob();
 
@@ -52,27 +46,20 @@ public sealed class ChessLabIngestionReceiptTests
             () => fixture.Service.IngestArtifactAsync(fixture.Id));
 
         using var receipt = fixture.ReadOnlyReceipt();
-        AssertFailure(receipt.RootElement, error.Message);
-        var recording = receipt.RootElement.GetProperty("recording");
-        Assert.Equal("failed", recording.GetProperty("status").GetString());
-        Assert.Equal(error.Message, recording.GetProperty("error").GetString());
-        Assert.Equal(1, recording.GetProperty("requestedGames").GetInt32());
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(fixture.Pgn))),
-            recording.GetProperty("pgn").GetProperty("sha256").GetString());
+        var root = receipt.RootElement;
+        Assert.Equal("laplace.chess-retained-ingestion/v2", root.GetProperty("schema").GetString());
+        Assert.Equal("failed", root.GetProperty("status").GetString());
+        Assert.Equal("failed", root.GetProperty("disposition").GetString());
+        Assert.Equal(error.Message, root.GetProperty("error").GetString());
+        Assert.Equal(1, root.GetProperty("games").GetInt32());
+        var inputs = root.GetProperty("inputs");
+        Assert.Equal(fixture.PgnPath, inputs.GetProperty("pgnPath").GetString());
+        Assert.Equal(fixture.ExperimentPath, inputs.GetProperty("experimentPath").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(fixture.Experiment))),
+            inputs.GetProperty("experimentTextSha256").GetString());
         Assert.Equal(1, fixture.HostRequests);
         Assert.Equal(0, fixture.Slot.ActiveIngests);
         Assert.Equal(1, fixture.Slot.IngestGate.CurrentCount);
-    }
-
-    private static void AssertFailure(JsonElement receipt, string error)
-    {
-        Assert.Equal("laplace.chess-retained-ingestion/v1", receipt.GetProperty("schema").GetString());
-        Assert.Equal("failed", receipt.GetProperty("status").GetString());
-        Assert.Equal("failed", receipt.GetProperty("disposition").GetString());
-        Assert.Equal(error, receipt.GetProperty("error").GetString());
-        Assert.Equal(JsonValueKind.Null, receipt.GetProperty("newlyRecordedGames").ValueKind);
-        Assert.Equal(JsonValueKind.Null, receipt.GetProperty("alreadyPresentGames").ValueKind);
-        Assert.False(receipt.GetProperty("noOpReplayVerified").GetBoolean());
     }
 
     private sealed class RetainedJob : IDisposable
@@ -87,7 +74,7 @@ public sealed class ChessLabIngestionReceiptTests
         internal readonly ChessLabService.JobSlot Slot;
         internal int HostRequests;
 
-        internal RetainedJob()
+        internal RetainedJob(Func<CancellationToken, Task<ChessLiveGameHost>>? host = null)
         {
             _directory = Path.Combine(Path.GetFullPath(ChessLabPaths.LabDir), Id);
             Directory.CreateDirectory(_directory);
@@ -105,10 +92,11 @@ public sealed class ChessLabIngestionReceiptTests
             });
             File.WriteAllText(PgnPath, Pgn);
             File.WriteAllText(ExperimentPath, Experiment);
-            Service = new ChessLabService(_ =>
+            Service = new ChessLabService(ct =>
             {
                 HostRequests++;
-                return Task.FromException<ChessLiveGameHost>(new InvalidOperationException("host unavailable"));
+                return host?.Invoke(ct)
+                    ?? Task.FromException<ChessLiveGameHost>(new InvalidOperationException("host unavailable"));
             });
             var job = new ChessLabJob(Id, ChessLabJobKind.Cutechess, ChessLabJobState.Completed,
                 new Dictionary<string, string>(), new ChessLabJobSummary(),

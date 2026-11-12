@@ -142,23 +142,6 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            // A non-hex reference the lexical resolver did not realize may name a player
-            // handle. It is ranked through the same indexed name-trajectory candidates as
-            // ChessPlayersAsync. Hex and FEN references stay exact.
-            if (!LooksLikeEntityHex(reference))
-            {
-                var players = await ChessPlayersAsync(
-                    1, 0, requested, null, "relevance", "desc", ct);
-                if (players.Players.FirstOrDefault() is { } player)
-                {
-                    var playerId = Convert.FromHexString(player.IdHex);
-                    await using var conn = await _dataSource.OpenConnectionAsync(ct);
-                    var facts = await ReadSalientFactsAsync(conn, playerId, 3, ct);
-                    return new ExploreResolveResponse(
-                        player.IdHex, player.Name, "chess_player", true, facts);
-                }
-            }
-
             if (resolved is not { } unresolved) return null;
 
             var unresolvedLabel = unresolved.Label;

@@ -23,6 +23,7 @@ public sealed class ModalityEngine<TState, TAction>
     private readonly IContentAddresser _addresser;
     private readonly IEdgeRatings _ratings;
     private readonly IStateValuer? _valuer;
+    private readonly Func<TState, TAction, TState, Hash128>? _edgeOf;
 
 
 
@@ -30,10 +31,16 @@ public sealed class ModalityEngine<TState, TAction>
     private const double TerminalWinValue = 4_000_000_000_000d;
     private const double TerminalLossValue = 100_000_000_000d;
 
+    /// <param name="edgeOf">
+    /// The id of the claim a played move is, where the modality's substrate names one (chess: the Engine's
+    /// [position, move, position]); otherwise the edge from state to next state under <paramref name="moveTypeId"/>.
+    /// </param>
     public ModalityEngine(
         ITurnModality<TState, TAction> modality, Hash128 moveTypeId,
-        IContentAddresser addresser, IEdgeRatings ratings)
+        IContentAddresser addresser, IEdgeRatings ratings,
+        Func<TState, TAction, TState, Hash128>? edgeOf = null)
     {
+        _edgeOf = edgeOf;
         _modality = modality ?? throw new ArgumentNullException(nameof(modality));
         _addresser = addresser ?? throw new ArgumentNullException(nameof(addresser));
         _ratings = ratings ?? throw new ArgumentNullException(nameof(ratings));
@@ -60,7 +67,9 @@ public sealed class ModalityEngine<TState, TAction>
         {
             nexts[i] = _modality.Apply(state, actions[i]);
             toIds[i] = _addresser.Address(_modality.StateKey(nexts[i]));
-            edgeIds[i] = ConsensusKeys.EdgeId(subjectId, _moveTypeId, toIds[i]);
+            edgeIds[i] = _edgeOf is { } edgeOf
+                ? edgeOf(state, actions[i], nexts[i])
+                : ConsensusKeys.EdgeId(subjectId, _moveTypeId, toIds[i]);
         }
 
         var effMu = await _ratings.EffMuAsync(edgeIds, ct).ConfigureAwait(false);

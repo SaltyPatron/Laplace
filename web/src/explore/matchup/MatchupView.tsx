@@ -4,17 +4,15 @@ import { WorldLink as RouterLink } from '../../world/WorldLink';
 import { changeWorld } from '../../world/context';
 import { useRouteText } from '../../layout/useRouteText';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel, useReadResource } from '@ui';
-import { exploreMatchup, exploreMatchupVerdict, exploreResponseField, exploreLexicon } from '../../query/api';
-import type { Matchup, MatchupSide, MatchupVerdict, ResponseField, ResponseFieldEntry, LexiconReading, TapeRow } from '../../query/types';
+import { exploreMatchup, exploreResponseField, exploreLexicon } from '../../query/api';
+import type { Matchup, MatchupSide, ResponseField, ResponseFieldEntry, LexiconReading, TapeRow } from '../../query/types';
 import { useAppStore } from '../../store';
 import { PaymentRequiredError } from '../../api/client';
 import { GatePrompt } from '../components/GatePrompt';
 import styles from './MatchupView.module.css';
 
 /**
- * Head-to-head of two entities: their facts, standing and the verdict path between them.
- * When the server attaches a `chess` record to a side, that side shows its witnessed game
- * record and peak source Elo from the folded game results.
+ * Head-to-head of two entities: their meanings and usage, and the verdict path between them.
  */
 export function MatchupView({ selectedId, embedded = false }: { selectedId?: string; embedded?: boolean } = {}) {
   const routeX = useRouteText('/explore/matchup/:x/:y', 'x');
@@ -35,8 +33,6 @@ export function MatchupView({ selectedId, embedded = false }: { selectedId?: str
   }, [x, y, queryX, queryY]);
 
   const [data, setData] = useState<Matchup | null>(null);
-  const [verdict, setVerdict] = useState<MatchupVerdict | null>(null);
-  const [verdictError, setVerdictError] = useState<string | null>(null);
   const [responseField, setResponseField] = useState<ResponseField | null>(null);
   const [responseError, setResponseError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -49,8 +45,6 @@ export function MatchupView({ selectedId, embedded = false }: { selectedId?: str
     setLoading(true);
     setError(null);
     setData(null);
-    setVerdict(null);
-    setVerdictError(null);
     setResponseField(null);
     setResponseError(null);
     setGated(false);
@@ -60,7 +54,6 @@ export function MatchupView({ selectedId, embedded = false }: { selectedId?: str
       .then((m) => {
         if (stale) return;
         setData(m);
-        if (m.x.chess && m.y.chess) return;
         exploreLexicon(x, y, opts)
           .then((field) => { if (!stale) setResponseField(field); })
           .catch((e) => { if (!stale) setResponseError(e instanceof Error ? e.message : String(e)); });
@@ -71,18 +64,6 @@ export function MatchupView({ selectedId, embedded = false }: { selectedId?: str
         else setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => { if (!stale) setLoading(false); });
-
-    // Direct claims and the broader response field are independent reads.
-    exploreMatchupVerdict(x, y, opts)
-      .then((v) => { if (!stale) setVerdict(v); })
-      .catch((e) => {
-        if (stale) return;
-        setVerdictError(
-          e instanceof PaymentRequiredError
-            ? 'verdict locked'
-            : e instanceof Error ? e.message : String(e),
-        );
-      });
 
     return () => { stale = true; };
   }, [x, y, tenant, quoteId]);
@@ -122,16 +103,12 @@ export function MatchupView({ selectedId, embedded = false }: { selectedId?: str
             <SideCard side={data.x} align="left" readings={responseField?.readings?.filter(row => row.side === 1)} readingError={responseError} />
             <div className={styles.center}>
               <span className={styles.vsBig}>vs</span>
-              {data.x.chess && data.y.chess ? <Verdict verdict={verdict} error={verdictError} /> :
-                <Connections field={responseField} error={responseError} />}
+              <Connections field={responseField} error={responseError} />
             </div>
             <SideCard side={data.y} align="right" readings={responseField?.readings?.filter(row => row.side === 2)} readingError={responseError} />
           </div>
-          {data.x.chess == null && data.y.chess == null && (
-            <SupportingRecords key={JSON.stringify([x, y, tenant, quoteId])} x={x} y={y} />
-          )}
-          {data.x.chess && data.y.chess ? <Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /> :
-            <details><summary>Direct claim overlap</summary><Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /></details>}
+          <SupportingRecords key={JSON.stringify([x, y, tenant, quoteId])} x={x} y={y} />
+          <details><summary>Direct claim overlap</summary><Tape tape={data.tape} xLabel={data.x.label} yLabel={data.y.label} /></details>
         </>
       ) : null}
     </div>
@@ -152,56 +129,11 @@ function SupportingRecords({ x, y }: { x: string; y: string }) {
   </details>;
 }
 
-function displayRelation(type: string, chessPlayer: boolean) {
-  const normalized = type.replaceAll('_', ' ').trim().toLowerCase();
-  return chessPlayer && normalized === 'played by' ? 'played against' : normalized;
-}
-
 function SideCard({ side, align, readings, readingError }: { side: MatchupSide; align: 'left' | 'right'; readings?: LexiconReading[]; readingError: string | null }) {
-  const edgeCount = side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted;
-  const chess = side.chess ?? null;
-  const chessPlayer = chess !== null || side.entity_type === 'Chess_Player';
-  const statValue = chess
-    ? chess.peak_source_elo
-    : chessPlayer ? side.source_rating_peak ?? null : edgeCount;
-  const statLabel = chess
-    ? `peak source Elo · ${chess.games.toLocaleString()} witnessed games`
-    : chessPlayer
-      ? `peak source Elo · ${side.source_rating_observations ?? 0} rating observations`
-      : 'direct claims';
-
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
       <RouterLink className={styles.sideName} to={`/explore/entity/${side.id}`}>{side.label}</RouterLink>
-      {!chessPlayer ? <Readings rows={readings} error={readingError} /> : <>
-      <div className={styles.record}>
-        {chess ? (
-          <>
-            <Rec n={chess.wins} label="wins" tone="confirm" />
-            <Rec n={chess.draws} label="draws" tone="draw" />
-            <Rec n={chess.losses} label="losses" tone="refute" />
-            <Rec n={chess.unscored} label="unscored" />
-          </>
-        ) : (
-          <>
-            <Rec n={side.record.confirmed} label="confirmed" tone="confirm" />
-            <Rec n={side.record.contested} label="contested" tone="draw" />
-            <Rec n={side.record.refuted} label="refuted" tone="refute" />
-            <Rec n={side.record.thin} label="thin" />
-          </>
-        )}
-      </div>
-      <div className={styles.topStat}>
-        <span className={styles.topMu}>{statValue != null ? Number(statValue).toFixed(0) : '—'}</span>
-        <span className={styles.topLabel}>{statLabel}</span>
-      </div>
-      {!chessPlayer && <Muted>Direct claims</Muted>}
-      <ul className={styles.facts}>
-        {side.top_facts.slice(0, 5).map((f, i) => (
-          <li key={i}><span className={styles.factType}>{displayRelation(f.type, chessPlayer)}</span> {f.fact}</li>
-        ))}
-      </ul>
-      </>}
+      <Readings rows={readings} error={readingError} />
     </div>
   );
 }
@@ -237,29 +169,6 @@ function Connections({ field, error }: { field: ResponseField | null; error: str
         <RouterLink to={`/explore/entity/${row.claim_id}`}>Recorded claim{row.witnesses != null && <> · {row.witnesses} {row.witnesses === 1 ? 'witness' : 'witnesses'}</>}</RouterLink>
       </p>)}</details></> : <Muted>No relationship was realized from the evidence read.</Muted>}
   </div>;
-}
-
-function Rec({ n, label, tone }: { n: number; label: string; tone?: 'confirm' | 'draw' | 'refute' }) {
-  return (
-    <div className={styles.rec}>
-      <span className={`${styles.recN} ${tone ? styles[tone] : ''}`}>{n}</span>
-      <span className={styles.recLabel}>{label}</span>
-    </div>
-  );
-}
-
-function Verdict({ verdict, error }: { verdict: MatchupVerdict | null; error: string | null }) {
-  if (error) return <ErrorText className={styles.verdictPending}>no verdict — {error}</ErrorText>;
-  if (verdict === null) return <Muted className={styles.verdictPending}>reading witnessed claims…</Muted>;
-  if (!verdict.verdict) return <Muted className={styles.verdictPending}>no verdict</Muted>;
-  return (
-    <div className={styles.verdict}>
-      <Muted>Direct evidence</Muted>
-      <span className={styles.verdictText}>{verdict.verdict}</span>
-      {verdict.relation && <span className={styles.verdictPath}>{verdict.relation}</span>}
-      {verdict.eff_mu != null && <span className={styles.verdictMu}>μ {Number(verdict.eff_mu).toFixed(0)}</span>}
-    </div>
-  );
 }
 
 function ResponseFieldView({ field, error }: { field: ResponseField | null; error: string | null }) {

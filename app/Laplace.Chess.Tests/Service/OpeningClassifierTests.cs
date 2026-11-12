@@ -91,39 +91,4 @@ public sealed class OpeningClassifierTests : IDisposable
         }
     }
 
-    [Fact]
-    public void Attest_EmitsEcoFamilyVariationAndConcept()
-    {
-        var match = new OpeningClassifier.OpeningMatch("Queen's Gambit Declined: Semi-Slav", "D30");
-        using var builder = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/opening-identity")
-            .DeclareSourcePrior(Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus);
-        var subject = Hash128.Text("test/opening-line");
-        OpeningClassifier.Attest(builder, subject, match, 0.7, ChessVocabulary.AnalysisSourceId);
-        var change = builder.Build();
-        try
-        {
-            Assert.Contains(change.Attestations, a =>
-                a.TypeId == ChessVocabulary.EcoCodeType && a.SubjectId == subject
-                && a.ObjectId == ContentEmitter.RootId("D30"));
-            Assert.Contains(change.Attestations, a =>
-                a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == subject
-                && a.ObjectId == ContentEmitter.RootId("Queen's Gambit Declined: Semi-Slav"));
-            Assert.Contains(change.Attestations, a =>
-                a.TypeId == ChessVocabulary.FeatureType && a.SubjectId == subject
-                && a.ObjectId == ContentEmitter.RootId("Queen's Gambit Declined"));
-            Assert.Contains(change.Attestations, a =>
-                a.TypeId == ChessVocabulary.FeatureType && a.SubjectId == subject
-                && a.ObjectId == ContentEmitter.RootId("Semi-Slav"));
-            Assert.True(ChessConcepts.TryResolve("gambit", chessDomain: true, out var gambit));
-            Assert.Contains(change.Attestations, a =>
-                a.TypeId == ChessVocabulary.FeatureType && a.SubjectId == subject
-                && a.ObjectId == gambit.Id
-                && a.ContextId == gambit.Member(ChessConcepts.Domain.Opening));
-            Assert.Contains(change.Entities, e => e.Id == gambit.Id);
-        }
-        finally
-        {
-            foreach (var stage in change.IntentStages) stage.Dispose();
-        }
-    }
 }

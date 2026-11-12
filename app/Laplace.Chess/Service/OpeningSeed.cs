@@ -64,8 +64,8 @@ public static class OpeningSeed
         foreach (var file in Files(path))
             foreach (var line in File.ReadLines(file))
             {
-                if (ChessOpeningsDecomposer.ParseRow(line) is not { } row) continue;
-                if (!TryReplay(m, ChessOpeningsDecomposer.ExtractSans(row.Movetext), plies, out var fen)) continue;
+                if (OpeningRows.ParseRow(line) is not { } row) continue;
+                if (!TryReplay(m, OpeningRows.ExtractSans(row.Movetext), plies, out var fen)) continue;
                 if (seen.Add(fen)) fens.Add(fen);
                 if (max > 0 && fens.Count >= max) return fens;
             }

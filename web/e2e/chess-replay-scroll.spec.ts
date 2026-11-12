@@ -5,65 +5,59 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 test.describe('chess UI', () => {
   test('replay stepping never steals page scroll', async ({ page }) => {
-    await page.route(`**/v1/chess/games/${GAME_ID}**`, async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname.endsWith('/plies')) {
-        await route.fulfill({
-          contentType: 'application/json',
-          body: JSON.stringify({
-            object: 'chess.game.plies',
-            game_id: GAME_ID,
-            start_fen: START_FEN,
-            has_clocks: false,
-            truncated: null,
-            plies: [
-              {
-                ply: 1,
-                san: 'e4',
-                uci: 'e2e4',
-                fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
-                white_moved: true,
-                clock_seconds: null,
-                position_id: '11111111111111111111111111111111',
-              },
-              {
-                ply: 2,
-                san: 'e5',
-                uci: 'e7e5',
-                fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
-                white_moved: false,
-                clock_seconds: null,
-                position_id: '22222222222222222222222222222222',
-              },
-            ],
-          }),
-        });
-        return;
-      }
-
+    // One read gives the headers (as PGN tags) and the replayed plies with their clocks.
+    await page.route(`**/modular/api/chess/game?id=${GAME_ID}`, async (route) => {
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          object: 'chess.game',
           id: GAME_ID,
-          white_id: '33333333333333333333333333333333',
+          line: null,
+          tags: [
+            { name: 'Event', value: 'Scroll ownership regression' },
+            { name: 'Termination', value: 'Normal' },
+            { name: 'TimeControl', value: '600+0' },
+          ],
           white: 'White player',
-          black_id: '44444444444444444444444444444444',
           black: 'Black player',
           result: '1-0',
-          played_on: '2026.09.02',
+          date: '2026.09.02',
           event: 'Scroll ownership regression',
           eco: 'C20',
-          termination: 'Normal',
-          time_control: '600+0',
-          tc_class: 'rapid',
+          start_fen: START_FEN,
           movetext: Array.from({ length: 200 }, (_, i) => `${i + 1}. e4 e5`).join(' '),
+          complete: true,
+          plies: [
+            {
+              ply: 1,
+              san: 'e4',
+              uci: 'e2e4',
+              fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
+              white_moved: true,
+              position: '11111111111111111111111111111111',
+              clock: '0:09:58.5',
+            },
+            {
+              ply: 2,
+              san: 'e5',
+              uci: 'e7e5',
+              fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
+              white_moved: false,
+              position: '22222222222222222222222222222222',
+              clock: '9:57',
+            },
+          ],
         }),
       });
     });
 
     await page.goto(`/chess/games/${GAME_ID}`);
     await expect(page.getByText('Starting position')).toBeVisible();
+    // Termination and TimeControl are read from the game's tags; players link by name.
+    await expect(page.getByText('600+0', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'White player', exact: true })).toHaveAttribute('href', '/chess/players/White%20player');
+    // Clock strings ("H:MM:SS.f" and "M:SS") are shown as minutes and seconds.
+    await expect(page.getByRole('button', { name: /^e4/ })).toContainText('9:59');
+    await expect(page.getByRole('button', { name: /^e5/ })).toContainText('9:57');
 
     await expect(page.locator('[data-chess-scroll-root]')).toBeVisible();
     // The application shell scrolls the document; that is the scroll position the replay must not reclaim.

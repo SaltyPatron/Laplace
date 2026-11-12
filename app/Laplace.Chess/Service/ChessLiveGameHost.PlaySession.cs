@@ -1,12 +1,8 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using global::Npgsql;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
@@ -14,8 +10,7 @@ public sealed partial class ChessLiveGameHost
 {
     public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session",
         string tenantId = "public", string? userId = null,
-        Hash128? whitePlayerId = null, string? whitePlayerName = null,
-        Hash128? blackPlayerId = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
+        string? whitePlayerName = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
     {
         if (!Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(tenantId))
             throw new ArgumentException($"tenant '{tenantId}' is not a valid identifier", nameof(tenantId));
@@ -25,7 +20,7 @@ public sealed partial class ChessLiveGameHost
         var id = Guid.NewGuid();
         if (requester is not null && (requester.TenantId != tenantId || requester.Subject != userId))
             throw new ArgumentException("Play ownership must match the authenticated requester.");
-        var eventId = ChessVocabulary.PlaySessionHandle(id);
+        var eventId = SessionHandle(id);
         var metadata = new ChessLiveGameMetadata(
             Event: "Laplace Play",
             Site: "Laplace",
@@ -33,22 +28,18 @@ public sealed partial class ChessLiveGameHost
             StartFen: ChessModality.StartFen);
         var session = new PlaySession(
             eventId, learnContext, recordToSubstrate, tenantId, userId,
-            whitePlayerId, whitePlayerName, blackPlayerId, blackPlayerName, requester)
+            whitePlayerName, blackPlayerName, requester)
         {
             Metadata = metadata,
             Operation = requester is null ? null : ChessPlayOperation.Start(id, requester, recordToSubstrate) with
             {
-                Context = new(learnContext,
-                    whitePlayerId is { } white ? Convert.ToHexString(white.ToBytes()) : null, whitePlayerName,
-                    blackPlayerId is { } black ? Convert.ToHexString(black.ToBytes()) : null, blackPlayerName, metadata),
+                Context = new(learnContext, null, whitePlayerName, null, blackPlayerName, metadata),
             },
         };
         session.SaveOperation();
         _playSessions[id] = session;
         if (recordToSubstrate)
-            _ = OpenGameAsync(
-                eventId, learnContext, whitePlayerId, blackPlayerId,
-                whitePlayerName, blackPlayerName, metadata);
+            _ = OpenGameAsync(eventId, whitePlayerName, blackPlayerName, metadata);
         return id;
     }
 
@@ -70,23 +61,14 @@ public sealed partial class ChessLiveGameHost
 
     private void RestorePlayRecording(PlaySession session)
     {
-        var game = new LiveGameSession(session.LearnContext, session.WhitePlayerId, session.BlackPlayerId,
-            session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
+        var game = new LiveGameSession(session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
         var modality = new ChessModality();
         var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen);
         foreach (var uci in session.Moves)
         {
             var move = MoveGen.Legal(state.Board).First(m => m.ToUci() == uci);
             var next = modality.Apply(state, move);
-            var from = modality.StateKey(state);
-            var to = modality.StateKey(next);
-            var recorded = ResolveRecordedPly(from, to, uci,
-                state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId);
-            game.Moves.Add(uci);
-            game.Plies.Add(recorded);
-            game.MoveIds.Add(ChessCompose.MoveId(recorded.MovingPiece, recorded.Move));
-            if (game.PositionIds.Count == 0) game.PositionIds.Add(ChessCompose.PositionId(from));
-            game.PositionIds.Add(ChessCompose.PositionId(to));
+            game.Plies.Add(ResolveRecordedPly(modality.StateKey(state), modality.StateKey(next), uci));
             state = next;
         }
         if (session.Operation is { } operation)
@@ -155,9 +137,9 @@ public sealed partial class ChessLiveGameHost
                 if (session.Operation is not null) RestorePlayRecording(session);
                 SetGameMetadata(session.EventId, new ChessLiveGameMetadata(
                     Termination: adjudicated ? "adjudicated" : "normal"));
-                var playingId = await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
-                if (session.Operation is { } operation && playingId != Hash128.Zero)
-                    session.Operation = operation with { RecordedPlayingId = Convert.ToHexString(playingId.ToBytes()).ToLowerInvariant() };
+                var lineId = await CompleteGameAsync(session.EventId, outcome, adjudicated, ct);
+                if (session.Operation is { } operation && lineId != Hash128.Zero)
+                    session.Operation = operation with { RecordedPlayingId = Convert.ToHexString(lineId.ToBytes()).ToLowerInvariant() };
             }
             session.SaveOperation("completed", !session.RecordToSubstrate ? "disabled"
                 : session.Moves.Count == 0 ? "empty" : "recorded", outcome.ResultToken);
@@ -186,11 +168,10 @@ public sealed partial class ChessLiveGameHost
     }
 
     public async Task RecordPlayPlyAsync(
-        Guid sessionId, int ply, string fromKey, string toKey, string moveToken,
-        Hash128? moverPlayerId, CancellationToken ct = default)
+        Guid sessionId, int ply, string fromKey, string toKey, string moveToken, CancellationToken ct = default)
     {
         if (!_playSessions.TryGetValue(sessionId, out var session) || !session.RecordToSubstrate) return;
-        await RecordPlyAsync(session.EventId, ply, fromKey, toKey, moveToken, moverPlayerId, ct);
+        await RecordPlyAsync(session.EventId, ply, fromKey, toKey, moveToken, ct);
     }
 
     public async Task RecordPlayPlyAnalysisAsync(
@@ -205,7 +186,6 @@ public sealed partial class ChessLiveGameHost
         // A recording started after a reply finishes before its writer and pool close.
         try { await _completions.All(); } catch { /* each failure is already a retryable receipt */ }
         _writeGate.Dispose();
-        await _writer.DisposeAsync();
         await _ds.DisposeAsync();
     }
 
@@ -222,13 +202,53 @@ public sealed partial class ChessLiveGameHost
         return GameOutcome.Draw;
     }
 
-    internal static RecordedPly ResolveRecordedPly(
-        string fromKey, string toKey, string moveToken, Hash128? moverPlayerId)
+    internal static RecordedPly ResolveRecordedPly(string fromKey, string toKey, string moveToken)
     {
-        var (board, moving, move) = ResolveMove(fromKey, toKey, moveToken);
-        return new RecordedPly(fromKey, toKey, move.ToUci(), San.ToSan(board, move),
-            board.WhiteToMove ? 0 : 1, moving, move, moverPlayerId);
+        var (board, _, move) = ResolveMove(fromKey, toKey, moveToken);
+        return new RecordedPly(board.ToFen(), move.ToUci(), San.ToSan(board, move), board.WhiteToMove ? 0 : 1,
+            board, move);
     }
+
+    /// <summary>The game's PGN: the Seven Tag Roster, the tags the game was played under, its moves and clocks.</summary>
+    internal static string Pgn(LiveGameSession session, GameOutcome result, bool adjudicated)
+    {
+        var meta = session.Metadata;
+        string termination = Clean(meta.Termination);
+        if (termination.Length == 0) termination = adjudicated ? "adjudicated" : "normal";
+        var tags = new List<KeyValuePair<string, string>>
+        {
+            new("Event", Tag(meta.Event)),
+            new("Site", Tag(meta.Site)),
+            new("Date", Tag(meta.Date)),
+            new("Round", "-"),
+            new("White", Tag(session.WhitePlayerName)),
+            new("Black", Tag(session.BlackPlayerName)),
+            new("Result", result.ResultToken),
+        };
+        if (meta.WhiteRating is > 0) tags.Add(new("WhiteElo", meta.WhiteRating.Value.ToString(CultureInfo.InvariantCulture)));
+        if (meta.BlackRating is > 0) tags.Add(new("BlackElo", meta.BlackRating.Value.ToString(CultureInfo.InvariantCulture)));
+        if (Clean(meta.TimeControl) is { Length: > 0 } timeControl) tags.Add(new("TimeControl", timeControl));
+        tags.Add(new("Termination", termination));
+        if (Clean(meta.ExternalGameId) is { Length: > 0 } external) tags.Add(new("GameId", external));
+        string startFen = session.Plies[0].FromFen;
+        if (NonStandardStartFen(startFen) is { } setup)
+        {
+            tags.Add(new("SetUp", "1"));
+            tags.Add(new("FEN", setup));
+        }
+        return ChessPgnWriter.Game(tags, session.Plies.Select(static p => p.San).ToArray(), result.ResultToken,
+            startFen, CompleteClockTokens(session));
+    }
+
+    /// <summary>The Engine's id of the game's line [P0, M0, P1, ...], or zero where its rules have none.</summary>
+    private static Hash128 LineId(LiveGameSession session)
+    {
+        var start = session.Plies[0].Before;
+        if (!ChessEngineIdentity.Covers(start)) return Hash128.Zero;
+        return ChessEngineIdentity.LineId(ChessEngineIdentity.Trajectory(start, session.Plies.Select(static p => p.Move)));
+    }
+
+    private static string Tag(string? value) => Clean(value) is { Length: > 0 } clean ? clean : "?";
 
     private static (Board Board, Piece Moving, ChessMove Move) ResolveMove(
         string fromKey, string toKey, string token)
@@ -270,126 +290,6 @@ public sealed partial class ChessLiveGameHost
         return (board, board.MovingPiece(move.Value), move.Value);
     }
 
-    private static void WitnessResult(SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result)
-    {
-        string token = result.ResultToken;
-        if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
-            b.AddAttestation(NativeAttestation.Categorical(
-                lineId, "Result", rid,
-                ChessVocabulary.SourceId, eventId, WitnessWeight));
-    }
-
-    private static void RecordGameMetadata(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 playingId,
-        LiveGameSession session, GameOutcome result, bool adjudicated)
-    {
-        var meta = session.Metadata;
-        string date = Clean(meta.Date);
-        string eventName = Clean(meta.Event);
-        string site = Clean(meta.Site);
-        string termination = Clean(meta.Termination);
-        if (termination.Length == 0) termination = adjudicated ? "adjudicated" : "normal";
-
-        if (eventName.Length > 0)
-        {
-            var eventId = ChessVocabulary.PgnEventId(eventName, site, date);
-            b.AddEntity(eventId, ChessVocabulary.PgnEventFloor(eventName, site, date), ChessVocabulary.EventType);
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                playingId, ChessVocabulary.HasEventType, eventId,
-                ChessVocabulary.SourceId, null, WitnessWeight));
-            AddMeta(b, lineId, ChessVocabulary.HasEventType, eventName, playingId);
-        }
-        AddMeta(b, lineId, ChessVocabulary.OnDateType, date, playingId);
-        AddMeta(b, lineId, ChessVocabulary.HasTerminationType, termination, playingId);
-
-        string tc = Clean(meta.TimeControl);
-        AddMeta(b, lineId, ChessVocabulary.HasTimeControlType, tc, playingId);
-
-        if (session.WhitePlayerId is { } wp && meta.WhiteRating is > 0)
-            AddRating(b, wp, meta.WhiteRating.Value, "WhiteElo", playingId);
-        if (session.BlackPlayerId is { } bp && meta.BlackRating is > 0)
-            AddRating(b, bp, meta.BlackRating.Value, "BlackElo", playingId);
-
-        string? startFen = NonStandardStartFen(meta.StartFen);
-        if (startFen is not null)
-        {
-            try
-            {
-                var positionId = ChessGraph.EmitPosition(b, Board.FromFen(startFen), ChessVocabulary.SourceId);
-                b.AddAttestation(NativeAttestation.CategoricalResolved(
-                    lineId, ChessVocabulary.HasSetupType, positionId,
-                    ChessVocabulary.SourceId, playingId, WitnessWeight));
-            }
-            catch (FormatException failure)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    "CHESS_SETUP_ATTESTATION_SKIPPED game={0}; invalid starting position: {1}", playingId, failure);
-            }
-        }
-
-        if (Clean(meta.ExternalGameId) is { Length: > 0 } external
-            && ContentEmitter.Emit(b, external, ChessVocabulary.SourceId) is { } externalId)
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                playingId, ChessVocabulary.CorrespondsToType, externalId,
-                ChessVocabulary.SourceId, null, WitnessWeight));
-    }
-
-    private static void AddMeta(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 typeId, string value, Hash128 playingId)
-    {
-        if (value.Length == 0) return;
-        if (ContentEmitter.Emit(b, value, ChessVocabulary.SourceId) is { } valueId)
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                lineId, typeId, valueId, ChessVocabulary.SourceId, playingId, WitnessWeight));
-    }
-
-    private static void AddRating(
-        SubstrateChangeBuilder b, Hash128 playerId, int rating, string tag, Hash128 playingId)
-    {
-        if (ContentEmitter.Emit(b, rating.ToString(CultureInfo.InvariantCulture), ChessVocabulary.SourceId) is { } ratingId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                playerId, tag, ratingId,
-                ChessVocabulary.SourceId, playingId, WitnessWeight));
-    }
-
-    private static void RecordLivePlyDetails(
-        SubstrateChangeBuilder b, Hash128 playingId, IReadOnlyList<ChessNode> movePoints,
-        LiveGameSession session, long nowUs)
-    {
-        if (movePoints.Count == 0) return;
-        var missing = ChessGraph.EmitAnnotationMissing(b, ChessVocabulary.SourceId, nowUs);
-        var values = new Hash128[movePoints.Count];
-        bool any = false;
-        for (int i = 0; i < movePoints.Count; i++)
-        {
-            int ply = i + 1;
-            var parts = new List<string>(6);
-            if (session.ClockRemainingMs.TryGetValue(ply, out int clockMs))
-                parts.Add($"clock_ms={clockMs}");
-            if (session.Analysis.TryGetValue(ply, out var a))
-            {
-                if (a.ScoreCpSideToMove is { } cp) parts.Add($"eval_cp_stm={cp}");
-                if (a.Depth > 0) parts.Add($"depth={a.Depth}");
-                if (a.Nodes > 0) parts.Add($"nodes={a.Nodes}");
-                if (a.Pv is { Count: > 0 }) parts.Add("pv=" + string.Join(' ', a.Pv));
-                if (a.Motifs is { Count: > 0 }) parts.Add("motifs=" + string.Join(',', a.Motifs));
-            }
-
-            if (parts.Count == 0)
-            {
-                values[i] = missing.Id;
-                continue;
-            }
-            string token = string.Join(';', parts);
-            values[i] = ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) ?? missing.Id;
-            any = true;
-        }
-        if (any)
-            ChessGraph.AppendPlayingAnnotationTrajectory(
-                b, playingId, values, movePoints,
-                PhysicalityType.ChessAnnotation, ChessVocabulary.SourceId, nowUs);
-    }
-
     private static string?[]? CompleteClockTokens(LiveGameSession session)
     {
         if (session.Plies.Count == 0 || session.ClockRemainingMs.Count < session.Plies.Count)
@@ -424,35 +324,20 @@ public sealed partial class ChessLiveGameHost
         return string.IsNullOrWhiteSpace(value) || value == "?" || value == "-" ? "" : value;
     }
 
-    private sealed class LiveGameSession(
-        string learnContext,
-        Hash128? whitePlayerId,
-        Hash128? blackPlayerId,
+    internal sealed class LiveGameSession(
         string? whitePlayerName,
         string? blackPlayerName,
         ChessLiveGameMetadata metadata)
     {
-        public string LearnContext { get; } = learnContext;
-        public Hash128? WhitePlayerId { get; private set; } = whitePlayerId;
-        public Hash128? BlackPlayerId { get; private set; } = blackPlayerId;
         public string? WhitePlayerName { get; private set; } = whitePlayerName;
         public string? BlackPlayerName { get; private set; } = blackPlayerName;
         public ChessLiveGameMetadata Metadata { get; private set; } = metadata;
-        public List<string> Moves { get; } = new();
         public List<RecordedPly> Plies { get; } = new();
         public Dictionary<int, int> ClockRemainingMs { get; } = new();
         public Dictionary<int, ChessLivePlyAnalysis> Analysis { get; } = new();
-        public List<Hash128> PositionIds { get; } = new();
-        public List<Hash128> MoveIds { get; } = new();
 
-        public void SetPlayers(
-            Hash128? nextWhiteId,
-            string? nextWhiteName,
-            Hash128? nextBlackId,
-            string? nextBlackName)
+        public void SetPlayers(string? nextWhiteName, string? nextBlackName)
         {
-            WhitePlayerId = nextWhiteId ?? WhitePlayerId;
-            BlackPlayerId = nextBlackId ?? BlackPlayerId;
             WhitePlayerName = string.IsNullOrWhiteSpace(nextWhiteName) ? WhitePlayerName : nextWhiteName;
             BlackPlayerName = string.IsNullOrWhiteSpace(nextBlackName) ? BlackPlayerName : nextBlackName;
         }
@@ -480,15 +365,13 @@ public sealed partial class ChessLiveGameHost
     }
 
     internal readonly record struct RecordedPly(
-        string FromKey, string ToKey, string MoveToken, string San, int MoverSide,
-        Piece MovingPiece, ChessMove Move, Hash128? MoverPlayerId);
+        string FromFen, string Uci, string San, int MoverSide, Board Before, ChessMove Move);
 }
 
 public sealed class PlaySession(
     Hash128 eventId, string learnContext, bool recordToSubstrate,
     string tenantId = "public", string? userId = null,
-    Hash128? whitePlayerId = null, string? whitePlayerName = null,
-    Hash128? blackPlayerId = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
+    string? whitePlayerName = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
 {
     public Hash128 EventId { get; } = eventId;
     public string LearnContext { get; } = learnContext;
@@ -499,9 +382,7 @@ public sealed class PlaySession(
     public SemaphoreSlim Gate { get; } = new(1, 1);
     internal ChessPlayOperation? Operation { get; set; }
     internal ChessLiveGameMetadata? Metadata { get; init; }
-    public Hash128? WhitePlayerId { get; } = whitePlayerId;
     public string? WhitePlayerName { get; } = whitePlayerName;
-    public Hash128? BlackPlayerId { get; } = blackPlayerId;
     public string? BlackPlayerName { get; } = blackPlayerName;
     public int PlyCount { get; set; }
     public ChessState? State { get; set; }
