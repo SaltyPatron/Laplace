@@ -229,7 +229,6 @@ SQL_QUERY("generation.adjacency_manifests", "bytea[],int4",
 
 
 
-SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu_fp1e9(),consensus.glicko2_initial_rd_fp1e9()")
 SQL_QUERY("language.code_surfaces", "bytea[]",
     "SELECT public.blake3_send(entity),content FROM public.laplace_labels("
     "ARRAY(SELECT public.blake3_from_bytea(id) FROM unnest($1::bytea[]) u(id) WHERE id IS NOT NULL))")
@@ -253,75 +252,6 @@ SQL_QUERY("content.first_children", "bytea[],bytea[]",
     "UNION SELECT public.blake3_send(c.entity),public.blake3_send(c.child) FROM "
     "public.laplace_constituents(ARRAY(SELECT DISTINCT public.blake3_from_bytea(node) FROM frontier)) c WHERE c.ordinal=1) "
     "SELECT f.root,c.child FROM frontier f JOIN children c ON c.id=f.node WHERE c.child IS NOT NULL")
-SQL_QUERY("chess.search_exact", "text[],bytea,bytea,bytea",
-    "SELECT e.id FROM unnest($1) WITH ORDINALITY q(value,ord) "
-    "JOIN laplace.entities e ON e.id=chess.player_id(q.value) AND e.type_id=$2 "
-    "JOIN laplace.consensus n ON n.subject_id=e.id AND n.witness_count>0 "
-    "WHERE length(q.value)>0 AND ((n.type_id=$3 AND n.object_id=$4) OR "
-    "(n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
-    " AND n.object_id IS NOT NULL)) "
-    "ORDER BY q.ord LIMIT 1")
-SQL_QUERY("chess.search_standings", "bytea[],bytea,bytea,bytea",
-    "SELECT DISTINCT e.id,c.witness_count,c.rating,c.rd FROM laplace.entities e "
-    "LEFT JOIN laplace.consensus c ON c.subject_id=e.id AND c.type_id=$3 AND c.object_id=$4 "
-    "WHERE e.id=ANY($1) AND e.type_id=$2")
-SQL_QUERY("chess.search_named_players", "text[]",
-    "SELECT DISTINCT n.subject_id FROM structural.text_containers($1) t "
-    "JOIN laplace.consensus n ON n.object_id=t.entity_id "
-    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
-    " AND n.witness_count>0")
-SQL_QUERY("chess.search_page", "text[],int4,int4,text,text,bool",
-    "SELECT encode(player_id,'hex'),name,games,rating,rd,eff_mu "
-    "FROM chess.player_search_candidates($1,$2,$3,$4,$5,$6)")
-SQL_QUERY("chess.roster_unrated", "bytea,bytea,bytea,int8",
-    "SELECT DISTINCT e.id FROM laplace.consensus n "
-    "JOIN laplace.entities e ON e.id=n.subject_id AND e.type_id=$1 "
-    "LEFT JOIN laplace.consensus c ON c.subject_id=e.id AND c.type_id=$2 AND c.object_id=$3 "
-    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME'))"
-    " AND n.object_id IS NOT NULL "
-    "AND n.witness_count>0 AND c.id IS NULL ORDER BY e.id LIMIT $4")
-SQL_QUERY("chess.roster_strength_asc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY (c.rating - 2*c.rd) ASC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_strength_desc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY (c.rating - 2*c.rd) DESC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_games_asc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.witness_count ASC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_games_desc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.witness_count DESC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_rating_asc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.rating ASC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_rating_desc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.rating DESC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_rd_asc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.rd ASC,c.subject_id LIMIT $4")
-SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
-    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
-    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
-    "WHERE c.type_id=$2 AND c.object_id=$3 "
-    "ORDER BY c.rd DESC,c.subject_id LIMIT $4")
-
-
 SQL_QUERY("leaders.native_named", "int4[],int4",
     "WITH leaders AS MATERIALIZED (SELECT * FROM ops.claim_leaders($1,$2) WITH ORDINALITY)\nSELECT b.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory\nFROM converse.relation_band_catalog() b LEFT JOIN leaders n ON n.band=b.band\nWHERE b.band=ANY($1) ORDER BY b.band,n.ordinality")
 

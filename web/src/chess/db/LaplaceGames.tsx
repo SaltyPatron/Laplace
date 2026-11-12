@@ -2,29 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel, Table, Td, Th, Select } from '@ui';
 import { StatCard } from '../../explore/components/StatCard';
-import { chessLaplaceGames } from './api';
-import { OutcomeChip } from './RecordBar';
-import type { ChessGameRow, ChessGamesResponse } from './types';
+import { chessLaplaceGames, playerPath } from './api';
+import type { ChessGamesResponse } from './types';
 import { DeepestOpeningCell, useDeepestOpenings } from '../openings/Openings';
 import styles from './ChessDb.module.css';
 
 const PAGE = 200;
-type OutcomeFilter = 'all' | 'win' | 'draw' | 'loss';
-type SideFilter = 'all' | 'white' | 'black';
-
-function outcomeName(game: ChessGameRow): OutcomeFilter {
-  return game.outcome === 2 ? 'win' : game.outcome === 1 ? 'draw' : game.outcome === 0 ? 'loss' : 'all';
-}
+/** The PGN result tokens a game can be filtered by. */
+const RESULTS = ['1-0', '1/2-1/2', '0-1'] as const;
+type ResultFilter = 'all' | typeof RESULTS[number];
 
 export function LaplaceGames() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q')?.trim().toLowerCase() ?? '';
-  const outcome = (['win', 'draw', 'loss'].includes(params.get('outcome') ?? '')
-    ? params.get('outcome')
-    : 'all') as OutcomeFilter;
-  const side = (['white', 'black'].includes(params.get('side') ?? '')
-    ? params.get('side')
-    : 'all') as SideFilter;
+  const result = (RESULTS as readonly string[]).includes(params.get('result') ?? '')
+    ? params.get('result') as ResultFilter
+    : 'all';
   const rawOffset = Number(params.get('offset') ?? 0);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset / PAGE) * PAGE : 0;
 
@@ -44,12 +37,10 @@ export function LaplaceGames() {
   // One batched opening read for the loaded page, not per filter.
   const deepest = useDeepestOpenings(data?.games ?? null);
   const filtered = useMemo(() => (data?.games ?? []).filter((game) => {
-    const matchesText = !query || [game.opponent, game.event, game.eco, game.played_on]
+    const matchesText = !query || [game.white, game.black, game.event, game.eco, game.date]
       .some((value) => value?.toLowerCase().includes(query));
-    const matchesOutcome = outcome === 'all' || outcomeName(game) === outcome;
-    const matchesSide = side === 'all' || (side === 'white') === game.as_white;
-    return matchesText && matchesOutcome && matchesSide;
-  }), [data, query, outcome, side]);
+    return matchesText && (result === 'all' || game.result === result);
+  }), [data, query, result]);
 
   function update(key: string, value: string | null, resetPage = true) {
     const next = new URLSearchParams(params);
@@ -59,9 +50,7 @@ export function LaplaceGames() {
     setParams(next);
   }
 
-  const wins = data?.games.filter((game) => game.outcome === 2).length ?? 0;
-  const draws = data?.games.filter((game) => game.outcome === 1).length ?? 0;
-  const losses = data?.games.filter((game) => game.outcome === 0).length ?? 0;
+  const count = (token: string) => data?.games.filter((game) => game.result === token).length ?? 0;
 
   return (
     <div className={styles.laplaceGames}>
@@ -73,7 +62,7 @@ export function LaplaceGames() {
           <div>
             <h2>Games Laplace played</h2>
             <Muted>
-              A dedicated record of browser and connected-board games attributed to Laplace —
+              The games Laplace itself recorded from the browser and connected boards,
               separate from the imported chess archive.
             </Muted>
           </div>
@@ -82,16 +71,16 @@ export function LaplaceGames() {
       </header>
 
       <div className={styles.statGrid}>
-        <StatCard label="Games in this batch" value={(data?.games.length ?? 0).toLocaleString()} />
-        <StatCard label="Wins" value={wins.toLocaleString()} />
-        <StatCard label="Draws" value={draws.toLocaleString()} />
-        <StatCard label="Losses" value={losses.toLocaleString()} />
+        <StatCard label="Games recorded" value={(data?.total ?? 0).toLocaleString()} />
+        <StatCard label="White wins in this batch" value={count('1-0').toLocaleString()} />
+        <StatCard label="Draws in this batch" value={count('1/2-1/2').toLocaleString()} />
+        <StatCard label="Black wins in this batch" value={count('0-1').toLocaleString()} />
       </div>
 
       <Panel title="Filter this game batch">
         <div className={styles.gameFilters}>
           <label className={styles.filterField}>
-            <span>Opponent, event, ECO, or date</span>
+            <span>Player, event, ECO, or date</span>
             <Input
               value={params.get('q') ?? ''}
               onChange={(event) => update('q', event.target.value || null)}
@@ -99,20 +88,12 @@ export function LaplaceGames() {
             />
           </label>
           <label className={styles.filterField}>
-            <span>Outcome</span>
-            <Select value={outcome} onChange={(event) => update('outcome', event.target.value === 'all' ? null : event.target.value)}>
-              <option value="all">All outcomes</option>
-              <option value="win">Wins</option>
-              <option value="draw">Draws</option>
-              <option value="loss">Losses</option>
-            </Select>
-          </label>
-          <label className={styles.filterField}>
-            <span>Side</span>
-            <Select value={side} onChange={(event) => update('side', event.target.value === 'all' ? null : event.target.value)}>
-              <option value="all">Either side</option>
-              <option value="white">White</option>
-              <option value="black">Black</option>
+            <span>Result</span>
+            <Select value={result} onChange={(event) => update('result', event.target.value === 'all' ? null : event.target.value)}>
+              <option value="all">All results</option>
+              <option value="1-0">White won (1-0)</option>
+              <option value="1/2-1/2">Draw (1/2-1/2)</option>
+              <option value="0-1">Black won (0-1)</option>
             </Select>
           </label>
         </div>
@@ -123,7 +104,7 @@ export function LaplaceGames() {
         {!error && data === null ? <LoadingText>Reading Laplace’s games…</LoadingText> : null}
         {data && data.games.length === 0 ? (
           <div className={styles.emptyResult}>
-            <strong>No attributed Laplace games are recorded in this batch yet.</strong>
+            <strong>No Laplace games are recorded in this batch yet.</strong>
             <Muted>New completed browser and Lichess games will appear here when recording is enabled.</Muted>
           </div>
         ) : null}
@@ -138,9 +119,9 @@ export function LaplaceGames() {
             <thead>
               <tr>
                 <Th>Date</Th>
-                <Th>Side</Th>
-                <Th>Opponent</Th>
-                <Th>Outcome</Th>
+                <Th>White</Th>
+                <Th>Black</Th>
+                <Th>Result</Th>
                 <Th>Event</Th>
                 <Th>ECO</Th>
                 <Th title="The deepest named opening this game follows, read from the substrate">Opening</Th>
@@ -149,14 +130,10 @@ export function LaplaceGames() {
             <tbody>
               {filtered.map((game) => (
                 <tr key={game.id}>
-                  <Td><Link className={styles.playerLink} to={`/chess/games/${game.id}`}>{game.played_on ?? 'undated'}</Link></Td>
-                  <Td>{game.as_white ? 'White' : 'Black'}</Td>
-                  <Td>
-                    {game.opponent_id
-                      ? <Link className={styles.playerLink} to={`/chess/players/${game.opponent_id}`}>{game.opponent}</Link>
-                      : game.opponent || 'Unknown'}
-                  </Td>
-                  <Td><OutcomeChip outcome={game.outcome} /></Td>
+                  <Td><Link className={styles.playerLink} to={`/chess/games/${game.id}`}>{game.date ?? 'undated'}</Link></Td>
+                  <Td><PlayerName name={game.white} /></Td>
+                  <Td><PlayerName name={game.black} /></Td>
+                  <Td><span className={styles.resultToken}>{game.result ?? '—'}</span></Td>
                   <Td>{game.event ?? '—'}</Td>
                   <Td>{game.eco ?? '—'}</Td>
                   <Td><DeepestOpeningCell id={game.id} openings={deepest} /></Td>
@@ -168,11 +145,11 @@ export function LaplaceGames() {
 
         {data && data.games.length > 0 ? (
           <div className={styles.pager}>
-            <Button variant="ghost" disabled={offset === 0} onClick={() => update('offset', String(Math.max(0, offset - PAGE)), false)}>
+            <Button variant="ghost" disabled={offset === 0} onClick={() => update('offset', offset > PAGE ? String(offset - PAGE) : null, false)}>
               ‹ Newer
             </Button>
-            <Muted>{offset + 1}–{offset + data.games.length}</Muted>
-            <Button variant="ghost" disabled={data.games.length < PAGE} onClick={() => update('offset', String(offset + PAGE), false)}>
+            <Muted>{offset + 1}–{offset + data.games.length} of {data.total.toLocaleString()}</Muted>
+            <Button variant="ghost" disabled={offset + data.games.length >= data.total} onClick={() => update('offset', String(offset + PAGE), false)}>
               Older ›
             </Button>
           </div>
@@ -180,4 +157,10 @@ export function LaplaceGames() {
       </Panel>
     </div>
   );
+}
+
+/** A player as the game's tag writes the name, linked to that name's page. */
+function PlayerName({ name }: { name: string | null }) {
+  if (!name) return <>Unknown</>;
+  return <Link className={styles.playerLink} to={playerPath(name)}>{name}</Link>;
 }

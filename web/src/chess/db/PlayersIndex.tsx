@@ -11,37 +11,28 @@ import {
   Table,
   Td,
   Th,
-  ToggleButton,
-  UnstyledButton,
 } from '@ui';
-import { chessPlayers } from './api';
-import type { ChessPlayersResponse } from './types';
+import { chessPlayers, playerPath } from './api';
+import type { ChessPlayerRow, ChessPlayersResponse } from './types';
 import styles from './ChessDb.module.css';
 
 const PAGE = 50;
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-const SORTS = ['relevance', 'strength', 'games', 'rating', 'rd'] as const;
-type PlayerSort = typeof SORTS[number];
-type SortDirection = 'asc' | 'desc';
 
 function safeOffset(raw: string | null): number {
   const value = Number(raw ?? 0);
   return Number.isFinite(value) && value > 0 ? Math.floor(value / PAGE) * PAGE : 0;
 }
 
-function safeSort(raw: string | null, searching: boolean): PlayerSort {
-  if (SORTS.includes(raw as PlayerSort)) return raw as PlayerSort;
-  return searching ? 'relevance' : 'strength';
+/** A game count; one that hit the read's cap is shown as "N+". */
+function gamesText(player: ChessPlayerRow): string {
+  return `${player.games.toLocaleString()}${player.games_complete ? '' : '+'}`;
 }
 
-/** A URL-addressable player browser: query, initial, order, direction and page all survive refresh/back. */
+/** A URL-addressable player search: the query and the page survive refresh/back. */
 export function PlayersIndex() {
   const [params, setParams] = useSearchParams();
   const search = params.get('q')?.trim() ?? '';
-  const initial = params.get('initial')?.toUpperCase().slice(0, 1) ?? '';
   const offset = safeOffset(params.get('offset'));
-  const sort = safeSort(params.get('sort'), !!search);
-  const direction: SortDirection = params.get('direction') === 'asc' ? 'asc' : 'desc';
 
   const [draft, setDraft] = useState(search);
   const [data, setData] = useState<ChessPlayersResponse | null>(null);
@@ -53,65 +44,30 @@ export function PlayersIndex() {
     let stale = false;
     setData(null);
     setErr(null);
-    chessPlayers({
-      limit: PAGE,
-      offset,
-      search: search || undefined,
-      initial: initial || undefined,
-      sort,
-      direction,
-    })
+    // The player read needs a search; without one the page only prompts for it.
+    if (!search) return () => { stale = true; };
+    chessPlayers({ search, limit: PAGE, offset })
       .then((next) => { if (!stale) setData(next); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { stale = true; };
-  }, [search, initial, offset, sort, direction]);
+  }, [search, offset]);
 
-  function updateParams(
-    updates: Record<string, string | null>,
-    { resetPage = true }: { resetPage?: boolean } = {},
-  ) {
+  function updateParams(updates: Record<string, string | null>) {
     const next = new URLSearchParams(params);
     for (const [key, value] of Object.entries(updates)) {
       if (value) next.set(key, value);
       else next.delete(key);
     }
-    if (resetPage) next.delete('offset');
     setParams(next);
   }
 
   function submit() {
-    const query = draft.trim();
-    updateParams({ q: query || null, initial: null });
-  }
-
-  function chooseInitial(letter: string) {
-    updateParams({ initial: initial === letter ? null : letter, q: null });
-    setDraft('');
-  }
-
-  function chooseSort(nextSort: PlayerSort) {
-    if (nextSort === 'relevance') {
-      updateParams({ sort: 'relevance', direction: 'desc' });
-      return;
-    }
-    const nextDirection: SortDirection = sort === nextSort
-      ? (direction === 'desc' ? 'asc' : 'desc')
-      : nextSort === 'rd' ? 'asc' : 'desc';
-    updateParams({ sort: nextSort, direction: nextDirection });
+    updateParams({ q: draft.trim() || null, offset: null });
   }
 
   function movePage(nextOffset: number) {
-    updateParams(
-      { offset: nextOffset > 0 ? String(nextOffset) : null },
-      { resetPage: false },
-    );
+    updateParams({ offset: nextOffset > 0 ? String(nextOffset) : null });
   }
-
-  const title = search
-    ? `Player matches for “${search}”`
-    : initial
-      ? `Players beginning with ${initial}`
-      : 'Player standings';
 
   return (
     <Stack gap={4}>
@@ -120,8 +76,8 @@ export function PlayersIndex() {
           <div>
             <h2>Player database</h2>
             <Muted>
-              Search by surname, full name, or a close spelling. Browse by initial when you
-              do not know the exact source spelling.
+              Search by a name as the games write it, or by one word of it: a surname
+              finds every name that contains it.
             </Muted>
           </div>
           <Link className={styles.laplaceGamesLink} to="/chess/laplace">
@@ -134,157 +90,99 @@ export function PlayersIndex() {
           value={draft}
           onChange={setDraft}
           onSubmit={submit}
-          placeholder="Karpov, Fischer, Mikhail Tal…"
+          placeholder="Carlsen, Fischer, Tal, Mikhail…"
           ariaLabel="Find a chess player"
           submitLabel="Search players"
           submitDisabled={!draft.trim()}
         >
-          {search || initial ? (
+          {search ? (
             <Button
               variant="ghost"
               type="button"
               onClick={() => {
                 setDraft('');
-                updateParams({ q: null, initial: null });
+                updateParams({ q: null, offset: null });
               }}
             >
               Clear
             </Button>
           ) : null}
         </LookupRow>
-
-        <nav className={styles.alphabet} aria-label="Browse players by first letter">
-          {ALPHABET.map((letter) => (
-            <ToggleButton
-              key={letter}
-              pressed={initial === letter}
-              data-active={initial === letter}
-              className={styles.letter}
-              onClick={() => chooseInitial(letter)}
-            >
-              {letter}
-            </ToggleButton>
-          ))}
-        </nav>
       </header>
 
-      <Panel title={title}>
-        <div className={styles.resultToolbar}>
-          <Muted aria-live="polite">
-            {data
-              ? search
-                ? `${data.total.toLocaleString()} matching player${data.total === 1 ? '' : 's'}`
-                : `Showing ${offset + 1}–${offset + data.players.length}`
-              : 'Reading player index…'}
-          </Muted>
-          {search ? (
-            <Button
-              size="sm"
-              variant="nav"
-              active={sort === 'relevance'}
-              onClick={() => chooseSort('relevance')}
-            >
-              Best match {sort === 'relevance' ? (direction === 'asc' ? '↑' : '↓') : ''}
-            </Button>
-          ) : null}
-        </div>
-
-        {err ? <ErrorText role="alert">Could not read players: {err}</ErrorText> : null}
-        {!err && data === null ? <LoadingText>Searching witnessed careers…</LoadingText> : null}
-        {data && data.players.length === 0 ? (
+      {!search ? (
+        <Panel title="Find a player">
           <div className={styles.emptyResult}>
-            <strong>
-              {search || initial
-                ? `No witnessed player matched “${search || initial}”.`
-                : 'No chess careers have been witnessed yet.'}
-            </strong>
-            {search || initial
-              ? <Muted>Try a surname, a nearby spelling, or choose a first letter.</Muted>
-              : <Muted>Ingest a PGN or finish a recorded game to populate this index.</Muted>}
+            <strong>Search for a player to see their recorded games.</strong>
+            <Muted>
+              Players are listed by the names their games were recorded under; there is no
+              roster to browse without a search.
+            </Muted>
           </div>
-        ) : null}
+        </Panel>
+      ) : (
+        <Panel title={`Player matches for “${search}”`}>
+          <div className={styles.resultToolbar}>
+            <Muted aria-live="polite">
+              {data
+                ? `${data.total.toLocaleString()} matching player${data.total === 1 ? '' : 's'}`
+                : err ? '' : 'Reading player index…'}
+            </Muted>
+          </div>
 
-        {data && data.players.length > 0 ? (
-          <>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>#</Th>
-                  <Th>Player</Th>
-                  <SortableHead label="Games" value="games" active={sort} direction={direction} onSort={chooseSort} />
-                  <SortableHead label="Conservative" value="strength" active={sort} direction={direction} onSort={chooseSort} />
-                  <SortableHead label="Laplace Glicko-2" value="rating" active={sort} direction={direction} onSort={chooseSort} />
-                  <SortableHead label="±RD" value="rd" active={sort} direction={direction} onSort={chooseSort} />
-                </tr>
-              </thead>
-              <tbody>
-                {data.players.map((player) => (
-                  <tr key={player.id}>
-                    {/* No recorded games is no standing: the server lists these after every
-                        rated player, and the table says so instead of printing the neutral prior. */}
-                    <Td>{player.games > 0 && player.rank ? player.rank : '—'}</Td>
-                    <Td>
-                      <Link className={styles.playerLink} to={`/chess/players/${player.id}`}>
-                        {player.name}
-                      </Link>
-                    </Td>
-                    <Td>{player.games.toLocaleString()}</Td>
-                    {player.games > 0 ? (
-                      <>
-                        <Td title="rating − 2·RD">{player.eff_mu.toFixed(0)}</Td>
-                        <Td>{player.rating.toFixed(0)}</Td>
-                        <Td>±{player.rd.toFixed(0)}</Td>
-                      </>
-                    ) : (
-                      <Td colSpan={3}><Muted>Unrated (no recorded games)</Muted></Td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-
-            <div className={styles.pager}>
-              <Button variant="ghost" disabled={offset <= 0} onClick={() => movePage(offset - PAGE)}>
-                ‹ Previous
-              </Button>
-              <Muted>Page {Math.floor(offset / PAGE) + 1}</Muted>
-              <Button
-                variant="ghost"
-                disabled={data.players.length < PAGE || (!!search && offset + data.players.length >= data.total)}
-                onClick={() => movePage(offset + PAGE)}
-              >
-                Next ›
-              </Button>
+          {err ? <ErrorText role="alert">Could not read players: {err}</ErrorText> : null}
+          {!err && data === null ? <LoadingText>Searching recorded games…</LoadingText> : null}
+          {data && data.players.length === 0 ? (
+            <div className={styles.emptyResult}>
+              <strong>No recorded player matched “{search}”.</strong>
+              <Muted>Try the surname alone, or the name exactly as a game writes it.</Muted>
             </div>
-          </>
-        ) : null}
-      </Panel>
-    </Stack>
-  );
-}
+          ) : null}
 
-function SortableHead({
-  label,
-  value,
-  active,
-  direction,
-  onSort,
-}: {
-  label: string;
-  value: Exclude<PlayerSort, 'relevance'>;
-  active: PlayerSort;
-  direction: SortDirection;
-  onSort: (sort: PlayerSort) => void;
-}) {
-  const selected = active === value;
-  return (
-    <Th aria-sort={selected ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <UnstyledButton className={styles.sortButton} onClick={() => onSort(value)}>
-        {label}
-        <span className={styles.sortMark} aria-hidden="true">
-          {selected ? (direction === 'asc' ? '↑' : '↓') : '↕'}
-        </span>
-      </UnstyledButton>
-    </Th>
+          {data && data.players.length > 0 ? (
+            <>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Player</Th>
+                    <Th>Games</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.players.map((player) => (
+                    <tr key={player.name}>
+                      <Td>
+                        <Link className={styles.playerLink} to={playerPath(player.name)}>
+                          {player.name}
+                        </Link>
+                      </Td>
+                      <Td title={player.games_complete ? undefined : 'at least this many games'}>
+                        {gamesText(player)}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <div className={styles.pager}>
+                <Button variant="ghost" disabled={offset <= 0} onClick={() => movePage(offset - PAGE)}>
+                  ‹ Previous
+                </Button>
+                <Muted>
+                  {offset + 1}–{offset + data.players.length} of {data.total.toLocaleString()}
+                </Muted>
+                <Button
+                  variant="ghost"
+                  disabled={offset + data.players.length >= data.total}
+                  onClick={() => movePage(offset + PAGE)}
+                >
+                  Next ›
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </Panel>
+      )}
+    </Stack>
   );
 }

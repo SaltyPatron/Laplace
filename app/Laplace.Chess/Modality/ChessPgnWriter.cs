@@ -55,4 +55,37 @@ public static class ChessPgnWriter
                 game.Moves, game.Outcome, game.StartFen,
                 game.White, game.Black, @event));
     }
+
+    /// <summary>
+    /// A game as PGN (the PGN standard's export format): the tag pairs in the order given (the Seven Tag
+    /// Roster first, as the caller orders them), then the movetext, each move's SAN numbered from the start
+    /// position's move number and side, with the mover's remaining clock as a <c>[%clk h:mm:ss]</c> comment
+    /// where one is given, and the result.
+    /// </summary>
+    public static string Game(
+        IReadOnlyList<KeyValuePair<string, string>> tags, IReadOnlyList<string> sans, string result,
+        string startFen = ChessModality.StartFen, IReadOnlyList<string?>? clocks = null)
+    {
+        var sb = new StringBuilder();
+        foreach (var (name, value) in tags)
+            sb.Append('[').Append(name).Append(" \"").Append(value.Replace("\\", "\\\\").Replace("\"", "\\\""))
+              .Append("\"]\n");
+        sb.Append('\n');
+        var board = new ChessModality().FromFen(startFen).Board;
+        int fullmove = board.FullmoveNumber;
+        bool whiteToMove = board.WhiteToMove, first = true;
+        for (int i = 0; i < sans.Count; i++)
+        {
+            if (whiteToMove) sb.Append(fullmove).Append(". ");
+            else if (first) sb.Append(fullmove).Append("... ");
+            sb.Append(sans[i]).Append(' ');
+            if (clocks is not null && i < clocks.Count && clocks[i] is { Length: > 0 } clock)
+                sb.Append("{[%clk ").Append(clock).Append("]} ");
+            if (!whiteToMove) fullmove++;
+            whiteToMove = !whiteToMove;
+            first = false;
+        }
+        sb.Append(result).Append("\n\n");
+        return sb.ToString();
+    }
 }

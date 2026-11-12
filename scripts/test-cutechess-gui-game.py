@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("gui_game", ROOT / "scripts/check-cutechess-gui-game.py")
 OWNER = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(OWNER)
-PROVIDER = ("info string providers root=1/0 position=20/0(atoms:0) "
+PROVIDER = ("info string providers root=1/0 syzygy=0/0(0-men) "
             "root-work-scope=provider-instance-deltas")
 MOVES = ["f2f3", "e7e5", "g2g4", "d8h4"]
 

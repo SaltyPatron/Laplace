@@ -15,17 +15,6 @@ public sealed class IngestRosterParityTests
         new(StringComparer.OrdinalIgnoreCase)
         {
             "chess",
-            "chess-analyze",
-            "chess-books",
-            "chess-eval",
-            "chess-move-outcomes",
-            "chess-opening-match",
-            "chess-player-context-outcomes",
-            "chess-position-outcomes",
-            "chess-syzygy",
-            "chess-tactic-outcomes",
-            "chess-transitions",
-            "chess-trajectory",
             "code",
             "frame-video",
             "model",
@@ -109,26 +98,6 @@ public sealed class IngestRosterParityTests
         }
         // A same-format route is not evidence that another corpus is implemented.
         // Native recipe dispatch acceptance is checked separately from this path contract.
-    }
-
-    [Fact]
-    public void ShellWrapper_ExposesChessTacticOutcomeRoute()
-    {
-        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "scripts", "ingest-source.sh"));
-        // The shell groups source keys and forwards the selected key through the
-        // shared ingest function; a separate chess-specific invocation is not required.
-        var branches = Regex.Matches(script,
-            @"(?m)^\s*(?<routes>[a-z0-9|-]+)\)\s*\n(?<body>[\s\S]*?)^\s*;;");
-        var branch = Assert.Single(branches.Cast<Match>(), match =>
-            match.Groups["routes"].Value.Split('|').Contains("chess-tactic-outcomes", StringComparer.Ordinal));
-        var body = branch.Groups["body"].Value;
-        Assert.Contains("require_cli", body, StringComparison.Ordinal);
-        Assert.Contains("ingest \"$source\"", body, StringComparison.Ordinal);
-        Assert.True(body.IndexOf("require_cli", StringComparison.Ordinal)
-            < body.IndexOf("ingest \"$source\"", StringComparison.Ordinal),
-            "the generic route must require the prepared runtime before invoking ingest");
-        Assert.Contains("local -a ingest_args=(\"$@\")", script, StringComparison.Ordinal);
-        Assert.Contains("dotnet \"$DLL\" ingest \"${ingest_args[@]}\"", script, StringComparison.Ordinal);
     }
 
     [Theory]

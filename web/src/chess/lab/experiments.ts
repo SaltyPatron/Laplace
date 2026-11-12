@@ -26,8 +26,8 @@ export const LAB_CATEGORIES: { id: LabCategory; label: string; blurb: string }[]
   },
   {
     id: 'import',
-    label: 'Import profiles & games',
-    blurb: 'Find and import FIDE, Chess.com, and Lichess identities; games are optional.',
+    label: 'Profiles & games',
+    blurb: 'Look up FIDE, Chess.com, and Lichess profiles and ingest player games.',
   },
 ];
 
@@ -77,24 +77,6 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     recordsLive: false,
   },
   {
-    kind: 'learned-pst',
-    title: 'Learned PST grid',
-    tagline: 'Provider inspection: the same learned residual consumed by substrate-enabled Search.',
-    description:
-      'MOVE-SELECTION PARTICIPATION: YES when the learned table has non-zero cells and substrate play is enabled. This job itself is read-only: it displays the data-driven piece-square residual folded from move OUTCOME consensus. Search consumes that residual as a distinct leaf-evaluation plane; the UCI provider receipt reports actual reads and non-zero contributions.',
-    expect: [
-      'Table of top squares by deviation for each piece type',
-      'Coverage percentage per piece',
-      'This view performs no training; it inspects a provider that the playing path consumes separately',
-    ],
-    tips: [
-      'A populated grid proves learned state exists; only search receipts prove that a particular move search actually consumed and was changed by it.',
-      'Positive deviation = good for the side to move from that square.',
-    ],
-    category: 'substrate',
-    recordsLive: false,
-  },
-  {
     kind: 'tactics',
     title: 'Tactics solve rate',
     tagline: 'Classical mate-finding diagnostic — separate from learned tactical-pattern evidence.',
@@ -133,10 +115,10 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     title: 'Ingest player games',
     tagline: 'Training/input acquisition — affects play only after evidence is folded into a selected provider.',
     description:
-      'MOVE-SELECTION PARTICIPATION: INDIRECT. This job streams a player archive, records/analyzes novel games, attributes them to the provider username, and imports identity/profile links. The importer never picks a move. Its data can affect later play only through providers Search actually selects (for example global transitions, learned move/PST evidence, learned tactical outcomes, and future player-conditioned providers).',
+      'MOVE-SELECTION PARTICIPATION: INDIRECT. This job streams a player archive and records its novel games. The importer never picks a move. Its data can affect later play only through providers Search actually selects (for example global transitions, learned move/PST evidence, learned tactical outcomes, and future player-conditioned providers).',
     expect: [
       'games_fetched count',
-      'games_ingested and profiles_ingested counts',
+      'games_ingested count',
       'games.pgn artifact with download link',
     ],
     tips: [
@@ -151,50 +133,50 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     title: 'Find FIDE identity',
     tagline: 'Identity lookup only — never a move-selection provider.',
     description:
-      'MOVE-SELECTION PARTICIPATION: NO. Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation. Selecting/importing an identity can support future player-conditioned evidence, but this lookup does not alter Search.',
-    expect: ['Ranked candidate table with official FIDE IDs', 'One-click profile import without downloading games'],
-    tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”, then import the selected official profile.'],
+      'MOVE-SELECTION PARTICIPATION: NO. Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation. This lookup does not alter Search.',
+    expect: ['Ranked candidate table with official FIDE IDs'],
+    tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”.'],
     category: 'import',
     recordsLive: false,
   },
   {
     kind: 'fide-profile',
-    title: 'Import one FIDE profile',
-    tagline: 'Profile evidence input — not automatically a playing-policy input.',
-    description: 'MOVE-SELECTION PARTICIPATION: INDIRECT. Loads one official identity and published rating planes into Laplace. The profile is durable evidence, but it affects move choice only when a selected player/opponent-conditioned provider consumes it; import success alone is not proof of use.',
-    expect: ['One durable Chess_Player profile', 'Standard, rapid, and blitz source ratings where published'],
-    tips: ['Usually use the Import profile button on a FIDE search result.'],
+    title: 'Fetch one FIDE profile',
+    tagline: 'Profile lookup only: never a move-selection provider.',
+    description: 'MOVE-SELECTION PARTICIPATION: NO. Fetches one official FIDE identity and its published ratings. The profile is shown in the run; nothing is written to Laplace.',
+    expect: ['Official profile table', 'Standard, rapid, and blitz source ratings where published'],
+    tips: ['Use Find FIDE identity first when you do not know the FIDE ID.'],
     category: 'import',
-    recordsLive: true,
+    recordsLive: false,
   },
   {
     kind: 'player-profile',
-    title: 'Associate player identities',
-    tagline: 'Identity/provenance input — not a live move selector.',
+    title: 'Fetch player profiles',
+    tagline: 'Profile lookup only: not a live move selector.',
     description:
-      'MOVE-SELECTION PARTICIPATION: INDIRECT. Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile, then writes metadata and the explicit identity link. This makes player-conditioned evidence possible; it does not itself change candidate scores.',
-    expect: ['Provider and official profile table', 'Downloadable profile JSON', 'identity_links receipt or FIDE candidates'],
-    tips: ['Use Find FIDE identity when several people share the same name; only an explicitly selected FIDE ID is associated.'],
+      'MOVE-SELECTION PARTICIPATION: NO. Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile. The profiles are shown in the run; nothing is written to Laplace.',
+    expect: ['Provider and official profile table', 'Downloadable profile JSON'],
+    tips: ['Use Find FIDE identity when several people share the same name.'],
     category: 'import',
     recordsLive: false,
   },
   {
     kind: 'fide-roster',
-    title: 'Ingest FIDE top players',
-    tagline: 'Cohort/profile input — not automatically part of live Search.',
+    title: 'Fetch FIDE top players',
+    tagline: 'Cohort lookup only: not part of live Search.',
     description:
-      'MOVE-SELECTION PARTICIPATION: INDIRECT. Reads an official FIDE ranking cohort, fetches selected profiles, and writes them as substrate evidence. The job expands player/rating content; move selection changes only when a selected context provider actually consumes that evidence.',
-    expect: ['Official ranked player table', 'Profile acquisition progress', 'profiles_ingested receipt'],
+      'MOVE-SELECTION PARTICIPATION: NO. Reads an official FIDE ranking cohort and fetches the selected profiles. The cohort is shown in the run; nothing is written to Laplace.',
+    expect: ['Official ranked player table', 'Profile acquisition progress'],
     tips: ['Start with 25 to inspect the cohort; the official pages currently publish up to 100 per list.'],
     category: 'import',
-    recordsLive: true,
+    recordsLive: false,
   },
 ];
 
 const byKind = new Map(LAB_EXPERIMENTS.map((e) => [e.kind, e]));
 
 /**
- * Job records carry the server enum name ("SubstrateTest", "LearnedPst"); the catalog and
+ * Job records carry the server enum name ("SubstrateTest", "LichessFetch"); the catalog and
  * every start request use the kebab form. Maps either spelling to the kebab form.
  */
 export function normalizeKind(kind: string): string {

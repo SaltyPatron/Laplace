@@ -351,7 +351,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
               {experimentFor(active.kind)?.recordsLive ? (
                 <Muted>Games were recorded to substrate during the run. PGN is for archival.</Muted>
               ) : active.kind.toLowerCase().replaceAll('-', '') === 'lichessfetch' && active.summary.message?.includes('new games') ? (
-                <Muted>Games and player profiles were ingested during this run. PGN is retained as the source artifact.</Muted>
+                <Muted>Games were ingested during this run. PGN is retained as the source artifact.</Muted>
               ) : (
                 <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest PGN to substrate</Button>
               )}

@@ -48,12 +48,12 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
     }
 
     [Fact]
-    public async Task ChessSearchBindsTextArrayAndBooleanThroughTheNativeCatalog()
+    public async Task ChessTransitionStandingsBindAnIdArrayThroughTheNativeCatalog()
     {
-        var rows = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
-            pg.DataSource, ["catalog-no-such-player"], 1, CancellationToken.None,
-            offset: 0, sort: "games", direction: "asc", exactOnly: true);
-        Assert.Empty(rows);
+        // A [position, move, position] claim no recorded game attested has no standing.
+        var claim = Hash128.Blake3("catalog-no-such-transition"u8);
+        Assert.Empty(await NpgsqlChessTransitionStandings.ReadAsync(pg.DataSource, [claim], CancellationToken.None));
+        Assert.Empty(NpgsqlChessTransitionStandings.Read(pg.DataSource, [claim]));
     }
 
     [Theory]

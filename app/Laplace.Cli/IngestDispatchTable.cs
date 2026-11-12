@@ -57,83 +57,10 @@ internal static class IngestDispatchTable
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
         ("model-corroborate", cli => IngestCommands.CorroborateSafetensorSnapshotsAsync(cli)),
 
-        // `chess` records games and derives the calculated layer in one Compose pass over
-        // the in-memory parse.
-        ("chess", IngestChessRecordAndAnalyzeAsync),
-
-        ("chess-analyze", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessAnalyzeDecomposer(cli.AnalyzeDepth), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Deposits the game trajectory physicality onto recorded games. A separate lane, not
-        // a ChessAnalyze.Version bump: consensus merge accumulates, so re-deriving analysis
-        // would double every observation_count. A physicality upserts, so re-running is safe.
-        ("chess-trajectory", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessTrajectoryDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Transition testimony over recorded games. Separate from ChessAnalysis because
-        // bumping its marker would double every standing calculated observation count.
-        ("chess-transitions", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessTransitionsDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Move-outcome fold over recorded games: each witnessed line's result is deposited as
-        // aggregated OUTCOME testimony on its MOVE entities, so the outcome table is a
-        // consensus read, not a read-time fold. Marker-gated per line.
-        ("chess-move-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessMoveOutcomesDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Reusable board-constituent outcome fold. Search loads this bounded atom census once
-        // and evaluates it throughout the tree; no per-node database reads.
-        ("chess-position-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessPositionOutcomesDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Color-normalized fork/pin/skewer outcomes over recorded games. The fused analyzer
-        // writes these for newly analysed games; this marker-gated lane covers games analysed
-        // without them, without bumping ChessAnalyze.Version. Search reads the resulting
-        // bounded pattern census at leaf evaluation.
-        ("chess-tactic-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessTacticOutcomesDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Player-context fold. One playing contributes once per player/phase/think class, so a
-        // long game gains no extra weight by lasting longer. Separately marker-gated; it never
-        // bumps ChessAnalyze.Version or replays its testimony.
-        ("chess-player-context-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessPlayerContextOutcomesDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Stockfish evaluation over recorded games as calculated testimony. --depth N sets the
-        // per-position search depth (default 10); --nodes N caps nodes instead. A run-level memo
-        // searches each content-addressed position once however many games share it.
-        ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
-                cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
-                cli.AnalyzeNodes), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Syzygy tablebases: path = packaging dir (.rtbw/.rtbz), unpacked via the Fathom codec
-        // into position/move/position material trajectories. An empty path resolves to
-        // ChessLabPaths.SyzygyDir; a missing dir admits nothing.
-        ("chess-syzygy", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessSyzygyDecomposer(), cli.Path ?? "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // Names each recorded line's opening by board identity: the deepest position equal to
-        // one the ChessOpenings catalog named. A witness beside the PGN header and the
-        // analyzer's SAN-prefix reading; marker-gated. No path: it reads admitted structure.
-        ("chess-opening-match", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessOpeningMatchDecomposer(), "",
-            skipLayerCheck: true, cli, skipSourceCompletion: true)),
-
-        // The book decomposer records and derives per record in one Compose over the
-        // in-memory parse, stamping ANALYZED_AT itself.
-        ("chess-books", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessBookDecomposer(cli.Recursive), cli.Path ?? "",
-            skipLayerCheck: true, cli)),
+        // PGN files of no corpus of the estate: the Engine reads each as games (recipes/pgn.recipe),
+        // the file's trunk its witness. A corpus (twic, lumbras-gigabase, chess-com, openings, syzygy,
+        // laplace-chess) is a canonical source and dispatches by its name.
+        ("chess", cli => IngestCommands.IngestNativeFilesAsync("chess", cli)),
     ];
 
     // Declaration order matters: static initializers run top to bottom, so Routes must
@@ -152,14 +79,6 @@ internal static class IngestDispatchTable
         return routes;
     }
 
-
-    // Records and derives the calculated layer in one Compose pass (ChessPgnDecomposer ->
-    // DeriveFromParsed over the in-memory parse). `--no-analyze` records game grain only and
-    // leaves derivation to a later `chess-analyze` run.
-    private static Task<int> IngestChessRecordAndAnalyzeAsync(IngestCommands.IngestCliArgs cli)
-        => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessPgnDecomposer(cli.Recursive, analyzeInline: !cli.NoAnalyze),
-            cli.Path ?? "", skipLayerCheck: true, cli, skipSourceCompletion: true);
 
     // Inspect the same inventory without invoking a handler. Chain preflight must
     // validate every source before any handler can open a database or publish.

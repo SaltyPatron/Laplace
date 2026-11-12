@@ -120,12 +120,6 @@ SQL_QUERY("ingest.physicality_descriptor_provider_payload", "bytea[]",
     "public.ST_AsBinary(p.trajectory,'NDR'),p.n_constituents,p.alignment_residual,"
     "p.source_dim,p.observed_at FROM laplace.physicalities p WHERE p.id=ANY($1)")
 
-SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
-    "SELECT 1::int2 AS kind,e.id,0::int8 AS observation_count FROM laplace.entities e WHERE e.id=ANY($1) "
-    "UNION ALL SELECT 2::int2,p.id,0::int8 FROM laplace.physicalities p WHERE p.id=ANY($2) "
-    "UNION ALL SELECT 3::int2,a.id,a.observation_count FROM laplace.attestations a "
-    "WHERE a.id=ANY($3) AND a.type_id=ANY($4)")
-
 /* Direct indexed containment selects candidates, never unverified body rows. */
 SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
     "SELECT candidate.entity_id FROM ("
@@ -157,24 +151,6 @@ SQL_QUERY("ingest.sources_completed", "bytea[],int4",
 SQL_QUERY("ingest.files_completed", "bytea,bytea[],int4",
     "SELECT DISTINCT unit_id FROM laplace.ingest_unit_completion "
     "WHERE witness_id=$1 AND unit_id=ANY($2) AND layer=$3 AND digest IS NULL")
-SQL_QUERY("chess.witness_inputs", "bytea[],bytea[],bytea[],bytea[],int4",
-    "SELECT subject_id,type_id, "
-    "       CASE WHEN octet_length(object_id)=16 THEN object_id END, "
-    "       CASE WHEN context_id IS NULL OR octet_length(context_id)=16 THEN context_id "
-    "            ELSE decode('00','hex') END, "
-    "       qualifier_mask "
-    "FROM laplace.attestations "
-    "WHERE subject_id=ANY($1) AND type_id=ANY($2) AND source_id=ANY($3) "
-    "  AND ($4::bytea[] IS NULL OR context_id=ANY($4)) "
-    "LIMIT $5 ")
-SQL_QUERY("chess.content_preflight", "bytea[],int4",
-    "SELECT entity_id,id,ST_MemSize(trajectory)::bigint,ST_NPoints(trajectory)::bigint "
-    "FROM laplace.physicalities "
-    "WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL "
-    "LIMIT $2 ")
-SQL_QUERY("chess.render_preflighted_results", "bytea[],int4",
-    "SELECT realize.render_text_batch($1,$2)")
-
 /* Account and payment projections use the same fixed statement owner.
  * Compound admissions are single transactional statements, not semicolon
  * batches that depend on named-placeholder rewriting. */
@@ -246,8 +222,6 @@ SQL_QUERY("identity.upsert_client", "text,text,text",
     "ON CONFLICT(provider) DO UPDATE SET client_id=EXCLUDED.client_id,authority=EXCLUDED.authority,enabled=true,updated_at=now()")
 SQL_QUERY("consensus.create_scoped_temp", "bytea[]",
     "CREATE TEMP TABLE consensus AS SELECT * FROM consensus.scoped_consensus($1)")
-SQL_QUERY("chess.db_identity", "",
-    "SELECT system_identifier::text, current_database() FROM pg_control_system()")
 SQL_QUERY("owner.set_read_only", "",
     "SET TRANSACTION READ ONLY")
 SQL_QUERY("owner.lock_platform_roles", "",

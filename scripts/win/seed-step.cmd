@@ -65,7 +65,6 @@ if /i "%STEP%"=="tatoeba"       goto run_ingest
 if /i "%STEP%"=="opensubtitles" goto run_ingest_opensubtitles_commit
 if /i "%STEP%"=="document"      goto run_ingest_path
 if /i "%STEP%"=="chess"         goto run_ingest_path
-if /i "%STEP%"=="chess-books"   goto run_ingest_path
 if /i "%STEP%"=="openings"      goto run_ingest_path
 if /i "%STEP%"=="stack"         goto run_ingest_path
 if /i "%STEP%"=="repo"          goto run_ingest_path
@@ -194,7 +193,6 @@ if /i "%STEP%"=="stack"         set "STEP_SOURCE=StackDecomposer"
 if /i "%STEP%"=="repo"          set "STEP_SOURCE=RepoDecomposer"
 if /i "%STEP%"=="tiny-codes"    set "STEP_SOURCE=TinyCodesDecomposer"
 if /i "%STEP%"=="chess"         set "STEP_SOURCE=ChessPgn"
-if /i "%STEP%"=="chess-books"   set "STEP_SOURCE=ChessBook"
 if /i "%STEP%"=="openings"      set "STEP_SOURCE=ChessOpenings"
 if not defined STEP_SOURCE (
   echo ERROR: seed-step verify: no source mapping for '%STEP%'
@@ -295,7 +293,7 @@ echo   floor:     unicode  iso639
 echo   document:  document ^<path^>
 echo   relations: wordnet  omw  verbnet  propbank  framenet  mapnet  wordframenet  semlink  conceptnet  atomic2020  ud  wiktionary
 echo   usage:     tatoeba  opensubtitles
-echo   chess:     chess ^<path^>  openings ^<path^>  chess-books ^<path^>
+echo   chess:     chess ^<path^>  openings ^<path^>
 echo   code:      stack ^<path^>  repo ^<path^>  tiny-codes ^<path^>
 echo   models:    model-tinyllama  model-phi  model-qwen  safetensors ^<snapshot-dir^>
 echo.

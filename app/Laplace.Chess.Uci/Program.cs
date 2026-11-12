@@ -86,10 +86,10 @@ if (cmd.Verb == "uci")
 }
 
 
-// The other commands return data; this writes it: JSON for the engine and lab commands, readable text for inspect and
-// review unless --json, the ladder's own progress and table.
+// The other commands return data; this writes it: JSON for the engine and lab commands, readable text for review
+// unless --json, the ladder's own progress and table.
 var json = new JsonSerializerOptions(UciJson.Options) { WriteIndented = true };
-bool textOutput = cmd.Verb is "inspect" or "review" or "lichess" or "help" || (cmd.Verb == "ladder" && cmd.Positionals.FirstOrDefault() != "stockfish-receipt");
+bool textOutput = cmd.Verb is "review" or "lichess" or "help" || (cmd.Verb == "ladder" && cmd.Positionals.FirstOrDefault() != "stockfish-receipt");
 textOutput &= !cmd.Flag("json");
 try
 {
@@ -106,12 +106,6 @@ try
                 cts.Cancel();
             };
             return await LichessCommand.RunAsync(settings, Console.Out, cts.Token);
-        }
-        case "inspect":
-        {
-            var report = InspectCommand.Run(cmd);
-            Console.Out.WriteLine(textOutput ? InspectCommand.Render(report) : JsonSerializer.Serialize(report, json));
-            return 0;
         }
         case "review":
         {

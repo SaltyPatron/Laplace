@@ -3,6 +3,9 @@ namespace Laplace.Chess.Service;
 /// <summary>One package inventory across every explicitly selected Syzygy directory.</summary>
 internal static class ChessSyzygyPaths
 {
+    /// <summary>A Syzygy package's table files: WDL and DTZ.</summary>
+    internal static readonly string[] PackageExtensions = [".rtbw", ".rtbz"];
+
     internal static IReadOnlyList<string> Roots(string pathList)
     {
         var roots = pathList.Split(Path.PathSeparator,
@@ -21,7 +24,7 @@ internal static class ChessSyzygyPaths
             if (!Directory.Exists(root))
                 throw new ChessInputException($"chess-syzygy: selected package directory '{root}' does not exist.");
         var paths = roots.SelectMany(static root => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            .Where(static path => ChessInput.HasExtension(path, ChessSyzygyDecomposer.PackageExtensions))
+            .Where(static path => ChessInput.HasExtension(path, ChessSyzygyPaths.PackageExtensions))
             .Select(Path.GetFullPath)
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .OrderBy(static path => path, StringComparer.Ordinal).ToArray();

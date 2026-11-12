@@ -1,23 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Button, ErrorText, Tooltip, TooltipContent, TooltipTrigger } from '@ui';
 import { describeFailure } from '../../api/client';
-import { chessPlayer } from '../../chess/db/api';
-import type { ChessPlayerResponse } from '../../chess/db/types';
 import { entityRecord } from '../../query/api';
 import type { EntityRecord } from '../../query/types';
 import type { ExploreEntityPreviewResponse } from '../types';
 import styles from './PlayerCard.module.css';
 
 /**
- * The entity's standing card. For any entity, the record read: its Glicko-2 standing over
- * its relations and its verdict counts (confirmed / contested / refuted / thin) as the
- * server's epistemic_status computes them. A Chess_Player reads its witnessed game record
- * and peak source Elo instead, kept apart from relation standing.
+ * The entity's standing card: the record read, its Glicko-2 standing over its relations
+ * and its verdict counts (confirmed / contested / refuted / thin) as the server's
+ * epistemic_status computes them.
  */
 export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse }) {
   const [record, setRecord] = useState<EntityRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [career, setCareer] = useState<ChessPlayerResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -25,21 +21,13 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
     let stale = false;
     setLoading(true);
     setRecord(null);
-    setCareer(null);
     setError(null);
-    if (preview.type === 'Chess_Player') {
-      chessPlayer(preview.id_hex, 0)
-        .then((r) => { if (!stale) setCareer(r); })
-        .catch((failure: unknown) => { if (!stale) setError(describeFailure(failure).message); })
-        .finally(() => { if (!stale) setLoading(false); });
-    } else {
-      entityRecord(preview.id_hex)
-        .then((r) => { if (!stale) setRecord(r); })
-        .catch((failure: unknown) => { if (!stale) setError(describeFailure(failure).message); })
-        .finally(() => { if (!stale) setLoading(false); });
-    }
+    entityRecord(preview.id_hex)
+      .then((r) => { if (!stale) setRecord(r); })
+      .catch((failure: unknown) => { if (!stale) setError(describeFailure(failure).message); })
+      .finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [preview.id_hex, preview.type, attempt]);
+  }, [preview.id_hex, attempt]);
 
   if (error) return <div>
     <ErrorText>Standing could not be loaded: {error}</ErrorText>
@@ -47,24 +35,6 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
   </div>;
 
   const pending = loading ? '…' : '—';
-  if (preview.type === 'Chess_Player') {
-    return (
-      <div className={styles.card}>
-        <Stat
-          value={career?.peak_rating != null ? String(career.peak_rating) : '—'}
-          label="peak source Elo"
-          hint="highest Elo explicitly tagged by an imported game or official/provider profile"
-          accent
-        />
-        <Stat value={career?.overall.games.toLocaleString() ?? pending} label="games" hint="witnessed games attributed to this player" />
-        <Stat value={career?.overall.wins.toLocaleString() ?? pending} label="wins" hint="witnessed scored wins" />
-        <Stat value={career?.overall.draws.toLocaleString() ?? pending} label="draws" hint="witnessed scored draws" />
-        <Stat value={career?.overall.losses.toLocaleString() ?? pending} label="losses" hint="witnessed scored losses" />
-        <Stat value={career?.overall.unscored.toLocaleString() ?? pending} label="unscored" hint="games whose source asserted no result" />
-      </div>
-    );
-  }
-
   return (
     <div className={styles.card}>
       <Stat

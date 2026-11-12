@@ -322,7 +322,7 @@ test('[CHESS-2] board coordinates shown', async ({ page }) => {
 });
 
 test('[CHESS-3] player profile is formatted', async ({ page }) => {
-  // Search by name: with no recorded games the player sorts among the unrated, far past page one.
+  // The player index reads only on a search; the page is the name as the games write it.
   await open(page, '/chess?q=Nakamura', 5000);
   await page.getByRole('link', { name: /Nakamura, Hikaru/ }).first().click();
   await page.waitForTimeout(5000);

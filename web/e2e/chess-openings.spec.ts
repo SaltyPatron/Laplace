@@ -46,13 +46,13 @@ test('a game shows its deepest opening, where it leaves book, and each ply\'s op
     { ply: 3, san: 'Nf3', uci: 'g1f3', fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', white_moved: true },
     { ply: 4, san: 'Nf6', uci: 'g8f6', fen: 'rnbqkb1r/pppp1ppp/5n2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3', white_moved: false },
     { ply: 5, san: 'h3', uci: 'h2h3', fen: 'rnbqkb1r/pppp1ppp/5n2/4p3/4P3/5N1P/PPPP1PP1/RNBQKB1R b KQkq - 0 3', white_moved: true },
-  ].map((row, i) => ({ ...row, clock_seconds: null, position_id: String(i + 1).repeat(32) }));
+  ].map((row, i) => ({ ...row, clock: null, position: String(i + 1).repeat(32) }));
   const posted: unknown[] = [];
-  await page.route(`**/v1/chess/games/${GAME_ID}**`, (route) => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/plies')
-    ? { object: 'chess.game.plies', game_id: GAME_ID, start_fen: START_FEN, has_clocks: false, truncated: null, plies }
-    : { object: 'chess.game', id: GAME_ID, white_id: null, white: 'White', black_id: null, black: 'Black', result: '1-0',
-        played_on: null, event: null, eco: 'C42', termination: null, time_control: null, tc_class: null,
-        movetext: '1. e4 e5 2. Nf3 Nf6 3. h3 1-0' } }));
+  // One read gives the game's tags and its replayed plies.
+  await page.route(`**/modular/api/chess/game?id=${GAME_ID}`, (route) => route.fulfill({ json: {
+    id: GAME_ID, line: 'f6'.repeat(16), tags: [{ name: 'White', value: 'White' }, { name: 'Black', value: 'Black' }, { name: 'Result', value: '1-0' }],
+    white: 'White', black: 'Black', result: '1-0', date: null, event: null, eco: 'C42', start_fen: START_FEN,
+    movetext: '1. e4 e5 2. Nf3 Nf6 3. h3 1-0', complete: true, plies } }));
   await page.route('**/modular/api/chess/game-openings', (route) => {
     posted.push(route.request().postDataJSON());
     return route.fulfill({ json: {
@@ -84,9 +84,9 @@ test('a game shows its deepest opening, where it leaves book, and each ply\'s op
 });
 
 test('a game list reads every game\'s deepest opening in one batch', async ({ page }) => {
-  const row = (id: string, movetext: string | null) => ({ id: id.repeat(32), played_on: '2026.11.11', event: 'Laplace Play', eco: null,
-    as_white: true, opponent_id: null, opponent: 'Browser player', result: '1-0', outcome: 2, movetext });
-  await page.route('**/v1/chess/laplace/games?**', (route) => route.fulfill({ json: { object: 'chess.games', player_id: '', offset: 0,
+  const row = (id: string, movetext: string | null) => ({ id: id.repeat(32), line: null, white: 'Laplace', black: 'Browser player',
+    result: '1-0', date: '2026.11.11', event: 'Laplace Play', eco: null, movetext });
+  await page.route('**/modular/api/chess/games?**', (route) => route.fulfill({ json: { witness: 'Laplace', total: 3, offset: 0,
     games: [row('a', '1. e4 e5 2. Nf3 Nf6 1-0'), row('b', '1. h4 a5 1-0'), row('c', null)] } }));
   const batches: unknown[] = [];
   await page.route('**/modular/api/chess/game-openings', (route) => {

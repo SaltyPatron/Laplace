@@ -6,13 +6,10 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class MatchRunnerFrozenEvidenceTests
 {
     [Fact]
-    [Trait("Category", "RequiresDatabase")]
-    public async Task LiveMatch_DoesNotCompleteAnyGameUntilMeasurementCloses()
+    public void LiveMatch_DoesNotCompleteAnyGameUntilMeasurementCloses()
     {
-        var cs = TestDb.RequireConnectionString();
-
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: "chess/test/frozen-match", connString: cs);
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
 
         const int games = 4;
         int progressCalls = 0;
@@ -43,6 +40,7 @@ public sealed class MatchRunnerFrozenEvidenceTests
         Assert.Equal(games, result.Games);
         Assert.True(progressCalls > 0);
         Assert.Equal(games, host.GamesCompleted);
+        Assert.Equal(games, engine.Reads.Count);
     }
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>

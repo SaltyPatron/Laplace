@@ -6,7 +6,7 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessExploreReadPathTests
 {
     [Fact]
-    public void ExploreUsesKeyedMoveCells_NotWholeGameTrajectoryScans()
+    public void ExploreReadsEachLegalMovesStanding_NotWholeGameTrajectoryScans()
     {
         string root = FindRepoRoot();
         string service = File.ReadAllText(Path.Combine(
@@ -14,7 +14,8 @@ public sealed class ChessExploreReadPathTests
         string reads = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
 
-        Assert.Contains("ChessMovesAsync", service, StringComparison.Ordinal);
+        Assert.Contains("NpgsqlChessTransitionStandings.ReadAsync", service, StringComparison.Ordinal);
+        Assert.Contains("ChessNativeRatings.Claim", service, StringComparison.Ordinal);
         Assert.DoesNotContain("ChessTrajectorySuccessorsAsync", service, StringComparison.Ordinal);
         Assert.DoesNotContain("chess_trajectory_successors", reads, StringComparison.Ordinal);
     }

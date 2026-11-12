@@ -81,98 +81,143 @@ test.describe('chess UI', () => {
     await expect(elo).toHaveValue('2300');
   });
 
-  test('player search, sorting, and paging are URL-addressable', async ({ page }) => {
+  test('player search and paging are URL-addressable', async ({ page }) => {
     const requests: URL[] = [];
-    await page.route('**/v1/chess/players?**', async (route) => {
-      requests.push(new URL(route.request().url()));
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          object: 'chess.players',
-          total: 101,
-          offset: Number(new URL(route.request().url()).searchParams.get('offset') ?? 0),
-          players: [{
-            rank: 51,
-            id: '11112222333344445555666677778888',
-            name: 'Karpov, Anatoly',
-            games: 2056,
-            rating: 1820,
-            rd: 60,
-            eff_mu: 1700,
-          }],
-        }),
-      });
+    await page.route('**/modular/api/chess/players?**', async (route) => {
+      const url = new URL(route.request().url());
+      requests.push(url);
+      await route.fulfill({ json: {
+        search: url.searchParams.get('search'),
+        total: 101,
+        offset: Number(url.searchParams.get('offset') ?? 0),
+        players: [
+          { name: 'Karpov, Anatoly', games: 2056, games_complete: false },
+          { name: 'Karpov, Alexander', games: 12, games_complete: true },
+        ],
+      } });
     });
 
-    await page.goto('/chess?q=Karpov&sort=games&direction=desc&offset=50');
-    await expect(page.getByRole('link', { name: 'Karpov, Anatoly' })).toBeVisible();
+    await page.goto('/chess?q=Karpov&offset=50');
+    const player = page.getByRole('link', { name: 'Karpov, Anatoly' });
+    await expect(player).toBeVisible();
+    // A player is addressed by the name as written, not by an id.
+    await expect(player).toHaveAttribute('href', '/chess/players/Karpov%2C%20Anatoly');
     await expect(page.getByRole('textbox', { name: 'Find a chess player' })).toHaveValue('Karpov');
-    await expect.poll(() => requests.at(-1)?.searchParams.toString()).toContain('search=Karpov');
-    expect(requests.at(-1)?.searchParams.get('sort')).toBe('games');
-    expect(requests.at(-1)?.searchParams.get('direction')).toBe('desc');
+    expect(requests.at(-1)?.searchParams.get('search')).toBe('Karpov');
     expect(requests.at(-1)?.searchParams.get('offset')).toBe('50');
+    expect(requests.at(-1)?.searchParams.get('limit')).toBe('50');
+    // A count that hit the read's cap is shown as "N+"; a complete one is exact.
+    await expect(page.getByRole('row').filter({ hasText: 'Karpov, Anatoly' })).toContainText('2,056+');
+    await expect(page.getByRole('row').filter({ hasText: 'Karpov, Alexander' }).getByRole('cell').last()).toHaveText('12');
+    // Names are the whole identity: no Laplace rating or standing column exists.
+    await expect(page.getByRole('columnheader')).toHaveText(['Player', 'Games']);
 
-    // The rating column is headed "Laplace Glicko-2"; its header button sorts by rating.
-    const ratingSort = page.getByRole('button', { name: 'Laplace Glicko-2', exact: true });
-    await ratingSort.click();
+    await page.getByRole('button', { name: 'Next ›', exact: true }).click();
     await expect(page).toHaveURL(/q=Karpov/);
-    await expect(page).toHaveURL(/sort=rating/);
-    await expect(page).toHaveURL(/direction=desc/);
-    expect(new URL(page.url()).searchParams.has('offset')).toBe(false);
+    await expect(page).toHaveURL(/offset=100/);
+    await expect.poll(() => requests.at(-1)?.searchParams.get('offset')).toBe('100');
+    await expect(page.getByRole('button', { name: 'Next ›', exact: true })).toBeDisabled();
 
-    await ratingSort.click();
-    await expect(page).toHaveURL(/direction=asc/);
+    // A new search starts from its first page.
+    await page.getByRole('textbox', { name: 'Find a chess player' }).fill('Tal');
+    await page.getByRole('button', { name: 'Search players', exact: true }).click();
+    await expect(page).toHaveURL(/q=Tal/);
+    expect(new URL(page.url()).searchParams.has('offset')).toBe(false);
   });
 
-  test('a player with no recorded games reads as unrated, not as a neutral prior', async ({ page }) => {
-    await page.route('**/v1/chess/players?**', (route) => route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        object: 'chess.players',
-        total: 2,
-        offset: 0,
-        players: [
-          { rank: 1, id: '11112222333344445555666677778888', name: 'Karpov, Anatoly', games: 2056, rating: 1820, rd: 60, eff_mu: 1700 },
-          { rank: 2, id: '99990000aaaabbbbccccddddeeeeffff', name: 'Profile, Only', games: 0, rating: 1500, rd: 350, eff_mu: 800 },
-        ],
-      }),
-    }));
+  test('the player index asks for a search instead of reading a roster', async ({ page }) => {
+    let reads = 0;
+    await page.route('**/modular/api/chess/players?**', (route) => { reads += 1; return route.fulfill({ json: { search: '', total: 0, offset: 0, players: [] } }); });
     await page.goto('/chess');
-    const unrated = page.getByRole('row').filter({ hasText: 'Profile, Only' });
-    await expect(unrated).toContainText('Unrated (no recorded games)');
-    await expect(unrated).not.toContainText('800');
-    await expect(unrated).not.toContainText('±350');
-    await expect(unrated.getByRole('cell').first()).toHaveText('—');
-    await expect(page.getByRole('row').filter({ hasText: 'Karpov, Anatoly' })).toContainText('1700');
+    await expect(page.getByText('Search for a player to see their recorded games.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Games Laplace played' })).toHaveAttribute('href', '/chess/laplace');
+    await expect(page.getByRole('table')).toHaveCount(0);
+    expect(reads).toBe(0);
+  });
+
+  test('a player page reads one name: record by colour, source ratings, opponents and paged games', async ({ page }) => {
+    const requests: URL[] = [];
+    const record = (games: number, wins: number, draws: number, losses: number) =>
+      ({ games, wins, draws, losses, unscored: 0, score: (wins + draws / 2) / games });
+    await page.route('**/modular/api/chess/player?**', (route) => {
+      const url = new URL(route.request().url());
+      requests.push(url);
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      return route.fulfill({ json: {
+        name: 'Karpov, Anatoly',
+        overall: record(60, 30, 10, 20), as_white: record(30, 18, 6, 6), as_black: record(30, 12, 4, 14),
+        peak_rating: 2780, ratings: [{ rating: 2780, games: 4 }, { rating: 2725, games: 9 }],
+        opponents_total: 40,
+        opponents: [{ name: 'Kasparov, Garry', ...record(20, 5, 10, 5) }],
+        total: 60, offset,
+        games: [{ id: (offset === 0 ? 'a' : 'b').repeat(32), line: null, white: 'Karpov, Anatoly', black: 'Kasparov, Garry',
+          result: '1-0', date: offset === 0 ? '1990.10.08' : '1985.09.03', event: 'World Championship', eco: 'C92', movetext: null,
+          as_white: true, opponent: 'Kasparov, Garry', outcome: 2 }],
+      } });
+    });
+    await page.route('**/modular/api/chess/game?**', (route) => route.fulfill({ json: {
+      id: 'a'.repeat(32), line: null, tags: [], white: 'Karpov, Anatoly', black: 'Kasparov, Garry', result: '1-0',
+      date: '1990.10.08', event: 'World Championship', eco: 'C92', start_fen: null, movetext: null, complete: true, plies: [] } }));
+
+    await page.goto('/chess/players/Karpov%2C%20Anatoly');
+    await expect(page.getByRole('heading', { name: 'Karpov, Anatoly', exact: true })).toBeVisible();
+    expect(requests[0].searchParams.get('name')).toBe('Karpov, Anatoly');
+    await expect(page.getByRole('row').filter({ hasText: 'As White' })).toContainText('18–6–6');
+    await expect(page.getByText('highest Elo a game tagged', { exact: true })).toBeVisible();
+    // Opponents carry the page player's wins, draws and losses, and link by name.
+    const opponent = page.getByRole('region', { name: 'Head to head' }).getByRole('row').filter({ hasText: 'Kasparov, Garry' });
+    await expect(opponent).toContainText('5–5–10');
+    await expect(opponent.getByRole('link', { name: 'Kasparov, Garry' })).toHaveAttribute('href', '/chess/players/Kasparov%2C%20Garry');
+    await expect(page.getByText('The 1 most played of 40 opponents.', { exact: false })).toBeVisible();
+
+    // Games page by the read's own total.
+    await expect(page.getByText('1–1 of 60', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Older ›', exact: true }).click();
+    await expect(page).toHaveURL(/offset=25/);
+    await expect.poll(() => requests.at(-1)?.searchParams.get('offset')).toBe('25');
+    await expect(page.getByRole('link', { name: '1985.09.03', exact: true })).toHaveAttribute('href', `/chess/games/${'b'.repeat(32)}`);
+  });
+
+  test('a name nobody played under says so instead of showing an empty record', async ({ page }) => {
+    const empty = { games: 0, wins: 0, draws: 0, losses: 0, unscored: 0, score: null };
+    await page.route('**/modular/api/chess/player?**', (route) => route.fulfill({ json: {
+      name: 'Profile, Only', overall: empty, as_white: empty, as_black: empty, peak_rating: null, ratings: [],
+      opponents_total: 0, opponents: [], total: 0, offset: 0, games: [] } }));
+    await page.goto('/chess/players/Profile%2C%20Only');
+    await expect(page.getByRole('heading', { name: 'Profile, Only', exact: true })).toBeVisible();
+    await expect(page.getByText('No recorded games under this name.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('table')).toHaveCount(0);
+    await expect(page.getByText('Peak rating', { exact: true })).toHaveCount(0);
   });
 
   test('Laplace games have a dedicated, filterable URL', async ({ page }) => {
-    await page.route('**/v1/chess/laplace/games?**', async (route) => {
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          object: 'chess.games',
-          player_id: '0123456789abcdef0123456789abcdef',
-          offset: 0,
-          games: [
-            { id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', played_on: '2026.08.19', event: 'Browser game', eco: null, as_white: false, opponent_id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', opponent: 'Kasparov', result: '0-1', outcome: 2 },
-            { id: 'cccccccccccccccccccccccccccccccc', played_on: '2026.08.18', event: 'Lichess', eco: 'B12', as_white: true, opponent_id: null, opponent: 'Other', result: '1/2-1/2', outcome: 1 },
-          ],
-        }),
-      });
+    const requests: URL[] = [];
+    await page.route('**/modular/api/chess/games?**', async (route) => {
+      requests.push(new URL(route.request().url()));
+      await route.fulfill({ json: {
+        witness: 'Laplace',
+        total: 2,
+        offset: 0,
+        games: [
+          { id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', line: null, white: 'Kasparov', black: 'Laplace', result: '0-1', date: '2026.08.19', event: 'Browser game', eco: null, movetext: null },
+          { id: 'cccccccccccccccccccccccccccccccc', line: null, white: 'Laplace', black: 'Other', result: '1/2-1/2', date: '2026.08.18', event: 'Lichess', eco: 'B12', movetext: null },
+        ],
+      } });
     });
 
-    await page.goto('/chess/laplace?q=Kasparov&outcome=win&side=black');
+    await page.goto('/chess/laplace?q=Kasparov&result=0-1');
     await expect(page.getByRole('heading', { name: 'Games Laplace played' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Kasparov' })).toBeVisible();
+    expect(requests[0].searchParams.get('witness')).toBe('Laplace');
+    // Both names of a game are shown, each linked to that name's page.
+    const game = page.getByRole('row').filter({ hasText: '2026.08.19' });
+    await expect(game.getByRole('link', { name: 'Kasparov', exact: true })).toHaveAttribute('href', '/chess/players/Kasparov');
+    await expect(game.getByRole('link', { name: 'Laplace', exact: true })).toHaveAttribute('href', '/chess/players/Laplace');
     await expect(page.getByText('Other', { exact: true })).toHaveCount(0);
-    await expect(page.getByLabel('Outcome')).toHaveValue('win');
-    await expect(page.getByLabel('Side')).toHaveValue('black');
+    await expect(page.getByLabel('Result')).toHaveValue('0-1');
 
-    await page.getByLabel('Side').selectOption('all');
+    await page.getByLabel('Result').selectOption('all');
     expect(new URL(page.url()).searchParams.get('q')).toBe('Kasparov');
-    expect(new URL(page.url()).searchParams.get('outcome')).toBe('win');
-    expect(new URL(page.url()).searchParams.has('side')).toBe(false);
+    expect(new URL(page.url()).searchParams.has('result')).toBe(false);
   });
 
   test('play is reachable from the Chess rail and a new game opens a play session', async ({ page }) => {
@@ -290,7 +335,7 @@ test.describe('chess UI', () => {
       if (url.pathname.endsWith('/catalog')) return route.fulfill({ json: { jobs: [], engines: {} } });
       if (url.pathname.endsWith('/jobs')) {
         return route.fulfill({ json: started
-          ? [{ id: 'ui-only-job', kind: 'learned-pst', state: 'Completed', summary: { done: 1, total: 1 }, artifacts: {} }]
+          ? [{ id: 'ui-only-job', kind: 'ladder', state: 'Completed', summary: { done: 1, total: 1 }, artifacts: {} }]
           : [] });
       }
       if (url.pathname.endsWith('/start')) {
@@ -306,7 +351,7 @@ test.describe('chess UI', () => {
     await page.goto('/chess');
     await page.getByRole('link', { name: 'Lab', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Chess Lab' })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('option', { name: /Learned PST grid/ }).click();
+    await page.getByRole('option', { name: /Eval overlay ladder/ }).click();
 
     const responsePromise = page.waitForResponse((response) =>
       response.url().endsWith('/chess/lab/start') && response.request().method() === 'POST');

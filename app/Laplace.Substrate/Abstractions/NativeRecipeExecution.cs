@@ -9,9 +9,17 @@ namespace Laplace.Decomposers.Abstractions;
 
 public enum NativeRecipeMode { Ingest, Plan, Claims, NoLoad }
 
+/// <summary>
+/// A witness named at run time (Engine <c>laplace witness</c>): its name, the trust class it states at
+/// (Laplace-Native <c>manifest/trust_classes.toml</c>) and its lineage, its name when none is given. Its
+/// trunk is [its name, its files' trunks]; what it states again is the same lineage, never a second voice.
+/// </summary>
+public sealed record NativeRuntimeWitness(string Name, string TrustClass, string? Lineage = null);
+
 public sealed record NativeRecipeRequest(
     NativeRecipeMode Mode, string? Source, IReadOnlyList<string> Paths,
-    string? ConnectionInfo = null, int Threads = 0, bool ExpandPrerequisites = true);
+    string? ConnectionInfo = null, int Threads = 0, bool ExpandPrerequisites = true,
+    NativeRuntimeWitness? Witness = null);
 
 /// <summary>
 /// Executes the canonical Engine compiler and record pipeline. Managed code passes
@@ -150,8 +158,18 @@ public sealed class NativeRecipeExecution
         if (request.Mode == NativeRecipeMode.Claims && paths.Length == 0)
             throw new ArgumentException("Claim inspection requires explicit input paths.", nameof(request));
 
+        if (request.Witness is { } witness)
+        {
+            // The Engine validates the class against Native's trust classes; names stay one line.
+            if (source is not null || paths.Length == 0 || request.Mode != NativeRecipeMode.Ingest)
+                throw new ArgumentException("A runtime witness states files: no source, and an actual ingest.", nameof(request));
+            if (string.IsNullOrWhiteSpace(witness.Name) || string.IsNullOrWhiteSpace(witness.TrustClass)
+                || new[] { witness.Name, witness.TrustClass, witness.Lineage ?? "" }.Any(static text => text.Contains('\n') || text.Contains('\r')))
+                throw new ArgumentException("A runtime witness has a name and a trust class, each on one line.", nameof(request));
+        }
+
         var start = ProcessInfo(Executable, request.ConnectionInfo);
-        start.ArgumentList.Add("ingest");
+        start.ArgumentList.Add(request.Witness is null ? "ingest" : "witness");
         start.ArgumentList.Add("-r"); start.ArgumentList.Add(Recipes);
         start.ArgumentList.Add("-t"); start.ArgumentList.Add(Tier0);
         // A root request owns prerequisite expansion. An entry in an explicit
@@ -171,6 +189,12 @@ public sealed class NativeRecipeExecution
         {
             start.ArgumentList.Add("-j");
             start.ArgumentList.Add(request.Threads.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        if (request.Witness is { } stated)
+        {
+            start.ArgumentList.Add("--as"); start.ArgumentList.Add(stated.Name);
+            start.ArgumentList.Add("--class"); start.ArgumentList.Add(stated.TrustClass);
+            if (!string.IsNullOrWhiteSpace(stated.Lineage)) { start.ArgumentList.Add("--lineage"); start.ArgumentList.Add(stated.Lineage); }
         }
         if (request.Mode != NativeRecipeMode.Ingest)
             start.ArgumentList.Add(request.Mode switch

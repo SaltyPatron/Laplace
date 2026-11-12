@@ -44,8 +44,6 @@ internal static class FideLabRunners
     {
         string cohort = Config(slot.Job.Config, "cohort", "open").Trim().ToLowerInvariant();
         int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
-
         if (!ChessGameFetcher.FideCohorts.Contains(cohort))
             throw new ArgumentException($"unknown FIDE cohort '{cohort}'", nameof(cohort));
 
@@ -55,24 +53,10 @@ internal static class FideLabRunners
                 $"FIDE published rating list returned no valid players for cohort '{cohort}'.");
 
         lab.Publish(slot, FideTable($"FIDE {cohort} top {candidates.Count}", candidates, actionable: true));
-        if (!ingest)
-        {
-            lab.UpdateSummary(slot, new ChessLabJobSummary(
-                candidates.Count, candidates.Count,
-                $"{candidates.Count} official FIDE profiles selected · not ingested"));
-            return;
-        }
-
-        // The published list is already the authoritative FIDE profile estate. HTML
-        // profile pages are optional enrichment and cannot make admission all-or-nothing.
-        var profiles = candidates.Select(candidate => Profile(candidate, cohort)).ToArray();
-        var liveHost = await lab.GetLiveHostAsync(ct);
-        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-        var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
-        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
+        // A player is a highway node named by a FIDE id (Sequence 27.3), recorded from the published list by
+        // a recipe of the estate when there is one; the list read here is shown, not recorded.
         lab.UpdateSummary(slot, new ChessLabJobSummary(
-            result.Profiles, candidates.Count,
-            $"{result.Profiles} official FIDE profiles ingested from {cohort}"));
+            candidates.Count, candidates.Count, $"{candidates.Count} official FIDE profiles selected"));
     }
 
     public static async Task RunProfileAsync(
@@ -81,13 +65,8 @@ internal static class FideLabRunners
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         var candidate = await FideRatingList.FindByIdAsync(fideId, ct);
         var profile = Profile(candidate, cohort: null);
-        var liveHost = await lab.GetLiveHostAsync(ct);
-        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-        var result = await ingestor.IngestPlayerProfilesAsync([profile], ct);
         lab.Publish(slot, ProfileTable(profile));
-        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(
-            result.Profiles, 1, $"{profile.DisplayName} imported from official FIDE list"));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(1, 1, $"{profile.DisplayName} read from the official FIDE list"));
     }
 
     internal static ChessPlayerProfile Profile(FidePlayerCandidate candidate, string? cohort)

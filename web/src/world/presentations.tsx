@@ -1,6 +1,5 @@
 import { lazy } from 'react';
 
-const PlayerPage = lazy(() => import('../chess/db/PlayerPage').then(module => ({ default: module.PlayerPage })));
 const GamePage = lazy(() => import('../chess/db/GamePage').then(module => ({ default: module.GamePage })));
 const Taxonomy = lazy(() => import('./TaxonomyView').then(module => ({ default: module.TaxonomyView })));
 const Matchup = lazy(() => import('../explore/matchup/MatchupView').then(module => ({ default: module.MatchupView })));
@@ -13,6 +12,5 @@ export const presentations = [
   { id: 'classification', label: 'Classification', types: [] as string[], render: (id: string) => <Taxonomy id={id} /> },
   { id: 'comparison', label: 'Comparison', types: [] as string[], render: (id: string) => <Matchup selectedId={id} embedded /> },
   { id: 'mesh', label: 'Related structure', types: [] as string[], render: (id: string) => <RelatedStructure selectedId={id} embedded /> },
-  { id: 'chess-player', label: 'Player', types: ['Chess_Player'], render: (id: string) => <PlayerPage selectedId={id} embedded /> },
   { id: 'chess-game', label: 'Game', types: ['Chess_Game'], render: (id: string) => <GamePage selectedId={id} embedded /> },
 ];

@@ -29,7 +29,7 @@ export default defineConfig({
       // paths then 404 against the dev server and the page renders blank.
       // Only the real API segments are proxied — /chess and /chess/players/*
       // stay with the router. Production is unaffected: one host serves both.
-      '^/chess/(bestmove|eval|explore|legal|move|new|learned-pst|lab|play|train|lichess)(/|$)': {
+      '^/chess/(bestmove|eval|explore|legal|move|new|lab|play|train|lichess)(/|$)': {
         target: endpoint,
         changeOrigin: false,
       },

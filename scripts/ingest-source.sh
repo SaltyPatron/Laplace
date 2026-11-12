@@ -28,7 +28,7 @@ if [[ "$source" == --catalog ]]; then exec python3 "$ROOT/scripts/ingest_catalog
 if [[ -n "$source" ]]; then source="$(python3 "$ROOT/scripts/ingest_catalog.py" --resolve "$source")"; fi
 LADDER=" ${SOURCE_ORDER[*]} "
 # Sources outside the ladder; each has its own route below.
-OTHER_SOURCES="chess chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy chess-opening-match chess-move-outcomes chess-tactic-outcomes chess-position-outcomes chess-player-context-outcomes code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
+OTHER_SOURCES="chess code repo stack tiny-codes tabular recipe agents rgba-image track-audio frame-video all chain safetensors"
 
 usage_sources() {
     echo "Sources: ${SOURCE_ORDER[*]}" >&2
@@ -265,18 +265,10 @@ case "$route" in
         [[ -n "$path" ]] || { echo "Usage: $0 $source <file-or-directory>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
-    chess|openings|chess-books)
+    chess|openings)
         require_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
-        ;;
-    chess-move-outcomes|chess-tactic-outcomes|chess-position-outcomes|chess-player-context-outcomes|chess-eval|chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
-        require_cli
-        ingest "$source"
-        ;;
-    chess-syzygy)
-        require_cli
-        if [[ -n "$path" ]]; then ingest chess-syzygy "$path"; else ingest chess-syzygy; fi
         ;;
     *)
         # The CLI owns historical input normalization and unknown-name errors;

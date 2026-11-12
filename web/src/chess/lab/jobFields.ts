@@ -41,27 +41,24 @@ export const JOB_FIELDS: Record<string, FieldDef[]> = {
     { key: 'depth', label: 'Analysis depth', type: 'number', min: 1, max: 12 },
     { key: 'maxGames', label: 'Max games', type: 'number', min: 1, max: 100 },
   ],
-  'learned-pst': [],
   'lichess-fetch': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
     { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
     { key: 'all', label: 'Ingest all games', type: 'bool', help: 'Omit the provider cap and stream the complete available archive.' },
     { key: 'max', label: 'Game limit', type: 'number', min: 1, step: 100, help: 'Used only when “Ingest all games” is off.', placeholder: '1000' },
-    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to connect to this online identity.', placeholder: '1503014' },
-    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record, analyze, deduplicate, and attribute the downloaded games immediately.' },
+    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record the downloaded games immediately.' },
   ],
   'player-profile': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'MagnusCarlsen' },
     { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
-    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional explicit FIDE identity association. Leave blank for provider-only acquisition; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
-    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Persist the profiles and selected identity association without downloading games.' },
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to fetch alongside. Leave blank for the provider profile only; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
   ],
   'fide-search': [
     { key: 'query', label: 'Player name', type: 'text', help: 'Search the official FIDE ratings database by real name.', placeholder: 'Carlsen, Magnus' },
     { key: 'limit', label: 'Candidate limit', type: 'number', min: 1, max: 100 },
   ],
   'fide-profile': [
-    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Import one official profile without downloading games.', placeholder: '1503014' },
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Fetch one official profile.', placeholder: '1503014' },
   ],
   'fide-roster': [
     {
@@ -74,7 +71,6 @@ export const JOB_FIELDS: Record<string, FieldDef[]> = {
       },
     },
     { key: 'limit', label: 'Top players', type: 'number', min: 1, max: 100 },
-    { key: 'ingest', label: 'Write profiles to Laplace', type: 'bool', help: 'Acquire every official profile and write the cohort as one substrate operation.' },
   ],
 };
 

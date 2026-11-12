@@ -101,8 +101,5 @@ public static class ChessCommands
           laplace-uci review PGN|DIR [--depth 4] [--max-games 20] [--json]
           laplace-uci lichess [--token T] [--engine laplace|stockfish|lc0|EXE] [--max-concurrent 4] [--speed S]... [--rated]
               the Lichess connector (one event stream per account: never beside the LaplaceLichess service)
-          laplace-uci inspect PGN [--game N | --where Tag=Value] [--max-games N] [--all-positions] [--json]
-          laplace-uci inspect "FEN" [--moves "e4 e5"]  |  inspect "e4 e5 Nf3" [--fen F]
-              the tree the monorepo would store for the input, read-only, without a database
         """;
 }

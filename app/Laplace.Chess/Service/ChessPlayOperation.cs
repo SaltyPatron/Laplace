@@ -39,22 +39,18 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
         if (State != "ongoing" && !(resumeRecording && CanRetryRecording))
             throw new InvalidOperationException("This operation cannot resume play or its retained recording.");
         // Earlier browser operations always started from the standard initial board.
-        var context = Context ?? new ChessPlayContext("chess/play/session", null, "Browser player",
-            Convert.ToHexString(ChessVocabulary.LaplacePlayerId.ToBytes()), "Laplace",
+        var context = Context ?? new ChessPlayContext("chess/play/session", null, "Browser player", null, "Laplace",
             new(Event: "Laplace Play", Site: "Laplace",
                 Date: StartedUtc.ToString("yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture),
                 StartFen: ChessModality.StartFen));
         var state = ReplayStates().Last();
-        var session = new PlaySession(ChessVocabulary.PlaySessionHandle(SessionId), context.LearnContext,
+        var session = new PlaySession(ChessLiveGameHost.SessionHandle(SessionId), context.LearnContext,
             RecordToSubstrate, Requester.TenantId, Requester.Subject,
-            ParsePlayer(context.WhitePlayerId), context.WhitePlayerName,
-            ParsePlayer(context.BlackPlayerId), context.BlackPlayerName, Requester)
+            context.WhitePlayerName, context.BlackPlayerName, Requester)
         { Operation = this with { Context = context }, Metadata = context.Metadata, State = state, PlyCount = Moves.Length };
         session.Moves.AddRange(Moves);
         return session;
     }
-
-    private static Hash128? ParsePlayer(string? value) => value is null ? null : Hash128.FromBytes(Convert.FromHexString(value));
 
     public IEnumerable<ChessState> ReplayStates()
     {

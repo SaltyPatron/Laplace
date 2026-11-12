@@ -30,11 +30,9 @@ internal static class ChessEndpoints
         app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct))).WithTags("chess");
 
-        // Continuations from a position read from MOVE consensus, optionally scoped to a
-        // player. The player name is canonicalized by PlayerAlias, as at ingest, so it
-        // resolves to the same player id.
+        // The moves recorded games played from a position: each one's Native standing, the most played first.
         app.MapPost("/chess/explore", async (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.ExploreAsync(req.Fen, req.Player, req.Limit ?? 12, ct))).WithTags("chess");
+            Results.Json(await svc.ExploreAsync(req.Fen, req.Limit ?? 12, ct))).WithTags("chess");
 
         app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
             Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) }))
@@ -45,9 +43,6 @@ internal static class ChessEndpoints
 
         app.MapGet("/chess/train/status", (ChessEngineService svc) =>
             Results.Json(svc.Status())).WithTags("chess");
-
-        app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
         app.MapPost("/chess/play/start", async (HttpContext ctx, PlayStartRequest req,
             ChessEngineService svc, Auth.ITenantResolver resolver, CancellationToken ct) =>
@@ -137,7 +132,6 @@ internal static class ChessEndpoints
                     new { kind = "ladder", label = "Eval overlay ladder", @default = new { games = "20", depth = "4", maxPlies = "160", concurrency = "0" } },
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
-                    new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
                     new { kind = "cutechess", label = "Laplace vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", conductor = "fastchess", affinity = "", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
                     new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "chesscom", all = "true", max = "1000", ingest = "true" } },
                     new { kind = "player-profile", label = "Acquire and associate player profiles", @default = new { site = "chesscom", ingest = "true" } },
@@ -434,7 +428,6 @@ internal static class ChessEndpoints
         "ladder" => (parsed = ChessLabJobKind.Ladder) == ChessLabJobKind.Ladder,
         "tactics" => (parsed = ChessLabJobKind.Tactics) == ChessLabJobKind.Tactics,
         "review" => (parsed = ChessLabJobKind.Review) == ChessLabJobKind.Review,
-        "learned-pst" or "learnedpst" => (parsed = ChessLabJobKind.LearnedPst) == ChessLabJobKind.LearnedPst,
         "cutechess" => (parsed = ChessLabJobKind.Cutechess) == ChessLabJobKind.Cutechess,
         "lichess-bot" or "lichessbot" => (parsed = ChessLabJobKind.LichessBot) == ChessLabJobKind.LichessBot,
         "lichess-fetch" or "lichessfetch" => (parsed = ChessLabJobKind.LichessFetch) == ChessLabJobKind.LichessFetch,
@@ -448,7 +441,7 @@ internal static class ChessEndpoints
     private sealed record FenRequest(string Fen);
     private sealed record MoveRequest(string Fen, string Uci, string[]? Moves);
     private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
-    private sealed record ExploreRequest(string Fen, string? Player, int? Limit);
+    private sealed record ExploreRequest(string Fen, int? Limit);
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth = null, int? MaxConcurrent = null, bool? Substrate = null, string[]? Speeds = null);

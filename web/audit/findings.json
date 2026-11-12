@@ -39,7 +39,7 @@
     { "id": "IA-2", "sev": "P2", "area": "navigation", "kind": "live", "title": "One search box per page", "check": "≤ 1 visible searchbox on /explore, /chat, /explore/mesh" },
     { "id": "IA-3", "sev": "P1", "area": "navigation", "kind": "live", "title": "Entity page has one tab bar and no hidden inspector", "check": "/explore/entity/<dog> has exactly one tablist/nav of views and no <details> wrapping views" },
     { "id": "IA-4", "sev": "P2", "area": "navigation", "kind": "live", "title": "Entity page title is the label", "check": "Direct load of /explore/entity/<dog> has an h1/h2 'dog', not the hex id" },
-    { "id": "IA-5", "sev": "P3", "area": "navigation", "kind": "live", "title": "One breadcrumb", "check": "≤ 1 breadcrumb nav on /explore/mesh/<dog> and /chess/players/<id>" },
+    { "id": "IA-5", "sev": "P3", "area": "navigation", "kind": "live", "title": "One breadcrumb", "check": "≤ 1 breadcrumb nav on /explore/mesh/<dog> and /chess/players/<name>" },
     { "id": "IA-6", "sev": "P3", "area": "navigation", "kind": "live", "title": "Mesh honors ?q=", "check": "/explore/mesh?q=dog shows the dog subject" },
 
     { "id": "ENT-1", "sev": "P2", "area": "entity", "kind": "live", "title": "Related information grouped by relation", "check": "Entity Knowledge view groups related facts under relation headings" },

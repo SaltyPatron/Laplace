@@ -29,7 +29,7 @@ public static class ChessPositionRef
     }
 
     /// <summary>
-    /// Compose the position entity id for a FEN-shaped reference, or return false
+    /// The Engine's position id for a FEN-shaped reference, or false
     /// when the text is not a FEN / cannot be modelled (X-FEN Chess960, garbage).
     /// </summary>
     public static bool TryComposeId(string? text, out Hash128 id)
@@ -37,11 +37,11 @@ public static class ChessPositionRef
         id = default;
         if (!LooksLikeFen(text)) return false;
         var fen = text!.Trim();
-        var m = new ChessModality();
-        if (ChessAnalyze.InitialState(fen, m) is not { } start) return false;
-        lock (ChessCompose.Gate)
-            id = ChessCompose.PositionId(start.Initial.Board);
-        return true;
+        Board board;
+        try { board = new ChessModality().FromFen(fen).Board; }
+        catch (FormatException) { return false; }
+        // The Engine's position id: the same position every recorded game and opening holds.
+        return ChessEngineIdentity.TryPositionId(board, out id);
     }
 
     /// <summary>32-hex form resolve_ref accepts as a literal content id.</summary>

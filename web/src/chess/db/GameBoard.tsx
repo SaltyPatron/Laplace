@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WorldLink as Link } from '../../world/WorldLink';
 import { Button, Muted, Range, SegmentedControl, UnstyledButton } from '@ui';
 import { Board } from '../play/Board';
-import type { ChessGamePliesResponse, ChessPlyRow } from './types';
+import { clockSeconds } from './api';
+import type { ChessGameResponse } from './types';
 import styles from './ChessDb.module.css';
 import layout from './GameBoard.module.css';
 import { OpeningList } from '../openings/Openings';
@@ -19,6 +20,9 @@ const SPEED_OF: Record<string, Speed> = { 'Real time': 'clock', Slow: 'slow', No
 
 /** Ceiling on one real-time wait; the recorded clock reading is still shown in full. */
 const MAX_REALTIME_MS = 6000;
+
+/** The board a game starts from when its record names no other. */
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 function mmss(seconds: number | null | undefined): string {
   if (seconds == null) return '—';
@@ -50,24 +54,29 @@ function keepMoveVisible(list: HTMLOListElement, active: HTMLElement) {
  * diffing against the opponent's reading would attribute their think to this move.
  * Increments make a diff negative, which is real and simply means no wait.
  */
-function realtimeGapMs(plies: ChessPlyRow[], i: number): number {
-  const here = plies[i]?.clock_seconds;
-  const prevSameSide = plies[i - 2]?.clock_seconds;
+function realtimeGapMs(clocks: (number | null)[], i: number): number {
+  const here = clocks[i];
+  const prevSameSide = clocks[i - 2];
   if (here == null || prevSameSide == null) return FIXED_MS.normal;
   return Math.min(Math.max(0, (prevSameSide - here) * 1000), MAX_REALTIME_MS);
 }
 
 /**
- * Plays back the server-replayed ply sequence of one game. Each ply's `position_id` is the
- * content address of the board after the move, linked to its entity page: the same position
- * entity every other game that reached it shares, with its trajectories and rated
- * continuations.
+ * Plays back the server-replayed ply sequence of one game. Each ply's `position` is the id
+ * of the board after the move, linked to its entity page: the same position every other
+ * game that reached it shares. Clocks are the readings the PGN comments wrote, shown only
+ * when every ply has one.
  */
 /** `openingsAt(ply)`: the named openings holding the position shown at that ply (0 = start), once read. */
-export function GameBoard({ data, white, black, openingsAt }: {
-  data: ChessGamePliesResponse; white: string; black: string; openingsAt?: (ply: number) => OpeningLine[] | undefined;
+export function GameBoard({ game, openingsAt }: {
+  game: ChessGameResponse; openingsAt?: (ply: number) => OpeningLine[] | undefined;
 }) {
-  const { plies, start_fen: startFen, has_clocks: hasClocks } = data;
+  const { plies } = game;
+  const startFen = game.start_fen ?? START_FEN;
+  const white = game.white ?? 'unknown';
+  const black = game.black ?? 'unknown';
+  const clocks = useMemo(() => plies.map((p) => clockSeconds(p.clock)), [plies]);
+  const hasClocks = plies.length > 0 && clocks.every((seconds) => seconds != null);
 
   const [ply, setPly] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -87,10 +96,10 @@ export function GameBoard({ data, white, black, openingsAt }: {
 
   useEffect(() => {
     if (!playing || atEnd) { if (atEnd) setPlaying(false); return; }
-    const delay = speed === 'clock' ? realtimeGapMs(plies, ply) : FIXED_MS[speed];
+    const delay = speed === 'clock' ? realtimeGapMs(clocks, ply) : FIXED_MS[speed];
     const t = setTimeout(() => setPly((p) => p + 1), delay);
     return () => clearTimeout(t);
-  }, [playing, ply, atEnd, speed, plies]);
+  }, [playing, ply, atEnd, speed, clocks]);
 
   // Scroll only the move list; the page's own scroll position is never moved by a ply change.
   useEffect(() => {
@@ -118,8 +127,8 @@ export function GameBoard({ data, white, black, openingsAt }: {
   }, [step, plies.length]);
 
   if (plies.length === 0) {
-    return data.truncated ? (
-      <Muted className={styles.note}>Replay unavailable: {data.truncated}</Muted>
+    return !game.complete ? (
+      <Muted className={styles.note}>Replay unavailable: this game did not replay.</Muted>
     ) : (
       <Muted>This recorded game ended before its first move.</Muted>
     );
@@ -128,7 +137,7 @@ export function GameBoard({ data, white, black, openingsAt }: {
   // Clocks are per-side: show each player their own most recent reading.
   const clockFor = (isWhite: boolean): number | null => {
     if (!hasClocks) return null;
-    for (let i = ply - 1; i >= 0; i--) if (plies[i].white_moved === isWhite) return plies[i].clock_seconds ?? null;
+    for (let i = ply - 1; i >= 0; i--) if (plies[i].white_moved === isWhite) return clocks[i];
     return null;
   };
 
@@ -219,7 +228,7 @@ export function GameBoard({ data, white, black, openingsAt }: {
         <div className={styles.movesHead}>
           <span>{ply === 0 ? 'Starting position' : `${current!.white_moved ? 'White' : 'Black'} played ${current!.san}`}</span>
           {current ? (
-            <Link className={styles.playerLink} to={`/explore/entity/${current.position_id}`}>
+            <Link className={styles.playerLink} to={`/explore/entity/${current.position}`}>
               open this position ›
             </Link>
           ) : null}
@@ -235,13 +244,13 @@ export function GameBoard({ data, white, black, openingsAt }: {
                 onClick={() => { setPlaying(false); setPly(i + 1); }}
               >
                 {p.san}
-                {hasClocks ? <span className={styles.moveClock}>{mmss(p.clock_seconds)}</span> : null}
+                {hasClocks ? <span className={styles.moveClock}>{mmss(clocks[i])}</span> : null}
               </UnstyledButton>
             </li>
           ))}
         </ol>
-        {data.truncated ? (
-          <Muted className={styles.note}>Replay stopped: {data.truncated}</Muted>
+        {!game.complete ? (
+          <Muted className={styles.note}>Replay stopped: this game did not replay past the last move shown.</Muted>
         ) : null}
       </div>
     </div>

@@ -24,16 +24,10 @@ public sealed class ChessPositionRefTests
         => Assert.True(ChessPositionRef.LooksLikeFen(StartFen));
 
     [Fact]
-    public void TryComposeId_MatchesExploreComposePath()
+    public void TryComposeId_IsTheEnginesPositionId()
     {
         Assert.True(ChessPositionRef.TryComposeId(StartFen, out var id));
-
-        var m = new ChessModality();
-        Hash128 expected;
-        lock (ChessCompose.Gate)
-            expected = ChessCompose.PositionId(m.StateKey(m.Initial()));
-
-        Assert.Equal(expected, id);
+        Assert.Equal(ChessEngineIdentity.PositionId(new ChessModality().Initial().Board), id);
     }
 
     [Fact]

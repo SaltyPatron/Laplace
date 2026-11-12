@@ -111,31 +111,6 @@ public class Chess960Tests
 
     // ---- real Chess960 games ----------------------------------------------------------
 
-    /// <summary>
-    /// The eight Chess960 games in a chess.com archive replay end to end. A wrong castling
-    /// rule derails SAN resolution within a few moves, so completing long games checks the
-    /// rules more broadly than constructed positions do.
-    /// </summary>
-    [SkippableFact]
-    [Trait("Category", "RequiresQualification")]
-    public async Task RealChessComFreestyleGames_AllReplay()
-    {
-        string pgn = Path.Combine(Laplace.Chess.Service.Tests.ChessCorpusPaths.Games,
-                                  "AnishGiri_chesscom.pgn");
-        Skip.IfNot(File.Exists(pgn), "chess.com archive not present");
-
-        int seen = 0, replayed = 0;
-        await foreach (var text in ChessPgnDecomposer.StreamAllGamesAsync(
-                           pgn, SearchOption.TopDirectoryOnly, default))
-        {
-            if (!text.Contains("Chess960")) continue;
-            seen++;
-            if (ChessPgnDecomposer.TryParseGame(text) is not null) replayed++;
-        }
-        Assert.True(seen > 0, "expected Chess960 games in this archive");
-        Assert.Equal(seen, replayed);
-    }
-
     private static ChessMove FindCastle(Board b, bool kingSide)
     {
         var pseudo = new List<ChessMove>();

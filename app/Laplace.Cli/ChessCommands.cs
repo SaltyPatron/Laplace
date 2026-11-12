@@ -23,16 +23,11 @@ internal static class ChessCommands
             "substrate-test" => await SubstrateTestAsync(args[1..]),
             "ladder" => await LadderAsync(args[1..]),
             "review" => await ReviewAsync(args[1..]),
-            "learned-pst" => await LearnedPstAsync(args[1..]),
-            "learned-eval-test" => await LearnedEvalTestAsync(args[1..]),
             "tactics" => await TacticsAsync(args[1..]),
             "lichess" => await LichessAsync(args[1..]),
             "lab" => await RunUciAsync(args[1..]),
             "match" => await MatchAsync(args[1..]),
             "bench" => Bench(args[1..]),
-            "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
-            "verify-recorded-corpus" => await ChessRecordedCorpusCommands.RunAsync(args[1..]),
-            "export-recorded-pgn" => await ChessRecordedCorpusCommands.ExportAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
     }
@@ -40,17 +35,16 @@ internal static class ChessCommands
     private static async Task<int> RecordAsync(string[] args)
     {
         if (args.Length != 1 || !File.Exists(args[0]))
-            return Fail("usage: laplace-mono chess record <pgn-file> (record complete source games and verify persisted trajectories)");
+            return Fail("usage: laplace-mono chess record <pgn-file> (the Engine reads the file's games; its trunk is their witness)");
         using var cancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
         Console.CancelKeyPress += cancel;
         try
         {
-            await using var ingestor = await ChessPgnIngestor.CreateAsync(cancellation.Token);
-            var result = await ingestor.IngestFileAsync(Path.GetFullPath(args[0]), Console.WriteLine,
-                cancellation.Token, requireCompleteSource: true);
-            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
-            return result.Parsed > 0 && result.Verified == result.Parsed ? 0 : 1;
+            string path = Path.GetFullPath(args[0]);
+            await new ChessGameRecorder(ChessEngineService.ResolveConnString()).IngestFileAsync(null, path, cancellation.Token);
+            Console.WriteLine($"recorded {path}");
+            return 0;
         }
         finally { Console.CancelKeyPress -= cancel; }
     }
@@ -72,27 +66,19 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace-mono chess <selfplay|move|fetch|record|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|lab|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
+        "usage: laplace-mono chess <selfplay|move|fetch|record|substrate-test|ladder|review|tactics|lichess|match|lab|bench>\n"
         + "  lab <check|match|ladder|analyse|inspect> [options]   (installed monorepo UCI tools, using this client's credentials and configuration)\n"
-        + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
+        + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; the Engine records the games)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
         + "  fetch <username> [--site chesscom|lichess] [--max N] [--out <path>]   (download a player's games as PGN)\n"
-        + "  record <pgn-file>   (record every complete source game and verify persisted typed trajectories)\n"
+        + "  record <pgn-file>   (the Engine reads the file's games; the file's trunk is their witness)\n"
         + "  substrate-test [--mode transition|off] [--games N] [--depth D] [--openings] [--no-record]\n"
-        + "      guided-vs-pure: direct witnessed state transitions against a classical control.\n"
-        + "      --mode transition = indexed position→position consensus (DEFAULT); off = sanity (pure vs pure)\n"
-        + "      --openings = seed games from the ingested ECO openings (where the corpus HAS data)\n"
+        + "      guided-vs-pure: the standings of the moves recorded games played against a classical control.\n"
+        + "      --mode transition = each root move's [position, move, position] standing (DEFAULT); off = sanity (pure vs pure)\n"
+        + "      --openings = seed games from the opening book\n"
         + "  ladder [--games N] [--depth D] [--openings] [--no-record]   (overlay-ablation: each EvalTerm's individual Elo)\n"
-        + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over ingested games)\n"
-        + "  measure-corpus --pgn /absolute/games.pgn --evidence-root /absolute/new-directory\n"
-        + "      [--games 75000] [--minimum-seconds 30] [--replays 1] [--deadline-seconds 3600]\n"
-        + "      [--expected-sha256 lowercase64]   (authentic PGN recording, readback, and replay evidence)\n"
-        + "  export-recorded-pgn --selection-manifest /absolute/selection.json --expected-sha256 lowercase64\n"
-        + "      --output-pgn /absolute/new-selected.pgn   (exact original frames; ordinary measure-corpus admits them)\n"
-        + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
-        + "  learned-eval-test [--games N] [--depth D] [--scale X] [--blend] [--openings]   (learned-PST vs PeSTO;\n"
-        + "      --blend = PeSTO floor + small learned overlay (additive), else learned REPLACES PeSTO)\n"
+        + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over a PGN's games)\n"
         + "  bench [--depth D]   (reproducible engine benchmark: fixed-depth Search over a standard\n"
         + "      position set; reports nodes, nodes/sec, and bytes allocated — the profile-before-\n"
         + "      optimizing baseline, deterministic node counts at a given depth)\n"
@@ -155,20 +141,11 @@ internal static class ChessCommands
         bool record = !HasFlag(args, "--no-record");
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-        bool useLearned = HasFlag(args, "--learned");
-        int[][]? mg = null, eg = null;
-        if (useLearned)
-        {
-            (mg, eg) = LearnedPst.BuildTables(ds, ArgDouble(args, "--learned-scale", 1.0));
-            (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
-        }
         var exactBias = new SubstrateRootBias(ds);
-        var boardEvaluator = new SubstrateBoardEvaluator(ds);
         MoveChooser GuidedSearch()
         {
             var search = new Search(
-                EvalTerm.All, exactBias, ttBits: 16, mgPst: mg, egPst: eg,
-                positionEvaluator: boardEvaluator,
+                EvalTerm.All, exactBias, ttBits: 16,
                 tablebase: ChessTablebaseRuntime.ProbeSearch);
             return (state, rng) => search.Think(
                 state, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
@@ -177,7 +154,7 @@ internal static class ChessCommands
         {
             "transition" or "fold" or "edge" => GuidedSearch,
             "off" => MatchRunner.SearcherFactory(
-                depth, EvalTerm.All, ttBits: 16, mgPst: mg, egPst: eg,
+                depth, EvalTerm.All, ttBits: 16,
                 tablebase: ChessTablebaseRuntime.ProbeSearch),
             _ => throw new ArgumentException($"unknown --mode '{mode}' (expected transition|off)"),
         };
@@ -190,7 +167,7 @@ internal static class ChessCommands
 
         string desc = mode switch
         {
-            "transition" or "fold" or "edge" => "full-depth conventional + substrate position/transition evaluation",
+            "transition" or "fold" or "edge" => "full-depth conventional + the standings of the moves recorded games played",
             _ => "NO prior (sanity)",
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
@@ -219,7 +196,7 @@ internal static class ChessCommands
             Console.WriteLine($"  recorded {recorder.Host.GamesCompleted} games to substrate (chess/cli/substrate-test)");
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
-        Console.WriteLine($"  search depth={depth}, transition frontiers={exactBias.RootReads:N0}, transition backend reads={exactBias.BackendReads:N0}, exact-evidence roots={exactBias.RootsWithExactEvidence:N0}, exact signals={exactBias.ExactTransitionSignals:N0}, move-physicality signals={exactBias.MovePhysicalitySignals:N0}, transition ROM={exactBias.TransitionPerfcacheHits:N0}, transition novel={exactBias.TransitionNovelHits:N0}, transition composed={exactBias.TransitionCompositions:N0}, structure reads={boardEvaluator.PositionReads:N0}, structure hits={boardEvaluator.PositionsWithEvidence:N0}, position atoms={boardEvaluator.LoadedAtoms:N0}, syzygy={ChessTablebaseRuntime.Largest}-men");
+        Console.WriteLine($"  search depth={depth}, transition frontiers={exactBias.RootReads:N0}, transition backend reads={exactBias.BackendReads:N0}, exact-evidence roots={exactBias.RootsWithExactEvidence:N0}, exact signals={exactBias.ExactTransitionSignals:N0}, syzygy={ChessTablebaseRuntime.Largest}-men");
         Console.WriteLine(r.EloDiff > 5
             ? "  => the substrate measurably raises the classical floor at this mode/scale."
             : "  => no clear lift at this mode/scale — try --openings, more games, deeper, or a larger --cp-per-point.");
@@ -231,26 +208,10 @@ internal static class ChessCommands
     private static async Task<int> ReviewAsync(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--"))
-            return Fail("usage: laplace-mono chess review <pgn-file|dir> [--depth D] [--max-games N] [--re-ingest]");
+            return Fail("usage: laplace-mono chess review <pgn-file|dir> [--depth D] [--max-games N]");
         var path = args[0];
         int depth = ArgInt(args, "--depth", 4);
         int maxGames = ArgInt(args, "--max-games", 20);
-        bool reIngest = HasFlag(args, "--re-ingest");
-
-        if (reIngest)
-        {
-            var m = new ChessModality();
-            var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review")
-                .DeclareSourcePrior(SourceTrust.UserPrompt);
-            int n = ChessReviewIngest.IngestPath(b, m, path, depth);
-            await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-            var inner = new NpgsqlSubstrateWriter(ds);
-            await using var acc = new ConsensusAccumulatingWriter(inner, ds);
-            await ((ISubstrateWriter)acc).ApplyAsync(b.Build(), System.Threading.CancellationToken.None);
-            Console.WriteLine($"re-ingest review tags: {n} games from {path} (depth {depth}) — applied, {acc.CellsFolded:N0} consensus rows folded");
-            return 0;
-        }
-
         var games = ChessGameReview.ReviewFile(path, depth, maxGames);
         Console.WriteLine($"reviewed {games.Count} games (depth {depth}) from {path}");
         int crazy = 0;
@@ -273,49 +234,6 @@ internal static class ChessCommands
 
     private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : (name.Length > 16 ? name[..16] : name);
 
-    private static async Task<int> LearnedPstAsync(string[] args)
-    {
-        string pieces = ArgStr(args, "--piece", LearnedPst.WhitePieces).ToUpperInvariant();
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-        var learned = LearnedPst.ReadWhite(ds);
-        Console.WriteLine($"learned piece-square values (rating-point deviation from a draw; >0 = good for the mover), db={LaplaceInstall.RedactConnectionString(ChessEngineService.ResolveConnString())}");
-
-        foreach (char pc in pieces)
-        {
-            var sqs = learned.Where(s => s.Piece == pc).ToList();
-            if (sqs.Count == 0) continue;
-            double cover = sqs.Count(s => s.Witness > 0) / 64.0 * 100;
-            Console.WriteLine($"\n  {PieceName(pc)} ('{pc}')  — {cover:F0}% of squares have evidence");
-            for (int rank = 7; rank >= 0; rank--)
-            {
-                var row = new System.Text.StringBuilder("    ");
-                for (int file = 0; file < 8; file++)
-                {
-                    var s = sqs.First(x => x.File == file && x.Rank == rank);
-                    row.Append((s.Witness > 0 ? $"{s.DevPoints:+0;-0;0}" : ".").PadLeft(6));
-                }
-                Console.WriteLine(row.ToString());
-            }
-            var best = sqs.Where(s => s.Witness > 0).OrderByDescending(s => s.DevPoints).FirstOrDefault();
-            var worst = sqs.Where(s => s.Witness > 0).OrderBy(s => s.DevPoints).FirstOrDefault();
-            if (best.Witness > 0)
-                Console.WriteLine($"    best {(char)('a' + best.File)}{(char)('1' + best.Rank)} {best.DevPoints:+0;-0}  "
-                    + $"worst {(char)('a' + worst.File)}{(char)('1' + worst.Rank)} {worst.DevPoints:+0;-0}");
-        }
-        return 0;
-    }
-
-    private static string PieceName(char p) => p switch
-    {
-        'P' => "Pawn",
-        'N' => "Knight",
-        'B' => "Bishop",
-        'R' => "Rook",
-        'Q' => "Queen",
-        'K' => "King",
-        _ => p.ToString(),
-    };
-
     private static Task<int> TacticsAsync(string[] args)
     {
         int depth = ArgInt(args, "--depth", 6);
@@ -331,38 +249,6 @@ internal static class ChessCommands
             Console.WriteLine($"  [{(r.Solved ? "OK " : "MISS")}] {r.Id,-28} engine {r.Engine,-6} expected {r.Expected}");
         Console.WriteLine($"solved {solved}/{total} ({(total > 0 ? 100.0 * solved / total : 0):F0}%)");
         return Task.FromResult(0);
-    }
-
-    private static async Task<int> LearnedEvalTestAsync(string[] args)
-    {
-        int games = ArgInt(args, "--games", 200);
-        int depth = ArgInt(args, "--depth", 4);
-        int maxPlies = ArgInt(args, "--max-plies", 160);
-        double scale = ArgDouble(args, "--scale", 6.0);
-        int concurrency = ArgInt(args, "--concurrency", 16);
-        bool seedOpenings = HasFlag(args, "--openings");
-        string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
-        var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
-
-        bool blend = HasFlag(args, "--blend");
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-        var (mg, eg) = LearnedPst.BuildTables(ds, scale);
-
-
-        if (blend) (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
-        var learned = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null, ttBits: 16, mgPst: mg, egPst: eg);
-        var pesto = MatchRunner.SearcherFactory(depth, EvalTerm.All);
-
-        Console.WriteLine($"learned-eval-test [{(blend ? "blend: PeSTO+learned" : "replace: learned-only")}]: "
-            + $"scale {scale}cp/pt vs hand-tuned PeSTO, depth {depth}, "
-            + $"{games} games, openings {(seedOpenings ? $"suite({book!.Count})" : "random")}");
-        var r = MatchRunner.Play(learned, pesto, games, maxPlies, seed: 99, concurrency: concurrency, openingFens: book);
-        string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
-        Console.WriteLine($"  learned W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
-        Console.WriteLine(r.EloDiff >= -10
-            ? "  => learned PST is competitive with hand-tuned PeSTO — the corpus eval is viable (tune scale / phase-split to push ahead)."
-            : "  => learned PST trails PeSTO at this scale (PST is the #2 pillar; needs phase-split + more evidence + validation before replacing).");
-        return 0;
     }
 
     private static async Task<int> LadderAsync(string[] args)
@@ -416,8 +302,7 @@ internal static class ChessCommands
         Action<ChessTrainStatus> report = st =>
             Console.WriteLine($"  [{st.Games}] W={st.White} B={st.Black} D={st.Draws} (adj {st.Adjudicated}); last {st.LastOutcome}");
 
-        await using var liveHost = await ChessLiveGameHost.CreateAsync(
-            ArgDouble(args, "--weight", 0.5d), ct: default);
+        await using var liveHost = await ChessLiveGameHost.CreateAsync();
         await using var svc = new ChessEngineService(
             ArgDouble(args, "--weight", 0.5d), liveHost);
 

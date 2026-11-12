@@ -476,7 +476,6 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<ReadinessResponse> ReadinessAsync(CancellationToken ct)
     {
-        var chessPerfcache = ObserveChessPerfcache();
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -530,21 +529,21 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             var ready = inventory.HasEntities && inventory.HasConsensus && perfcacheReady
                 && inventory.MissingNativeApi.Length == 0 && inventory.MissingNativeIndexes.Length == 0;
             if (ready)
-                return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache,
+                return new ReadinessResponse(true, true, entities, consensus, true,
                     HasEntities: inventory.HasEntities, HasConsensus: inventory.HasConsensus);
 
             detail ??= !inventory.HasEntities ? "substrate has no entities (unseeded)"
                 : !inventory.HasConsensus ? "substrate has no consensus relations (unseeded)"
                 : !postgresPerfcacheReady ? "T0 perfcache not loaded in PostgreSQL"
                 : "T0 perfcache not loaded in this process";
-            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail, chessPerfcache,
+            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail,
                 HasEntities: inventory.HasEntities, HasConsensus: inventory.HasConsensus);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
             Serilog.Log.ForContext<SubstrateClient>().Warning(ex,
                 "Readiness failed while reading substrate inventory.");
-            return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}", chessPerfcache);
+            return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}");
         }
     }
 

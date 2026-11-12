@@ -115,69 +115,6 @@ public sealed class ChessInputTests : IDisposable
         Assert.Equal(Path.GetFullPath(f), Assert.Single(hits));
     }
 
-    /// <summary>TWIC ships each weekly issue as a .zip holding one .pgn.</summary>
-    [Fact]
-    public async Task ZipMember_IsReadAsGames()
-    {
-        var dir = Dir("zipped");
-        string zipPath = Path.Combine(dir, "twic9999.zip");
-        using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-        {
-            var entry = zip.CreateEntry("twic9999.pgn");
-            using var s = entry.Open();
-            using var w = new StreamWriter(s, Encoding.UTF8);
-            w.Write(OneGame + "\n" + OneGame.Replace("\"A\"", "\"C\""));
-        }
-
-        var hits = ChessInput.Resolve(dir, SearchOption.TopDirectoryOnly, ChessInput.PgnExtensions, "chess");
-        Assert.Single(hits);
-
-        var games = new List<string>();
-        await foreach (var g in ChessPgnDecomposer.StreamAllGamesAsync(
-                           dir, SearchOption.TopDirectoryOnly, default))
-            games.Add(g);
-        Assert.Equal(2, games.Count);
-        Assert.All(games, g => Assert.NotNull(ChessPgnDecomposer.TryParseGame(g)));
-    }
-
-    [Fact]
-    public async Task GzipMember_IsReadAsGames()
-    {
-        var dir = Dir("gzipped");
-        string gzPath = Path.Combine(dir, "games.pgn.gz");
-        using (var fs = File.Create(gzPath))
-        using (var gz = new GZipStream(fs, CompressionMode.Compress))
-        using (var w = new StreamWriter(gz, Encoding.UTF8))
-            w.Write(OneGame);
-
-        var games = new List<string>();
-        await foreach (var g in ChessPgnDecomposer.StreamAllGamesAsync(
-                           dir, SearchOption.TopDirectoryOnly, default))
-            games.Add(g);
-        Assert.Single(games);
-    }
-
-    [Theory]
-    [InlineData("games.pgn.zst")]
-    [InlineData("games.ZST")]
-    public async Task ZstdMember_DirectoryAndExplicitInput_ReadSameGamesAsPlaintext(string name)
-    {
-        string dir = Dir("zstandard");
-        string compressed = Path.Combine(dir, name);
-        File.WriteAllBytes(compressed, TwoGamesZstd);
-        Assert.Equal(compressed, Assert.Single(ChessInput.Resolve(dir,
-            SearchOption.TopDirectoryOnly, ChessInput.PgnExtensions, "chess")));
-        Assert.True(ChessInput.IsCompressed(compressed));
-        string plain = Path.Combine(_root, "reference.pgn");
-        File.WriteAllText(plain, TwoGames);
-        var expected = new List<string>();
-        await foreach (var game in ChessPgnDecomposer.StreamFileGamesAsync(plain, default)) expected.Add(game);
-        var actual = new List<string>();
-        await foreach (var game in ChessPgnDecomposer.StreamFileGamesAsync(compressed, default)) actual.Add(game);
-        Assert.Equal(2, actual.Count);
-        Assert.Equal(expected, actual);
-    }
-
     [Fact]
     public async Task Zstd_ConcatenatedFrames_WithOneByteInput_ReadFully()
     {
@@ -197,21 +134,6 @@ public sealed class ChessInputTests : IDisposable
         using var source = new MemoryStream(TwoGamesZstd[..length]);
         using var zstd = new ZstdDecompressionStream(source);
         Assert.Throws<InvalidDataException>(() => zstd.CopyTo(Stream.Null));
-    }
-
-    [Fact]
-    public async Task Zstd_ChecksumCorruption_PropagatesAndReleasesFile()
-    {
-        string path = Path.Combine(_root, "corrupt.pgn.zst");
-        byte[] corrupt = [.. TwoGamesZstd];
-        corrupt[^1] ^= 1;
-        File.WriteAllBytes(path, corrupt);
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
-        {
-            await foreach (var _ in ChessPgnDecomposer.StreamFileGamesAsync(path, default)) { }
-        });
-        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.Equal(corrupt.Length, exclusive.Length);
     }
 
     [Fact]
@@ -253,22 +175,6 @@ public sealed class ChessInputTests : IDisposable
         decoder.Dispose();
         source.Resume.SetResult();
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await pending);
-    }
-
-    [Fact]
-    public async Task Zstd_CancelledEnumeration_ReleasesFile()
-    {
-        string path = Path.Combine(_root, "cancel.pgn.zst");
-        File.WriteAllBytes(path, TwoGamesZstd);
-        using var cancellation = new CancellationTokenSource();
-        await using (var games = ChessPgnDecomposer.StreamFileGamesAsync(path, cancellation.Token).GetAsyncEnumerator())
-        {
-            Assert.True(await games.MoveNextAsync());
-            cancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await games.MoveNextAsync());
-        }
-        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.Equal(TwoGamesZstd.Length, exclusive.Length);
     }
 
     [Fact]
@@ -326,33 +232,6 @@ public sealed class ChessInputTests : IDisposable
             () => ChessInput.Resolve(dir, SearchOption.TopDirectoryOnly, ChessInput.OpeningsExtensions, "openings"));
         Assert.Throws<ChessInputException>(
             () => ChessInput.Resolve(dir, SearchOption.TopDirectoryOnly, ChessInput.BookExtensions, "chess-books"));
-    }
-
-    [Fact]
-    public void SyzygyRoot_KeepsEveryMenBracketAndSeparateDtzDirectories()
-    {
-        var root = Dir("tablebases");
-        string[] directories =
-        [
-            Path.Combine(root, "3-4-5", "WDL"),
-            Path.Combine(root, "3-4-5", "DTZ"),
-            Path.Combine(root, "6", "WDL"),
-            Path.Combine(root, "6", "DTZ"),
-        ];
-        string[] names = ["KQvK.rtbw", "KQvK.rtbz", "KPPvKPP.rtbw", "KPPvKPP.rtbz"];
-        for (int i = 0; i < directories.Length; i++)
-        {
-            Directory.CreateDirectory(directories[i]);
-            File.WriteAllBytes(Path.Combine(directories[i], names[i]), [0]);
-        }
-
-        Assert.Equal(root, ChessInput.ResolveSyzygyPackagingDir(root));
-        Assert.Equal(directories.OrderBy(static p => p, StringComparer.Ordinal),
-            ChessInput.SyzygyProbePath(root).Split(Path.PathSeparator));
-        var files = ChessInput.Resolve(root, SearchOption.AllDirectories,
-            ChessSyzygyDecomposer.PackageExtensions, "chess-syzygy");
-        Assert.Equal(4, files.Count);
-        Assert.Null(ChessSyzygyDecomposer.ExplainEmptyDirectory(root, 3));
     }
 
     [Fact]

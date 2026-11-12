@@ -19,11 +19,10 @@ spec = importlib.util.spec_from_file_location("cutechess_engine_acceptance",
 OWNER = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(OWNER)
 
-PROVIDERS = ("root=1/0 position=21/0(atoms:0) learned-pst=21/0(cells:0) "
-             "tactics=21/0(patterns:0) syzygy=0/0(0-men) "
+PROVIDERS = ("root=1/0 syzygy=0/0(0-men) "
              "root-work-scope=provider-instance-deltas root-backend=1 root-cache=0 "
-             "root-frontiers=1 root-transitions=20/0/0 root-ms-inclusive=1.000 "
-             "frontier-ms=0.200 evidence-read-ms=0.300 snapshot-prepare=1/0.400ms")
+             "root-frontiers=1 root-ms-inclusive=1.000 "
+             "frontier-ms=0.200 evidence-read-ms=0.300")
 
 
 class UserEngineAcceptanceTests(unittest.TestCase):
@@ -46,7 +45,7 @@ class UserEngineAcceptanceTests(unittest.TestCase):
             "  print('option name Substrate type combo default substrate var substrate var off')\n"
             "  print('uciok',flush=True)\n"
             " elif command=='isready':\n"
-            + ("  print('info string substrate provider stack prepared (selected:no-delta, syzygy 0-men)')\n"
+            + ("  print('info string substrate provider stack prepared (recorded-move standings, syzygy 0-men)')\n"
                if prepared else "  print('info string substrate provider initialization failed (fixture)')\n") +
             "  print('readyok',flush=True)\n"
             " elif command.startswith('go '):\n"
@@ -155,7 +154,6 @@ class UserEngineAcceptanceTests(unittest.TestCase):
         self.assertEqual("e2e4", result["bestmove"])
         self.assertEqual(2, result["completed_depth"])
         self.assertEqual(1, result["providers"]["root_reads"])
-        self.assertEqual(21, result["providers"]["position_reads"])
         self.assertEqual(os.geteuid(), result["process"]["uid"])
         self.assertFalse(result["complete_game_proven"])
         self.assertFalse(result["cold_boot_proven"])
@@ -168,7 +166,7 @@ class UserEngineAcceptanceTests(unittest.TestCase):
 
     def test_classical_receipt_and_zero_provider_work_are_refused(self):
         for index, provider in enumerate(("classical-only", PROVIDERS.replace("root=1/", "root=0/"),
-                                         PROVIDERS.replace("position=21/", "position=0/"))):
+                                         PROVIDERS.replace("provider-instance-deltas", "unavailable"))):
             with self.subTest(provider=index), self.assertRaisesRegex(ValueError, "substrate providers"):
                 self.check(self.engine("provider-" + str(index), provider=provider))
 

@@ -9,17 +9,16 @@ public sealed record ChessCommandLine(string Verb, IReadOnlyDictionary<string, s
     IReadOnlyDictionary<string, string> Options, IReadOnlySet<string> Flags)
 {
     public static readonly string[] Verbs =
-        ["uci", "engines", "analyse", "bestmove", "compare", "match", "ladder", "check", "review", "lichess", "inspect", "help"];
+        ["uci", "engines", "analyse", "bestmove", "compare", "match", "ladder", "check", "review", "lichess", "help"];
 
     /// <summary>Options that take no value.</summary>
     public static readonly IReadOnlySet<string> BooleanFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "warm", "startpos", "json", "require-data", "require-ladder", "check-latest", "cutechess-gui", "rated",
-        "no-tb", "recover", "all-positions",
+        "no-tb", "recover",
     };
 
-    /// <summary>Arguments that are not options, in order: the ladder action and run directory, the PGN to review or
-    /// inspect, the moves or FEN to inspect.</summary>
+    /// <summary>Arguments that are not options, in order: the ladder action and run directory, the PGN to review.</summary>
     public IReadOnlyList<string> Positionals { get; init; } = [];
 
     /// <summary>Every value of an option given more than once (--speed), in order.</summary>
@@ -37,7 +36,7 @@ public sealed record ChessCommandLine(string Verb, IReadOnlyDictionary<string, s
         var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var positionals = new List<string>();
         // uci, engines, analyse, bestmove and compare take options only; the others take positional arguments too.
-        bool takesPositionals = verb is "ladder" or "review" or "inspect";
+        bool takesPositionals = verb is "ladder" or "review";
         for (int i = verb == "uci" && (args.Count == 0 || args[0] != "uci") ? 0 : 1; i < args.Count; i++)
         {
             string a = args[i];

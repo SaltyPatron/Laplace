@@ -203,24 +203,18 @@ public static class MatchRunner
             bool aWhite = (g % 2 == 0);
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var pgnMoves = pgnSink is not null ? new List<ChessMove>() : null;
-            // Routing key for this game's plies, not identity: it never reaches the
-            // substrate. ChessLiveGameHost mints the playing entity from content at
-            // completion (ChessVocabulary.LivePlayingId), so two runs of the same match
-            // producing the same game now converge on one playing and fold a second
-            // witness — which the old GUID-per-occurrence handle made impossible.
+            // Routing key for this game's plies, not identity: it never reaches the substrate. The game
+            // is recorded once it completes, as the PGN its moves make, so two runs that play the same
+            // game write the same file and the Engine reads it once.
             Hash128? gameId = liveHost is not null || onPly is not null
-                ? ChessVocabulary.PlaySessionHandle(Guid.NewGuid())
+                ? ChessLiveGameHost.SessionHandle(Guid.NewGuid())
                 : null;
             if (liveHost is not null && gameId is { } gidOpen)
             {
                 string? whiteName = aWhite ? aPlayerName : bPlayerName;
                 string? blackName = aWhite ? bPlayerName : aPlayerName;
-                Hash128? whiteId = string.IsNullOrWhiteSpace(whiteName)
-                    ? null : ChessVocabulary.PlayerId(whiteName);
-                Hash128? blackId = string.IsNullOrWhiteSpace(blackName)
-                    ? null : ChessVocabulary.PlayerId(blackName);
                 liveHost.OpenGameAsync(
-                    gidOpen, learnCtx, whiteId, blackId, whiteName, blackName,
+                    gidOpen, whiteName, blackName,
                     new ChessLiveGameMetadata(
                         Event: eventName,
                         Site: "Laplace Chess Lab",
@@ -236,7 +230,7 @@ public static class MatchRunner
                 substrateGameId: gameId,
                 plyRecordSink: liveHost is null && onPly is null ? null : (gid, ply, sub, obj, mover, uci) =>
                 {
-                    liveHost?.RecordPlyAsync(gid, ply, sub, obj, uci, null, ct)
+                    liveHost?.RecordPlyAsync(gid, ply, sub, obj, uci, ct)
                         .GetAwaiter().GetResult();
                     onPly?.Invoke(g, ply, uci, obj);
                 });

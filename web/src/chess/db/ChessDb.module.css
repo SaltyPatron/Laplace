@@ -91,84 +91,6 @@
     gap: var(--space-3);
   }
 
-  .profileGrid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-    gap: var(--space-3);
-  }
-
-  .profileCard {
-    display: flex;
-    gap: var(--space-3);
-    min-width: 0;
-    padding: var(--space-3);
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-md);
-    background: var(--material-enamel);
-  }
-
-  .profileAvatar {
-    width: 4.5rem;
-    height: 4.5rem;
-    flex: 0 0 auto;
-    border-radius: var(--radius-md);
-    object-fit: cover;
-  }
-
-  .profileBody {
-    min-width: 0;
-  }
-
-  .profileBody p {
-    margin: var(--space-2) 0 0;
-  }
-
-  .profileHeading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-3);
-  }
-
-  .profileHeading span {
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-  }
-
-  .profileFacts,
-  .profileLinks {
-    font-size: var(--text-sm);
-  }
-
-  dl.profileFacts {
-    margin: var(--space-2) 0 0;
-  }
-
-  .profileFacts div {
-    display: grid;
-    grid-template-columns: minmax(6rem, auto) 1fr;
-    gap: var(--space-2);
-  }
-
-  .profileFacts dt {
-    color: var(--color-text-muted);
-  }
-
-  .profileFacts dd {
-    min-width: 0;
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .profileLinks {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-    margin-top: var(--space-2);
-  }
-
   .playerLink {
     color: var(--color-accent);
     text-decoration: none;
@@ -185,31 +107,6 @@
     gap: var(--space-3);
     min-height: 2.2rem;
     margin-bottom: var(--space-2);
-  }
-
-  .sortButton {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    width: 100%;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    font-weight: inherit;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .sortButton:hover {
-    color: var(--color-text-primary);
-  }
-
-  .sortMark {
-    color: var(--color-signal);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
   }
 
   .emptyResult {
@@ -541,35 +438,6 @@
 }
 
 @layer components {
-  .alphabet {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-half);
-    margin-top: var(--space-3);
-  }
-
-  .letter {
-    min-width: 1.75rem;
-    padding: var(--space-1) var(--space-1);
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    color: var(--color-text-primary);
-    font: inherit;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-  }
-
-  .letter:hover {
-    border-color: var(--color-border-default);
-  }
-
-  .letter[data-active='true'] {
-    background: var(--color-accent);
-    color: var(--color-bg-panel);
-    font-weight: 600;
-  }
-
   @container page (max-width: 36rem) {
     .heroTitleRow {
       flex-direction: column;

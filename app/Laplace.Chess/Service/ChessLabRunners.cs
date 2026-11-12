@@ -31,11 +31,10 @@ public static partial class ChessLabRunners
 
         var ds = liveHost.DataSource;
         var exactBias = new SubstrateRootBias(ds);
-        var boardEvaluator = new SubstrateBoardEvaluator(ds);
         Func<Board, SearchTablebaseVerdict?> tablebase = ChessTablebaseRuntime.ProbeSearch;
         Func<MoveChooser> guided = mode == "off"
             ? () => SearchChooser(depth, null, null, tablebase, ct)
-            : () => SearchChooser(depth, exactBias, boardEvaluator, tablebase, ct);
+            : () => SearchChooser(depth, exactBias, null, tablebase, ct);
         Func<MoveChooser> pure = () => SearchChooser(depth, null, null, tablebase, ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
         ConcurrentBag<MatchPgnGame>? pgnSink = persistPgn ? new() : null;
@@ -70,18 +69,8 @@ public static partial class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("transition_frontier_builds", exactBias.FrontierBuilds));
         lab.Publish(slot, new ChessLabMetricEvent("transition_evidence_cache_hits", exactBias.EvidenceCacheHits));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
-        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_roots", exactBias.RootsWithMoveEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.ExactTransitionSignals));
-        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_signals", exactBias.MovePhysicalitySignals));
-        lab.Publish(slot, new ChessLabMetricEvent("transition_perfcache_hits", exactBias.TransitionPerfcacheHits));
-        lab.Publish(slot, new ChessLabMetricEvent("transition_novel_hits", exactBias.TransitionNovelHits));
-        lab.Publish(slot, new ChessLabMetricEvent("transition_compositions", exactBias.TransitionCompositions));
-        lab.Publish(slot, new ChessLabMetricEvent("child_structure_reads", boardEvaluator.PositionReads));
-        lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", boardEvaluator.PositionsWithEvidence));
-        lab.Publish(slot, new ChessLabMetricEvent("position_atoms_loaded", boardEvaluator.LoadedAtoms));
-        lab.Publish(slot, new ChessLabMetricEvent("position_evidence_generation", boardEvaluator.EvidenceGeneration));
         lab.Publish(slot, new ChessLabMetricEvent("syzygy_max_men", ChessTablebaseRuntime.Largest));
-        lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", ChessTransitionObservations.Epoch));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));
         lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorded} recorded"));
@@ -216,56 +205,14 @@ public static partial class ChessLabRunners
             Finish(lab, slot, ChessLabJobState.Completed);
         }, ct);
 
-    public static async Task RunLearnedPstAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
-    {
-        var liveHost = await lab.GetLiveHostAsync(ct);
-        var learned = LearnedPst.ReadWhite(liveHost.DataSource);
-        var rows = learned.Where(s => s.Witness > 0).OrderByDescending(s => s.DevPoints).Take(32)
-            .Select(s => (IReadOnlyList<string>)[((char)('a' + s.File)).ToString() + (s.Rank + 1), s.Piece.ToString(), s.DevPoints.ToString("+0;-0")])
-            .ToList();
-        lab.Publish(slot, new ChessLabTableEvent("learned PST (top squares)", ["sq", "piece", "dev"], rows));
-        Finish(lab, slot, ChessLabJobState.Completed);
-    }
-
     public static async Task RunCutechessAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        var measurement = new ChessRecordingMeasurement(slot.Job.Id, int.Parse(Config(slot.Job.Config, "rounds", "10")));
-        (ChessLabJobState State, string? Message) outcome;
-        try
-        {
-            outcome = await RunCutechessCoreAsync(lab, slot, measurement, ct);
-            bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool value) && value;
-            measurement.Complete(outcome.State == ChessLabJobState.Completed
-                ? ingest ? "completed" : "not-requested"
-                : outcome.State.ToString().ToLowerInvariant(), outcome.Message);
-        }
-        catch (OperationCanceledException)
-        {
-            measurement.Complete("cancelled", "cancelled");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            measurement.Complete("failed", ex.Message);
-            throw;
-        }
-        finally
-        {
-            var path = Path.Combine(LabDir, slot.Job.Id, "recording.json");
-            await measurement.WriteAsync(path);
-            lab.AddArtifact(slot, "recording.json", path);
-        }
-        lab.Publish(slot, new ChessLabMetricEvent("games_committed_readback", measurement.ReadbackGames));
-        lab.Publish(slot, new ChessLabMetricEvent("plies_committed_readback", measurement.ReadbackPlies));
-        lab.Publish(slot, new ChessLabMetricEvent("play_seconds", measurement.ElapsedSeconds.Play));
-        lab.Publish(slot, new ChessLabMetricEvent("recording_seconds", measurement.ElapsedSeconds.Recording));
-        lab.Publish(slot, new ChessLabMetricEvent("commit_seconds", measurement.ElapsedSeconds.Commit));
-        lab.Publish(slot, new ChessLabMetricEvent("readback_seconds", measurement.ElapsedSeconds.Readback));
+        var outcome = await RunCutechessCoreAsync(lab, slot, ct);
         Finish(lab, slot, outcome.State, outcome.Message);
     }
 
     private static async Task<(ChessLabJobState State, string? Message)> RunCutechessCoreAsync(
-        ChessLabService lab, ChessLabService.JobSlot slot, ChessRecordingMeasurement measurement, CancellationToken ct)
+        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
         var cfg = slot.Job.Config;
         bool ingest = bool.TryParse(Config(cfg, "ingest", "true"), out bool ingestValue) && ingestValue;
@@ -357,7 +304,7 @@ public static partial class ChessLabRunners
         }
         finally
         {
-            measurement.ElapsedSeconds.Play += Stopwatch.GetElapsedTime(playStarted).TotalSeconds;
+            lab.Publish(slot, new ChessLabMetricEvent("play_seconds", Stopwatch.GetElapsedTime(playStarted).TotalSeconds));
             if (transcript is not null)
             {
                 await transcript.FlushAsync(CancellationToken.None);
@@ -385,22 +332,15 @@ public static partial class ChessLabRunners
                 ChessLabIngestRun? journal = null;
                 try
                 {
-                    measurement.ValidateMatch(receipt);
-                    var experimentJson = await File.ReadAllTextAsync(persistedReceiptPath!, ct);
-                    await measurement.IdentifyPgnAsync(pgnOut, experimentJson, ct);
-                    lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
+                    int games = PgnGames.StreamGames(pgnOut).Count();
+                    if (games != options.Rounds)
+                        throw new InvalidDataException($"expected {options.Rounds} PGN games but the match wrote {games}");
+                    lab.Publish(slot, new ChessLabLogEvent("info", "recording games.pgn through the Engine (witness Laplace)…"));
                     var liveHost = await lab.GetLiveHostAsync(ct);
                     journal = await ChessLabIngestRun.StartAsync(
-                        liveHost.DataSource, lab.Log, slot.Job.Id, $"cutechess/{slot.Job.Id}", ct);
-                    await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-                    journal.Attach(ingestor);
-                    var r = await journal.IngestUnitAsync("games.pgn", options.Rounds, () => ingestor.IngestRecordedFileAsync(
-                        pgnOut, measurement, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                        experimentReceiptJson: experimentJson));
-                    if (r.Parsed != options.Rounds)
-                        throw new InvalidDataException($"expected {options.Rounds} PGN games but parsed {r.Parsed}");
-                    await measurement.VerifyPgnUnchangedAsync(pgnOut, ct);
-                    lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
+                        liveHost, lab.Log, slot.Job.Id, $"cutechess/{slot.Job.Id}", ChessGameRecorder.Witness, ct);
+                    await journal.IngestUnitAsync("games.pgn", pgnOut, ct);
+                    lab.Publish(slot, new ChessLabMetricEvent("games_ingested", games));
                     ingestSucceeded = true;
                     journal.Complete();
                 }
@@ -438,7 +378,6 @@ public static partial class ChessLabRunners
             ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
             receipt.Ingested = ingest ? ingestSucceeded : null;
             await receipt.WriteAsync(persistedReceiptPath!);
-            await measurement.IdentifyFinalExperimentAsync(persistedReceiptPath!);
         }
 
         return (final, finalMessage);

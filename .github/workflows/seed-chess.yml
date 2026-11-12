@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: games-lumbras-elite
-        options: [games-lumbras-elite, games-chesscom-all, games-magnus, games-hikaru, games-firouzja, games-nihalsarin, games-caruana, games-gukesh, games-pragg, games-anish-giri, games-owner, games-twic, games-lumbras-otb, games-lumbras-online, openings, books, syzygy, chess-analyze, chess-eval, chess-move-outcomes, chess-tactic-outcomes, chess-transitions, chess-trajectory, chess-opening-match, custom-games, custom-openings, custom-books, custom-syzygy]
+        options: [games-lumbras-elite, games-chesscom-all, games-magnus, games-hikaru, games-firouzja, games-nihalsarin, games-caruana, games-gukesh, games-pragg, games-anish-giri, games-owner, games-twic, games-lumbras-otb, games-lumbras-online, openings, syzygy, custom-games, custom-openings, custom-syzygy]
       slice:
         description: "Only for games-lumbras-otb / games-lumbras-online; otherwise leave all"
         type: choice
@@ -26,10 +26,6 @@ on:
         type: choice
         options: [laplace-mono]
         default: laplace-mono
-      derive_after_games:
-        description: "Game presets only: also derive move outcomes and transitions"
-        type: boolean
-        default: true
       replace_existing_source:
         description: "DESTRUCTIVE, derived operations only: retract the complete derived source first"
         type: boolean
@@ -60,10 +56,6 @@ on:
         type: string
         required: false
         default: laplace-mono
-      derive_after_games:
-        type: boolean
-        required: false
-        default: true
       replace_existing_source:
         type: boolean
         required: false
@@ -214,42 +206,10 @@ jobs:
             openings)
               source=openings
               ;;
-            books)
-              source=chess-books
-              p="$root/ProjectGutenberg/text"
-              ;;
             syzygy)
-              source=chess-syzygy
+              source=syzygy
               p="$chess/syzygy"
               [[ ! -d "$p/3-4-5" ]] || p="$p/3-4-5"
-              ;;
-            chess-analyze)
-              source=chess-analyze
-              pathless_derived=1
-              ;;
-            chess-eval)
-              source=chess-eval
-              pathless_derived=1
-              ;;
-            chess-move-outcomes)
-              source=chess-move-outcomes
-              pathless_derived=1
-              ;;
-            chess-tactic-outcomes)
-              source=chess-tactic-outcomes
-              pathless_derived=1
-              ;;
-            chess-transitions)
-              source=chess-transitions
-              pathless_derived=1
-              ;;
-            chess-trajectory)
-              source=chess-trajectory
-              pathless_derived=1
-              ;;
-            chess-opening-match)
-              source=chess-opening-match
-              pathless_derived=1
               ;;
             custom-games)
               source=chess
@@ -257,11 +217,8 @@ jobs:
             custom-openings)
               source=openings
               ;;
-            custom-books)
-              source=chess-books
-              ;;
             custom-syzygy)
-              source=chess-syzygy
+              source=syzygy
               ;;
             *)
               echo "::error::unknown chess preset: $PRESET"
@@ -333,7 +290,6 @@ jobs:
       source: ${{ needs.resolve.outputs.source }}
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
-      chess_derived: ${{ needs.resolve.outputs.source == 'chess' && inputs.derive_after_games }}
       evict_before_ingest: ${{ inputs.replace_existing_source }}
       confirm_evict: ${{ inputs.confirm_replace_existing }}
       run_gate: true
