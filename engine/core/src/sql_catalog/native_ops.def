@@ -64,14 +64,21 @@ SQL_QUERY("converse.recall_session", "text,bytea",
 SQL_QUERY("ops.source_status", "text",
     "SELECT source, source_id, known, ingested, evidence_approx, has_entities, last_run_status, last_run_at, throughput_status, throughput_compared, throughput_rows_per_s, throughput_baseline_rows_per_s, throughput_slowdown_ratio FROM ops.source_status($1)")
 
-SQL_QUERY("content.confirmed_user_artifact_occurrence", "bytea,bytea,bytea,bytea,int2",
-    "SELECT EXISTS (\n    SELECT 1\n    FROM laplace.attestations a\n    JOIN laplace.entities e\n      ON e.id = a.object_id\n     AND e.type_id = $4\n    WHERE a.subject_id = $1 AND a.source_id = $1\n      AND a.object_id = $2 AND a.type_id = $3\n      AND a.outcome = $5\n)")
-
-SQL_QUERY("content.user_artifact_observation", "text,bytea",
-    "SELECT bytes, modified_at\nFROM laplace.ingest_file_journal\nWHERE source_name = $1\n  AND file_id = $2\n  AND status = 'ok'\nORDER BY ended_at DESC NULLS LAST, run_id DESC\nLIMIT 1")
-
-SQL_QUERY("content.confirmed_prompt_contexts", "bytea,bytea,bytea,int2",
-    "SELECT DISTINCT encode(COALESCE(context_id, object_id), 'hex')\nFROM laplace.attestations\nWHERE subject_id = $1\n  AND source_id = $2\n  AND type_id = $3\n  AND outcome = $4\nORDER BY 1")
+/* A participant's upload, read off the Native substrate: the file trunk [metadata, content] and the runtime
+ * witness trunk [participant, file] that holds it, only when that trunk begins with the participant's name; the
+ * content realized to its text by laplace_text (lp_realize). No row: no such file of that participant. */
+SQL_QUERY("content.participant_file", "bytea,text",
+    "WITH f AS MATERIALIZED (SELECT public.blake3_from_bytea($1) AS id), "
+    "parts AS MATERIALIZED ( "
+    "  SELECT public.laplace_vertex_ids(p.path) AS v FROM public.physicality p, f "
+    "  WHERE p.entity = f.id AND public.laplace_path_length(p.path) = 2), "
+    "holder AS MATERIALIZED ( "
+    "  SELECT h.entity FROM f, public.laplace_holders(ARRAY[f.id]) h "
+    "  WHERE public.laplace_path_starts(h.path, public.laplace_text_id($2)) "
+    "  ORDER BY h.entity LIMIT 1) "
+    "SELECT public.blake3_send(parts.v[1]), public.blake3_send(parts.v[2]), public.blake3_send(holder.entity), "
+    "       public.laplace_text(parts.v[2]) "
+    "FROM parts, holder")
 
 SQL_QUERY("generation.forward_code", "text,int4,int4,float8,int4,bytea[]",
     "SELECT g.step, g.entity, g.stride_used\nFROM generation.forward_text(\n    $1, $2, $3, $4, $5, NULL::bigint, 4, 16, $6::bytea[]) g\nORDER BY g.step")

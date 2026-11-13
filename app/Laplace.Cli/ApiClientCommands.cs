@@ -214,8 +214,7 @@ internal static class ApiClientCommands
         using var body = new StreamContent(file);
         body.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         string target = "/v1/content/" + (code ? "code" : "text") + "/raw?name="
-            + Uri.EscapeDataString(Path.GetFileName(path)) + "&path=" + Uri.EscapeDataString(relativePath)
-            + "&modified_at=" + Uri.EscapeDataString(File.GetLastWriteTimeUtc(path).ToString("O"));
+            + Uri.EscapeDataString(Path.GetFileName(path)) + "&path=" + Uri.EscapeDataString(relativePath);
         using var response = await SendAsync(client, HttpMethod.Post, target, body, ct);
         using var receipt = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         if (receipt.RootElement.ValueKind != JsonValueKind.Object

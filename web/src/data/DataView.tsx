@@ -11,7 +11,7 @@ import { readAdmissionHistory, recordAdmissions, type AdmissionRecord } from './
 import { useUploadQueue } from './UploadProvider';
 import styles from './DataView.module.css';
 
-type VisibleItem = Omit<UploadItem, 'read' | 'body' | 'receipt'> & { file_id?: string; content_id?: string; source?: string; modality?: string | null };
+type VisibleItem = Omit<UploadItem, 'read' | 'body' | 'receipt'> & { file_id?: string; content_id?: string; source?: string };
 export function DataView() {
   const { tenant, authUser } = useAppStore();
   return <DataWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
@@ -34,7 +34,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
     const next = new URLSearchParams(params); next.set('id', id); setParams(next);
   }
   const rows = useMemo(() => state.items.map(({ read: _read, receipt, ...item }): VisibleItem => ({
-    ...item, file_id: receipt?.file_id, content_id: receipt?.content_id, source: receipt?.source, modality: receipt?.modality,
+    ...item, file_id: receipt?.file_id, content_id: receipt?.content_id, source: receipt?.source,
   })), [state.items]);
   const snapshot = useMemo(() => captureRows(rows, 'Explicit local artifact selection and HTTP admission receipts in this tab. This is not a seed manifest run or a complete source inventory.'), [rows]);
   const [history, setHistory] = useState<AdmissionRecord[]>(() => readAdmissionHistory(scope));
@@ -64,7 +64,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
         <Field label="Files" help="Selection does not upload anything. Original UTF-8 bytes, including line endings and a byte-order mark, are sent only when you start admission.">
           <Input type="file" multiple onChange={(event) => {
             for (const file of Array.from(event.target.files ?? [])) queue.add({ name: file.name, path: file.webkitRelativePath || file.name, mode,
-              bytes: file.size, modifiedAt: new Date(file.lastModified).toISOString(),
+              bytes: file.size,
               body: () => file, read: async () => new Uint8Array(await file.arrayBuffer()) });
             event.target.value = '';
           }} />
@@ -102,7 +102,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
       {history.length === 0 ? <p>Nothing admitted yet in this tab.</p> : <ul className={styles.history} aria-label="Admission history">
         {history.map((row) => <li key={row.file_id}>
           <div className={styles.historyHead}><strong>{row.name}</strong><span className={styles.historyStatus}>admitted</span></div>
-          <Muted><time dateTime={row.admitted_at}>{new Date(row.admitted_at).toLocaleString()}</time> · {row.bytes.toLocaleString()} bytes · {row.mode}{row.modality ? ` · ${row.modality}` : ''}{row.path && row.path !== row.name ? ` · ${row.path}` : ''}</Muted>
+          <Muted><time dateTime={row.admitted_at}>{new Date(row.admitted_at).toLocaleString()}</time> · {row.bytes.toLocaleString()} bytes · {row.mode}{row.path && row.path !== row.name ? ` · ${row.path}` : ''}</Muted>
           <div className={styles.toolbar}>
             <Button variant="ghost" onClick={() => openReceipt(row.file_id)} aria-label={`Read ${row.name}`}>Read</Button>
             {/^[0-9a-f]{32}$/i.test(row.content_id) && <Link to={`/explore/entity/${row.content_id.toLowerCase()}`} aria-label={`Open entity for ${row.name}`}>Open entity</Link>}
@@ -132,19 +132,19 @@ function ContentInspector({ id, tenant }: { id: string; tenant: string }) {
     try {
       const bytes = await readContentBytes(id, { tenant });
       const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-      const fallback = id + '.bin';
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = (content.name || fallback).split(/[\\/]/).pop() || fallback;
+      // The substrate records a file's name inside its metadata, not as a download name: the file's ID names it.
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = content.file_id;
       document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); setError(null);
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <Panel title="Admitted content readback" expandable actions={<Button variant="ghost" disabled={!valid} onClick={() => void readback.refresh()}>Refresh content</Button>}>
     {!valid ? <ErrorText>This address is not a 32-character hexadecimal ID.</ErrorText> : <ReadStatus label="Admitted content" resource={readback} />}
     {content && <div className={styles.stack}>
-      <h3>{content.name || content.path || 'Content artifact'}</h3><Muted>{content.bytes ?? 'Unreported'} bytes · {content.modality ?? 'text'} · {content.source}</Muted>
+      <h3>File {content.file_id}</h3><Muted>{content.bytes} bytes · stated by {content.source}</Muted>
       <div className={styles.toolbar}><Button onClick={() => void download()}>Download exact bytes</Button><Link to={`/explore/entity/${content.content_id}`}>Explore content structure</Link><Link to={`/explore/entity/${content.source_id}`}>Inspect source</Link></div>
       {content.text !== null ? <pre className={styles.preview}>{content.text.slice(0, 131072).replace(/[\uD800-\uDBFF]$/, '')}</pre> : <Muted>No text preview was returned. Download exact bytes streams the binary response separately.</Muted>}
       {content.text && content.text.length > 131072 && <Muted>Long text preview truncated. Download exact bytes retrieves the complete reconstructed content separately.</Muted>}
-      <details><summary>Identifiers and source context</summary><pre className={styles.preview}>{JSON.stringify({ requested_id: content.requested_id, kind: content.kind, file_id: content.file_id, document_id: content.document_id, content_id: content.content_id, metadata_id: content.metadata_id, source_id: content.source_id, path: content.path, modified_at: content.modified_at, contexts: content.contexts }, null, 2)}</pre></details>
+      <details><summary>Identifiers and source context</summary><pre className={styles.preview}>{JSON.stringify({ file_id: content.file_id, content_id: content.content_id, metadata_id: content.metadata_id, source_id: content.source_id, source: content.source }, null, 2)}</pre></details>
     </div>}{error && <ErrorText role="alert">{error}</ErrorText>}
   </Panel>;
 }

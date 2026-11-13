@@ -12,12 +12,11 @@ export function readContentBytes(id: string, options: ApiOptions) {
 
 export async function admitContentRaw(
   mode: ContentMode,
-  meta: { name: string; path: string; modified_at?: string },
+  meta: { name: string; path: string },
   body: BodyInit,
   options: ApiOptions,
 ) {
   const query = new URLSearchParams({ name: meta.name, path: meta.path });
-  if (meta.modified_at) query.set('modified_at', meta.modified_at);
   return contentReceipt(await apiPostBody<unknown>(
     `/v1/content/${mode}/raw?${query.toString()}`,
     body,

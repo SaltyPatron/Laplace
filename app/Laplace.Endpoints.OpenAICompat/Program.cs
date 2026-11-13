@@ -41,9 +41,7 @@ builder.Services.AddSingleton(logHealth);
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddSingleton<AdminPostgresDataSources>();
-builder.Services.AddSingleton(sp => new ContentArtifactCloser(
-    sp.GetRequiredService<SubstrateClient>().DataSource,
-    message => sp.GetRequiredService<ILogger<ContentArtifactCloser>>().LogWarning("{Message}", message)));
+builder.Services.AddSingleton(_ => UserUploads.Installed());
 builder.Services.AddOpenApi();
 
 builder.Services.AddResponseCompression(options =>

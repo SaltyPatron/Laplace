@@ -21,7 +21,7 @@ const content = await import(await moduleUrl('../src/data/content.ts'));
 const { UploadQueue } = await import(await moduleUrl('../src/data/uploadQueue.ts'));
 const { ingestStatusTone, countText } = await import(await moduleUrl('../src/admin/ingestPresentation.ts'));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; };
-const receipt = { file_id: 'a'.repeat(32), document_id: 'b'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', bytes: 1, modality: null };
+const receipt = { file_id: 'a'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', path: 'x.txt', bytes: 1 };
 const file = (name = 'x.txt', read = async () => new TextEncoder().encode('A')) => ({ name, path: name, mode: 'text', bytes: 1, read });
 
 test('identical canonical-looking rows retain independent occurrence ordinals', () => {
@@ -70,10 +70,11 @@ test('base64 roundtrip is byte-exact across chunk and padding boundaries', () =>
 });
 test('UTF-8 BOM, decomposed accents, case, line endings and metadata are not normalized', () => {
   const text = '\ufeff King != king\r\ne\u0301\n'; const bytes = content.textBytes(text);
-  const payload = content.contentPayload(' King.txt ', 'folder/King.txt', bytes, '2026-01-01T00:00:00Z');
+  const payload = content.contentPayload(' King.txt ', 'folder/King.txt', bytes);
   assert.deepEqual(content.decodeContent(payload.content_base64), bytes);
   assert.equal(payload.name, ' King.txt '); assert.equal(payload.path, 'folder/King.txt');
-  assert.equal(payload.modified_at, '2026-01-01T00:00:00Z');
+  // A file's times are no part of it: nothing sends them.
+  assert.equal('modified_at' in payload, false);
 });
 test('invalid UTF-8, unpaired surrogate, empty content and invalid paths are rejected before a request', () => {
   assert.throws(() => content.textBytes('\ud800'));
@@ -84,7 +85,7 @@ test('invalid UTF-8, unpaired surrogate, empty content and invalid paths are rej
 });
 test('a successful HTTP status without actual admission IDs is not an admission receipt', () => {
   assert.equal(content.contentReceipt(receipt), receipt);
-  for (const value of [null, {}, { ...receipt, content_id: '' }, { ...receipt, bytes: -1 }, { ...receipt, modality: undefined }])
+  for (const value of [null, {}, { ...receipt, content_id: '' }, { ...receipt, bytes: -1 }, { ...receipt, path: undefined }])
     assert.throws(() => content.contentReceipt(value));
 });
 test('a new selection performs no provider or file read before explicit start', () => {
@@ -143,11 +144,11 @@ test('raw admission sends the original Blob and metadata without materializing a
   const body = new Blob([bytes]);
   const queue = new UploadQueue();
   queue.add({ ...file('exact.txt', async () => { throw new Error('raw admission must not read the file into JSON'); }),
-    bytes: bytes.length, body: () => body, modifiedAt: '2026-01-01T00:00:00Z' });
+    bytes: bytes.length, body: () => body });
   await queue.startRaw(async (mode, meta, submitted) => {
     assert.equal(mode, 'text'); assert.equal(submitted, body);
     assert.deepEqual(new Uint8Array(await submitted.arrayBuffer()), bytes);
-    assert.deepEqual(meta, { name: 'exact.txt', path: 'exact.txt', modified_at: '2026-01-01T00:00:00Z' });
+    assert.deepEqual(meta, { name: 'exact.txt', path: 'exact.txt' });
     return receipt;
   });
   assert.equal(queue.getSnapshot().items[0].status, 'admitted');
