@@ -157,7 +157,7 @@ public sealed partial class NpgsqlSubstrateWriter
         preparationDiagnostic?.Complete();
 
         // Entity sort+pack overlaps verification. The control transaction takes no
-        // apply lock (IngestMutexGateTests.ContentAddressedApply_DoesNotAcquireGlobalAdvisoryLock).
+        // apply lock.
         int workerConnectionLimit = ResolveWorkerConnectionLimit(_ds);
         bool singleConnectionApply = workerConnectionLimit <= 0;
         Task<(byte[][] Payloads, int[] RowsByLane, int Groups)>? optimisticEntCopy = null;
