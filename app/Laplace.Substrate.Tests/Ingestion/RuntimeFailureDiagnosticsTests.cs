@@ -54,23 +54,6 @@ public sealed class RuntimeFailureDiagnosticsTests
         "Host=127.0.0.1;Port=1;Username=failure-test;Database=failure-test;SSL Mode=Disable;Timeout=1;Pooling=false");
 
     [Fact]
-    public async Task TurnFailureRetainsCauseWithoutAnOptionalWarningCallback()
-    {
-        using var capture = new FailureCapture();
-        await using var source = UnreachableDatabase();
-        await using var closer = new TurnCloser(source);
-        Assert.False(await closer.CloseAsync("failure-test", ConversationContent.SessionId("failure-test", "one"), "hello", "reply"));
-        Assert.True(closer.Broken);
-        Assert.IsType<NpgsqlException>(closer.LastFailure);
-        Assert.Contains("Conversation turn deposit failed", capture.Text, StringComparison.Ordinal);
-        Assert.Contains(closer.LastFailure.ToString(), capture.Text, StringComparison.Ordinal);
-        // A subsequent failure gets a fresh writer and retains its own cause.
-        var first = closer.LastFailure;
-        Assert.False(await closer.CloseAsync("failure-test", ConversationContent.SessionId("failure-test", "two"), "hello", "reply"));
-        Assert.NotSame(first, closer.LastFailure);
-    }
-
-    [Fact]
     public async Task ArtifactFailureRemainsFailedAndRetainsItsCauseWithoutAWarningCallback()
     {
         using var capture = new FailureCapture();

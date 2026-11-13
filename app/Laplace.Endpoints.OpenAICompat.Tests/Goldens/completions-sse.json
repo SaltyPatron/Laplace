@@ -6,14 +6,10 @@
     "model": "laplace-completions-001",
     "choices": [
       {
-        "text": " the",
+        "text": "the",
         "index": 0,
         "finish_reason": null,
-        "logprobs": {
-          "token_logprobs": [
-            5
-          ]
-        }
+        "logprobs": null
       }
     ]
   },
@@ -27,11 +23,7 @@
         "text": " whale",
         "index": 0,
         "finish_reason": null,
-        "logprobs": {
-          "token_logprobs": [
-            4
-          ]
-        }
+        "logprobs": null
       }
     ]
   },
@@ -45,11 +37,7 @@
         "text": " sings",
         "index": 0,
         "finish_reason": null,
-        "logprobs": {
-          "token_logprobs": [
-            3
-          ]
-        }
+        "logprobs": null
       }
     ]
   },

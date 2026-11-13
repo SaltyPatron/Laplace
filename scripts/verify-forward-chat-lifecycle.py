@@ -2,18 +2,20 @@
 """Produce an executable receipt for a complete multi-turn Laplace chat lifecycle.
 
 This is a proof harness, not a substitute chat implementation. It drives the ordinary
-OpenAI-compatible endpoint, then reads the substrate-resident session manifest and
-executes the same canonical native forward program with the exact ordered discourse
-identities that converse.forward_turn derives for the next turn.
+OpenAI-compatible endpoint twice in one session, and then reads the Native substrate
+(public.entity, public.attestation) for what the Engine's forward program recorded.
+
+Every chat turn is the Engine's (`laplace turn`): it admits the prompt as content, reads the
+session's earlier turns as discourse, answers, and witnesses the turn: the participant's claim
+[session, turn] at the turn's ordinal under UserPromptContent, and Laplace's claim
+[response, prompt] under ResponseContent. The session is [participant, session key].
 
 The receipt proves:
-  * the client does not have to resend transcript history;
-  * prompt and response turns become durable substrate session identities;
-  * message content identities are recoverable from those turns;
-  * the next forward pass receives those identities as ordered DISCOURSE state;
-  * one native generation.forward_program owns routing through terminal semantic act;
-  * generation.forward_text realizes only a completed native semantic act; and
-  * the ordinary HTTP response is itself witnessed into the session for the following turn.
+  * the client does not resend transcript history;
+  * each turn's prompt, response and turn [prompt, response] are recorded as content;
+  * the participant's [session, turn] claim is attested at the turn's ordinal, in the database;
+  * the second turn read the first from the record (one turn before it, at ordinal two); and
+  * the response returned over HTTP is the response the Engine witnessed.
 """
 from __future__ import annotations
 
@@ -31,11 +33,16 @@ from pathlib import Path
 
 MAX_BYTES = 16 * 1024 * 1024
 MODEL = "laplace-converse-001"
+HEX = re.compile(r"^[0-9a-f]{32}$")
 
 
 def require(ok: bool, message: str) -> None:
     if not ok:
         raise RuntimeError(message)
+
+
+def literal(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
 
 
 def psql(database: str, sql: str, timeout: int) -> object:
@@ -50,48 +57,25 @@ def psql(database: str, sql: str, timeout: int) -> object:
     return json.loads(raw) if raw else None
 
 
-def session_id(database: str, tenant: str, key: str, timeout: int) -> str:
-    # Same canonical key law used by ConversationContent.SessionId:
-    # substrate/conversation/session/{tenant}/{sessionKey}/v1. Resolve it through the
-    # installed native canonical-id function; do not hand-hash it in the proof harness.
-    canonical_key = ("substrate/conversation/session/" + tenant + "/" + key + "/v1").replace("'", "''")
+def recorded(database: str, proof: dict, timeout: int) -> dict:
+    """What the database holds of one turn, read through the Native functions: the content the turn
+    recorded, and the participant's [session, turn] claim with its place and trust."""
+    ids = [proof["prompt_id"], proof["response_id"], proof["turn_id"]]
     sql = f"""
-SELECT to_json(encode(realize.canonical_id('{canonical_key}'::text),'hex'));
-"""
-    result = psql(database, sql, timeout)
-    require(isinstance(result, str) and len(result) == 32, "installed canonical-id resolver did not return a 128-bit session id")
-    return result
-
-
-def snapshot(database: str, sid: str, timeout: int) -> dict:
-    sql = f"""
-WITH s AS (SELECT decode('{sid}','hex')::bytea AS id),
-turns AS MATERIALIZED (
-  SELECT t.ordinal,t.turn_id FROM s, LATERAL converse.session_turn_ids(s.id,NULL) t
-),
-contents AS MATERIALIZED (
-  SELECT c.message_id,c.content_id
-  FROM (SELECT array_agg(DISTINCT turn_id) ids FROM turns) x,
-       LATERAL converse.message_content_ids(x.ids) c
-),
-history AS (
-  SELECT array_agg(id ORDER BY ordinal,branch) ids
-  FROM (
-    SELECT ordinal,0 branch,turn_id id FROM turns
-    UNION ALL
-    SELECT t.ordinal,1,c.content_id
-    FROM turns t JOIN contents c ON c.message_id=t.turn_id
-    WHERE c.content_id IS NOT NULL AND c.content_id<>t.turn_id
-  ) h
+WITH handle AS (
+  SELECT laplace_compose(ARRAY[laplace_text_id({literal(proof["participant"])}),
+                               laplace_text_id({literal(proof["session"])})]) AS id
+), claim AS (
+  SELECT laplace_compose(ARRAY[handle.id, '{proof["turn_id"]}'::blake3]) AS id FROM handle
 )
 SELECT json_build_object(
- 'turns',COALESCE((SELECT json_agg(json_build_object('ordinal',ordinal,'turn_id',encode(turn_id,'hex')) ORDER BY ordinal) FROM turns),'[]'::json),
- 'contents',COALESCE((SELECT json_agg(json_build_object('message_id',encode(message_id,'hex'),'content_id',encode(content_id,'hex')) ORDER BY message_id) FROM contents),'[]'::json),
- 'discourse_ids',COALESCE((SELECT to_json(ARRAY(SELECT encode(x,'hex') FROM unnest(ids) x)) FROM history),'[]'::json)
-);
+ 'entities',(SELECT count(*) FROM entity WHERE id = ANY(ARRAY[{",".join(f"'{x}'::blake3" for x in ids)}])),
+ 'claim',(SELECT id::text FROM claim),
+ 'attestations',COALESCE((SELECT json_agg(json_build_object('position',a."position",'trust',a.trust,'witness',a.witness::text)
+                           ORDER BY a.witness) FROM attestation a, claim WHERE a.claim = claim.id),'[]'::json));
 """
     result = psql(database, sql, timeout)
-    require(isinstance(result, dict), "session snapshot is not an object")
+    require(isinstance(result, dict), "the turn's record is not an object")
     return result
 
 
@@ -118,50 +102,7 @@ def http_turn(base: str, tenant: str, session: str, prompt: str, timeout: int) -
                 "request": body, "response": payload}
 
 
-def native_trace(database: str, prompt: str, discourse: list[str], timeout: int) -> dict:
-    arr = "ARRAY[" + ",".join(f"decode('{x}','hex')" for x in discourse) + "]::bytea[]" if discourse else "NULL::bytea[]"
-    prompt_sql = prompt.replace("'", "''")
-    sql = f"""
-WITH execution AS MATERIALIZED (
- SELECT * FROM generation.forward_program(
-   '{prompt_sql}'::text,128,5,0.6,10,NULL::bigint,2,8,{arr},NULL::bytea[])
-), realized AS MATERIALIZED (
- SELECT * FROM generation.forward_text(
-   '{prompt_sql}'::text,128,5,0.6,10,NULL::bigint,2,8,{arr})
-)
-SELECT json_build_object(
- 'execution',COALESCE((SELECT json_agg(json_build_object(
-   'step',step,'event',event,'entity',CASE WHEN entity IS NULL THEN NULL ELSE encode(entity,'hex') END,
-   'root_id',CASE WHEN root_id IS NULL THEN NULL ELSE encode(root_id,'hex') END,
-   'candidate_count',candidate_count,'ordered_context_count',ordered_context_count,
-   'proposal_channel_count',proposal_channel_count,'routing_round',routing_round,
-   'program_id',CASE WHEN program_id IS NULL THEN NULL ELSE encode(program_id,'hex') END,
-   'required_obligations',required_obligations,'satisfied_obligations',satisfied_obligations,
-   'remaining_required',remaining_required,'completion',completion,'disposition',disposition,
-   'semantic_act_id',CASE WHEN semantic_act_id IS NULL THEN NULL ELSE encode(semantic_act_id,'hex') END,
-   'output_fingerprint',CASE WHEN output_fingerprint IS NULL THEN NULL ELSE encode(output_fingerprint,'hex') END,
-   'output_count',output_count) ORDER BY step,routing_round) FROM execution),'[]'::json),
- 'realized',COALESCE((SELECT json_agg(json_build_object('step',step,'text',entity,'stride_used',stride_used) ORDER BY step) FROM realized),'[]'::json)
-);
-"""
-    result = psql(database, sql, timeout)
-    require(isinstance(result, dict), "native trace is not an object")
-    return result
-
-
-def validate_native_trace(result: dict) -> None:
-    terminals = [r for r in result["execution"] if r["event"] in ("complete", "unresolved")]
-    require(len(terminals) == 1, "native program did not return exactly one terminal receipt")
-    terminal = terminals[0]
-    require(terminal["completion"] is True and terminal["disposition"] == "complete",
-            "native program did not complete a semantic act")
-    require(terminal["semantic_act_id"] and terminal["output_fingerprint"],
-            "completed native program lacks semantic-act/output fingerprint")
-    require(len(result["realized"]) == terminal["output_count"],
-            "realization count differs from native output receipt")
-
-
-def validate_http(turn: dict, session: str) -> None:
+def validate_http(turn: dict, session: str) -> dict:
     error = turn["response"].get("error")
     code = error.get("code") if isinstance(error, dict) else None
     suffix = f" ({code})" if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,80}", code) else ""
@@ -171,6 +112,17 @@ def validate_http(turn: dict, session: str) -> None:
     require(body.get("object") == "chat.completion" and body.get("model") == MODEL,
             "ordinary endpoint returned another contract")
     require(body.get("metadata", {}).get("session") == session, "metadata lost session key")
+    proof = body.get("metadata", {}).get("laplace", {}).get("forward_proof")
+    require(isinstance(proof, dict), "the response carries no receipt of the turn that produced it")
+    require(proof.get("session") == session, "the receipt names another session")
+    content = body["choices"][0]["message"]["content"]
+    require(content, f"the forward program emitted nothing ({proof.get('disposition')}): there is no turn to witness")
+    require(proof.get("witnessed") is True, f"the Engine did not witness the turn: {proof.get('reason')}")
+    for key in ("prompt_id", "response_id", "turn_id"):
+        require(HEX.match(proof.get(key) or ""), f"the receipt's {key} is not an ID")
+    require(content == "".join(step["text"] for step in proof["steps"]),
+            "the response is not what the receipt's steps emitted")
+    return proof
 
 
 def main() -> int:
@@ -181,67 +133,56 @@ def main() -> int:
     ap.add_argument("--session", default="forward-life-" + uuid.uuid4().hex)
     ap.add_argument("--first", default="what is a dog?")
     ap.add_argument("--second", default="what about its senses?")
-    ap.add_argument("--timeout-seconds", type=int, default=180)
+    ap.add_argument("--timeout-seconds", type=int, default=600)
     ap.add_argument("--receipt", type=Path, required=True)
     args = ap.parse_args()
-    report = {"schema": "laplace.forward-chat-lifecycle-proof/v1", "disposition": "failed",
+    report = {"schema": "laplace.forward-chat-lifecycle-proof/v2", "disposition": "failed",
               "tenant": args.tenant, "session": args.session,
               "prompts": [args.first, args.second], "model": MODEL}
     started = time.monotonic_ns()
     try:
         # The ordinary endpoint is the writer. No proof-only insert or alternate chat path.
         first = http_turn(args.base, args.tenant, args.session, args.first, args.timeout_seconds)
-        validate_http(first, args.session)
         report["http_turns"] = [first]
-        sid = session_id(args.database, args.tenant, args.session, args.timeout_seconds)
-        report["session_id"] = sid
-        after_first = snapshot(args.database, sid, args.timeout_seconds)
-        report["after_first"] = after_first
-        require(after_first["turns"], "first HTTP turn did not persist its prompt")
-        require(after_first["discourse_ids"], "first HTTP turn produced no reusable discourse identities")
+        first_proof = validate_http(first, args.session)
+        first_record = recorded(args.database, first_proof, args.timeout_seconds)
+        report["first_record"] = first_record
 
-        # Inspect exactly what turn two will consume before sending turn two.
-        second_native = native_trace(args.database, args.second, after_first["discourse_ids"], args.timeout_seconds)
-        report["turn_two_native_receipt"] = second_native
         second = http_turn(args.base, args.tenant, args.session, args.second, args.timeout_seconds)
-        validate_http(second, args.session)
         report["http_turns"].append(second)
-        after_second = snapshot(args.database, sid, args.timeout_seconds)
-        report["after_second"] = after_second
-        # Collect both ordinary turns and the actual native terminal receipt even
-        # when the substrate cannot answer yet. Acceptance still requires a
-        # completed semantic act and both persisted prompt/response pairs.
-        validate_native_trace(second_native)
-        require(len(after_first["turns"]) >= 2, "first HTTP turn did not persist prompt+response")
-        require(len(after_second["turns"]) >= len(after_first["turns"]) + 2,
-                "second HTTP turn did not append prompt+response to the substrate session")
-        require(after_second["discourse_ids"][:len(after_first["discourse_ids"])] == after_first["discourse_ids"],
-                "existing discourse identity order changed across turns")
-        require(len(after_second["discourse_ids"]) > len(after_first["discourse_ids"]),
-                "second turn did not extend reusable substrate discourse")
+        second_proof = validate_http(second, args.session)
+        second_record = recorded(args.database, second_proof, args.timeout_seconds)
+        report["second_record"] = second_record
 
-        report.update({"session_id": sid, "after_first": after_first,
-                       "turn_two_native_receipt": second_native,
-                       "http_turns": [first, second], "after_second": after_second,
-                       "proof": {
-                         "ordinary_endpoint_only": True,
-                         "client_history_resent": False,
-                         "prompt_response_persisted_each_turn": True,
-                         "next_turn_discourse_matches_session_snapshot": True,
-                         "native_terminal_semantic_act": True,
-                         "realization_from_completed_program": True,
-                         "session_extended_for_following_turn": True}})
+        require(first_proof["participant"] == second_proof["participant"],
+                "the two turns of one session were witnessed by different participants")
+        require(second_proof["turns_before"] == first_proof["turns_before"] + 1
+                and second_proof["ordinal"] == first_proof["ordinal"] + 1,
+                "the second turn did not read the first from the record")
+        for name, proof, record in (("first", first_proof, first_record), ("second", second_proof, second_record)):
+            require(record["entities"] == 3, f"the {name} turn's prompt, response and turn are not all recorded")
+            places = [a["position"] for a in record["attestations"]]
+            require(places == [proof["ordinal"]],
+                    f"the {name} turn's [session, turn] claim is not attested once at its ordinal: {places}")
+
+        report["proof"] = {
+            "ordinary_endpoint_only": True,
+            "client_history_resent": False,
+            "turn_content_recorded_each_turn": True,
+            "session_turn_claim_at_its_ordinal": True,
+            "second_turn_read_the_first_from_the_record": True,
+            "response_is_what_was_witnessed": True}
         canonical = json.dumps(report["proof"], sort_keys=True, separators=(",", ":")).encode()
         report["proof_fingerprint_sha256"] = hashlib.sha256(canonical).hexdigest()
         report["disposition"] = "verified"
         code = 0
-    except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, subprocess.SubprocessError) as error:
         report["error"] = str(error)
         code = 1
     report["wall_milliseconds"] = (time.monotonic_ns() - started) // 1_000_000
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps({k: report[k] for k in ("schema","disposition","error","wall_milliseconds") if k in report}))
+    print(json.dumps({k: report[k] for k in ("schema", "disposition", "error", "wall_milliseconds") if k in report}))
     print(f"FORWARD_CHAT_LIFECYCLE_RECEIPT={args.receipt}")
     return code
 

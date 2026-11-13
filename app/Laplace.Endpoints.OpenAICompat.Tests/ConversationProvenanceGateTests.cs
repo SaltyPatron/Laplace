@@ -5,10 +5,11 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// Source-text pins for conversational provenance (spec 34): session ids mint through
-/// the canonical id law, no endpoint emits canned assistant prose, model routing goes
-/// through <c>ModelCatalog</c>, every turn closes with tenant and session, and a turn
-/// deposit emits testimony. Reads the source tree only; no database.
+/// Source-text pins for the conversation surfaces (Wiki Sequence 21. Sessions): every surface
+/// that converses, the OpenAI-compatible endpoints, MCP `chat` and the CLI, runs the one forward
+/// program through <c>ConversationTurns</c>, and the Engine (<c>laplace turn</c>) answers and
+/// witnesses the turn. No surface composes a turn, writes a row or reads a second substrate's
+/// chat. Reads the source tree only; no database.
 /// </summary>
 public sealed class ConversationProvenanceGateTests
 {
@@ -36,120 +37,77 @@ public sealed class ConversationProvenanceGateTests
         var text = Read("app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs");
         Assert.DoesNotContain("Contains(\"converse\"", text);
         Assert.DoesNotContain("Contains(\"form\"", text);
-        Assert.Contains("ModelCatalog.IsConverse", text);
-    }
-
-    [Fact]
-    public void TurnWitness_CarriesTenantAndSessionProvenance()
-    {
-        var text = Read("app/Laplace.Endpoints.OpenAICompat/TurnWitness.cs");
-        Assert.Contains("record struct TurnItem", text);
-        Assert.Contains("string Tenant", text);
-        Assert.Contains("Hash128 SessionId", text);
-        // The HTTP interface closes a turn through the shared TurnCloser with tenant
-        // and session.
-        Assert.Contains("new TurnCloser(", text);
-        Assert.Contains("closer.CloseAsync(", text);
-        Assert.Contains("item.Tenant, item.SessionId", text);
+        Assert.Contains("ModelCatalog.IsChatModel", text);
+        Assert.Contains("ModelCatalog.IsCompletionsModel", text);
     }
 
     /// <summary>
-    /// ONE CLOSE, THREE LANES. The close sequence — Tier-0 ROM, accumulating writer,
-    /// tenant scope, bootstrap-once, attribute-once, build, apply — is TurnCloser's
-    /// and no frontend may re-derive it. It was previously copied into MCP and the
-    /// HTTP lane (which had already diverged: only HTTP checked the substrate floor)
-    /// while the CLI ran a weaker fourth path with no tenant or session at all.
+    /// ONE PROGRAM, EVERY SURFACE. Each conversation surface hands its turn to the Engine
+    /// through <c>ConversationTurns</c>; none reads the retired chat functions or builds a turn.
     /// </summary>
-    [Fact]
-    public void TurnCloser_IsTheOnlyCloseSequence()
+    [Theory]
+    [InlineData("app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs")]
+    [InlineData("app/Laplace.Endpoints.Mcp/SubstrateTools.cs")]
+    [InlineData("app/Laplace.Cli/QueryCommands.cs")]
+    public void ConversationSurfaces_RunTheEngineTurn(string surface)
     {
-        var closer = Read("app/Laplace.Substrate/Ingestion/TurnCloser.cs");
-        Assert.Contains("ConversationContent.Resolve", closer);
-        Assert.Contains("ConversationContent.BuildTenantBootstrapChanges", closer);
-        Assert.Contains("ConversationContent.TryBuildTurnChange", closer);
-        Assert.Contains("ConsensusAccumulatingWriter", closer);   // fold inline, not deferred
-        Assert.Contains("CodepointPerfcache.LoadDefault", closer); // the Tier-0 ROM floor all lanes share
-
-        // No interface re-derives it.
-        foreach (var lane in new[]
+        var text = StripComments(Read(surface));
+        Assert.Contains("TurnAsync(", text);
+        foreach (var retired in new[]
                  {
-                     "app/Laplace.Endpoints.Mcp/SubstrateTools.cs",
-                     "app/Laplace.Endpoints.OpenAICompat/TurnWitness.cs",
-                     "app/Laplace.Cli/QueryCommands.cs",
+                     "NpgsqlSubstrateReads.ChatAsync(", "ForwardTurnAsync(", "ForwardTurnStepsAsync(",
+                     "ForwardTurnObservedStepsAsync(", "TurnCloser", "TryBuildTurnChange",
+                     "BuildTenantBootstrapChanges", "ApplyConversationTurnAsync",
                  })
-        {
-            var text = Read(lane);
-            Assert.DoesNotContain("ConversationContent.BuildTenantBootstrapChanges", text);
-            Assert.DoesNotContain("ConversationContent.TryBuildTurnChange", text);
-        }
+            Assert.DoesNotContain(retired, text);
     }
 
     /// <summary>
-    /// CLI chat enters the same conversational operation as every other interface
-    /// (<c>NpgsqlSubstrateReads.ChatAsync</c>, spec 36), never
-    /// <c>generation.walk_text</c> directly, and closes the turn under a canonical
-    /// session id.
+    /// The turn is the Engine's: <c>laplace turn</c> (or <c>said</c>) with its receipt. The
+    /// orchestrator composes no identity, opens no database connection and writes no row.
     /// </summary>
     [Fact]
-    public void CliChat_GoesThroughChatAndClosesWithProvenance()
+    public void ConversationTurns_RunsTheEngineAndComposesNothing()
     {
-        var text = Read("app/Laplace.Cli/QueryCommands.cs");
-        // Call sites only; comment prose is stripped before matching.
-        var chat = StripComments(ExtractMethod(text, "public static async Task<int> ChatAsync"));
-        Assert.Contains("ChatAsync(", chat);
-        Assert.DoesNotContain("generation.walk_text(", chat);
-        Assert.Contains("closer.CloseAsync(", chat);
-        // A CLI turn carries a real session, minted through the canonical id law.
-        Assert.Contains("ConversationContent.SessionId(", text);
+        var turns = StripComments(Read("app/Laplace.Substrate/Ingestion/ConversationTurns.cs"));
+        var engine = StripComments(Read("app/Laplace.Substrate/Abstractions/NativeRecipeExecution.Turns.cs"));
+        Assert.Contains(".TurnAsync(", turns);
+        Assert.Contains("\"turn\"", engine);
+        Assert.Contains("\"said\"", engine);
+        Assert.Contains("\"--receipt\"", engine);
+        Assert.Contains("\"--files\"", engine);
+        foreach (var text in new[] { turns, engine })
+            foreach (var forbidden in new[]
+                     {
+                         "ContentTierSpine", "HashComposer", "SubstrateChangeBuilder", "ConsensusAccumulatingWriter",
+                         "NpgsqlCatalog", "OpenConnectionAsync", "Blake3",
+                     })
+                Assert.DoesNotContain(forbidden, text);
+    }
+
+    /// <summary>The catalog keeps no statement of the retired turn writer or its chat reads.</summary>
+    [Fact]
+    public void SqlCatalog_HoldsNoSecondConversationSubstrate()
+    {
+        var catalog = Read("engine/core/src/sql_catalog.def");
+        foreach (var retired in new[]
+                 {
+                     "\"conversation.append_turns\"", "\"conversation.forward_turn\"",
+                     "\"conversation.forward_turn_observed\"", "\"converse.chat\"",
+                     "session_append_turns",
+                 })
+            Assert.DoesNotContain(retired, catalog);
     }
 
     [Fact]
-    public void ConversationContent_EmitsTurnLevelTestimony()
+    public void McpChatTurn_IsTheEngineTurnOfTheMcpParticipant()
     {
-        var text = Read("app/Laplace.Substrate/Abstractions/ConversationContent.cs");
-        Assert.Contains("\"APPEARS_IN\"", text);
-        Assert.DoesNotContain("\"PRECEDES\"", text);
-        Assert.Contains("session_append_turns", Read("engine/core/src/sql_catalog.def"));
-        Assert.Contains("\"HAS_ATTRIBUTION\"", text);
-        // Ids mint through the canonical system, never a hand hash.
-        Assert.Contains("SubstrateCanonicalIds", text);
-        Assert.DoesNotContain("SHA256", text);
-    }
-
-    [Fact]
-    public void McpDepositTurn_UsesConversationProvenance()
-    {
-        // Scoped to DepositTurn: the MCP `witness` tool deposits a sessionless note
-        // through the plain UserPrompt/Response sources; only a conversational turn
-        // carries tenant/session provenance.
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
-        var depositTurn = ExtractMethod(text, "private bool DepositTurn");
-        // The turn closes through the shared closer with the MCP tenant.
-        Assert.Contains("CloseAsync(McpTenant", depositTurn);
-        Assert.DoesNotContain("UserPromptContent.BuildBootstrapChange", depositTurn);
-        // Notes use the plain sources on their own writer and latch, so a note
-        // failure cannot disable turn deposits.
+        var chat = StripComments(ExtractMethod(text, "private (string, bool) ChatTurn"));
+        Assert.Contains("_turns.Value.TurnAsync(McpTenant", chat);
+        // Notes use the plain sources on their own writer and latch.
         Assert.Contains("UserPromptContent.BuildBootstrapChange", text);
         Assert.Contains("_plainWriterBroken", text);
-    }
-
-    /// <summary>
-    /// Natural chat runs the forward program (<c>ForwardTurnAsync</c>); explicit
-    /// shapes run the <c>ChatAsync</c> inspection operation. An empty forward pass is
-    /// not replaced by session recall, and a chat reply's eff_mu/witnesses are null,
-    /// never zero.
-    /// </summary>
-    [Fact]
-    public void HttpConverse_UsesForwardProgramWithoutRecallFallback()
-    {
-        var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.cs");
-        var method = StripComments(ExtractMethod(text,
-            "private static async Task<IReadOnlyList<ConverseRow>> RunConversationAsync"));
-        var chatIdx = method.IndexOf("NpgsqlSubstrateReads.ChatAsync(", StringComparison.Ordinal);
-        Assert.True(chatIdx >= 0, "explicit shapes must retain the inspection operation");
-        Assert.Contains("NpgsqlSubstrateReads.ForwardTurnAsync(", method);
-        Assert.DoesNotContain("RecallSessionAsync", method);
-        Assert.Contains("ConverseRow(reply, null, null)", method);
     }
 
     /// <summary>Drops // line comments so a pin tests the call sites, not the prose.</summary>

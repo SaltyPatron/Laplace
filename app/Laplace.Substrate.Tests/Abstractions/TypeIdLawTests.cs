@@ -117,23 +117,18 @@ public class TypeIdLawTests
     }
 
     [Fact]
-    public void CliProgram_CallsExtensionWalkText()
+    public void CliWalk_IsTheEngineReadTurn()
     {
         var repoRoot = FindRepoRoot();
         var cliDir = Path.Combine(repoRoot, "app", "Laplace.Cli");
-        var readFolder = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql");
-        var reads = string.Join("\n", Directory.EnumerateFiles(readFolder, "NpgsqlSubstrateReads*.cs")
-            .Select(File.ReadAllText));
-
         var sb = new System.Text.StringBuilder();
         foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
             sb.Append(File.ReadAllText(f));
         var text = sb.ToString();
-        // CLI and HTTP consume the canonical forward-turn rows via the native catalog.
-        Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
-        Assert.Contains("\"conversation.forward_turn\"", reads, StringComparison.Ordinal);
-        Assert.Contains("converse.forward_turn($1,$2,$3,$4,$5,$6)",
-            ReadSqlCatalog(repoRoot), StringComparison.Ordinal);
+        // The CLI walk is the one forward program read (laplace turn --read), never a SQL walk.
+        Assert.Contains("TurnAsync(CliParticipant, CliSession, prompt, read: true)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("WalkTextAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("converse.forward_turn", ReadSqlCatalog(repoRoot), StringComparison.Ordinal);
         Assert.DoesNotContain("generation.generate(", text, StringComparison.Ordinal);
     }
 

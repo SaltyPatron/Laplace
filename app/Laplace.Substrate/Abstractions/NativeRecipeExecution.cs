@@ -27,7 +27,7 @@ public sealed record NativeRecipeRequest(
 /// containment, pruning, COPY and source registration. Native failures remain in
 /// the child process and its actual exit status is returned to the caller.
 /// </summary>
-public sealed class NativeRecipeExecution
+public sealed partial class NativeRecipeExecution
 {
     public string Executable { get; }
     public string Recipes { get; }
@@ -240,7 +240,7 @@ public sealed class NativeRecipeExecution
         return ExecuteAsync(start, standardOutput, standardError, ct);
     }
 
-    private static ProcessStartInfo ProcessInfo(string executable, string? connectionInfo)
+    internal static ProcessStartInfo ProcessInfo(string executable, string? connectionInfo)
     {
         string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
             ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
@@ -265,21 +265,44 @@ public sealed class NativeRecipeExecution
         Stream standardOutput, Stream standardError, CancellationToken ct = default,
         Action<NativeRecipeProgress>? progress = null)
     {
+        if (progress is null) return await RunAsync(start, standardOutput, standardError, null, ct).ConfigureAwait(false);
+        string progressPath = WorkFile("ingest-progress");
+        try
+        {
+            start.Environment["LAPLACE_INGEST_PROGRESS_PATH"] = progressPath;
+            return await RunAsync(start, standardOutput, standardError,
+                process => ObserveAsync(progressPath, progress, process, ct), ct).ConfigureAwait(false);
+        }
+        finally { File.Delete(progressPath); }
+    }
+
+    /// <summary>
+    /// An empty file of this run's own in the declared work directory, named by <paramref name="kind"/>: where
+    /// the Engine writes what it reports while it runs, or reads what it is given.
+    /// </summary>
+    internal static string WorkFile(string kind, string extension = ".jsonl")
+    {
+        string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+            ?? throw new InvalidOperationException("Native execution requires the declared work directory.");
+        if (!Directory.Exists(work)) throw new DirectoryNotFoundException($"The declared work directory is not available: {work}");
+        string path = Path.Combine(work, kind + "-" + Guid.NewGuid().ToString("N") + extension);
+        using (File.Create(path)) { }
+        return path;
+    }
+
+    /// <summary>
+    /// Runs the Engine: its standard output and error pumped to the streams given while it runs, and what
+    /// <paramref name="observe"/> follows (a file it writes) read alongside. Cancellation and any failure of a
+    /// pump or of the observer stop the process; its exit status is returned.
+    /// </summary>
+    internal static async Task<int> RunAsync(ProcessStartInfo start,
+        Stream standardOutput, Stream standardError, Func<Process, Task>? observe, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
         ct.ThrowIfCancellationRequested();
         using var process = new Process { StartInfo = start };
-        string? progressPath = null;
-        if (progress is not null)
-        {
-            string work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT")
-                ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
-                ?? throw new InvalidOperationException("Native progress requires the declared work directory.");
-            if (!Directory.Exists(work)) throw new DirectoryNotFoundException($"The declared work directory is not available: {work}");
-            progressPath = Path.Combine(work, "ingest-progress-" + Guid.NewGuid().ToString("N") + ".jsonl");
-            using (File.Create(progressPath)) { }
-            process.StartInfo.Environment["LAPLACE_INGEST_PROGRESS_PATH"] = progressPath;
-        }
         Task output = Task.CompletedTask, error = Task.CompletedTask, observations = Task.CompletedTask;
         try
         {
@@ -287,8 +310,7 @@ public sealed class NativeRecipeExecution
             using var cancellation = ct.Register(() => Stop(process));
             output = PumpAsync(process.StandardOutput.BaseStream, standardOutput, process, ct);
             error = PumpAsync(process.StandardError.BaseStream, standardError, process, ct);
-            observations = progressPath is null ? Task.CompletedTask
-                : ObserveAsync(progressPath, progress!, process, ct);
+            observations = observe is null ? Task.CompletedTask : observe(process);
             await process.WaitForExitAsync(ct).ConfigureAwait(false);
             await Task.WhenAll(output, error, observations).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
@@ -303,20 +325,38 @@ public sealed class NativeRecipeExecution
             catch { /* Retain the original process, cancellation or stream failure. */ }
             throw;
         }
-        finally
-        {
-            if (progressPath is not null) File.Delete(progressPath);
-        }
     }
 
-    private static async Task ObserveAsync(string path, Action<NativeRecipeProgress> progress,
+    private static Task ObserveAsync(string path, Action<NativeRecipeProgress> progress,
         Process process, CancellationToken ct)
+    {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        return TailAsync(path, line =>
+        {
+            var observation = JsonSerializer.Deserialize<NativeRecipeProgress>(line, options)
+                ?? throw new InvalidDataException("Native progress contained no observation.");
+            if (observation.FilesTotal < 0 || observation.FilesDone < 0
+                || observation.FilesDone > observation.FilesTotal || observation.Entities < 0
+                || observation.Physicalities < 0 || observation.BytesDone < 0)
+                throw new InvalidDataException("Native progress contained invalid counters.");
+            if (observation.Event is not ("inventory" or "file-start" or "file-known" or "file-composed" or "progress" or "source-trunk" or "source-publication" or "complete" or "failed"))
+                throw new InvalidDataException("Native progress contained an unknown event.");
+            progress(observation);
+        }, process, "progress", ct);
+    }
+
+    /// <summary>
+    /// Follows a JSON Lines file the Engine writes while it runs (ingest progress, a turn's receipt): each
+    /// complete line to <paramref name="line"/> as it is written, until the process has exited and the file
+    /// is read to its end. A line left unfinished at exit, or a line the reader refuses, stops the process.
+    /// </summary>
+    internal static async Task TailAsync(string path, Action<ReadOnlySpan<byte>> line,
+        Process process, string what, CancellationToken ct)
     {
         try
         {
             await using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
             using var pending = new MemoryStream();
             var buffer = new byte[4096];
             while (true)
@@ -325,24 +365,19 @@ public sealed class NativeRecipeExecution
                 for (int i = 0; i < count; i++)
                 {
                     if (buffer[i] != (byte)'\n') { pending.WriteByte(buffer[i]); continue; }
-                    var observation = JsonSerializer.Deserialize<NativeRecipeProgress>(pending.GetBuffer().AsSpan(0, checked((int)pending.Length)), options)
-                        ?? throw new InvalidDataException("Native progress contained no observation.");
+                    line(pending.GetBuffer().AsSpan(0, checked((int)pending.Length)));
                     pending.SetLength(0);
-                    if (observation.FilesTotal < 0 || observation.FilesDone < 0
-                        || observation.FilesDone > observation.FilesTotal || observation.Entities < 0
-                        || observation.Physicalities < 0 || observation.BytesDone < 0)
-                        throw new InvalidDataException("Native progress contained invalid counters.");
-                    if (observation.Event is not ("inventory" or "file-start" or "file-known" or "file-composed" or "progress" or "source-trunk" or "source-publication" or "complete" or "failed"))
-                        throw new InvalidDataException("Native progress contained an unknown event.");
-                    progress(observation);
                 }
                 if (count != 0) continue;
                 if (process.HasExited)
                 {
-                    if (pending.Length != 0) throw new InvalidDataException("Native progress ended inside an observation.");
+                    // What the process wrote before it exited is all there: one more read finds its end.
+                    int more = await file.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+                    if (more > 0) { file.Seek(-more, SeekOrigin.Current); continue; }
+                    if (pending.Length != 0) throw new InvalidDataException($"Native {what} ended inside a line.");
                     return;
                 }
-                await Task.Delay(200, ct).ConfigureAwait(false);
+                await Task.Delay(100, ct).ConfigureAwait(false);
             }
         }
         catch { Stop(process); throw; }
@@ -354,7 +389,7 @@ public sealed class NativeRecipeExecution
         catch { Stop(process); throw; }
     }
 
-    private static void Stop(Process process)
+    internal static void Stop(Process process)
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         catch (InvalidOperationException) { /* It exited between the check and kill. */ }

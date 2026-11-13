@@ -100,9 +100,7 @@ internal static class AppComposition
         services.AddSingleton<MachineCostWitnessService>();
         services.AddSingleton<ExploreDecomposeService>();
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
-        services.AddSingleton<TurnWitness>();
-        services.AddSingleton<IConversationWitness>(sp => sp.GetRequiredService<TurnWitness>());
-        services.AddServerHostedService(sp => sp.GetRequiredService<TurnWitness>());
+        services.AddSingleton<IConversationTurns, InstalledConversationTurns>();
         services.AddServerHostedService<CatalogPrewarmService>();
         if (browserAuth.Providers.Count > 0)
             services.AddServerHostedService<IdentityClientBootstrapService>();

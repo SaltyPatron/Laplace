@@ -398,11 +398,9 @@ jobs:
           r=json.loads(Path("artifacts/forward-chat-lifecycle/receipt.json").read_text())
           assert r["disposition"] == "verified", r.get("error")
           print("session:", r["session"])
-          print("session_id:", r["session_id"])
           print("proof_fingerprint_sha256:", r["proof_fingerprint_sha256"])
-          print("turns_after_first:", len(r["after_first"]["turns"]))
-          print("turns_after_second:", len(r["after_second"]["turns"]))
-          print("turn_two_native_events:", len(r["turn_two_native_receipt"]["execution"]))
+          print("first_turn_claim:", r["first_record"]["claim"])
+          print("second_turn_claim:", r["second_record"]["claim"])
           PY
       - name: Publish lifecycle proof receipt
         if: always()

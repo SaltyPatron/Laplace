@@ -13,23 +13,6 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 internal sealed class UnreachableSubstrateClient : ISubstrateClient
 {
-    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, CancellationToken ct) =>
-        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
-        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
-        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
-        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
-
-    public IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
-        string prompt, int steps = 32, int maxOrder = 5, double temperature = 0.7, int topK = 10,
-        CancellationToken ct = default) =>
-        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
-
     public Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
@@ -167,104 +150,10 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         Task.FromResult<ResponseFieldResponse?>(new("response.field", 2, fanout, nearest, []));
     public Task<ResponseFieldResponse?> LexiconAsync(string xRef, string? yRef, CancellationToken ct) =>
         Task.FromResult<ResponseFieldResponse?>(new("lexicon", 2, 0, 0, []));
-    public IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
-        string prompt,byte[]? session,ConverseOptions options,CancellationToken ct) =>
-        WalkTextStreamAsync(prompt,options.MaxTokens ?? 128,options.Window ?? 5,
-            options.Temperature ?? 0.6,options.TopK ?? 10,ct);
-
-    public async IAsyncEnumerable<ForwardObservedEvent> ForwardTurnObservedStreamAsync(
-        string prompt, byte[]? session, ConverseOptions options,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        // An explicit operator language is echoed so an endpoint test can observe
-        // the tag that reached the substrate client on the ordinary forward lane.
-        if (string.Equals(options.LanguageSource, "request", StringComparison.Ordinal))
-        {
-            string echo = $"language={options.LanguageCode}";
-            yield return new ForwardObservedEvent(1, "emit", 0, string.Empty, echo, echo, 0, string.Empty);
-            yield return new ForwardObservedEvent(
-                1, "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
-                Completion: true, Disposition: "complete", OutputCount: 1,
-                PriorDiscourseIds: Array.Empty<string>());
-            yield break;
-        }
-        var count = 0;
-        await foreach (var token in ForwardTurnStreamAsync(prompt, session, options, ct))
-        {
-            count++;
-            yield return new ForwardObservedEvent(
-                token.Step, "emit", 0, string.Empty, token.Token, token.Token,
-                (int)token.Mu, string.Empty);
-        }
-        yield return new ForwardObservedEvent(
-            count, count == 0 ? "unresolved" : "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
-            Completion: count != 0, Disposition: count == 0 ? "unresolved" : "complete", OutputCount: count,
-            PriorDiscourseIds: Array.Empty<string>());
-    }
-
     private const string WhaleIdHex = "00112233445566778899aabbccddeeff";
     private const string CetaceanIdHex = "ffeeddccbbaa99887766554433221100";
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
     private const string WordNetIdHex = "fedcba9876543210fedcba9876543210";
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, CancellationToken ct) =>
-        ForwardRowsAsync(prompt,session,default,ct);
-
-    private async Task<IReadOnlyList<ConverseRow>> ForwardRowsAsync(
-        string prompt,byte[]? session,ConverseOptions options,CancellationToken ct)
-    {
-        var reply = new System.Text.StringBuilder();
-        await foreach (var token in ForwardTurnStreamAsync(prompt,session,options,ct))
-            reply.Append(token.Token);
-        return reply.Length == 0 ? [] : [new ConverseRow(reply.ToString(),null,null)];
-    }
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
-        options.Shape is null && options.Bands is null && !options.Elaborate
-            ? ForwardRowsAsync(prompt, session, options, ct)
-            : Task.FromResult<IReadOnlyList<ConverseRow>>(
-            [
-                new ConverseRow(
-                    $"shape={options.Shape ?? "-"};bands={string.Join(',', options.Bands ?? [])};elaborate={options.Elaborate}",
-                    0.91m, 42)
-            ]);
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
-        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<ConverseRow>>(
-        [
-            new ConverseRow("tenant-scoped: my own witnessed answer.", 0.42m, 3)
-        ]);
-
-    public Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<ConverseRow>>(
-        [
-            new ConverseRow("A whale is a marine mammal.", 0.91m, 42)
-        ]);
-
-    public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
-        string prompt,
-        int steps = 32,
-        int maxOrder = 5,
-        double temperature = 0.7,
-        int topK = 10,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        await Task.CompletedTask;
-        if (prompt.Contains("unknown-topic",StringComparison.OrdinalIgnoreCase)) yield break;
-        if (steps < 1) yield break;
-        yield return new GenerateToken(1, " the", 5);
-
-        if (prompt.Contains("trigger-stream-error", StringComparison.OrdinalIgnoreCase))
-            throw new SubstrateUnavailableException("substrate went away mid-walk.", new InvalidOperationException());
-        if (steps < 2) yield break;
-        yield return new GenerateToken(2, " whale", 4);
-        if (steps < 3) yield break;
-        yield return new GenerateToken(3, " sings", 3);
-    }
 
     public Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<CompletionRow>>(

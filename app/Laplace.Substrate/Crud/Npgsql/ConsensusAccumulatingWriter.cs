@@ -181,55 +181,6 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
 
-    public async Task<ApplyResult> ApplyConversationTurnAsync(
-        SubstrateChange change, Hash128 sessionId, IReadOnlyList<Hash128> turnIds,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(change);
-        ArgumentNullException.ThrowIfNull(turnIds);
-        if (sessionId == Hash128.Zero || turnIds.Count == 0)
-            throw new ArgumentException("A conversation append requires a session and ordered turn ids.");
-        var ids = turnIds.Select(id => id.ToBytes()).ToArray();
-        var retry = Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry;
-        for (int attempt = 0; ; attempt++)
-        {
-            try
-            {
-                return await ApplyCoreAsync(
-                    [change], workingSet: true, append: false, default,
-                    precommitVerifier: null, ct,
-                    async (connection, transaction, token) =>
-                    {
-                        long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
-                        await using var command = NpgsqlCatalog.Command(connection, transaction,
-                            "conversation.append_turns", sessionId.ToBytes(), ids,
-                            change.Metadata.BuiltAt.ToUniversalTime(), change.Metadata.IntentId.ToBytes(),
-                            physicalityBudget, 512, physicalityBudget / MemoryTopology.Hash128Bytes);
-                        void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
-                        {
-                            const string prefix = "session descriptor view unavailable; transaction pending: ";
-                            if (notice.Notice.MessageText.StartsWith(prefix, StringComparison.Ordinal))
-                                _log.LogInformation("SESSION_PHYSICALITY_VIEW transaction_pending=true receipt={Receipt}",
-                                    notice.Notice.MessageText[prefix.Length..]);
-                        }
-                        connection.Notice += OnSessionNotice;
-                        try { await command.ExecuteScalarAsync(token).ConfigureAwait(false); }
-                        finally { connection.Notice -= OnSessionNotice; }
-                    }).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (attempt + 1 < retry.MaxAttempts && retry.IsTransient(ex))
-            {
-                TimeSpan delay = retry.DelayBeforeAttempt(attempt, Random.Shared);
-                _log.LogWarning(ex,
-                    "CONVERSATION_APPEND_RETRY session={SessionId} intent={IntentId} failed_attempt={FailedAttempt} next_attempt={NextAttempt} max_attempts={MaxAttempts} delay_ms={DelayMs}",
-                    sessionId, change.Metadata.IntentId, attempt + 1, attempt + 2,
-                    retry.MaxAttempts, delay.TotalMilliseconds);
-                if (delay > TimeSpan.Zero)
-                    await Task.Delay(delay, ct).ConfigureAwait(false);
-            }
-        }
-    }
-
     public async Task<ApplyResult> ApplyWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
@@ -295,8 +246,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
         Hash128 sourceId,
         Func<CancellationToken, ValueTask>? precommitVerifier,
-        CancellationToken ct,
-        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? appendConversation = null)
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
@@ -321,9 +271,6 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
             if (precommitVerifier is not null && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "source integrity verification requires the atomic evidence-and-consensus writer");
-            if (appendConversation is not null && !atomicWorkingSet)
-                throw new InvalidOperationException(
-                    "Conversation history requires the atomic evidence-and-consensus writer.");
             if (hasEphemeralFolds && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "ephemeral fold inputs require the journaled atomic writer; "
@@ -354,9 +301,6 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         if (acceptedDelta is { Count: > 0 })
                             (atomicStats, committedMaskPairs) = await UpsertDeltaInTransactionAsync(
                                 acceptedDelta, connection, transaction, token).ConfigureAwait(false);
-
-                        if (appendConversation is not null)
-                            await appendConversation(connection, transaction, token).ConfigureAwait(false);
 
                         // Source-integrity verification runs inside the same transaction, after
                         // the fold, so a failed check rolls back evidence and standing together.

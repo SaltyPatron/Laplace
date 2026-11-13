@@ -36,7 +36,7 @@ internal sealed record McpHttpOptions(string Token, string Origin, int Port = 51
 /// MCP 2025-06-18 Streamable HTTP: POST replies are application/json; GET returns 405.
 /// Each session owns an <see cref="McpServer"/> over the same tool set the stdio
 /// transport dispatches to. Requests in one session serialize on its gate because the
-/// native writer and TurnCloser are not thread-safe.
+/// native writer is not thread-safe.
 /// </summary>
 internal static class McpHttpHost
 {

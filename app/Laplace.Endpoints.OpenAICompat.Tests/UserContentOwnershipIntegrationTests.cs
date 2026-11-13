@@ -344,33 +344,10 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             confirm: false));
         await writer.ApplyAsync(refutedFile.Build());
 
-        string refutedPromptTenant = $"prompt-refute-{suffix}";
-        var refutedPromptScope = ConversationContent.Resolve(refutedPromptTenant);
-        foreach (var bootstrap in ConversationContent.BuildTenantBootstrapChanges(refutedPromptScope))
-            await writer.ApplyAsync(bootstrap);
-        Hash128 sessionId = ConversationContent.SessionId(refutedPromptTenant, "refuted");
-        var refutedPrompt = new SubstrateChangeBuilder(
-            refutedPromptScope.PromptSource, "test/user-content/refuted-prompt")
-            .AddEntity(
-                sessionId,
-                EntityTier.Document,
-                ConversationContent.SessionType);
-        refutedPrompt.AddAttestation(NativeAttestation.Categorical(
-            contentId,
-            ConversationContent.MembershipRelation,
-            sessionId,
-            refutedPromptScope.PromptSource,
-            sessionId,
-            SourceTrust.UserPrompt,
-            confirm: false));
-        await writer.ApplyAsync(refutedPrompt.Build());
-
         using var falseTypeExport = await ExportAsync(client, falseTypeTenant, admitted.ContentId);
         Assert.Equal(HttpStatusCode.NotFound, falseTypeExport.StatusCode);
         using var refutedFileExport = await ExportAsync(client, refutedFileTenant, admitted.FileId);
         Assert.Equal(HttpStatusCode.NotFound, refutedFileExport.StatusCode);
-        using var refutedPromptExport = await ExportAsync(client, refutedPromptTenant, admitted.ContentId);
-        Assert.Equal(HttpStatusCode.NotFound, refutedPromptExport.StatusCode);
     }
 
     private static void AssertCanonicalIds(UserContentWriteResponse response)

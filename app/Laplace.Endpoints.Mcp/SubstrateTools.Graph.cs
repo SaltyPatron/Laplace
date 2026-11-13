@@ -227,117 +227,39 @@ internal sealed partial class SubstrateTools : IMcpTools
         return (result.ToJsonString(), false);
     }
 
+    // One turn of the session, answered by the forward program and witnessed by the Engine (laplace turn),
+    // the same program the HTTP chat surface and the CLI run. The reply is what the turn realized; the
+    // receipt says the turn's ID, its place in the session and the program's disposition.
     private (string, bool) ChatTurn(JsonObject? args)
     {
         var prompt = Req(args, "prompt");
         var sessionKey = Opt(args, "session") ?? _processSessionKey;
-        var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
-        var shape = Opt(args, "shape");
-        var bandsCsv = Opt(args, "bands");
-        int[]? bands = bandsCsv is null
-            ? null
-            : bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(int.Parse).ToArray();
-        var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
-        var languageInput = Opt(args, "language");
-        byte[]? language = null;
-        var languageCode = languageInput is null
-            ? LanguageReference.ResolveSystemCode()
-            : LanguageReference.ResolveCode(languageInput);
-        if (languageInput is not null && languageCode is null)
-            return ($"language does not resolve to ISO 639: {languageInput}", true);
-        if (languageCode is not null)
+        if (!ConversationContent.IsValidIdentifier(sessionKey))
+            return ("session must match [A-Za-z0-9._@-]{1,128}", true);
+        NativeTurnReceipt turn;
+        try { turn = _turns.Value.TurnAsync(McpTenant, sessionKey, prompt).GetAwaiter().GetResult(); }
+        catch (Exception failure) when (failure is InvalidOperationException or FileNotFoundException or DirectoryNotFoundException)
         {
-            language = LanguageReference.IdForResolvedCode(languageCode).ToBytes();
+            return ($"The turn did not run: {failure.Message}", true);
         }
-
-        int steps = Int(args, "max_tokens", 128);
-        int stride = Int(args, "window", 5);
-        int topK = Int(args, "top_k", 10);
-        double spread = args?["temperature"]?.GetValue<double>() ?? 0.6;
-        if (steps < 1 || stride < 1 || topK < 1 || !double.IsFinite(spread) || spread < 0)
-            return ("Output length, window, and top_k must be positive; temperature must be finite and nonnegative.", true);
-
-        bool inspection = !string.IsNullOrWhiteSpace(shape) || bands is { Length: > 0 } || elaborate;
-        string occurrenceKey = Guid.NewGuid().ToString("N");
-        if (!TurnCloser.CloseAsync(McpTenant, sessionId, prompt, null,
-                occurrenceKey: occurrenceKey, phase: ConversationContent.TurnPhase.Input)
-            .GetAwaiter().GetResult())
-            return ("The prompt did not commit to the substrate.", true);
-        string? reply;
-        JsonObject? terminal = null;
-        if (inspection)
-        {
-            reply = NpgsqlSubstrateReads.ChatAsync(
-                _db, prompt, sessionId.ToBytes(), default,
-                shape: shape, bands: bands, elaborate: elaborate,
-                language: language).GetAwaiter().GetResult();
-        }
-        else
-        {
-            // The same observed native invocation the HTTP chat surface reads: the
-            // reply is its emitted surfaces and the terminal row is its disposition,
-            // so an empty turn states why (unresolved, ambiguous, budget_exhausted)
-            // instead of collapsing to an absent reply.
-            (reply, terminal) = ObservedTurn(prompt, sessionId.ToBytes(), steps, stride, spread, topK);
-        }
-
-        bool witnessed = string.IsNullOrEmpty(reply) || TurnCloser.CloseAsync(
-            McpTenant, sessionId, prompt, reply, occurrenceKey: occurrenceKey,
-            phase: ConversationContent.TurnPhase.Output).GetAwaiter().GetResult();
-
         var result = new JsonObject
         {
-            ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply }),
+            ["rows"] = new JsonArray(new JsonObject { ["reply"] = turn.Response.Length == 0 ? null : turn.Response }),
             ["session"] = sessionKey,
-            ["witnessed"] = witnessed
-        };
-        if (terminal is not null) result["forward"] = terminal;
-        if (!witnessed) result["error"] = "The turn did not commit to the substrate.";
-        return (result.ToJsonString(), !witnessed);
-    }
-
-    private (string? Reply, JsonObject? Terminal) ObservedTurn(
-        string prompt, byte[] session, int steps, int stride, double spread, int topK)
-    {
-        var text = new StringBuilder();
-        int emitted = 0;
-        NpgsqlSubstrateReads.ForwardTurnObservedRow? couple = null, last = null;
-        var rows = NpgsqlSubstrateReads.ForwardTurnObservedStepsAsync(
-            _db, prompt, session, steps, stride, spread, topK, default).GetAsyncEnumerator();
-        try
-        {
-            while (rows.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            ["witnessed"] = turn.Witnessed,
+            ["forward"] = new JsonObject
             {
-                var row = rows.Current;
-                if (row.Event == "couple") couple = row;
-                if (row.Event is "complete" or "unresolved" or "ambiguous" or "budget_exhausted")
-                    last = row;
-                if (row.Event != "emit" || row.Surface is null) continue;
-                text.Append(row.Surface);
-                ++emitted;
-            }
-        }
-        finally { rows.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
-
-        JsonObject? terminal = last is not { } t ? null : new JsonObject
-        {
-            ["event"] = t.Event,
-            ["disposition"] = t.Disposition,
-            ["completion"] = t.Completion,
-            ["root_id"] = t.RootIdHex,
-            ["program_id"] = t.ProgramIdHex,
-            ["required_obligations"] = t.RequiredObligations,
-            ["satisfied_obligations"] = t.SatisfiedObligations,
-            ["ordered_context"] = t.OrderedContextCount,
-            ["coupled_candidates"] = couple?.CandidateCount,
-            ["coupled_relation_families"] = couple?.RelationFamilies,
-            ["coupled_sources"] = couple?.SupportSources,
-            ["semantic_act_id"] = t.SemanticActIdHex,
-            ["output_fingerprint"] = t.OutputFingerprintHex,
-            ["emitted"] = emitted,
+                ["disposition"] = turn.Disposition,
+                ["prompt_id"] = turn.PromptId,
+                ["response_id"] = turn.ResponseId,
+                ["turn_id"] = turn.TurnId,
+                ["ordinal"] = turn.Ordinal,
+                ["turns_before"] = turn.TurnsBefore,
+                ["emitted"] = turn.Steps.Count,
+            },
         };
-        return (emitted == 0 ? null : text.ToString(), terminal);
+        if (!turn.Witnessed && turn.Response.Length > 0) result["error"] = "The turn did not commit to the substrate: " + turn.Reason;
+        return (result.ToJsonString(), !turn.Witnessed && turn.Response.Length > 0);
     }
 
     // The agent write lane: mint a note as witnessed content and fold it, so the
@@ -488,22 +410,6 @@ internal sealed partial class SubstrateTools : IMcpTools
             _plainWriterBroken = true;
             Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP writer initialization failed.");
             Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
-        }
-    }
-
-    // The OODA close runs through the shared TurnCloser (Laplace.Ingestion), which
-    // owns the whole sequence — floor gate, writer, tenant scope cache, bootstrap,
-    // attribution, build, apply. This lane used to re-derive it and was missing the
-    // floor gate, so an MCP turn against a floorless database deposited testimony
-    // with no tier-0 constituents to anchor it.
-    private TurnCloser TurnCloser => _turnCloser ??= new TurnCloser(
-        _db, warn => Console.Error.WriteLine($"laplace-mcp: {warn}"));
-
-    private bool DepositTurn(string prompt, string? reply, Hash128 sessionId)
-    {
-        lock (_writerSync)
-        {
-            return TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
         }
     }
 
