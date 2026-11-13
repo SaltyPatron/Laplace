@@ -6,7 +6,7 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # staging; no sudo), with deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database
 # laplace-mono, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
 # deploy/linux/site-host.sh, run once by a person. Seeding is an operation (product-operator.yml), never part of a delivery;
-# this workflow has no manual dispatch (scripts/validate-pipeline.py: manual dispatch belongs in product-operator.yml).
+# this workflow has no manual dispatch (manual dispatch belongs in product-operator.yml).
 #
 # After hart-server verification, hart-prod receives the same staged application and
 # native closure. Its declared substrate connection selects hart-server or hart-cloud;
@@ -61,12 +61,8 @@ on:
       - "!web/scripts/test-*.mjs"
       - "!web/scripts/verify-*.mjs"
       - "!web/e2e/**"
-      - "!scripts/test-workflow-architecture.py"
-      - "!scripts/test-seed-workflow-ownership.py"
       - "!scripts/native-ingest-idempotency.sql"
-      - "!scripts/test-product-ci-artifact-ownership.py"
       - "!scripts/test-benchmark-suite.py"
-      - "!scripts/validate-pipeline.py"
       - "!vault-data-inventory.tsv"
       - "!vault-data-directories.list"
       # Re-include the pinned Native closure after .github/**. The shared

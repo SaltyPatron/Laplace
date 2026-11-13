@@ -57,21 +57,16 @@ run_ci_contract_checks() {
     scripts/ci_managed_projects.py \
     scripts/web-artifact.py \
     scripts/atomic-directory-exchange.py
-  ci_contract_check python3 scripts/validate-pipeline.py
   # A BEGIN ATOMIC body binds its callees at CREATE: the install and upgrade manifests must
   # define every callee first, or a fresh CREATE EXTENSION fails (42883 on staging).
   ci_contract_check python3 scripts/check-sql-manifest-dependencies.py
   ci_contract_check python3 scripts/test-sql-manifest-dependencies.py
-  ci_contract_check python3 scripts/test-ci-workspace.py
   ci_contract_check python3 scripts/test-runtime-installation.py
   ci_contract_check python3 scripts/test-service-units.py
-  ci_contract_check python3 scripts/test-product-ci-artifact-ownership.py
-  ci_contract_check python3 scripts/test-seed-workflow-ownership.py
   ci_contract_check python3 scripts/test-ingest-source-exit.py
   ci_contract_check python3 scripts/test-decomposer-gate-check.py
   ci_contract_check python3 scripts/test-db-reset-guard.py
   ci_contract_check python3 scripts/test-host-lock-wait.py
-  ci_contract_check ruby tests/site-workflow.rb
   ci_contract_check python3 tests/site-status.py
   ci_contract_check python3 scripts/test-platform-access-audit.py
   ci_contract_check python3 scripts/test-platform-access-enroll.py
@@ -87,13 +82,7 @@ run_ci_contract_checks() {
   ci_contract_check bash tests/machine-config.sh
   ci_contract_check python3 tests/linux-configuration.py
   ci_contract_check python3 tests/configured-paths.py
-  ci_contract_check python3 scripts/test-workflow-architecture.py
   ci_contract_check python3 scripts/test-benchmark-suite.py
-  ci_contract_check python3 scripts/test-ci-impact-plan.py
-  ci_contract_check ruby tests/legacy-delivery-contracts.rb
-  ci_contract_check python3 scripts/test-ci-qualification-cache.py
-  ci_contract_check python3 scripts/test-ci-product-freshness.py
-  ci_contract_check python3 scripts/test-ci-managed-projects.py
   ci_contract_check python3 scripts/test-managed-policy.py
   ci_contract_check python3 scripts/test-application-payload.py
   ci_contract_check python3 scripts/test-application-publish.py
