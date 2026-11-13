@@ -3,7 +3,7 @@
 -- the perfcache-backed word law; multi-token text by the native phrase resolver
 -- (both in-system — ids are never constructed outside the extension's native hash).
 -- Callers that already hold an id keep it; callers that hold TEXT call converse.resolve().
--- One implementation per fact (Rule #6): laplace.word_id/resolve_phrase remain the
+-- One implementation per fact (Rule #6): public.laplace_text_id/resolve_phrase remain the
 -- primitives, this is the one door in front of them.
 --
 -- GH #862 / #860: no SET, real schema names.
@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION converse.resolve(p_text text)
 BEGIN ATOMIC
     SELECT CASE
         WHEN position(' ' IN btrim(p_text)) = 0
-            THEN laplace.word_id(btrim(p_text))
+            THEN public.blake3_send(public.laplace_text_id(btrim(p_text)))
         ELSE converse.resolve_phrase(p_text)
     END;
 END;

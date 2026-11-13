@@ -9,8 +9,8 @@ BEGIN ATOMIC
     -- that happen to share a surface AND rendered a label for every consensus
     -- edge of every input word. Aggregate per (type_id, object_id), then realize.render
     -- exactly once per output row at the boundary.
-    WITH v AS (SELECT w AS word, laplace.word_id(w) AS id
-               FROM unnest(p_words) AS w WHERE laplace.word_id(w) IS NOT NULL),
+    WITH v AS (SELECT w AS word, public.blake3_send(public.laplace_text_id(w)) AS id
+               FROM unnest(p_words) AS w WHERE public.blake3_send(public.laplace_text_id(w)) IS NOT NULL),
     g AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
                array_agg(DISTINCT v.word ORDER BY v.word) AS words,

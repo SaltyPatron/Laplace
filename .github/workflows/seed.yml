@@ -316,7 +316,7 @@ jobs:
               return
             fi
             local src_name
-            src_name=$(python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(canonical_source(sys.argv[1])); print("" if not e else (f"laplace.witness_id(%r, %r)" % tuple(e["witness"]) if e.get("witness") else f"laplace.source_id(%r)" % e["decomposer"]))' "$key")
+            src_name=$(python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(canonical_source(sys.argv[1])); print("" if not e else (f"public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id(%r), public.laplace_text_id(%r)]))" % tuple(e["witness"]) if e.get("witness") else f"public.blake3_send(public.laplace_text_id('substrate/source/' || %r || '/v1'))" % e["decomposer"]))' "$key")
             local before after
             if [[ -n "$src_name" ]]; then
               before=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \

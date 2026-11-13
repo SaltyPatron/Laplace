@@ -5,7 +5,7 @@ DO $couple_standing_state$
 DECLARE
     prompt text := 'zzstandingvolatilityqv';
     anchor bytea;
-    candidate bytea := laplace.word_id('zzstandingcandidateqv');
+    candidate bytea := public.blake3_send(public.laplace_text_id('zzstandingcandidateqv'));
     relation bytea := laplace.relation_type_id('IS_A');
     before_program bytea;
     after_program bytea;
@@ -33,7 +33,7 @@ BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(anchor,relation,candidate),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[anchor, relation, candidate]::public.blake3[], NULL))),
          anchor,relation,candidate,
          1800000000000,30000000000,60000000,5,now());
 
@@ -48,7 +48,7 @@ BEGIN
 
     UPDATE laplace.consensus
        SET volatility=70000000
-     WHERE id=laplace.consensus_id(anchor,relation,candidate);
+     WHERE id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[anchor, relation, candidate]::public.blake3[], NULL)));
 
     SELECT p.program_id INTO after_program
       FROM generation.forward_program(prompt,1,0,0.0,8,7,0,64,NULL,NULL) p

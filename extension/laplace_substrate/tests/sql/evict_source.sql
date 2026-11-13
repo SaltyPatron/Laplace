@@ -9,24 +9,24 @@
 
 DO $$
 DECLARE
-    type_t   bytea := public.laplace_hash128_blake3('Type');
-    src_w    bytea := laplace.source_id('EvictTestWitness');
-    src_a    bytea := laplace.source_id('EvictTestAnalysis');
-    marker_t bytea := public.laplace_hash128_blake3('test/evict/marker-type');
-    rel_p    bytea := public.laplace_hash128_blake3('test/evict/rel');
+    type_t   bytea := public.blake3_send(public.laplace_text_id('Type'));
+    src_w    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestWitness/v1'));
+    src_a    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1'));
+    marker_t bytea := public.blake3_send(public.laplace_text_id('test/evict/marker-type'));
+    rel_p    bytea := public.blake3_send(public.laplace_text_id('test/evict/rel'));
     rel_hot  bytea := laplace.relation_type_id('IS_A');
-    subj     bytea := public.laplace_hash128_blake3('test/evict/subject');
-    o1       bytea := public.laplace_hash128_blake3('test/evict/obj1');
-    o2       bytea := public.laplace_hash128_blake3('test/evict/obj2');
-    o3       bytea := public.laplace_hash128_blake3('test/evict/obj3');
-    o4       bytea := public.laplace_hash128_blake3('test/evict/obj4');
-    o5       bytea := public.laplace_hash128_blake3('test/evict/obj5');
-    m1       bytea := public.laplace_hash128_blake3('test/evict/marker1');
-    m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
-    m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
-    m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
-    f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
-    f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/evict/subject'));
+    o1       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj1'));
+    o2       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj2'));
+    o3       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj3'));
+    o4       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj4'));
+    o5       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj5'));
+    m1       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker1'));
+    m2       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker2'));
+    m3       bytea := public.blake3_send(public.laplace_text_id('test/evict/content-by-analysis'));
+    m4       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker-of-witness'));
+    f1       bytea := public.blake3_send(public.laplace_text_id('test/evict/file/owned'));
+    f2       bytea := public.blake3_send(public.laplace_text_id('test/evict/file/legacy'));
     phi_w    bigint := 30000000000;
     phi_a    bigint := 150000000000;
     win      bigint := 1000000000;
@@ -60,7 +60,7 @@ BEGIN
         ('00000000-0000-0000-0000-000000000508', 'owned.file', 'EvictTestAnalysis', f1, 'ok'),
         ('00000000-0000-0000-0000-000000000508', 'legacy.file', 'EvictTestAnalysis', f2, 'ok');
     INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id)
-    VALUES (public.laplace_hash128_blake3('test/evict/replay'), src_a);
+    VALUES (public.blake3_send(public.laplace_text_id('test/evict/replay')), src_a);
 
     -- Completion state owned by the analysis witness: two file units and its layer.
     -- Source eviction must clear every completion row under the witness.
@@ -77,33 +77,33 @@ BEGIN
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
         -- cell I (subj, rel_p, o1): ANALYSIS ONLY — must be culled entirely
-        (public.laplace_hash128_blake3('test/evict/a1'), subj, rel_p, o1, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a1')), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
-        (public.laplace_hash128_blake3('test/evict/a2'), subj, rel_p, o1, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a2')), subj, rel_p, o1, src_a, NULL,
          1, t3, 1, s_ref, phi_a),
         -- cell II (subj, rel_p, o2): MIXED — witness survives, cell refolds
-        (public.laplace_hash128_blake3('test/evict/w1'), subj, rel_p, o2, src_w, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/w1')), subj, rel_p, o2, src_w, NULL,
          2, t1, 3, 3 * s_conf, phi_w),
-        (public.laplace_hash128_blake3('test/evict/a3'), subj, rel_p, o2, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a3')), subj, rel_p, o2, src_a, NULL,
          2, t2, 2, s_conf, phi_a),
         -- cell III (subj, rel_p, o3): WITNESS ONLY — untouched, byte-identical
-        (public.laplace_hash128_blake3('test/evict/w2'), subj, rel_p, o3, src_w, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/w2')), subj, rel_p, o3, src_w, NULL,
          2, t1, 4, 2 * win, phi_w),
         -- cell IV (subj, IS_A, o4): MIXED on a HOT (hash-partitioned) relation
-        (public.laplace_hash128_blake3('test/evict/w3'), subj, rel_hot, o4, src_w, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/w3')), subj, rel_hot, o4, src_w, NULL,
          2, t1, 2, 2 * s_conf, phi_w),
-        (public.laplace_hash128_blake3('test/evict/a4'), subj, rel_hot, o4, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a4')), subj, rel_hot, o4, src_a, NULL,
          0, t2, 1, 0, phi_a),
         -- cell V (subj, rel_p, NULL): ANALYSIS ONLY, NULL object — culled
-        (public.laplace_hash128_blake3('test/evict/a5'), subj, rel_p, NULL, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a5')), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
         -- cell VI (subj, rel_p, o5): interleaved observations — grouped refold pin:
         -- surviving witness rows t1 and t3 straddle the deleted analysis row t2
-        (public.laplace_hash128_blake3('test/evict/w4'), subj, rel_p, o5, src_w, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/w4')), subj, rel_p, o5, src_w, NULL,
          2, t1, 1, win, phi_w),
-        (public.laplace_hash128_blake3('test/evict/a6'), subj, rel_p, o5, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/a6')), subj, rel_p, o5, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
-        (public.laplace_hash128_blake3('test/evict/w5'), subj, rel_p, o5, src_w, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/w5')), subj, rel_p, o5, src_w, NULL,
          1, t3, 2, s_conf, phi_w);
 
     -- Consensus built exactly as ingest builds it: one incremental fold per
@@ -158,29 +158,29 @@ END $$;
 -- The eviction under test. p_batch = 2 forces multiple delete/refold batches per
 -- relation; p_drain = false leaves highway_mask_dirty observable so its exact
 -- contents can be asserted before the logger-bearing drain path is exercised below.
-CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
+CALL ops.evict_source(public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1')), NULL,
                   NULL,
                   p_batch => 2, p_drain => false);
 
 DO $$
 DECLARE
-    src_w    bytea := laplace.source_id('EvictTestWitness');
-    src_a    bytea := laplace.source_id('EvictTestAnalysis');
-    marker_t bytea := public.laplace_hash128_blake3('test/evict/marker-type');
-    rel_p    bytea := public.laplace_hash128_blake3('test/evict/rel');
+    src_w    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestWitness/v1'));
+    src_a    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1'));
+    marker_t bytea := public.blake3_send(public.laplace_text_id('test/evict/marker-type'));
+    rel_p    bytea := public.blake3_send(public.laplace_text_id('test/evict/rel'));
     rel_hot  bytea := laplace.relation_type_id('IS_A');
-    subj     bytea := public.laplace_hash128_blake3('test/evict/subject');
-    o1       bytea := public.laplace_hash128_blake3('test/evict/obj1');
-    o2       bytea := public.laplace_hash128_blake3('test/evict/obj2');
-    o3       bytea := public.laplace_hash128_blake3('test/evict/obj3');
-    o4       bytea := public.laplace_hash128_blake3('test/evict/obj4');
-    o5       bytea := public.laplace_hash128_blake3('test/evict/obj5');
-    m1       bytea := public.laplace_hash128_blake3('test/evict/marker1');
-    m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
-    m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
-    m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
-    f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
-    f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/evict/subject'));
+    o1       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj1'));
+    o2       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj2'));
+    o3       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj3'));
+    o4       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj4'));
+    o5       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj5'));
+    m1       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker1'));
+    m2       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker2'));
+    m3       bytea := public.blake3_send(public.laplace_text_id('test/evict/content-by-analysis'));
+    m4       bytea := public.blake3_send(public.laplace_text_id('test/evict/marker-of-witness'));
+    f1       bytea := public.blake3_send(public.laplace_text_id('test/evict/file/owned'));
+    f2       bytea := public.blake3_send(public.laplace_text_id('test/evict/file/legacy'));
     phi_w    bigint := 30000000000;
     win      bigint := 1000000000;
     s_conf   bigint := 900000000;
@@ -341,17 +341,17 @@ BEGIN
 END $$;
 
 -- Idempotence: evicting an already-evicted source changes nothing.
-CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
+CALL ops.evict_source(public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1')), NULL,
                   NULL,
                   p_batch => 2, p_drain => false);
 
 -- Unseeded no-op: a source with zero rows evicts cleanly (0 rows, not an error).
-CALL ops.evict_source(laplace.source_id('Evict_NoSuchSource'), NULL, NULL,
+CALL ops.evict_source(public.blake3_send(public.laplace_text_id('substrate/source/Evict_NoSuchSource/v1')), NULL, NULL,
                   p_drain => false);
 
 DO $$
 DECLARE
-    subj bytea := public.laplace_hash128_blake3('test/evict/subject');
+    subj bytea := public.blake3_send(public.laplace_text_id('test/evict/subject'));
     n    bigint;
 BEGIN
     SELECT count(*) INTO n
@@ -374,14 +374,14 @@ END $$;
 -- counts return exactly to the v1 snapshot — the #508 acceptance: no double count.
 DO $$
 DECLARE
-    src_a    bytea := laplace.source_id('EvictTestAnalysis');
-    rel_p    bytea := public.laplace_hash128_blake3('test/evict/rel');
+    src_a    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1'));
+    rel_p    bytea := public.blake3_send(public.laplace_text_id('test/evict/rel'));
     rel_hot  bytea := laplace.relation_type_id('IS_A');
-    subj     bytea := public.laplace_hash128_blake3('test/evict/subject');
-    o1       bytea := public.laplace_hash128_blake3('test/evict/obj1');
-    o2       bytea := public.laplace_hash128_blake3('test/evict/obj2');
-    o4       bytea := public.laplace_hash128_blake3('test/evict/obj4');
-    o5       bytea := public.laplace_hash128_blake3('test/evict/obj5');
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/evict/subject'));
+    o1       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj1'));
+    o2       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj2'));
+    o4       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj4'));
+    o5       bytea := public.blake3_send(public.laplace_text_id('test/evict/obj5'));
     phi_a    bigint := 150000000000;
     win      bigint := 1000000000;
     s_conf   bigint := 900000000;
@@ -396,17 +396,17 @@ BEGIN
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (public.laplace_hash128_blake3('test/evict/v2/a1'), subj, rel_p, o1, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a1')), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
-        (public.laplace_hash128_blake3('test/evict/v2/a2'), subj, rel_p, o1, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a2')), subj, rel_p, o1, src_a, NULL,
          1, t3, 1, s_ref, phi_a),
-        (public.laplace_hash128_blake3('test/evict/v2/a3'), subj, rel_p, o2, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a3')), subj, rel_p, o2, src_a, NULL,
          2, t2, 2, s_conf, phi_a),
-        (public.laplace_hash128_blake3('test/evict/v2/a4'), subj, rel_hot, o4, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a4')), subj, rel_hot, o4, src_a, NULL,
          0, t2, 1, 0, phi_a),
-        (public.laplace_hash128_blake3('test/evict/v2/a5'), subj, rel_p, NULL, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a5')), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
-        (public.laplace_hash128_blake3('test/evict/v2/a6'), subj, rel_p, o5, src_a, NULL,
+        (public.blake3_send(public.laplace_text_id('test/evict/v2/a6')), subj, rel_p, o5, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a);
 
     affected := consensus.upsert(
@@ -464,9 +464,9 @@ END $$;
 -- Cleanup: this file COMMITs (the procedure requires it), so remove the fixture.
 DO $$
 DECLARE
-    src_w bytea := laplace.source_id('EvictTestWitness');
-    src_a bytea := laplace.source_id('EvictTestAnalysis');
-    subj  bytea := public.laplace_hash128_blake3('test/evict/subject');
+    src_w bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestWitness/v1'));
+    src_a bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictTestAnalysis/v1'));
+    subj  bytea := public.blake3_send(public.laplace_text_id('test/evict/subject'));
 BEGIN
     DELETE FROM laplace.ingest_file_journal
     WHERE run_id = '00000000-0000-0000-0000-000000000508';
@@ -478,22 +478,22 @@ BEGIN
     DELETE FROM laplace.consensus WHERE subject_id = subj;
     DELETE FROM laplace.highway_mask_dirty WHERE id IN (
         subj,
-        public.laplace_hash128_blake3('test/evict/obj1'),
-        public.laplace_hash128_blake3('test/evict/obj2'),
-        public.laplace_hash128_blake3('test/evict/obj4'),
-        public.laplace_hash128_blake3('test/evict/obj5'));
+        public.blake3_send(public.laplace_text_id('test/evict/obj1')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj2')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj4')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj5')));
     DELETE FROM laplace.entities WHERE id IN (
         src_w, src_a,
-        public.laplace_hash128_blake3('test/evict/rel'), subj,
-        public.laplace_hash128_blake3('test/evict/obj1'),
-        public.laplace_hash128_blake3('test/evict/obj2'),
-        public.laplace_hash128_blake3('test/evict/obj3'),
-        public.laplace_hash128_blake3('test/evict/obj4'),
-        public.laplace_hash128_blake3('test/evict/obj5'),
-        public.laplace_hash128_blake3('test/evict/marker-of-witness'),
-        public.laplace_hash128_blake3('test/evict/content-by-analysis'),
-        public.laplace_hash128_blake3('test/evict/file/owned'),
-        public.laplace_hash128_blake3('test/evict/file/legacy'));
+        public.blake3_send(public.laplace_text_id('test/evict/rel')), subj,
+        public.blake3_send(public.laplace_text_id('test/evict/obj1')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj2')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj3')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj4')),
+        public.blake3_send(public.laplace_text_id('test/evict/obj5')),
+        public.blake3_send(public.laplace_text_id('test/evict/marker-of-witness')),
+        public.blake3_send(public.laplace_text_id('test/evict/content-by-analysis')),
+        public.blake3_send(public.laplace_text_id('test/evict/file/owned')),
+        public.blake3_send(public.laplace_text_id('test/evict/file/legacy')));
     DROP TABLE IF EXISTS _ev_snap_v1;
     DROP TABLE IF EXISTS _ev_snap_evicted;
     RAISE NOTICE '- evict fixture cleaned up';
@@ -505,9 +505,9 @@ END $$;
 -- hash leaf and require repeated operator invocations to finish one source.
 DO $$
 DECLARE
-    type_t bytea := public.laplace_hash128_blake3('Type');
-    src    bytea := laplace.source_id('EvictDefaultPartitionTest');
-    subj   bytea := public.laplace_hash128_blake3('test/evict/default/subject');
+    type_t bytea := public.blake3_send(public.laplace_text_id('Type'));
+    src    bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictDefaultPartitionTest/v1'));
+    subj   bytea := public.blake3_send(public.laplace_text_id('test/evict/default/subject'));
     rel    bytea;
     obj    bytea;
     evid   bytea;
@@ -516,12 +516,9 @@ BEGIN
     VALUES (src, 0, type_t), (subj, 0, type_t);
 
     FOR i IN 1..9 LOOP
-        rel := public.laplace_hash128_blake3(
-            convert_to('test/evict/default/relation/' || i, 'UTF8'));
-        obj := public.laplace_hash128_blake3(
-            convert_to('test/evict/default/object/' || i, 'UTF8'));
-        evid := public.laplace_hash128_blake3(
-            convert_to('test/evict/default/evidence/' || i, 'UTF8'));
+        rel := public.blake3_send(public.laplace_text_id('test/evict/default/relation/' || i));
+        obj := public.blake3_send(public.laplace_text_id('test/evict/default/object/' || i));
+        evid := public.blake3_send(public.laplace_text_id('test/evict/default/evidence/' || i));
         INSERT INTO laplace.entities (id, tier, type_id)
         VALUES (rel, 0, type_t), (obj, 0, type_t);
         INSERT INTO laplace.attestations
@@ -535,13 +532,13 @@ BEGIN
     RAISE NOTICE '- HASH-leaf fixture deposited: 9 dynamic relation types';
 END $$;
 
-CALL ops.evict_source(laplace.source_id('EvictDefaultPartitionTest'), NULL, NULL,
+CALL ops.evict_source(public.blake3_send(public.laplace_text_id('substrate/source/EvictDefaultPartitionTest/v1')), NULL, NULL,
                   p_batch => 2, p_drain => false);
 
 DO $$
 DECLARE
-    src  bytea := laplace.source_id('EvictDefaultPartitionTest');
-    subj bytea := public.laplace_hash128_blake3('test/evict/default/subject');
+    src  bytea := public.blake3_send(public.laplace_text_id('substrate/source/EvictDefaultPartitionTest/v1'));
+    subj bytea := public.blake3_send(public.laplace_text_id('test/evict/default/subject'));
     rel  bytea;
     obj  bytea;
     n    bigint;
@@ -553,10 +550,8 @@ BEGIN
 
     DELETE FROM laplace.highway_mask_dirty WHERE id = subj;
     FOR i IN 1..9 LOOP
-        rel := public.laplace_hash128_blake3(
-            convert_to('test/evict/default/relation/' || i, 'UTF8'));
-        obj := public.laplace_hash128_blake3(
-            convert_to('test/evict/default/object/' || i, 'UTF8'));
+        rel := public.blake3_send(public.laplace_text_id('test/evict/default/relation/' || i));
+        obj := public.blake3_send(public.laplace_text_id('test/evict/default/object/' || i));
         DELETE FROM laplace.highway_mask_dirty WHERE id = obj;
         DELETE FROM laplace.entities WHERE id IN (rel, obj);
     END LOOP;

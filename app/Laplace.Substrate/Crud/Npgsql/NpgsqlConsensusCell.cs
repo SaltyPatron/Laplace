@@ -8,7 +8,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// One consensus cell by (subject, type, object), returning raw Glicko-2
 /// <c>rating</c>/<c>rd</c>/<c>witness_count</c> rather than the effective rating that
 /// <see cref="NpgsqlConsensusByIds"/> returns. The installed <c>consensus.cell</c> looks the
-/// row up by its primary id (<c>laplace.consensus_id</c>).
+/// row up by its primary id (<c>public.laplace_compose</c> of its parts).
 /// </summary>
 public static class NpgsqlConsensusCell
 {

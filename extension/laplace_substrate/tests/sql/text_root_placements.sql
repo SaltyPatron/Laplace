@@ -78,7 +78,7 @@ DO $identity$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM placement_result p JOIN placement_input i USING (ord)
-        WHERE p.root_id IS DISTINCT FROM laplace.word_id(i.surface)) THEN
+        WHERE p.root_id IS DISTINCT FROM public.blake3_send(public.laplace_text_id(i.surface))) THEN
         RAISE EXCEPTION 'placement root differs from canonical word_id';
     END IF;
     IF EXISTS (
@@ -96,8 +96,8 @@ BEGIN
         SELECT 1 FROM placement_result p JOIN placement_input i USING (ord)
         WHERE p.ord IN (1,2,3,18)
           AND (p.tier <> 0 OR p.root_id IS DISTINCT FROM
-               public.laplace_hash128_blake3(convert_to(i.surface,'UTF8'))
-               OR realize.codepoint_for_id(p.root_id) IS DISTINCT FROM ascii(i.surface))) THEN
+               public.blake3_send(public.laplace_text_id(i.surface))
+               OR public.laplace_codepoint(public.blake3_from_bytea(p.root_id)) IS DISTINCT FROM ascii(i.surface))) THEN
         RAISE EXCEPTION 'single-codepoint roots must collapse to the native Unicode floor';
     END IF;
     IF (SELECT to_jsonb(p) - 'ord' FROM placement_result p WHERE ord=7)
@@ -105,7 +105,7 @@ BEGIN
        (SELECT to_jsonb(p) - 'ord' FROM placement_result p WHERE ord=8)
        OR (SELECT tier FROM placement_result WHERE ord=7) <> 0
        OR (SELECT root_id FROM placement_result WHERE ord=7) IS DISTINCT FROM
-          public.laplace_hash128_blake3(convert_to(U&'\00E9','UTF8')) THEN
+          public.blake3_send(public.laplace_text_id(U&'\00E9')) THEN
         RAISE EXCEPTION 'NFC/NFD equivalents must share exact canonical root placement';
     END IF;
     IF (SELECT tier FROM placement_result WHERE ord=9) <> 1

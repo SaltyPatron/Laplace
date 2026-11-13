@@ -5,7 +5,7 @@
 -- what replaced parse_ask() and the English pattern ladder behind it.
 --
 --   p_intent       one of converse.query_shapes().shape
---   p_topic        subject id (converse.resolve_ref accepts a word or an id hex)
+--   p_topic        subject id (public.laplace_resolve_ref accepts a word or an id hex)
 --   p_topic2       object id, for the two-topic shapes (is_a, reason)
 --   p_type_name    canonical relation type, for the related / related_in shapes
 --   p_lang         target language, for the translate shape

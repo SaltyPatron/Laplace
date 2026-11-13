@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
     LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH w AS MATERIALIZED (
-    SELECT laplace.word_id(p_term) AS id
+    SELECT public.blake3_send(public.laplace_text_id(p_term)) AS id
 ),
 cand AS MATERIALIZED (
     SELECT s.synset_id, s.eff_mu, s.witnesses,

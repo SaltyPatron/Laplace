@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION laplace.consensus_id(
-    p_subject bytea, p_type bytea, p_object bytea)
-    RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_id'
-    LANGUAGE C LAPLACE_IMMUTABLE;

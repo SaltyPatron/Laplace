@@ -94,7 +94,7 @@ BEGIN ATOMIC
     SELECT e.direction, e.relation, e.neighbour_id, e.neighbour, e.eff_mu, e.witnesses
     FROM consensus.edges(@extschema@.word_id(p_word), p_direction, NULL::bytea[],
                            p_limit, p_refuted,
-                           converse.word_language(laplace.word_id(p_word))) e
+                           converse.word_language(public.blake3_send(public.laplace_text_id(p_word)))) e
 ;
 END;
 

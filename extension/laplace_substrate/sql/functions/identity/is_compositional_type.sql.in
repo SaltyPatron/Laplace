@@ -1,8 +1,0 @@
--- No SET search_path, so `= ANY(...)` inlines into the caller.
-CREATE OR REPLACE FUNCTION laplace.is_compositional_type(p_type_id bytea)
-RETURNS boolean
-LANGUAGE sql
-IMMUTABLE
-BEGIN ATOMIC
-    SELECT p_type_id = ANY(laplace.compositional_type_ids());
-END;

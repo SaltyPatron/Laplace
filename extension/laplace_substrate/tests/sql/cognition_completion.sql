@@ -10,31 +10,31 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 BEGIN;
 DO $completion_provenance$
 DECLARE
-    alpha_id bytea := laplace.word_id('cognitionalpha');
-    beta_id bytea := laplace.word_id('cognitionbeta');
-    answer_id bytea := public.laplace_hash128_blake3('test/cognition/answer');
+    alpha_id bytea := public.blake3_send(public.laplace_text_id('cognitionalpha'));
+    beta_id bytea := public.blake3_send(public.laplace_text_id('cognitionbeta'));
+    answer_id bytea := public.blake3_send(public.laplace_text_id('test/cognition/answer'));
     causes_id bytea := laplace.relation_type_id('CAUSES');
-    alpha_root bytea := public.laplace_hash128_blake3('test/cognition/alpha-sequence');
-    beta_root bytea := public.laplace_hash128_blake3('test/cognition/beta-sequence');
+    alpha_root bytea := public.blake3_send(public.laplace_text_id('test/cognition/alpha-sequence'));
+    beta_root bytea := public.blake3_send(public.laplace_text_id('test/cognition/beta-sequence'));
     completed boolean;
     remaining int;
 BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(alpha_id,causes_id,answer_id),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[alpha_id, causes_id, answer_id]::public.blake3[], NULL))),
          alpha_id,causes_id,answer_id,
          2000000000000,30000000000,60000000,5,now());
 
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
     VALUES
-        (public.laplace_hash128_blake3('test/cognition/alpha-physicality'),
+        (public.blake3_send(public.laplace_text_id('test/cognition/alpha-physicality')),
          alpha_root,1,public.ST_MakePoint(1,1,1,1),decode(repeat('00',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(alpha_id,1,1,0),
              public.laplace_mantissa_pack(answer_id,2,1,0)]),2,now()),
-        (public.laplace_hash128_blake3('test/cognition/beta-physicality'),
+        (public.blake3_send(public.laplace_text_id('test/cognition/beta-physicality')),
          beta_root,1,public.ST_MakePoint(2,2,2,2),decode(repeat('00',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(beta_id,1,1,0),
@@ -81,7 +81,7 @@ DO $whole_trunk_grounding$
 DECLARE
     prompt text := 'cognitionalpha cognitionbeta';
     prompt_root bytea;
-    answer_id bytea := public.laplace_hash128_blake3('test/cognition/trunk-answer');
+    answer_id bytea := public.blake3_send(public.laplace_text_id('test/cognition/trunk-answer'));
     causes_id bytea := laplace.relation_type_id('CAUSES');
     completed boolean;
     remaining int;
@@ -96,7 +96,7 @@ BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(prompt_root,causes_id,answer_id),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[prompt_root, causes_id, answer_id]::public.blake3[], NULL))),
          prompt_root,causes_id,answer_id,
          2000000000000,30000000000,60000000,5,now());
 
@@ -123,9 +123,9 @@ $whole_trunk_grounding$;
 DO $routed_semantic_grounding$
 DECLARE
     prompt text := 'cognitionhopalpha';
-    alpha_id bytea := laplace.word_id(prompt);
-    route_id bytea := public.laplace_hash128_blake3('test/cognition/route');
-    result_id bytea := public.laplace_hash128_blake3('test/cognition/routed-result');
+    alpha_id bytea := public.blake3_send(public.laplace_text_id(prompt));
+    route_id bytea := public.blake3_send(public.laplace_text_id('test/cognition/route'));
+    result_id bytea := public.blake3_send(public.laplace_text_id('test/cognition/routed-result'));
     route_relation bytea := laplace.relation_type_id('RELATED_TO');
     result_relation bytea := laplace.relation_type_id('CAUSES');
     completed boolean;
@@ -135,10 +135,10 @@ BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(alpha_id,route_relation,route_id),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[alpha_id, route_relation, route_id]::public.blake3[], NULL))),
          alpha_id,route_relation,route_id,
          2000000000000,30000000000,60000000,5,now()),
-        (laplace.consensus_id(route_id,result_relation,result_id),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[route_id, result_relation, result_id]::public.blake3[], NULL))),
          route_id,result_relation,result_id,
          2000000000000,30000000000,60000000,5,now());
 

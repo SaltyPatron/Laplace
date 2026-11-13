@@ -7,7 +7,7 @@ BEGIN ATOMIC
 
     WITH seed_ids AS (
         SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-        FROM (SELECT laplace.word_id(s) AS wid FROM unnest(p_seeds) AS s) q
+        FROM (SELECT public.blake3_send(public.laplace_text_id(s)) AS wid FROM unnest(p_seeds) AS s) q
         WHERE wid IS NOT NULL
     ),
 
@@ -153,7 +153,7 @@ BEGIN ATOMIC
     clean AS (
         SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri
         FROM rendered n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT public.laplace_text_is(n.s, 'White_Space', 'Yes')
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
           -- 2026-07-09 (finish-line Phase 2): the old `~ '[[:alpha:]]'` gate made
           -- punctuation and numerals unrepresentable — no synthesized model could emit

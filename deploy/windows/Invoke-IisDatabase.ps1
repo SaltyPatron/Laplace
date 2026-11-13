@@ -252,7 +252,7 @@ try {
             $null=Query "SET ROLE `"$role`"; SELECT 1 FROM app.billing_quotes LIMIT 1; SELECT 1 FROM app.users LIMIT 1; RESET ROLE;" $selected
         }else{
             Migrate 'substrate-status'
-            $null=Query "SET ROLE `"$role`"; SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus); SELECT * FROM ops.substrate_counts(); SELECT laplace.word_id('the'); RESET ROLE;" $selected
+            $null=Query "SET ROLE `"$role`"; SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus); SELECT * FROM ops.substrate_counts(); SELECT public.blake3_send(public.laplace_text_id('the')); RESET ROLE;" $selected
             $receipt.substrate_runtime_access_verified=$true
         }
     }

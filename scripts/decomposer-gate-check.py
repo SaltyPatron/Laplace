@@ -94,8 +94,8 @@ def check_source(
     decomposer = src["decomposer"]
     # A source generation is the witness [authority, release]; legacy decomposers keep
     # their named source id until they move onto recipes.
-    source_sql = (f"laplace.witness_id('{src['witness'][0]}', '{src['witness'][1]}')"
-                  if src.get("witness") else f"laplace.source_id('{decomposer}')")
+    source_sql = (f"public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id('{src['witness'][0]}'), public.laplace_text_id('{src['witness'][1]}')]))"
+                  if src.get("witness") else f"public.blake3_send(public.laplace_text_id('substrate/source/{decomposer}/v1'))")
     layer = src["layer"]
     results: list[dict] = []
     ok = True

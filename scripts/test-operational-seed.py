@@ -118,14 +118,14 @@ class OperationalSeedTests(unittest.TestCase):
         # File completion is operational state read from the completion table, not
         # a self-referential attestation.
         self.assertIn(
-            "ops.unit_completed(laplace.source_id('OperationalDecomposer'), e.fingerprint, 2)", sql)
+            "ops.unit_completed(public.blake3_send(public.laplace_text_id('substrate/source/OperationalDecomposer/v1')), e.fingerprint, 2)", sql)
         self.assertNotIn("laplace.attestations", sql)
         self.assertIn(next(iter(self.selected.values())).hex(), sql)
 
     def test_native_fingerprint_uses_length_and_complete_fixed_size_blocks(self):
         payload = b"a" * (4 << 20) + b"z"
         sql = SEED.fingerprint_sql(payload)
-        self.assertEqual(3, sql.count("public.laplace_hash128_blake3("))
+        self.assertEqual(3, sql.count("public.blake3_send(public.laplace_text_id(")))
         self.assertIn(len(payload).to_bytes(8, "little", signed=True).hex(), sql)
         self.assertIn("decode('7a','hex')", sql)
 

@@ -30,6 +30,6 @@ FROM (
     ('document',      2, 'UserPrompt')
 ) AS t(step, layer_order, source_name)
 CROSS JOIN LATERAL (
-  SELECT ops.layer_completed(laplace.source_id(t.source_name), t.layer_order) AS layer_complete
+  SELECT ops.layer_completed(public.blake3_send(public.laplace_text_id('substrate/source/' || t.source_name || '/v1')), t.layer_order) AS layer_complete
 ) m
 ORDER BY 1;

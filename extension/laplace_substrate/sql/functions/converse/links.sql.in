@@ -41,7 +41,7 @@ BEGIN ATOMIC
         SELECT c.type_id, c.object_id,
                consensus.eff_mu(c.rating, c.rd) AS emu
         FROM laplace.consensus c
-        WHERE c.subject_id = laplace.word_id(p_word)
+        WHERE c.subject_id = public.blake3_send(public.laplace_text_id(p_word))
     ),
     ids AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT x.id ORDER BY x.id), '{}'::bytea[]) AS a

@@ -344,7 +344,7 @@ public sealed partial class NativeSqlCatalogPreparationTests
             await migrate.ExecuteNonQueryAsync();
         var source = SubstrateCanonicalIds.Source("OperationalDecomposer");
         await using (var identity = new NpgsqlCommand(
-            "SELECT laplace.source_id('OperationalDecomposer')", connection, transaction))
+            "SELECT public.blake3_send(public.laplace_text_id('substrate/source/OperationalDecomposer/v1'))", connection, transaction))
             Assert.Equal(source.ToBytes(), Assert.IsType<byte[]>(await identity.ExecuteScalarAsync()));
         await using (var record = new NpgsqlCommand("""
             INSERT INTO laplace.ingest_layer_completion(witness_id,layer)
@@ -355,7 +355,7 @@ public sealed partial class NativeSqlCatalogPreparationTests
             await record.ExecuteNonQueryAsync();
         }
         await using (var complete = new NpgsqlCommand(
-            "SELECT ops.layer_completed(laplace.source_id('OperationalDecomposer'),2)", connection, transaction))
+            "SELECT ops.layer_completed(public.blake3_send(public.laplace_text_id('substrate/source/OperationalDecomposer/v1')),2)", connection, transaction))
             Assert.Equal(true, await complete.ExecuteScalarAsync());
         await transaction.RollbackAsync();
     }

@@ -105,10 +105,10 @@ def proof_sql(shape: dict, files: dict, timeout: int, seed_run_id: str,
     if v2:
         mode = binary(slot["binding_mode_id"])
         mode_roster = f"""
-        realize.canonical_id('{CURRENT_FORM}') AS current_form_binding,
-        realize.canonical_id('{WITNESSED_SEMANTIC}') AS witnessed_semantic_binding,
-        realize.canonical_id('{SCHEMA_V2}') AS task_schema_v2,
-        realize.canonical_id('laplace/task-shape/slots-end/v2') AS slots_end_v2,
+        public.blake3_send(public.laplace_text_id('{CURRENT_FORM}')) AS current_form_binding,
+        public.blake3_send(public.laplace_text_id('{WITNESSED_SEMANTIC}')) AS witnessed_semantic_binding,
+        public.blake3_send(public.laplace_text_id('{SCHEMA_V2}')) AS task_schema_v2,
+        public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v2')) AS slots_end_v2,
 """
         mode_column, mode_hash, mode_flat = f"{mode} AS binding_mode,", "," + mode, ",s.binding_mode"
         schema_column = SOURCE.text_sql(SCHEMA_V2) + " AS schema,"
@@ -124,7 +124,7 @@ current_forms AS MATERIALIZED (
  SELECT n.root_id,n.node_index,n.byte_offset,n.byte_length,n.id
  FROM prompt_nodes n LEFT JOIN prompt_nodes p ON p.node_index=n.parent_index
  WHERE n.tier<=2 AND (n.parent_index IS NULL OR p.tier>2)
- AND NOT realize.is_all_whitespace(n.surface)
+ AND NOT public.laplace_text_is(n.surface, 'White_Space', 'Yes')
  ORDER BY n.byte_offset,n.node_index LIMIT 2049
 ),
 """
@@ -139,8 +139,8 @@ current_forms AS MATERIALIZED (
     # this choice nor its operands/predicate constrain the native execution.
     if proof_mode == "definition":
         require(prompt == PROMPT and operand == "glacier", "definition proof inputs must remain unchanged")
-        operand_expression = "laplace.word_id('glacier')"
-        frontier_forms = "ARRAY[laplace.word_id('define'),laplace.word_id('glacier')]"
+        operand_expression = "public.blake3_send(public.laplace_text_id('glacier'))"
+        frontier_forms = "ARRAY[public.blake3_send(public.laplace_text_id('define')),public.blake3_send(public.laplace_text_id('glacier'))]"
         result_table = "definitions"
         operand_ctes = f"""
 senses AS MATERIALIZED (
@@ -167,7 +167,7 @@ definitions AS MATERIALIZED (
         entity_key = "synset_entities"
     else:
         require(bool(prompt) and bool(operand), "direct relation proof needs explicit prompt and operand")
-        operand_expression = f"laplace.content_id(convert_to({SOURCE.text_sql(operand)},'UTF8'))"
+        operand_expression = f"public.blake3_send(public.laplace_text_id({SOURCE.text_sql(operand)}))"
         frontier_forms = ("ARRAY(SELECT x.id FROM converse.prompt_tree("
                           + SOURCE.text_sql(prompt) + ",false) x WHERE x.tier=2)")
         result_table = "relation_targets"
@@ -210,8 +210,8 @@ seed_run AS MATERIALIZED (
  SELECT * FROM laplace.ingest_run_journal WHERE run_id='{seed_run_id}'::uuid
 ),
 roster AS MATERIALIZED (
- SELECT laplace.source_id('OperationalDecomposer') AS operational,
-        laplace.source_id('WordNetDecomposer') AS wordnet,
+ SELECT public.blake3_send(public.laplace_text_id('substrate/source/OperationalDecomposer/v1')) AS operational,
+        public.blake3_send(public.laplace_text_id('substrate/source/WordNetDecomposer/v1')) AS wordnet,
         laplace.relation_type_id('IS_EXAMPLE_OF') AS example_of,
         laplace.relation_type_id('CALLS') AS calls,
         laplace.relation_type_id('HAS_INPUT') AS has_input,
@@ -229,15 +229,15 @@ slot AS MATERIALIZED (
         {binary(slot['accepted_entity_type_id'])} AS accepted_type,
         {mode_column}
         public.laplace_hash128_merkle(4::smallint, ARRAY[
-          realize.canonical_id('laplace/task-shape/token-slot/v{version}'),
+          public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v{version}')),
           {binary(slot['exemplar_token_ref_id'])},{binary(slot['accepted_entity_type_id'])}{mode_hash}]) AS id
 ),
 declaration AS MATERIALIZED (
  SELECT {schema_column} {binary(shape['exemplar_parse_id'])} AS exemplar,
         {binary(shape['predicate_id'])} AS predicate,
-        ARRAY[realize.canonical_id('{shape['schema']}'),{binary(shape['exemplar_parse_id'])},
+        ARRAY[public.blake3_send(public.laplace_text_id('{shape['schema']}')),{binary(shape['exemplar_parse_id'])},
           {binary(shape['predicate_id'])},s.id,s.token_ref,s.accepted_type{mode_flat},
-          realize.canonical_id('laplace/task-shape/slots-end/v{version}')] AS ids FROM slot s
+          public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v{version}'))] AS ids FROM slot s
 ),
 task AS MATERIALIZED (
  SELECT d.*,public.laplace_hash128_merkle(4::smallint,d.ids) AS id FROM declaration d
@@ -295,8 +295,8 @@ standing AS MATERIALIZED (
 ),
 selected AS MATERIALIZED (
  SELECT p.* FROM laplace.physicalities p WHERE p.type=8 AND p.id=ANY(ARRAY[
-    public.laplace_hash128_blake3((SELECT id FROM task)||decode('0800','hex')),
-    public.laplace_hash128_blake3((SELECT exemplar FROM task)||decode('0800','hex'))])
+    public.blake3_send(public.laplace_text_id((SELECT id FROM task)||decode('0800','hex'))),
+    public.blake3_send(public.laplace_text_id((SELECT exemplar FROM task)||decode('0800','hex')))])
 ),
 packed_sizes AS MATERIALIZED (
  SELECT p.id,sum(u.run_length)::bigint AS logical_count FROM selected p
@@ -320,7 +320,7 @@ type8_frontier AS MATERIALIZED (
 ),
 execution AS MATERIALIZED (
  SELECT * FROM generation.forward_program({SOURCE.text_sql(prompt)},128,5,0.6,10,
-   laplace.hash128_lo(public.laplace_hash128_blake3(convert_to({SOURCE.text_sql(prompt)},'UTF8'))),
+   NULL::bigint,
    2,8,NULL::bytea[],NULL::bytea[])
 ),
 realization_ids AS MATERIALIZED (

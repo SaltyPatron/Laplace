@@ -5,14 +5,14 @@
 -- relation / content ids (the prior pg_temp.relation_type_id used a different
 -- salt than relation_type_id() and silently queried empty bands).
 --
--- Default subject = word_id('hot'). Override with native encode() hex:
+-- Default subject = public.blake3_send(public.laplace_text_id('hot')). Override with native encode() hex:
 --   psql -v subj=36fcbb29fdd839df97da13190a9983c2 -f scripts/substrate-inference-demo.sql
 SET search_path = laplace, public;
 
 \if :{?subj}
 SELECT decode(:'subj', 'hex') AS subject_id \gset
 \else
-SELECT word_id('hot') AS subject_id \gset
+SELECT public.blake3_send(public.laplace_text_id('hot')) AS subject_id \gset
 \endif
 
 \echo '== A. CONTENT ROUND-TRIP (entity -> its own text, no model in the path) =='

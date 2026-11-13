@@ -16,11 +16,11 @@ BEGIN ATOMIC
         -- prunes to one leaf; id alone would probe every leaf.
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
-                  WHERE c.id = laplace.consensus_id(p_w1, p_type, p_w2)
+                  WHERE c.id = public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_w1, p_type, p_w2]::public.blake3[], NULL)))
                     AND c.type_id = p_type AND c.subject_id = p_w1), 0),
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
-                  WHERE c.id = laplace.consensus_id(p_w2, p_type, p_w1)
+                  WHERE c.id = public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_w2, p_type, p_w1]::public.blake3[], NULL)))
                     AND c.type_id = p_type AND c.subject_id = p_w2), 0))::float8
 ;
 END;

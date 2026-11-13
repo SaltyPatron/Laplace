@@ -96,11 +96,11 @@ def sql_text(value: str) -> str:
 
 
 def fingerprint_sql(payload: bytes) -> str:
-    parts = ["realize.canonical_id('substrate/file-resume-fingerprint/v1')",
-             "public.laplace_hash128_blake3(decode('"
-             + len(payload).to_bytes(8, "little", signed=True).hex() + "','hex'))"]
-    parts.extend("public.laplace_hash128_blake3(decode('"
-                 + payload[start:start + FINGERPRINT_BLOCK_BYTES].hex() + "','hex'))"
+    parts = ["public.blake3_send(public.laplace_text_id('substrate/file-resume-fingerprint/v1'))",
+             "public.blake3_send(public.laplace_text_id(decode('"
+             + len(payload).to_bytes(8, "little", signed=True).hex() + "','hex')))"]
+    parts.extend("public.blake3_send(public.laplace_text_id(decode('"
+                 + payload[start:start + FINGERPRINT_BLOCK_BYTES].hex() + "','hex')))"
                  for start in range(0, len(payload), FINGERPRINT_BLOCK_BYTES))
     return "public.laplace_hash128_merkle(0::smallint,ARRAY[" + ",".join(parts) + "])"
 
@@ -123,14 +123,14 @@ WITH expected(relative_path, bytes, fingerprint) AS MATERIALIZED (VALUES
            encode(f.resume_fingerprint,'hex') AS resume_fingerprint,
            encode(e.fingerprint,'hex') AS expected_fingerprint,
            e.bytes AS expected_bytes,
-           ops.unit_completed(laplace.source_id('{SOURCE}'), e.fingerprint, 2)
+           ops.unit_completed(public.blake3_send(public.laplace_text_id('substrate/source/{SOURCE}/v1')), e.fingerprint, 2)
                AS completion_present
     FROM laplace.ingest_file_journal f
     LEFT JOIN expected e ON e.relative_path = f.relative_path
     WHERE f.run_id = '{receipt['run_id']}'::uuid
 )
 SELECT json_build_object(
-    'expected_source_id', encode(laplace.source_id('{SOURCE}'),'hex'),
+    'expected_source_id', encode(public.blake3_send(public.laplace_text_id('substrate/source/{SOURCE}/v1')),'hex'),
     'run', (SELECT json_build_object(
         'run_id', run_id, 'source_name', source_name, 'source_id', encode(source_id,'hex'),
         'layer', layer, 'status', status, 'evidence_persisted', evidence_persisted,

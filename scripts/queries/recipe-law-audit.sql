@@ -11,7 +11,7 @@ SET search_path = laplace, public;
 
 \echo ====== 1. entity types: forbidden (WordNet_Sense_Key), text rows (Document), records (Source_Record) ======
 SELECT t.name AS type, t.expect,
-       (SELECT count(*) FROM entities e WHERE e.type_id = word_id(t.name)) AS entities
+       (SELECT count(*) FROM entities e WHERE e.type_id = public.blake3_send(public.laplace_text_id(t.name))) AS entities
 FROM (VALUES ('WordNet_Sense_Key', 'must be 0'),
              ('Document',          'only real documents (no recipe rows)'),
              ('Source_Record',     'recipe rows and file content trees'),
@@ -20,7 +20,7 @@ FROM (VALUES ('WordNet_Sense_Key', 'must be 0'),
 
 \echo ====== 2. Document entities by tier (recipe rows were tier >= 2 Documents) ======
 SELECT e.tier, count(*) AS documents
-FROM entities e WHERE e.type_id = word_id('Document')
+FROM entities e WHERE e.type_id = public.blake3_send(public.laplace_text_id('Document'))
 GROUP BY e.tier ORDER BY e.tier;
 
 \echo ====== 3. CORRESPONDS_TO objects by type, per witness ======
@@ -45,7 +45,7 @@ WITH objs AS (
     FROM attestations a
     JOIN entities o ON o.id = a.object_id
     WHERE a.type_id = relation_type_id('CORRESPONDS_TO')
-      AND o.type_id IN (word_id('Sentence'), word_id('Word'), word_id('WordNet_Sense_Key'))
+      AND o.type_id IN (public.blake3_send(public.laplace_text_id('Sentence')), public.blake3_send(public.laplace_text_id('Word')), public.blake3_send(public.laplace_text_id('WordNet_Sense_Key')))
     LIMIT 50000
 ), rendered AS (
     SELECT r.* FROM realize.display_label_batch((SELECT array_agg(id) FROM objs)) r
@@ -59,7 +59,7 @@ FROM rendered;
 \echo        (a mismatch is a text entity relabelled by lexicalization or another stage; must be 0)
 WITH sample AS (
     SELECT e.id FROM entities e
-    WHERE e.type_id = word_id('Sentence') AND e.tier BETWEEN 2 AND 3
+    WHERE e.type_id = public.blake3_send(public.laplace_text_id('Sentence')) AND e.tier BETWEEN 2 AND 3
     LIMIT 2000
 ), lab AS (
     SELECT l.id, l.label FROM realize.display_label_batch((SELECT array_agg(id) FROM sample)) l
@@ -81,7 +81,7 @@ FROM ingest_run_journal ORDER BY source_name, started_at DESC;
 \echo ====== 7. Atomic2020 claims by relation (C# decomposer; source id is its name) ======
 WITH per AS (
     SELECT a.type_id, count(*) AS claims
-    FROM attestations a WHERE a.source_id = source_id('Atomic2020Decomposer')
+    FROM attestations a WHERE a.source_id = public.blake3_send(public.laplace_text_id('substrate/source/Atomic2020Decomposer/v1'))
     GROUP BY 1
 )
 SELECT r.label AS relation, p.claims

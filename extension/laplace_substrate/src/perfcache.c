@@ -251,88 +251,6 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
     return codepoint_table_lookup_id(&key, out_cp) == 0;
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_word_id);
-
-Datum
-pg_laplace_word_id(PG_FUNCTION_ARGS)
-{
-    text       *t = PG_GETARG_TEXT_PP(0);
-    const char *data = VARDATA_ANY(t);
-    Size        len = VARSIZE_ANY_EXHDR(t);
-    hash128_t   id;
-    int         rc;
-    bytea      *out;
-
-    if (len == 0)
-        PG_RETURN_NULL();
-
-    if (!laplace_perfcache_ready())
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("word_id requires the T0 perfcache"),
-                 errhint("ALTER SYSTEM SET laplace_substrate.perfcache_path = '<blob>'; "
-                         "SELECT pg_reload_conf(); (install-extensions.cmd wires this)")));
-
-    rc = laplace_content_root_id((const uint8_t *) data, (size_t) len, &id);
-    if (rc != 0)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("word_id: content decomposition failed (rc=%d)", rc)));
-
-    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
-    memcpy(VARDATA(out), &id, sizeof(hash128_t));
-    PG_RETURN_BYTEA_P(out);
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_codepoint_for_id);
-
-Datum
-pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
-{
-    bytea   *b = PG_GETARG_BYTEA_PP(0);
-    uint32_t cp;
-
-    if (VARSIZE_ANY_EXHDR(b) != sizeof(hash128_t))
-        PG_RETURN_NULL();
-    if (!laplace_perfcache_codepoint_for_id((const uint8_t *) VARDATA_ANY(b), &cp))
-        PG_RETURN_NULL();
-    PG_RETURN_INT32((int32) cp);
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
-
-Datum
-pg_laplace_is_all_whitespace(PG_FUNCTION_ARGS)
-{
-    text *t;
-
-    if (PG_ARGISNULL(0))
-        PG_RETURN_BOOL(false);
-    if (!laplace_perfcache_ready())
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("is_all_whitespace requires the T0 perfcache"),
-                 errhint("ALTER SYSTEM SET laplace_substrate.perfcache_path = '<blob>'; "
-                         "SELECT pg_reload_conf();")));
-    t = PG_GETARG_TEXT_PP(0);
-    PG_RETURN_BOOL(laplace_text_is_all_whitespace(
-        (const uint8_t *) VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t)) != 0);
-}
-
-/* The admitted Tier-0 window: the record count of the active T0 branch floor
- * when loaded, or the full Unicode scalar count otherwise. */
-PG_FUNCTION_INFO_V1(pg_laplace_atom_window);
-
-Datum
-pg_laplace_atom_window(PG_FUNCTION_ARGS)
-{
-    uint64_t count = LAPLACE_PERFCACHE_RECORD_COUNT;
-    if (codepoint_table_is_loaded())
-        (void)codepoint_table_records(NULL, &count);
-    PG_RETURN_INT64((int64) count);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_perfcache_receipt);
 
 Datum
@@ -358,26 +276,6 @@ pg_laplace_perfcache_receipt(PG_FUNCTION_ARGS)
 }
 
 static void
-read_required_id16(Datum arg, bool isnull, const char *fn_name, const char *param_name, hash128_t *out)
-{
-    bytea *b;
-    Size   len;
-
-    if (isnull)
-        ereport(ERROR,
-                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                 errmsg("%s: %s must not be NULL", fn_name, param_name)));
-    b = DatumGetByteaPP(arg);
-    len = VARSIZE_ANY_EXHDR(b);
-    if (len != sizeof(hash128_t))
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("%s: %s has length %zu, expected %zu",
-                        fn_name, param_name, (size_t) len, sizeof(hash128_t))));
-    memcpy(out, VARDATA_ANY(b), sizeof(hash128_t));
-}
-
-static void
 text_arg_root_id(text *t, const char *fn_name, const char *param_name, hash128_t *out)
 {
     const char *data = VARDATA_ANY(t);
@@ -400,29 +298,6 @@ text_arg_root_id(text *t, const char *fn_name, const char *param_name, hash128_t
                         fn_name, param_name, rc)));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_consensus_id);
-
-Datum
-pg_laplace_consensus_id(PG_FUNCTION_ARGS)
-{
-    hash128_t children[3];
-    size_t    n = 2;
-    bytea    *out;
-
-    read_required_id16(PG_GETARG_DATUM(0), PG_ARGISNULL(0), "consensus_id", "subject_id", &children[0]);
-    read_required_id16(PG_GETARG_DATUM(1), PG_ARGISNULL(1), "consensus_id", "type_id", &children[1]);
-    if (!PG_ARGISNULL(2))
-    {
-        read_required_id16(PG_GETARG_DATUM(2), false, "consensus_id", "object_id", &children[2]);
-        n = 3;
-    }
-
-    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
-    hash128_merkle(0, children, n, (hash128_t *) VARDATA(out));
-    PG_RETURN_BYTEA_P(out);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_property_value_id);
 
 Datum
@@ -433,23 +308,6 @@ pg_laplace_property_value_id(PG_FUNCTION_ARGS)
 
     text_arg_root_id(PG_GETARG_TEXT_PP(0), "property_value_id", "property", &children[0]);
     text_arg_root_id(PG_GETARG_TEXT_PP(1), "property_value_id", "value", &children[1]);
-
-    out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));
-    hash128_merkle(0, children, 2, (hash128_t *) VARDATA(out));
-    PG_RETURN_BYTEA_P(out);
-}
-
-PG_FUNCTION_INFO_V1(pg_laplace_witness_id);
-
-Datum
-pg_laplace_witness_id(PG_FUNCTION_ARGS)
-{
-    hash128_t children[2];
-    bytea    *out;
-
-    text_arg_root_id(PG_GETARG_TEXT_PP(0), "witness_id", "authority", &children[0]);
-    text_arg_root_id(PG_GETARG_TEXT_PP(1), "witness_id", "release", &children[1]);
 
     out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
     SET_VARSIZE(out, VARHDRSZ + sizeof(hash128_t));

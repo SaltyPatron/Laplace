@@ -534,7 +534,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
 				&scalar_word_id_plan,
-				"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) AS u(s)",
+				"SELECT public.blake3_send(public.laplace_text_id(u.s)) FROM unnest($1::text[]) AS u(s)",
 				1, at, "word_case_variants"),
 			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)

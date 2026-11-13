@@ -127,15 +127,12 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
 
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         await using (var verify = new NpgsqlCommand(
-            "SELECT realize.render_text(@content), laplace.grammar_source_id(@source, @modality)",
+            "SELECT realize.render_text(@content)",
             conn))
         {
             verify.Parameters.Add("content", NpgsqlDbType.Bytea).Value = contentId;
-            verify.Parameters.Add("source", NpgsqlDbType.Bytea).Value = source;
-            verify.Parameters.Add("modality", NpgsqlDbType.Text).Value = "python";
             await using var reader = await verify.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
-            Assert.Equal(admitted.ContentId, Convert.ToHexStringLower(reader.GetFieldValue<byte[]>(1)));
             Assert.False(reader.IsDBNull(0));
             Assert.Equal(Encoding.UTF8.GetString(source), reader.GetString(0));
         }
@@ -472,14 +469,6 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
             "functions",
             "readback",
             "reconstruct_content.sql.in");
-        string grammarSourceIdSql = Path.Combine(
-            root,
-            "extension",
-            "laplace_substrate",
-            "sql",
-            "functions",
-            "readback",
-            "grammar_source_id.sql.in");
         string ingestFileJournalSql = Path.Combine(
             root,
             "extension",
@@ -489,15 +478,11 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
             "tables",
             "ingest_file_journal.sql.in");
         await ApplySqlFileAsync(testConnection, ingestFileJournalSql);
-        await ApplySqlFileAsync(
-            testConnection,
-            grammarSourceIdSql,
-            "laplace_substrate");
         await ApplySqlFileAsync(testConnection, reconstructSql);
 
         command.CommandText = """
             INSERT INTO laplace.entities (id, tier, type_id)
-            VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'))
+            VALUES (public.blake3_send(public.laplace_text_id('☃')), 0, laplace.entity_type_id('Codepoint'))
             ON CONFLICT DO NOTHING
             """;
         await command.ExecuteNonQueryAsync();

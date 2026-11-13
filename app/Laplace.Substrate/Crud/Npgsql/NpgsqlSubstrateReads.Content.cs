@@ -7,18 +7,6 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static partial class NpgsqlSubstrateReads
 {
 
-    /// <summary><c>realize.vertex_tier(flags)</c> / <c>realize.vertex_atom(flags)</c>.</summary>
-    public static async Task<(short Tier, int Atom)> VertexDecodeAsync(
-        NpgsqlDataSource dataSource, long flags, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("realize.vertex_decode"),
-            static r => (r.GetInt16(0), r.GetInt32(1)),
-            p => p.AddWithValue("flags", flags),
-            ct: ct, label: "vertex_tier", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? ((short)0, 0) : rows[0];
-    }
-
     public readonly record struct EntityPlacementRow(
         short Type, double X, double Y, double Z, double M, double Radius, int Constituents);
 

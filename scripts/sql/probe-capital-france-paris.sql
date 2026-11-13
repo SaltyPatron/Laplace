@@ -3,15 +3,15 @@ SET search_path = laplace, public;
 
 \echo '=== WORD IDS ==='
 SELECT w AS surface,
-       encode(word_id(w), 'hex') AS word_id_hex,
-       word_id(w) IS NOT NULL AS resolved
+       encode(public.blake3_send(public.laplace_text_id(w)), 'hex') AS word_id_hex,
+       public.blake3_send(public.laplace_text_id(w)) IS NOT NULL AS resolved
 FROM unnest(ARRAY['capital','france','Paris','paris','France','of','city']) AS w;
 
 \echo ''
 \echo '=== ENTITY FACETS ==='
-SELECT realize.render_text(word_id(w), 8) AS surface, e.tier, realize.render(e.type_id) AS type
+SELECT realize.render_text(public.blake3_send(public.laplace_text_id(w)), 8) AS surface, e.tier, realize.render(e.type_id) AS type
 FROM unnest(ARRAY['capital','france','Paris','paris']) AS w
-JOIN entities e ON e.id = word_id(w);
+JOIN entities e ON e.id = public.blake3_send(public.laplace_text_id(w));
 
 \echo ''
 \echo '=== CORPUS FREQUENCY RANK (trajectory occurrence) ==='
@@ -50,7 +50,7 @@ SELECT realize.render_text(c.subject_id, 40) AS precedes,
        consensus.eff_mu_display(c.rating, c.rd) AS mu,
        c.witness_count
 FROM consensus c
-WHERE c.object_id IN (word_id('capital'), word_id('france'), word_id('Paris'), word_id('paris'))
+WHERE c.object_id IN (public.blake3_send(public.laplace_text_id('capital')), public.blake3_send(public.laplace_text_id('france')), public.blake3_send(public.laplace_text_id('Paris')), public.blake3_send(public.laplace_text_id('paris')))
   AND c.type_id = relation_type_id('PRECEDES')
   AND NOT consensus.refuted(c.rating, c.rd)
 ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
@@ -65,8 +65,8 @@ SELECT realize.render_text(c.subject_id, 40) AS subject,
 FROM consensus c
 WHERE c.type_id = relation_type_id('PRECEDES')
   AND (
-    (c.subject_id = word_id('capital') AND realize.render_text(c.object_id, 40) IN ('france','Paris','paris','France','of'))
-    OR (c.subject_id = word_id('of') AND c.object_id IN (word_id('france'), word_id('Paris'), word_id('paris')))
+    (c.subject_id = public.blake3_send(public.laplace_text_id('capital')) AND realize.render_text(c.object_id, 40) IN ('france','Paris','paris','France','of'))
+    OR (c.subject_id = public.blake3_send(public.laplace_text_id('of')) AND c.object_id IN (public.blake3_send(public.laplace_text_id('france')), public.blake3_send(public.laplace_text_id('Paris')), public.blake3_send(public.laplace_text_id('paris'))))
     OR (realize.render_text(c.subject_id, 40) = 'capital' AND realize.render_text(c.object_id, 40) IN ('france','Paris','paris'))
   )
 ORDER BY consensus.eff_mu(c.rating, c.rd) DESC;
@@ -74,7 +74,7 @@ ORDER BY consensus.eff_mu(c.rating, c.rd) DESC;
 \echo ''
 \echo '=== TRAJECTORY BIGRAMS (direct from geometry, not folded PRECEDES) ==='
 WITH targets AS (
-    SELECT unnest(ARRAY[word_id('capital'), word_id('france'), word_id('Paris'), word_id('paris')]) AS tid
+    SELECT unnest(ARRAY[public.blake3_send(public.laplace_text_id('capital')), public.blake3_send(public.laplace_text_id('france')), public.blake3_send(public.laplace_text_id('Paris')), public.blake3_send(public.laplace_text_id('paris'))]) AS tid
 ),
 t AS (
     SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
@@ -108,7 +108,7 @@ WITH t AS (
     SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
     FROM physicalities p
     WHERE p.type = 1 AND p.trajectory IS NOT NULL
-      AND laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[word_id('capital')]
+      AND laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[public.blake3_send(public.laplace_text_id('capital'))]
     ORDER BY p.entity_id, p.source_id LIMIT 20000
 ),
 seq AS (
@@ -138,31 +138,31 @@ SELECT 'Paris' AS word, answer FROM generation.recall_trajectories('Paris', 8);
 \echo '=== ATTESTATIONS OUT (top 30 per word) ==='
 SELECT 'capital' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
        a.outcome, a.observation_count, realize.render(a.source_id) AS source
-FROM attestations_out(word_id('capital'), 30) a;
+FROM attestations_out(public.blake3_send(public.laplace_text_id('capital')), 30) a;
 SELECT 'france' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
        a.outcome, a.observation_count, realize.render(a.source_id) AS source
-FROM attestations_out(word_id('france'), 30) a;
+FROM attestations_out(public.blake3_send(public.laplace_text_id('france')), 30) a;
 SELECT 'Paris' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
        a.outcome, a.observation_count, realize.render(a.source_id) AS source
-FROM attestations_out(word_id('Paris'), 30) a;
+FROM attestations_out(public.blake3_send(public.laplace_text_id('Paris')), 30) a;
 
 \echo ''
 \echo '=== ATTESTATIONS IN (top 20 per word) ==='
 SELECT 'capital' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
        a.outcome, a.observation_count
-FROM attestations_in(word_id('capital'), 20) a;
+FROM attestations_in(public.blake3_send(public.laplace_text_id('capital')), 20) a;
 SELECT 'france' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
        a.outcome, a.observation_count
-FROM attestations_in(word_id('france'), 20) a;
+FROM attestations_in(public.blake3_send(public.laplace_text_id('france')), 20) a;
 SELECT 'Paris' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
        a.outcome, a.observation_count
-FROM attestations_in(word_id('Paris'), 20) a;
+FROM attestations_in(public.blake3_send(public.laplace_text_id('Paris')), 20) a;
 
 \echo ''
 \echo '=== CONSENSUS OUT READABLE (all relation types, top 25) ==='
-SELECT 'capital' AS word, * FROM consensus_out_readable(word_id('capital'), 25);
-SELECT 'france' AS word, * FROM consensus_out_readable(word_id('france'), 25);
-SELECT 'Paris' AS word, * FROM consensus_out_readable(word_id('Paris'), 25);
+SELECT 'capital' AS word, * FROM consensus_out_readable(public.blake3_send(public.laplace_text_id('capital')), 25);
+SELECT 'france' AS word, * FROM consensus_out_readable(public.blake3_send(public.laplace_text_id('france')), 25);
+SELECT 'Paris' AS word, * FROM consensus_out_readable(public.blake3_send(public.laplace_text_id('Paris')), 25);
 
 \echo ''
 \echo '=== LEXICAL RELATIONS (foundry crawl edge set) involving these words ==='
@@ -171,8 +171,8 @@ SELECT realize.render_text(c.subject_id, 40) AS subject,
        realize.render_text(c.object_id, 40) AS object,
        consensus.eff_mu_display(c.rating, c.rd) AS mu
 FROM consensus c
-WHERE (c.subject_id IN (word_id('capital'), word_id('france'), word_id('Paris'))
-    OR c.object_id IN (word_id('capital'), word_id('france'), word_id('Paris')))
+WHERE (c.subject_id IN (public.blake3_send(public.laplace_text_id('capital')), public.blake3_send(public.laplace_text_id('france')), public.blake3_send(public.laplace_text_id('Paris')))
+    OR c.object_id IN (public.blake3_send(public.laplace_text_id('capital')), public.blake3_send(public.laplace_text_id('france')), public.blake3_send(public.laplace_text_id('Paris'))))
   AND c.type_id IN (
     SELECT relation_type_id(n) FROM unnest(ARRAY[
         'IS_A','IS_SYNONYM_OF','IS_COORDINATE_TERM_WITH','IS_ANTONYM_OF',

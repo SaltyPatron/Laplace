@@ -248,7 +248,7 @@ public static partial class NpgsqlSubstrateReads
                 p.Add(new NpgsqlParameter("seed", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)seed ?? DBNull.Value });
             }, ct: ct, label: "walk_continuations", onError: onError);
 
-    /// <summary><c>generation.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
+    /// <summary><c>generation.recall_trajectories(laplace_text_id(w), k)</c> — first answer.</summary>
     public static Task<string?> RecallTrajectoryAnswerAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -259,7 +259,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("k", k);
             }, ct: ct, label: "recall_trajectories", onError: onError);
 
-    /// <summary>Top <c>consensus.salient_facts(word_id(w), NULL, k)</c> fact by eff_mu.</summary>
+    /// <summary>Top <c>consensus.salient_facts(laplace_text_id(w), NULL, k)</c> fact by eff_mu.</summary>
     public static Task<string?> SalientFactForWordAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>

@@ -475,13 +475,13 @@ class OperationalTaskTests(unittest.TestCase):
         sql = proof.proof_sql(*args, "direct-relation", "The opposite of hot is", "hot")
         for marker in (proof.CURRENT_FORM, proof.WITNESSED_SEMANTIC, proof.SCHEMA_V2,
                        "laplace/task-shape/token-slot/v2", "laplace/task-shape/slots-end/v2"):
-            self.assertIn("realize.canonical_id('" + marker + "')", sql)
+            self.assertIn("public.blake3_send(public.laplace_text_id('" + marker + "'))", sql)
         slot = sql.split("slot AS MATERIALIZED (", 1)[1].split("\n),", 1)[0]
         native_hash = slot.split("public.laplace_hash128_merkle", 1)[1]
         self.assertIn("decode('" + "05"*16 + "','hex')", native_hash)
         self.assertIn("s.id,s.token_ref,s.accepted_type,s.binding_mode", sql)
         self.assertIn("n.tier<=2 AND (n.parent_index IS NULL OR p.tier>2)", sql)
-        self.assertIn("NOT realize.is_all_whitespace(n.surface)", sql)
+        self.assertIn("NOT public.laplace_text_is(n.surface, 'White_Space', 'Yes')", sql)
         self.assertIn("ORDER BY n.byte_offset,n.node_index LIMIT 2049", sql)
         execution = sql.split("execution AS MATERIALIZED (", 1)[1].split("\n),", 1)[0]
         for forbidden in ("binding", "slot", "mode", "05050505", "operand", "predicate"):
@@ -489,7 +489,7 @@ class OperationalTaskTests(unittest.TestCase):
         shape["schema"] = proof.SCHEMA
         del shape["slots"][0]["binding_mode_id"]
         old = proof.proof_sql(*args)
-        self.assertIn("realize.canonical_id('laplace/task-shape/token-slot/v1')", old)
+        self.assertIn("public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v1'))", old)
         self.assertNotIn("binding_mode", old)
         self.assertNotIn("current_forms", old)
 

@@ -97,7 +97,7 @@ elseif($sql -like 'SELECT extversion FROM pg_extension*' -or $sql -like 'SELECT 
         if($case[0] -eq 'substrate'){
             Assert (@($events | Where-Object {$_ -ceq 'sql:-- canonical runtime grants fixture'}).Count -eq 1) 'Substrate grants did not reuse the selected migration package.'
             Assert (@($events | Where-Object {$_ -match '^sql:GRANT .*ON ALL (TABLES|SEQUENCES|FUNCTIONS)'}).Count -eq 0) 'A parallel blanket grant stack still touches substrate objects.'
-            Assert (@($events | Where-Object {$_ -like 'sql:SET ROLE*laplace.word_id*'}).Count -eq 1) 'Substrate tables and cache were not checked as the runtime role.'
+            Assert (@($events | Where-Object {$_ -like 'sql:SET ROLE*public.laplace_text_id*'}).Count -eq 1) 'Substrate tables and cache were not checked as the runtime role.'
         }
         Assert ($env:LAPLACE_DB -ceq 'ambient-connection' -and $env:PGPASSWORD -ceq 'ambient-secret-fixture') 'Process environment was not restored.'
         Write-Host "PASS $($case[0]) $($case[1]): scoped commands, runtime grants, environment restoration"

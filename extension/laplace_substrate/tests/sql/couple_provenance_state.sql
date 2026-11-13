@@ -5,14 +5,14 @@ DO $couple_provenance_state$
 DECLARE
     prompt text := 'zzprovenancestateqv';
     anchor bytea;
-    candidate bytea := laplace.word_id('zzprovenancecandidateqv');
+    candidate bytea := public.blake3_send(public.laplace_text_id('zzprovenancecandidateqv'));
     relation bytea := laplace.relation_type_id('IS_A');
-    source_a bytea := public.laplace_hash128_blake3('test/couple-provenance/source-a');
-    source_b bytea := public.laplace_hash128_blake3('test/couple-provenance/source-b');
-    context_a bytea := public.laplace_hash128_blake3('test/couple-provenance/context-a');
-    context_b bytea := public.laplace_hash128_blake3('test/couple-provenance/context-b');
-    witness_a bytea := public.laplace_hash128_blake3('test/couple-provenance/witness-a');
-    witness_b bytea := public.laplace_hash128_blake3('test/couple-provenance/witness-b');
+    source_a bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/source-a'));
+    source_b bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/source-b'));
+    context_a bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/context-a'));
+    context_b bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/context-b'));
+    witness_a bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/witness-a'));
+    witness_b bytea := public.blake3_send(public.laplace_text_id('test/couple-provenance/witness-b'));
     before_program bytea;
     after_program bytea;
 BEGIN
@@ -39,7 +39,7 @@ BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(anchor,relation,candidate),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[anchor, relation, candidate]::public.blake3[], NULL))),
          anchor,relation,candidate,
          1800000000000,30000000000,60000000,1,now());
 

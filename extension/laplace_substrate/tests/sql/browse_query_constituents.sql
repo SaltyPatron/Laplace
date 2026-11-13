@@ -6,13 +6,13 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 BEGIN;
 DO $browse_query_constituents$
 DECLARE
-    type_t     bytea := public.laplace_hash128_blake3('Type');
-    type_word  bytea := public.laplace_hash128_blake3('Word');
-    type_sent  bytea := public.laplace_hash128_blake3('Sentence');
-    src        bytea := public.laplace_hash128_blake3('test/browse/source');
-    w_sodium   bytea := public.laplace_hash128_blake3('test/browse/word-sodium');
-    w_chloride bytea := public.laplace_hash128_blake3('test/browse/word-chloride');
-    sent       bytea := public.laplace_hash128_blake3('test/browse/sentence');
+    type_t     bytea := public.blake3_send(public.laplace_text_id('Type'));
+    type_word  bytea := public.blake3_send(public.laplace_text_id('Word'));
+    type_sent  bytea := public.blake3_send(public.laplace_text_id('Sentence'));
+    src        bytea := public.blake3_send(public.laplace_text_id('test/browse/source'));
+    w_sodium   bytea := public.blake3_send(public.laplace_text_id('test/browse/word-sodium'));
+    w_chloride bytea := public.blake3_send(public.laplace_text_id('test/browse/word-chloride'));
+    sent       bytea := public.blake3_send(public.laplace_text_id('test/browse/sentence'));
     t2flag     bigint := (2::bigint << 1);
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
@@ -24,7 +24,7 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
     VALUES
-        (public.laplace_hash128_blake3('test/browse/phys-sentence'), sent, 1,
+        (public.blake3_send(public.laplace_text_id('test/browse/phys-sentence')), sent, 1,
          public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
          decode('00000000000000000000000000000000','hex'),
          public.ST_MakeLine(ARRAY[

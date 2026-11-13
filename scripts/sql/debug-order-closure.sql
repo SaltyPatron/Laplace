@@ -2,7 +2,7 @@ SET search_path = laplace, public;
 
 WITH seed_ids AS (
     SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-    FROM (SELECT word_id(s) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
+    FROM (SELECT public.blake3_send(public.laplace_text_id(s)) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
 ),
 order1 AS (
     SELECT c.object_id AS entity_id, consensus.eff_mu(c.rating, c.rd)::numeric AS w,

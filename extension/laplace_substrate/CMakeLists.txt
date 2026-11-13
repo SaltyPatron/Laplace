@@ -230,7 +230,6 @@ set(EXT_C_SOURCES
     src/graph_cascade.c
     src/foundry_crawl.c
     src/perfcache.c
-    src/grammar_source.c
     src/descent_probe.c
     src/fold_route.c
     src/fold_route_plans.c

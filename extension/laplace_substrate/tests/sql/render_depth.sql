@@ -16,14 +16,14 @@ BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(root,255,laplace.entity_type_id('Text')) ON CONFLICT DO NOTHING;
     INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES(public.laplace_hash128_blake3(root||decode('0100','hex')),root,1,
+    VALUES(public.blake3_send(public.laplace_text_id(root||decode('0100','hex'))),root,1,
       public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),
       public.ST_MakeLine(ARRAY(SELECT public.laplace_mantissa_pack(children[i],i,runs[i],coalesce(flags[i],0))
           FROM generate_subscripts(children,1) i ORDER BY i)),logical);
     RETURN root;
 END $$;
 DO $$
-DECLARE a bytea:=laplace.word_id('A'); x bytea:=laplace.word_id('x'); z bytea;
+DECLARE a bytea:=public.blake3_send(public.laplace_text_id('A')); x bytea:=public.blake3_send(public.laplace_text_id('x')); z bytea;
     root bytea:=a; repeated bytea; unknown bytea; spoof bytea; cycle_a bytea; cycle_b bytea;
     expected text; actual text[];
 BEGIN
@@ -48,13 +48,13 @@ BEGIN
        realize.render_bytes(repeated) IS DISTINCT FROM convert_to('A','UTF8')||decode('0000','hex')||convert_to('x','UTF8') THEN
         RAISE EXCEPTION 'length-bearing realization lost Unicode NUL';
     END IF;
-    unknown:=public.laplace_hash128_blake3('render-depth-unrecorded-child');
+    unknown:=public.blake3_send(public.laplace_text_id('render-depth-unrecorded-child'));
     spoof:=pg_temp.render_fixture_node(ARRAY[a,unknown],ARRAY[1,1],ARRAY[0::bigint,1::bigint|(66::bigint<<31)]);
     IF realize.render_text(spoof) IS NOT NULL THEN
         RAISE EXCEPTION 'physicality annotation manufactured a scalar with a different content identity';
     END IF;
-    cycle_a:=public.laplace_hash128_blake3('render-depth-corrupt-cycle-a');
-    cycle_b:=public.laplace_hash128_blake3('render-depth-corrupt-cycle-b');
+    cycle_a:=public.blake3_send(public.laplace_text_id('render-depth-corrupt-cycle-a'));
+    cycle_b:=public.blake3_send(public.laplace_text_id('render-depth-corrupt-cycle-b'));
     PERFORM pg_temp.render_fixture_node(ARRAY[cycle_b,x],ARRAY[1,1],NULL,cycle_a);
     PERFORM pg_temp.render_fixture_node(ARRAY[cycle_a,x],ARRAY[1,1],NULL,cycle_b);
     actual:=realize.render_text_batch(ARRAY[cycle_a,root,cycle_b,root]);

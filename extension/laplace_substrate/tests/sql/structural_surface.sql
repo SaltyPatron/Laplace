@@ -16,10 +16,10 @@ WHERE n.nspname = 'structural'
 SELECT count(*) AS collocates_empty_for_unknown_word
 FROM structural.collocates('zzznosuchword', 5);
 
-SELECT structural.word_curve(laplace.word_id('dog')) IS NULL AS no_curve_without_physicality;
+SELECT structural.word_curve(public.blake3_send(public.laplace_text_id('dog'))) IS NULL AS no_curve_without_physicality;
 
 SELECT count(*) = 0 AS cluster_empty_without_physicality
-FROM structural.cluster(laplace.word_id('dog'), 0.05, 10);
+FROM structural.cluster(public.blake3_send(public.laplace_text_id('dog')), 0.05, 10);
 
 -- Non-empty contract and batch parity. The previous test stopped at the early-return
 -- path, so the scalar's ambiguous output variables and the batch's nonexistent
@@ -28,17 +28,17 @@ FROM structural.cluster(laplace.word_id('dog'), 0.05, 10);
 BEGIN;
 DO $cluster_fixture$
 DECLARE
-    src       bytea := public.laplace_hash128_blake3('test/cluster/source');
-    type_t    bytea := public.laplace_hash128_blake3('Type');
-    type_word bytea := public.laplace_hash128_blake3('Word');
-    seed      bytea := public.laplace_hash128_blake3('test/cluster/seed');
-    near_word bytea := public.laplace_hash128_blake3('test/cluster/near');
-    far_word  bytea := public.laplace_hash128_blake3('test/cluster/far');
-    unresolved bytea := public.laplace_hash128_blake3('test/cluster/unresolved');
-    l0 bytea := public.laplace_hash128_blake3('test/cluster/leaf-0');
-    l1 bytea := public.laplace_hash128_blake3('test/cluster/leaf-1');
-    l2 bytea := public.laplace_hash128_blake3('test/cluster/leaf-2');
-    l3 bytea := public.laplace_hash128_blake3('test/cluster/leaf-3');
+    src       bytea := public.blake3_send(public.laplace_text_id('test/cluster/source'));
+    type_t    bytea := public.blake3_send(public.laplace_text_id('Type'));
+    type_word bytea := public.blake3_send(public.laplace_text_id('Word'));
+    seed      bytea := public.blake3_send(public.laplace_text_id('test/cluster/seed'));
+    near_word bytea := public.blake3_send(public.laplace_text_id('test/cluster/near'));
+    far_word  bytea := public.blake3_send(public.laplace_text_id('test/cluster/far'));
+    unresolved bytea := public.blake3_send(public.laplace_text_id('test/cluster/unresolved'));
+    l0 bytea := public.blake3_send(public.laplace_text_id('test/cluster/leaf-0'));
+    l1 bytea := public.blake3_send(public.laplace_text_id('test/cluster/leaf-1'));
+    l2 bytea := public.blake3_send(public.laplace_text_id('test/cluster/leaf-2'));
+    l3 bytea := public.blake3_send(public.laplace_text_id('test/cluster/leaf-3'));
     scalar_ids bytea[];
     batch_ids  bytea[];
     n bigint;
@@ -53,25 +53,25 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
     VALUES
-        (public.laplace_hash128_blake3(l0 || decode('0100','hex')), l0, 1,
+        (public.blake3_send(public.laplace_text_id(l0 || decode('0100','hex'))), l0, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.0,0.0,0.0,0.0),0), decode(repeat('00',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3(l1 || decode('0100','hex')), l1, 1,
+        (public.blake3_send(public.laplace_text_id(l1 || decode('0100','hex'))), l1, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.1,0.1,0.1,0.1),0), decode(repeat('01',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3(l2 || decode('0100','hex')), l2, 1,
+        (public.blake3_send(public.laplace_text_id(l2 || decode('0100','hex'))), l2, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.8,0.8,0.8,0.8),0), decode(repeat('02',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3(l3 || decode('0100','hex')), l3, 1,
+        (public.blake3_send(public.laplace_text_id(l3 || decode('0100','hex'))), l3, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.9,0.9,0.9,0.9),0), decode(repeat('03',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3(seed || decode('0100','hex')), seed, 1,
+        (public.blake3_send(public.laplace_text_id(seed || decode('0100','hex'))), seed, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.40,0.40,0.40,0.40),0), decode(repeat('10',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.laplace_hash128_blake3(near_word || decode('0100','hex')), near_word, 1,
+        (public.blake3_send(public.laplace_text_id(near_word || decode('0100','hex'))), near_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.41,0.41,0.41,0.41),0), decode(repeat('11',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.laplace_hash128_blake3(far_word || decode('0100','hex')), far_word, 1,
+        (public.blake3_send(public.laplace_text_id(far_word || decode('0100','hex'))), far_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.95,0.95,0.95,0.95),0), decode(repeat('12',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l2,1,1,0),
@@ -130,28 +130,28 @@ ROLLBACK;
 -- while its angle is worse; unit-direction KNN must return `angular-close`.
 BEGIN;
 INSERT INTO laplace.entities (id, tier, type_id) VALUES
-    (public.laplace_hash128_blake3('test/angular/source'), 0,
-     public.laplace_hash128_blake3('Type'), NULL),
-    (public.laplace_hash128_blake3('test/angular/raw-close'), 42,
-     public.laplace_hash128_blake3('Word'),
-     public.laplace_hash128_blake3('test/angular/source')),
-    (public.laplace_hash128_blake3('test/angular/angular-close'), 42,
-     public.laplace_hash128_blake3('Word'),
-     public.laplace_hash128_blake3('test/angular/source'));
+    (public.blake3_send(public.laplace_text_id('test/angular/source')), 0,
+     public.blake3_send(public.laplace_text_id('Type')), NULL),
+    (public.blake3_send(public.laplace_text_id('test/angular/raw-close')), 42,
+     public.blake3_send(public.laplace_text_id('Word')),
+     public.blake3_send(public.laplace_text_id('test/angular/source'))),
+    (public.blake3_send(public.laplace_text_id('test/angular/angular-close')), 42,
+     public.blake3_send(public.laplace_text_id('Word')),
+     public.blake3_send(public.laplace_text_id('test/angular/source')));
 
 INSERT INTO laplace.physicalities
     (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents)
 VALUES
-    (public.laplace_hash128_blake3('test/angular/raw-close/physicality'),
-     public.laplace_hash128_blake3('test/angular/raw-close'), 1,
+    (public.blake3_send(public.laplace_text_id('test/angular/raw-close/physicality')),
+     public.blake3_send(public.laplace_text_id('test/angular/raw-close')), 1,
      public.ST_SetSRID(public.ST_MakePoint(0.9, 0.1, 0, 0), 0),
      decode(repeat('21', 16), 'hex'), NULL, 0),
-    (public.laplace_hash128_blake3('test/angular/angular-close/physicality'),
-     public.laplace_hash128_blake3('test/angular/angular-close'), 1,
+    (public.blake3_send(public.laplace_text_id('test/angular/angular-close/physicality')),
+     public.blake3_send(public.laplace_text_id('test/angular/angular-close')), 1,
      public.ST_SetSRID(public.ST_MakePoint(100, 1, 0, 0), 0),
      decode(repeat('22', 16), 'hex'), NULL, 0);
 
-SELECT bool_and(entity_id = public.laplace_hash128_blake3('test/angular/angular-close'))
+SELECT bool_and(entity_id = public.blake3_send(public.laplace_text_id('test/angular/angular-close')))
        AS angular_knn_ignores_radius
 FROM generation.nearest_entity(1, 0, 0, 0, 1, NULL, ARRAY[42::smallint]);
 
@@ -171,19 +171,19 @@ WHERE i.indexrelid = 'laplace.physicalities_direction_gist'::regclass;
 -- Locale counts are exact radius counts over the direction index, not an
 -- estimate from an arbitrary nearest-3,000 prefix.
 INSERT INTO laplace.entities (id, tier, type_id) VALUES
-    (laplace.word_id('localeanchor'), 2, realize.canonical_id('Word'),
-     public.laplace_hash128_blake3('test/angular/source')),
-    (laplace.word_id('localeneighbor'), 2, realize.canonical_id('Word'),
-     public.laplace_hash128_blake3('test/angular/source'));
+    (public.blake3_send(public.laplace_text_id('localeanchor')), 2, public.blake3_send(public.laplace_text_id('Word')),
+     public.blake3_send(public.laplace_text_id('test/angular/source'))),
+    (public.blake3_send(public.laplace_text_id('localeneighbor')), 2, public.blake3_send(public.laplace_text_id('Word')),
+     public.blake3_send(public.laplace_text_id('test/angular/source')));
 INSERT INTO laplace.physicalities
     (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents)
 VALUES
-    (public.laplace_hash128_blake3('test/angular/localeanchor/physicality'),
-     laplace.word_id('localeanchor'), 1,
+    (public.blake3_send(public.laplace_text_id('test/angular/localeanchor/physicality')),
+     public.blake3_send(public.laplace_text_id('localeanchor')), 1,
      public.ST_SetSRID(public.ST_MakePoint(1, 0, 0, 0), 0),
      decode(repeat('23', 16), 'hex'), NULL, 0),
-    (public.laplace_hash128_blake3('test/angular/localeneighbor/physicality'),
-     laplace.word_id('localeneighbor'), 1,
+    (public.blake3_send(public.laplace_text_id('test/angular/localeneighbor/physicality')),
+     public.blake3_send(public.laplace_text_id('localeneighbor')), 1,
      public.ST_SetSRID(public.ST_MakePoint(2, 0, 0, 0), 0),
      decode(repeat('24', 16), 'hex'), NULL, 0);
 
@@ -243,7 +243,7 @@ SELECT pg_get_functiondef('generation.consensus_peer(bytea,integer)'::regprocedu
            LIKE '%LIMIT GREATEST(p_k, 0)%'
        AS consensus_peer_uses_declared_candidate_budget;
 
-SELECT generation.consensus_peer(laplace.word_id('w'), 0) IS NULL
+SELECT generation.consensus_peer(public.blake3_send(public.laplace_text_id('w')), 0) IS NULL
        AS consensus_peer_zero_budget_is_empty;
 
 -- structural_surface complete

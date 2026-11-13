@@ -22,14 +22,11 @@ SQL_QUERY("ops.entity_evidence_count", "bytea",
 SQL_QUERY("converse.first_placed_topic", "text",
     "SELECT converse.first_placed_topic($1)")
 
-SQL_QUERY("converse.resolve_ref", "text",
-    "SELECT converse.resolve_ref($1)")
-
-SQL_QUERY("laplace.word_id", "text",
-    "SELECT laplace.word_id($1)")
+SQL_QUERY("substrate.text_id", "text",
+    "SELECT public.blake3_send(public.laplace_text_id($1))")
 
 SQL_QUERY("readiness.perfcache_probe", "",
-    "SELECT laplace.word_id('the');")
+    "SELECT public.blake3_send(public.laplace_text_id('the'));")
 
 SQL_QUERY("realize.label_or_hex", "bytea",
     "SELECT COALESCE(\n    NULLIF(realize.render_text_fast($1, 8), ''),\n    converse.label_or_hex($1));")
@@ -44,7 +41,7 @@ SQL_QUERY("generation.recall_trajectory_answer", "text,int4",
     "SELECT answer FROM generation.recall_trajectories($1, $2) LIMIT 1")
 
 SQL_QUERY("consensus.salient_fact_for_word", "text,int4",
-    "SELECT fact FROM consensus.salient_facts(laplace.word_id($1), NULL, $2)\nORDER BY eff_mu DESC LIMIT 1")
+    "SELECT fact FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id($1)), NULL, $2)\nORDER BY eff_mu DESC LIMIT 1")
 
 SQL_QUERY("consensus.stats", "",
     "SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM consensus.stats()")
@@ -146,7 +143,7 @@ SQL_QUERY("foundry.source_ids", "text",
     "SELECT decode(id::text,'hex') FROM ops.witness_catalog() WHERE lower(source_label)=lower($1) OR id::text=lower($1) ORDER BY id")
 
 SQL_QUERY("realize.resolved_word_surfaces", "text[]",
-    "SELECT realize.render_text(laplace.word_id(s))\nFROM unnest($1::text[]) AS s\nWHERE laplace.word_id(s) IS NOT NULL")
+    "SELECT realize.render_text(public.blake3_send(public.laplace_text_id(s)))\nFROM unnest($1::text[]) AS s\nWHERE public.blake3_send(public.laplace_text_id(s)) IS NOT NULL")
 
 SQL_QUERY("foundry.attribute_outbound", "text,bytea[],int4",
     "-- ONE PLAN, NOT ONE PER VOCAB ENTRY. consensus.edges_raw is LANGUAGE sql with\n-- UNION ALL + ORDER BY + LIMIT, so it does not inline: under CROSS JOIN LATERAL\n-- it re-plans against a 216-leaf partitioned table once per subject, and a\n-- foundry vocab is thousands of subjects inside the 180 s command timeout.\n-- Inlined here because both partition keys must reach the predicate: type_id is\n-- a folded IMMUTABLE literal (LIST level) and subject_id is a ScalarArrayOp\n-- (HASH level). Handing either one to a per-row variable loses the pruning.\n-- Equivalence to the edges_raw call it replaces, at THIS call site only:\n-- p_direction 'out' keeps the outbound arm; p_refuted true disables the refuted\n-- filter; a one-element p_types is an equality; the window reproduces\n-- ORDER BY eff_mu::float8/1e9 DESC, neighbour_id LIMIT p_limit per subject.\nWITH ranked AS (\n    SELECT c.subject_id,\n           c.object_id AS neighbour_id,\n           GREATEST(consensus.walk_edge_weight(c.rating, c.rd), 0) AS w,\n           row_number() OVER (\n               PARTITION BY c.subject_id\n               ORDER BY (consensus.eff_mu(c.rating, c.rd))::float8 / 1e9 DESC,\n                        c.object_id\n           ) AS rn\n    FROM laplace.consensus c\n    WHERE c.subject_id = ANY ($2)\n      AND c.type_id = laplace.relation_type_id($1)\n)\nSELECT subject_id, neighbour_id, w\nFROM ranked\nWHERE rn <= $3")
@@ -191,14 +188,11 @@ SQL_QUERY("consensus.by_ids_pair", "bytea[],bytea,bytea[],bytea",
 SQL_QUERY("consensus.by_ids_triple", "bytea[],bytea,bytea[],bytea,bytea[],bytea",
     "SELECT 0, id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)\nUNION ALL\nSELECT 1, id, eff_mu, rd, witness_count FROM consensus.by_ids($3, $4)\nUNION ALL\nSELECT 2, id, eff_mu, rd, witness_count FROM consensus.by_ids($5, $6)")
 
-SQL_QUERY("ingest.evidence_count_for_relation_source", "text,text",
-    "SELECT ops.evidence_count(\n    p_type => laplace.relation_type_id($1),\n    p_source => laplace.source_id($2))")
+SQL_QUERY("ingest.evidence_count_for_source", "bytea",
+    "SELECT ops.evidence_count(p_source => $1)")
 
-SQL_QUERY("ingest.evidence_count_for_source_name", "text",
-    "SELECT ops.evidence_count(p_source => laplace.source_id($1))")
-
-SQL_QUERY("ingest.content_count_for_source_name", "text",
-    "SELECT ops.content_count(p_source => laplace.source_id($1))")
+SQL_QUERY("ingest.content_count_for_source", "bytea",
+    "SELECT ops.content_count(p_source => $1)")
 
 SQL_QUERY("ingest.evidence_count_for_relation", "text",
     "SELECT ops.evidence_count(p_type => laplace.relation_type_id($1))")
@@ -209,20 +203,20 @@ SQL_QUERY("ingest.evidence_count_for_relation_source_id", "text,bytea",
 SQL_QUERY("ingest.close_run_count", "uuid,text",
     "SELECT count(*) FROM ops.ingest_run_close($1, $2)")
 
-SQL_QUERY("ingest.source_bootstrap_present", "text,text",
-    "SELECT ops.source_bootstrap_present(\n    laplace.source_id($1), laplace.relation_type_id($2))")
+SQL_QUERY("ingest.source_bootstrap_present", "bytea,text",
+    "SELECT ops.source_bootstrap_present(\n    $1, laplace.relation_type_id($2))")
 
 SQL_QUERY("ingest.source_layer_completed_operation", "int4,bytea",
     "SELECT ops.layer_completed($2, $1)")
 
 SQL_QUERY("ingest.model_circuit_trajectory_count", "",
-    "SELECT consensus.entity_physicality_count(\n           realize.canonical_id('Model_Circuit'), 3)")
+    "SELECT consensus.entity_physicality_count(\n           public.blake3_send(public.laplace_text_id('Model_Circuit')), 3)")
 
 SQL_QUERY("ingest.attestation_counts_by_source", "",
     "SELECT s.source, s.evidence, encode(s.source_id, 'hex')\nFROM ops.source_counts() s\nORDER BY s.evidence DESC")
 
 SQL_QUERY("ingest.unicode_capital_a_content_probe", "",
-    "SELECT realize.render(realize.canonical_id('A')), f.tier,\n       p.x, p.y, p.z, p.m\nFROM ops.entity_facets(realize.canonical_id('A')) f\nCROSS JOIN ops.entity_physicalities(realize.canonical_id('A')) p\nWHERE p.type = 1")
+    "SELECT realize.render(public.blake3_send(public.laplace_text_id('A'))), f.tier,\n       p.x, p.y, p.z, p.m\nFROM ops.entity_facets(public.blake3_send(public.laplace_text_id('A'))) f\nCROSS JOIN ops.entity_physicalities(public.blake3_send(public.laplace_text_id('A'))) p\nWHERE p.type = 1")
 
 SQL_QUERY("structural.trunks_by_head", "bytea[],bytea",
     "SELECT DISTINCT ON (h.head) h.head, e.id, e.tier, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord) FROM unnest($1::bytea[]) AS h(head) JOIN laplace.physicalities p ON p.type = 1 AND p.trajectory IS NOT NULL AND (public.laplace_trajectory_constituent_ids(p.trajectory))[1] = h.head JOIN laplace.entities e ON e.id = p.entity_id AND e.type_id = $2 ORDER BY h.head, e.id")
@@ -304,16 +298,12 @@ SQL_QUERY("journal.run_finished", "uuid,text,int8,int8,int8,int8,int8,int8,text,
     "UPDATE laplace.ingest_run_journal SET status = $2, phase = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'complete' END, ended_at = now(), throughput_elapsed_ms = $13, units_attempted = $3, units_applied = $4, units_failed = $5, entities = $6, physicalities = $7, attestations = $8, error = COALESCE($9, error), files_done = $10, input_units_done = $11, input_units_total = $12 WHERE run_id = $1")
 SQL_QUERY("journal.run_failed", "uuid,text,text",
     "UPDATE laplace.ingest_run_journal SET status = $2, phase = 'failed', ended_at = now(), error = $3 WHERE run_id = $1")
-SQL_QUERY("journal.failed_before_start", "uuid,text,text,bool,text",
-    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted, error) VALUES ($1, $2, laplace.source_id($2), -1, $3, 'failed', now(), $4, $5)")
+SQL_QUERY("journal.failed_before_start", "uuid,text,bytea,text,bool,text",
+    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted, error) VALUES ($1, $2, $3, -1, $4, 'failed', now(), $5, $6)")
 SQL_QUERY("journal.run_skip_identified", "uuid,text,bytea,int4,bool",
     "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) VALUES ($1, $2, $3, $4, 'skipped-complete', 'complete', now(), $5)")
-SQL_QUERY("journal.run_skip_named", "uuid,text,int4,bool",
-    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) VALUES ($1, $2, laplace.source_id($2), $3, 'skipped-complete', 'complete', now(), $4)")
 SQL_QUERY("journal.run_start_identified", "uuid,text,bytea,int4,int8,int8,bool",
     "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) VALUES ($1, $2, $3, $4, 'running', $5, $6, $7)")
-SQL_QUERY("journal.run_start_named", "uuid,text,int4,int8,int8,bool",
-    "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) VALUES ($1, $2, laplace.source_id($2), $3, 'running', $4, $5, $6)")
 SQL_QUERY("journal.accepted_run", "uuid,text,bytea,timestamptz,timestamptz,int8,int8,int8,int8,bool",
     "INSERT INTO laplace.ingest_run_journal (run_id, source_name, source_id, layer, status, phase, started_at, ended_at, units_attempted, units_applied, entities, physicalities, attestations, files_done, files_total, input_units_done, input_units_total, throughput_elapsed_ms, evidence_persisted) VALUES ($1, $2, $3, 0, 'ok', 'complete', $4, $5, 1, 1, $6, $7, $8, 1, 1, 1, 1, $9, $10)")
 SQL_QUERY("journal.accepted_file", "uuid,text,text,bytea,timestamptz,timestamptz,int8,timestamptz,int8,int8,int8",
@@ -333,8 +323,8 @@ SQL_QUERY("write.journal_receipt_probe", "bytea",
     "SELECT 1 FROM laplace.ingest_flush_journal WHERE working_set_id=$1")
 SQL_QUERY("write.journal_receipt", "bytea,bytea,text,bytea[]",
     "WITH receipt AS ( INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3) RETURNING working_set_id) INSERT INTO laplace.ingest_flush_journal_sources (working_set_id, source_id) SELECT receipt.working_set_id, source_id FROM receipt CROSS JOIN unnest($4::bytea[]) AS source_id")
-SQL_QUERY("write.unicode_layer_completed", "",
-    "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE witness_id = laplace.source_id('Unicode') AND layer = 0)")
+SQL_QUERY("write.unicode_layer_completed", "bytea",
+    "SELECT EXISTS (SELECT 1 FROM laplace.ingest_layer_completion WHERE witness_id = $1 AND layer = 0)")
 SQL_QUERY("write.entities_have_rows", "",
     "SELECT EXISTS (SELECT 1 FROM laplace.entities LIMIT 1)")
 SQL_QUERY("write.physicalities_have_rows", "",

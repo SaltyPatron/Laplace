@@ -167,13 +167,13 @@ SELECT laplace_distance_4d(
 
 WITH packed AS (
     SELECT laplace_mantissa_pack(
-        laplace_hash128_blake3('test_entity'::bytea),
+        public.blake3_send(public.laplace_text_id('test_entity')),
         42,
         7,
         12345::bigint
     ) AS vertex
 )
-SELECT (laplace_mantissa_unpack(vertex)).entity_id  = laplace_hash128_blake3('test_entity'::bytea) AS eid_roundtrip,
+SELECT (laplace_mantissa_unpack(vertex)).entity_id  = public.blake3_send(public.laplace_text_id('test_entity')) AS eid_roundtrip,
        (laplace_mantissa_unpack(vertex)).ordinal    = 42 AS ord_roundtrip,
        (laplace_mantissa_unpack(vertex)).run_length = 7  AS run_roundtrip,
        (laplace_mantissa_unpack(vertex)).flags      = 12345::bigint AS flags_roundtrip
@@ -182,7 +182,7 @@ FROM packed;
 DO $$
 BEGIN
     PERFORM laplace_mantissa_pack(
-        laplace_hash128_blake3('x'::bytea),
+        public.blake3_send(public.laplace_text_id('x')),
         0, 0,
         (1::bigint << 52)
     );
@@ -196,7 +196,7 @@ SELECT 'mantissa_pack_rejects_high_flag_bits' AS validation_check;
 DO $$
 BEGIN
     PERFORM laplace_mantissa_pack(
-        laplace_hash128_blake3('x'::bytea),
+        public.blake3_send(public.laplace_text_id('x')),
         70000,
         0,
         0::bigint

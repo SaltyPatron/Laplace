@@ -17,7 +17,7 @@ BEGIN ATOMIC
     FROM agg a
     WHERE NOT EXISTS (SELECT 1 FROM @extschema@.relation_registry() r WHERE r.type_id = a.id)
       AND NOT EXISTS (SELECT 1 FROM @extschema@.entity_type_registry() t WHERE t.type_id = a.id)
-      AND realize.codepoint_for_id(a.id) IS NULL
+      AND public.laplace_codepoint(public.blake3_from_bytea(a.id)) IS NULL
       AND NOT EXISTS (SELECT 1 FROM @extschema@.physicalities p
                       WHERE p.entity_id = a.id AND p.type = 1 AND p.trajectory IS NOT NULL)
     ORDER BY a.refs DESC

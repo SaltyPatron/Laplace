@@ -6,8 +6,8 @@ RESET client_min_messages;
 -- This proves that the native expanded operation derives true ordinals from the
 -- run-length prefix sum and does not use ST_NPoints or the stored vertex index.
 WITH ids AS (
-    SELECT laplace_hash128_blake3('rle-a'::bytea) AS a,
-           laplace_hash128_blake3('rle-b'::bytea) AS b
+    SELECT public.blake3_send(public.laplace_text_id('rle-a')) AS a,
+           public.blake3_send(public.laplace_text_id('rle-b')) AS b
 ), packed AS (
     SELECT a, b, ST_MakeLine(ARRAY[
         -- atom 97, tier 0, repeated three times
@@ -40,8 +40,8 @@ FROM expanded;
 -- without materializing it. Plain and RLE storage are equal; changing any
 -- semantic part is not. STRICT supplies SQL NULL propagation.
 WITH ids AS (
-    SELECT laplace_hash128_blake3('eq-a'::bytea) AS a,
-           laplace_hash128_blake3('eq-b'::bytea) AS b
+    SELECT public.blake3_send(public.laplace_text_id('eq-a')) AS a,
+           public.blake3_send(public.laplace_text_id('eq-b')) AS b
 ), forms AS (
     SELECT
       ST_MakeLine(ARRAY[
@@ -77,12 +77,12 @@ FROM forms;
 
 -- Membership is unique in first-occurrence order; it is not the ordered path.
 SELECT laplace_trajectory_constituent_ids(laplace_trajectory_build(ARRAY[
-           laplace_hash128_blake3('member-b'::bytea),
-           laplace_hash128_blake3('member-a'::bytea),
-           laplace_hash128_blake3('member-b'::bytea),
-           laplace_hash128_blake3('member-a'::bytea)])) = ARRAY[
-           laplace_hash128_blake3('member-b'::bytea),
-           laplace_hash128_blake3('member-a'::bytea)] AS membership_preserves_first_occurrence;
+           public.blake3_send(public.laplace_text_id('member-b')),
+           public.blake3_send(public.laplace_text_id('member-a')),
+           public.blake3_send(public.laplace_text_id('member-b')),
+           public.blake3_send(public.laplace_text_id('member-a'))])) = ARRAY[
+           public.blake3_send(public.laplace_text_id('member-b')),
+           public.blake3_send(public.laplace_text_id('member-a'))] AS membership_preserves_first_occurrence;
  membership_preserves_first_occurrence 
 ---------------------------------------
  t

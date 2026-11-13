@@ -44,10 +44,10 @@ def main(argv: list[str]) -> int:
         return 2
     if src.get("witness"):
         authority, release = src["witness"]
-        witness = f"laplace.witness_id({quote(authority)}, {quote(release)})"
+        witness = f"public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id({quote(authority)}), public.laplace_text_id({quote(release)})]))"
         label = f"witness={authority}@{release} layer={layer}"
     else:
-        witness = f"laplace.source_id({quote(decomposer)})"
+        witness = f"public.blake3_send(public.laplace_text_id('substrate/source/' || {quote(decomposer)} || '/v1'))"
         label = f"source={decomposer} layer={layer}"
     print(f"(ops.native_source_completed({quote(name)}) OR ops.layer_completed({witness}, {int(layer)}))\t{label}")
     return 0

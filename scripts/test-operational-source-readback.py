@@ -28,7 +28,7 @@ class SourceReadbackTests(unittest.TestCase):
         self.assertTrue(sql.rstrip().endswith("ROLLBACK;"))
         self.assertIn("SET LOCAL client_encoding='UTF8'", sql)
         self.assertIn("WHERE p.type=8 AND p.trajectory IS NOT NULL", sql)
-        self.assertIn("@> ARRAY[realize.canonical_id('ud/parse/schema/v1')]", sql)
+        self.assertIn("@> ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]", sql)
         self.assertIn("&& ARRAY(SELECT id FROM cue_ids)", sql)
         self.assertIn("ORDER BY p.n_constituents,p.entity_id,p.id LIMIT 17", sql)
         self.assertIn("p.n_constituents BETWEEN 1 AND 2048", sql)

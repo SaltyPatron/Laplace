@@ -6,5 +6,5 @@ CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT n.neighbor,n.geodesic,n.frechet
-    FROM structural.neighbors_of(converse.resolve_ref(p_word),p_k) n;
+    FROM structural.neighbors_of(public.laplace_resolve_ref(p_word),p_k) n;
 END;

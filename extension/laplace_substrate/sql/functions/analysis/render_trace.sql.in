@@ -5,7 +5,7 @@
 -- and gives each child a verdict: orphan (no entities row), composed (renders
 -- by recursion), codepoint, or unrenderable.
 --
--- realize.codepoint_for_id is the costly call, so it runs only on rows the
+-- public.laplace_codepoint is the costly call, so it runs only on rows the
 -- entity join left undecided; labels realize through one
 -- converse.label_or_hex_batch. Codepoints print via to_hex alone: no case
 -- folding on the read path. Internal aliases avoid the RETURNS TABLE names,
@@ -44,7 +44,7 @@ BEGIN ATOMIC
         SELECT cheap.pid, cheap.ord, cheap.cid, cheap.etier,
                cheap.has_entity, cheap.has_traj,
                CASE WHEN cheap.has_entity AND NOT cheap.has_traj
-                    THEN realize.codepoint_for_id(cheap.cid)
+                    THEN public.laplace_codepoint(public.blake3_from_bytea(cheap.cid))
                END AS cp
         FROM cheap
     ),

@@ -11,7 +11,7 @@ BEGIN
 END
 $$;
 SELECT realize.render_text_batch(ARRAY[
-           laplace.word_id('A'), laplace.word_id(' '), laplace.word_id('狼')])
+           public.blake3_send(public.laplace_text_id('A')), public.blake3_send(public.laplace_text_id(' ')), public.blake3_send(public.laplace_text_id('狼'))])
        = ARRAY['A',' ','狼'] AS floor_without_database_closure;
  floor_without_database_closure 
 --------------------------------

@@ -20,7 +20,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('10000000-0000-0000-0000-000000000001', 'ThroughputRegressionTest',
-         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRegressionTest/v1')), 1, 'running',
          '2026-01-01 00:00:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 00:00:10+00', entities = 1000
@@ -71,7 +71,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('10000000-0000-0000-0000-000000000002', 'ThroughputRegressionTest',
-         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRegressionTest/v1')), 1, 'running',
          '2026-01-01 01:00:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 01:00:20+00', entities = 1000
@@ -124,7 +124,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('10000000-0000-0000-0000-000000000003', 'ThroughputRegressionTest',
-         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRegressionTest/v1')), 1, 'running',
          '2026-01-01 02:00:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 02:00:20+00', entities = 1000
@@ -145,7 +145,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, phase, started_at, ended_at)
     VALUES
         ('10000000-0000-0000-0000-000000000004', 'ThroughputRegressionTest',
-         laplace.source_id('ThroughputRegressionTest'), 1, 'skipped-complete', 'complete',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRegressionTest/v1')), 1, 'skipped-complete', 'complete',
          '2026-01-01 03:00:00+00', '2026-01-01 03:00:00+00');
     SELECT last_run_status = 'skipped-complete'
        AND throughput_status = 'ok'
@@ -162,7 +162,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('10000000-0000-0000-0000-000000000005', 'ThroughputRegressionTest',
-         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRegressionTest/v1')), 1, 'running',
          '2026-01-01 03:10:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 03:10:10+00'
@@ -183,7 +183,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('20000000-0000-0000-0000-000000000001', 'ThroughputUnmeasuredTest',
-         laplace.source_id('ThroughputUnmeasuredTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputUnmeasuredTest/v1')), 1, 'running',
          '2026-01-01 04:00:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 04:00:10+00'
@@ -219,7 +219,7 @@ BEGIN
         (run_id, source_name, source_id, layer, status, started_at)
     VALUES
         ('30000000-0000-0000-0000-000000000001', 'ThroughputRunnerClockTest',
-         laplace.source_id('ThroughputRunnerClockTest'), 1, 'running',
+         public.blake3_send(public.laplace_text_id('substrate/source/ThroughputRunnerClockTest/v1')), 1, 'running',
          '2026-01-01 05:00:00+00');
     UPDATE laplace.ingest_run_journal
        SET status = 'ok', ended_at = '2026-01-01 05:00:20+00',

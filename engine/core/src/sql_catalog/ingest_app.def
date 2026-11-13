@@ -95,7 +95,7 @@ SQL_QUERY("source.evidence_count", "bytea", "SELECT ops.evidence_count(p_source 
 SQL_QUERY("language.tags", "text[]",
     "WITH rel AS (SELECT laplace.relation_type_id('HAS_EXTERNAL_ID') AS ext,"
     "laplace.relation_type_id('HAS_NAME') AS name,laplace.relation_type_id('HAS_LANGUAGE_SCOPE') AS scope),"
-    "spec AS (SELECT laplace.content_id(convert_to(t,'UTF8')) AS id FROM unnest($1::text[]) t),"
+    "spec AS (SELECT public.blake3_send(public.laplace_text_id(t)) AS id FROM unnest($1::text[]) t),"
     "named AS (SELECT c.subject_id AS id FROM laplace.consensus c,rel,spec s "
     "WHERE c.object_id=s.id AND (c.type_id=rel.ext OR c.type_id=rel.name) UNION SELECT id FROM spec),"
     "lang AS (SELECT n.id FROM named n,rel WHERE EXISTS (SELECT 1 FROM laplace.consensus k "

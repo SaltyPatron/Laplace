@@ -69,7 +69,7 @@ def psql_rows(db, sql):
 EXPECTED_SQL = """
 SELECT lower(realize.render(c.object_id))
 FROM laplace.v_consensus_unrefuted c
-WHERE c.subject_id = laplace.word_id(%(word)s)
+WHERE c.subject_id = public.blake3_send(public.laplace_text_id(%(word)s))
   AND c.object_id IS NOT NULL
 ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
 LIMIT %(limit)d;

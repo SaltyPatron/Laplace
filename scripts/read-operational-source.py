@@ -316,23 +316,23 @@ SET LOCAL idle_in_transaction_session_timeout='60s';
 WITH
 cues(surface) AS (VALUES {cue_values}),
 operands(surface) AS (VALUES {operand_values}),
-cue_ids AS MATERIALIZED (SELECT surface,laplace.word_id(surface) AS id FROM cues),
-operand_ids AS MATERIALIZED (SELECT surface,laplace.word_id(surface) AS id FROM operands),
+cue_ids AS MATERIALIZED (SELECT surface,public.blake3_send(public.laplace_text_id(surface)) AS id FROM cues),
+operand_ids AS MATERIALIZED (SELECT surface,public.blake3_send(public.laplace_text_id(surface)) AS id FROM operands),
 roster AS MATERIALIZED (
  SELECT laplace.relation_type_id('HAS_PARSE') AS has_parse,
         laplace.relation_type_id('HAS_SENSE') AS has_sense,
         laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
         laplace.relation_type_id('HAS_DEFINITION') AS definition,
-        realize.canonical_id('ud/parse/schema/v1') AS ud_schema,
-        laplace.witness_id('UD', '2.18') AS ud_source,
-        laplace.source_id('WordNetDecomposer') AS wordnet_source
+        public.blake3_send(public.laplace_text_id('ud/parse/schema/v1')) AS ud_schema,
+        public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id('UD'), public.laplace_text_id('2.18')])) AS ud_source,
+        public.blake3_send(public.laplace_text_id('substrate/source/WordNetDecomposer/v1')) AS wordnet_source
 ),
 nominated AS MATERIALIZED (
  SELECT p.id,p.entity_id,p.n_constituents,p.trajectory
  FROM laplace.physicalities p
  WHERE p.type=8 AND p.trajectory IS NOT NULL
    AND public.laplace_trajectory_constituent_ids(p.trajectory)
-       @> ARRAY[realize.canonical_id('ud/parse/schema/v1')]
+       @> ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]
    AND public.laplace_trajectory_constituent_ids(p.trajectory)
        && ARRAY(SELECT id FROM cue_ids)
  ORDER BY p.n_constituents,p.entity_id,p.id LIMIT {candidates+1}
@@ -346,7 +346,7 @@ source_sample_witnesses AS MATERIALIZED (
  LIMIT 5
 ),
 source_sample_ids AS MATERIALIZED (
- SELECT DISTINCT public.laplace_hash128_blake3(object_id||decode('0800','hex')) AS id
+ SELECT DISTINCT public.blake3_send(public.laplace_text_id(object_id||decode('0800','hex'))) AS id
  FROM (SELECT object_id FROM source_sample_witnesses LIMIT 4) a
 ),
 cue_sample_nominated AS MATERIALIZED (
@@ -385,7 +385,7 @@ structure_records AS MATERIALIZED (
     'trajectory_ewkb_hex',encode(public.st_asewkb(p.trajectory),'hex'),
     'canonical_identity',(p.entity_id=public.laplace_hash128_merkle(4::smallint,e.ids)
           OR EXISTS(SELECT 1 FROM unnest(e.flags) f WHERE f<>0))
-       AND p.id=public.laplace_hash128_blake3(p.entity_id||decode('0800','hex')),
+       AND p.id=public.blake3_send(public.laplace_text_id(p.entity_id||decode('0800','hex'))),
     'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(e.ids) x),
     'constituent_flags',(SELECT jsonb_agg(f) FROM unnest(e.flags) f)) AS record
  FROM selected p JOIN expanded e ON e.id=p.id
@@ -492,7 +492,7 @@ SELECT jsonb_build_object(
       'opponent_rd_fp1e9',a.opponent_rd_fp1e9,'opponent_rating_fp1e9',a.opponent_rating_fp1e9,
       'fold_replayable',a.fold_replayable,
       'canonical_type8_present',EXISTS(SELECT 1 FROM selected p WHERE p.id=
-        public.laplace_hash128_blake3(a.object_id||decode('0800','hex')))))
+        public.blake3_send(public.laplace_text_id(a.object_id||decode('0800','hex'))))))
       FROM (SELECT * FROM source_sample_witnesses LIMIT 4) a),'[]'),
     'cue_type8_sample_more',(SELECT count(*)>4 FROM cue_sample_nominated)),
  'limits',jsonb_build_object('candidate_overflow',(SELECT count(*)>{candidates} FROM nominated),

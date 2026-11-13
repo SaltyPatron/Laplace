@@ -21,7 +21,7 @@ RETURNS TABLE(
 LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
 WITH term AS (
-    SELECT laplace.word_id(p_term) AS id
+    SELECT public.blake3_send(public.laplace_text_id(p_term)) AS id
 ),
 frontier AS (
     SELECT b.sense_id,

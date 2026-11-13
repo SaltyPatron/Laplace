@@ -4,7 +4,7 @@
 -- realize.render_text calls on the hot lexical_peers -> senses/define/bubble_up path.
 -- Output-identical by delegation: case-map selection stays in one batched
 -- DISTINCT ON ... ORDER BY consensus.eff_mu DESC over laplace.v_consensus_unrefuted, rendering
--- stays realize.render_text, minting stays laplace.word_id, the existence gate
+-- stays realize.render_text, minting stays public.laplace_text_id, the existence gate
 -- stays consensus.entity_exists; the C only walks the grapheme trajectory once and
 -- reproduces word_case_map_surface's string assembly. See src/lexical_case.c.
 CREATE OR REPLACE FUNCTION lexical.word_case_variants(p_word bytea)

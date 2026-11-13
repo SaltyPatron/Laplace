@@ -190,7 +190,7 @@ public sealed class HighwayMaskRefreshConcurrencyTests(LocalPgFixture pg)
         await using var command = WithId(connection, """
             INSERT INTO laplace.consensus
                 (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-            SELECT laplace.consensus_id(@id,r,@id),@id,r,@id,
+            SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[@id, r, @id]::public.blake3[], NULL))),@id,r,@id,
                    1500000000000,350000000000,60000000,1,now()
             FROM (SELECT laplace.relation_type_id(@relation) AS r) resolved
             """, id);
