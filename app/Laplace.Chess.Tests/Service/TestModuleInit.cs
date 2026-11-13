@@ -32,7 +32,7 @@ internal static class TestModuleInit
 
         // Search reads the opening catalog as its continuation book, and a missing catalog is an
         // error. Unless the host declares one, the process (and the UCI children it starts) uses
-        // the repository's complete, header-only catalog, and the book loads once before any test
+        // the repository's small complete catalog, and the book loads once before any test
         // can point LAPLACE_CHESS_OPENINGS elsewhere.
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS")))
             Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", Path.Combine(root, "test-data", "chess-openings"));
