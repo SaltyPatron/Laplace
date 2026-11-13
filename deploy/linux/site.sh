@@ -231,6 +231,9 @@ phase_install() {
   local stage f rel n=0
   stage="$(mktemp -d "$SITE_WORK/.install.XXXXXX")"
   DESTDIR="$stage" cmake --install "$SITE_BUILD" >/dev/null 8>&-
+  # The recipe tree is data no process maps, and the Engine loads every .recipe in a source's directory: it is
+  # replaced whole, so a recipe removed from Laplace-Engine is gone from the installation too.
+  [[ -d "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/recipes" ]] && rm -rf "$LAPLACE_INSTALL_PREFIX/share/laplace/recipes"
   while IFS= read -r -d '' f; do
     rel="${f#"$stage$LAPLACE_INSTALL_PREFIX"/}"
     mkdir -p "$LAPLACE_INSTALL_PREFIX/$(dirname "$rel")"
