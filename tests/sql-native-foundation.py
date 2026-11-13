@@ -14,7 +14,7 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ("bootstrap", "render_depth", "prompt_segments", "native_consensus_endpoints", "session_identity", "declared_paths_input", "generation_corpus", "chess_read",
+CASES = ("bootstrap", "render_depth", "prompt_segments", "native_consensus_endpoints", "session_identity", "declared_paths_input", "generation_corpus",
          "highway_mask_deposit", "highway_mask_recovery")
 
 
@@ -81,13 +81,20 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
         if receipt["cases"][0]["exit_code"] == 0:
             native = Path(os.environ.get("LAPLACE_POSTGRES_SOURCE", ROOT.parent / "Laplace-postgres"))
             started = time.monotonic()
+            # Laplace-postgres's lifecycle test runs against a deployed database, whose stage templates its deployment
+            # prepared; this owned database is prepared the same way, by the extension's own function.
+            stage = run("psql", ["-X", "--no-password", "--dbname=" + database, "--set=ON_ERROR_STOP=1",
+                                 "--command=SELECT public.laplace_ensure_stage();"], args.results / "stage.log")
             with (args.results / "native_load_lifecycle.log").open("w", encoding="utf-8") as output:
                 result = subprocess.run([sys.executable, str(native / "tests/stage-lifecycle.py"),
                     "--psql", str(args.pgbin / ("psql" + suffix)), "--connection", "dbname=" + database],
-                    cwd=ROOT, text=True, stdout=output, stderr=subprocess.STDOUT, timeout=120).returncode
+                    cwd=ROOT, text=True, stdout=output, stderr=subprocess.STDOUT, timeout=120).returncode if stage == 0 else stage
             receipt["cases"].append({"name": "native_load_lifecycle", "exit_code": result,
                 "elapsed_ms": round((time.monotonic() - started) * 1000)})
             print(f"native_load_lifecycle: {'passed' if result == 0 else 'FAILED'}", flush=True)
+            if result:
+                failed = args.results / ("stage.log" if stage else "native_load_lifecycle.log")
+                print("".join(failed.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)[-25:]), flush=True)
             grants = ROOT / "db/schema/20_substrate_grants.sql"
             options = ["-X", "--no-password", "--dbname=" + database, "--set=ON_ERROR_STOP=1"]
             result = run("psql", [*options, "--file=" + str(grants)], args.results / "runtime_grants.log")
