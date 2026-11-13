@@ -16,7 +16,7 @@ BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(root,255,laplace.entity_type_id('Text')) ON CONFLICT DO NOTHING;
     INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES(public.blake3_send(public.laplace_text_id(root||decode('0100','hex'))),root,1,
+    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(root), public.laplace_cp_id(1)])),root,1,
       public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),
       public.ST_MakeLine(ARRAY(SELECT public.laplace_mantissa_pack(children[i],i,runs[i],coalesce(flags[i],0))
           FROM generate_subscripts(children,1) i ORDER BY i)),logical);

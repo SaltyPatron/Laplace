@@ -373,7 +373,7 @@ BEGIN
     -- earlier synthetic corpus rows deliberately model separate observations.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_text_id(sent_sem||decode('0100','hex'))),sent_sem,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_sem), public.laplace_cp_id(1)])),sent_sem,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(ctx,1,1,t2flag),
                                 public.laplace_mantissa_pack(gap,2,1,0),
@@ -422,7 +422,7 @@ BEGIN
     -- An explicit graph result can instead establish a new observation scope.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_text_id(next_root||decode('0100','hex'))),next_root,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(next_root), public.laplace_cp_id(1)])),next_root,1,
         public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(semantic,1,1,t2flag),
                                 public.laplace_mantissa_pack(noise,2,1,t2flag)]),2);
@@ -477,7 +477,7 @@ BEGIN
     -- edge of their own. Repetition lives in one canonical ordered manifest.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_text_id(sent_noise||decode('0100','hex'))),sent_noise,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_noise), public.laplace_cp_id(1)])),sent_noise,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY(
             SELECT public.laplace_mantissa_pack(

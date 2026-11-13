@@ -10,7 +10,7 @@ CREATE TABLE physicality_readback_fixture.atoms AS
 SELECT * FROM converse.text_root_placements(ARRAY['A','B','AB','substrate/source/PhysicalityDescriptorAdmission/v1']);
 CREATE TABLE physicality_readback_fixture.source AS
 SELECT p.root_id AS entity_id,
-    public.blake3_send(public.laplace_text_id(p.root_id || decode('0100','hex'))) AS placement_id,
+    public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(p.root_id), public.laplace_cp_id(1)])) AS placement_id,
     public.ST_MakePoint(p.coord[1],p.coord[2],p.coord[3],p.coord[4]) AS coord,
     public.ST_MakeLine(ARRAY[
         public.laplace_mantissa_pack(a.root_id,1,1,0),
@@ -130,13 +130,13 @@ VALUES ((SELECT entity_id FROM physicality_readback_fixture.unavailable_source),
         laplace.entity_type_id('Document'))
 ON CONFLICT DO NOTHING;
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,radius_origin,n_constituents,alignment_residual,source_dim,observed_at)
-SELECT public.blake3_send(public.laplace_text_id(u.entity_id || u.unit_id)),u.entity_id,9,u.coord,
+SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(u.entity_id), public.blake3_from_bytea(u.unit_id)])),u.entity_id,9,u.coord,
        public.laplace_hilbert_encode(u.coord),u.trajectory,3,2,float8send(0.5),4,
        '2024-01-01T00:00:00Z'::timestamptz
 FROM physicality_readback_fixture.unavailable_source u;
 CREATE TABLE physicality_readback_fixture.unavailable_warm AS
 SELECT * FROM structural.physicality_descriptor_read(
-    ARRAY(SELECT public.blake3_send(public.laplace_text_id(u.entity_id || u.unit_id))
+    ARRAY(SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(u.entity_id), public.blake3_from_bytea(u.unit_id)]))
           FROM physicality_readback_fixture.unavailable_source u),268435456,2048,10000000);
 -- A legacy Content-placement fallback body for the same anchor entity.
 CREATE TABLE physicality_readback_fixture.legacy_frames AS

@@ -336,9 +336,9 @@ BEGIN
     VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
             public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')))
     ON CONFLICT DO NOTHING;
-    content_id := public.blake3_send(public.laplace_text_id(existing_id || decode('0100', 'hex')));
-    projection_id := public.blake3_send(public.laplace_text_id(existing_id || decode('0300', 'hex')));
-    orphan_id := public.blake3_send(public.laplace_text_id(missing_id || decode('0300', 'hex')));
+    content_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(1)]));
+    projection_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(3)]));
+    orphan_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(missing_id), public.laplace_cp_id(3)]));
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index, observed_at)
     VALUES (content_id, existing_id, 1, observed_coord,
             public.laplace_hilbert_encode(observed_coord), '2026-01-01 00:00:00+00')

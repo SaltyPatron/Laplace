@@ -7,7 +7,7 @@ SELECT i, public.blake3_send(public.laplace_text_id('carrier-test/parent/' || i)
     public.blake3_send(public.laplace_text_id('carrier-test/second/' || i)) AS second
 FROM generate_series(1,100) i;
 ALTER TABLE carrier_input ADD COLUMN physicality bytea;
-UPDATE carrier_input SET physicality = public.blake3_send(public.laplace_text_id(parent || decode('0100','hex')));
+UPDATE carrier_input SET physicality = public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(parent), public.laplace_cp_id(1)]));
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
 SELECT physicality,parent,CASE WHEN i=98 THEN 2 ELSE 1 END,
     public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),

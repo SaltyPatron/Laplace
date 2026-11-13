@@ -53,25 +53,25 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
     VALUES
-        (public.blake3_send(public.laplace_text_id(l0 || decode('0100','hex'))), l0, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(l0), public.laplace_cp_id(1)])), l0, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.0,0.0,0.0,0.0),0), decode(repeat('00',16),'hex'), NULL,0,now()),
-        (public.blake3_send(public.laplace_text_id(l1 || decode('0100','hex'))), l1, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(l1), public.laplace_cp_id(1)])), l1, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.1,0.1,0.1,0.1),0), decode(repeat('01',16),'hex'), NULL,0,now()),
-        (public.blake3_send(public.laplace_text_id(l2 || decode('0100','hex'))), l2, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(l2), public.laplace_cp_id(1)])), l2, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.8,0.8,0.8,0.8),0), decode(repeat('02',16),'hex'), NULL,0,now()),
-        (public.blake3_send(public.laplace_text_id(l3 || decode('0100','hex'))), l3, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(l3), public.laplace_cp_id(1)])), l3, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.9,0.9,0.9,0.9),0), decode(repeat('03',16),'hex'), NULL,0,now()),
-        (public.blake3_send(public.laplace_text_id(seed || decode('0100','hex'))), seed, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(seed), public.laplace_cp_id(1)])), seed, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.40,0.40,0.40,0.40),0), decode(repeat('10',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.blake3_send(public.laplace_text_id(near_word || decode('0100','hex'))), near_word, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(near_word), public.laplace_cp_id(1)])), near_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.41,0.41,0.41,0.41),0), decode(repeat('11',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.blake3_send(public.laplace_text_id(far_word || decode('0100','hex'))), far_word, 1,
+        (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(far_word), public.laplace_cp_id(1)])), far_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.95,0.95,0.95,0.95),0), decode(repeat('12',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l2,1,1,0),

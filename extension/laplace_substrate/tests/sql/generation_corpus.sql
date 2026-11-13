@@ -713,7 +713,7 @@ DECLARE
 BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    SELECT public.blake3_send(public.laplace_text_id(v.root || decode('0100','hex'))),
+    SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(v.root), public.laplace_cp_id(1)])),
            v.root, 1, public.ST_MakePoint(0,0,0,0), decode(repeat('00',16),'hex'),
            public.ST_MakeLine(ARRAY[
                public.laplace_mantissa_pack(prefix, 1, 1, 4),

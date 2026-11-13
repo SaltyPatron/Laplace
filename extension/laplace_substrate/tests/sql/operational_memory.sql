@@ -23,7 +23,7 @@ BEGIN
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES
-        (public.blake3_send(public.laplace_text_id(p_subject || p_type || p_object || p_source || COALESCE(p_context, ''::bytea))),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object, p_source, p_context]::public.blake3[], NULL))),
          p_subject,p_type,p_object,p_source,p_context,2,
          now(),5,5000000000,30000000000);
     INSERT INTO laplace.consensus
@@ -500,7 +500,7 @@ BEGIN
     VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'));
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
-    VALUES(public.blake3_send(public.laplace_text_id(parse_id || decode('0800','hex'))),
+    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(parse_id), public.laplace_cp_id(8)])),
         parse_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,
         decode(repeat('00',16),'hex'),public.laplace_trajectory_build(manifest),
         cardinality(manifest),now());

@@ -1,25 +1,4 @@
 BEGIN;
-SELECT public.blake3_send(public.laplace_text_id('d')) = public.blake3_send(public.laplace_text_id('d')) AS leaf_rule_holds;
- leaf_rule_holds 
------------------
- t
-(1 row)
-
-SELECT public.blake3_send(public.laplace_text_id('dog')) = public.blake3_send(public.laplace_text_id(('\x01'::bytea
-            || public.blake3_send(public.laplace_text_id('d'))
-            || public.blake3_send(public.laplace_text_id('o'))
-            || public.blake3_send(public.laplace_text_id('g'))))) AS merkle_rule_holds;
- merkle_rule_holds 
--------------------
- t
-(1 row)
-
-SELECT public.blake3_send(public.laplace_text_id('')) IS NULL AS empty_is_null;
- empty_is_null 
----------------
- t
-(1 row)
-
 DO $$
 DECLARE
     rel_meta bytea := laplace.entity_type_id('RelationType');
