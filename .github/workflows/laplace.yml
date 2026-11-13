@@ -217,8 +217,8 @@ jobs:
         if: failure()
         run: deploy/linux/site.sh status
 
-      - name: Exercise installed database recreation and failure recovery
-        run: bash tests/database-recreation.sh
+      - name: Database checks against the deployed installation
+        run: deploy/linux/site.sh checks
 
       - name: Verify installed GIN maintenance with owner and restricted database roles
         run: bash tests/ingest-completion.sh

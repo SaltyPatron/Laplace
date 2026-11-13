@@ -164,7 +164,7 @@ class WorkflowArchitecture(unittest.TestCase):
 
     def test_ci_contract_is_an_explicit_lightweight_lane_on_the_repository_runner(self):
         # No Linux job runs on a GitHub-hosted image: the policy lane is hart-server's runner, never for a fork's
-        # pull request, and its PostgreSQL fixture is a private cluster rather than a service container.
+        # pull request, and it starts no PostgreSQL: database checks run against the deployed installation.
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", text)
         self.assertNotIn("\n  push:\n", text)
@@ -173,8 +173,8 @@ class WorkflowArchitecture(unittest.TestCase):
                  + text.count("runner: [self-hosted, laplace, Laplace, staging]"))
         self.assertEqual(linux, 8)
         self.assertEqual(text.count("github.event.pull_request.head.repo.full_name == github.repository"), 6)
-        self.assertEqual(text.count("bash scripts/ci/private-postgres.sh start"), 2)
-        self.assertEqual(text.count("bash scripts/ci/private-postgres.sh stop"), 2)
+        self.assertNotIn("private-postgres", text)
+        self.assertNotIn("initdb", text)
         # Windows coverage is kept; it leaves the hosted image when a self-hosted Windows runner exists.
         self.assertIn("runs-on: windows-2025", text)
         self.assertIn("runner: windows-2025", text)
