@@ -328,7 +328,7 @@ realization_ids AS MATERIALIZED (
    SELECT object_id AS id FROM {result_table} UNION SELECT entity FROM execution WHERE event='emit'
    UNION SELECT sep_entity FROM execution WHERE event='emit' AND sep_entity IS NOT NULL) x
 ),
-rendered AS MATERIALIZED (SELECT ids,realize.batch(ids) AS surfaces FROM realization_ids)
+rendered AS MATERIALIZED (SELECT ids,ARRAY(SELECT lp_l.content FROM unnest((ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS surfaces FROM realization_ids)
 SELECT jsonb_build_object(
  'schema','laplace.operational-task-native-proof/v1','database',current_database(),
  'snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),

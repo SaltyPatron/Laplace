@@ -9,7 +9,7 @@ FROM unnest(ARRAY['capital','france','Paris','paris','France','of','city']) AS w
 
 \echo ''
 \echo '=== ENTITY FACETS ==='
-SELECT realize.render_text(word_id(w), 8) AS surface, e.tier, realize.render(e.type_id) AS type
+SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id(w))::bytea],NULL)::public.blake3[]) lp_l) AS surface, e.tier, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(e.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS type
 FROM unnest(ARRAY['capital','france','Paris','paris']) AS w
 JOIN entities e ON e.id = word_id(w);
 
@@ -28,7 +28,7 @@ WITH w AS (
     GROUP BY tc.entity_id
 ),
 ranked AS (
-    SELECT realize.render_text(id, 40) AS surface, c,
+    SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(id)::bytea],NULL)::public.blake3[]) lp_l) AS surface, c,
            row_number() OVER (ORDER BY c DESC) AS freq_rank
     FROM w
 )
@@ -45,8 +45,8 @@ SELECT 'paris' AS seed, * FROM structural.collocates('paris', 25);
 
 \echo ''
 \echo '=== PRECEDES: what PRECEDES each word (consensus in-edges) ==='
-SELECT realize.render_text(c.subject_id, 40) AS precedes,
-       realize.render_text(c.object_id, 40) AS word,
+SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS precedes,
+       (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS word,
        consensus.eff_mu_display(c.rating, c.rd) AS mu,
        c.witness_count
 FROM consensus c
@@ -58,16 +58,16 @@ LIMIT 40;
 
 \echo ''
 \echo '=== capital -> france / Paris PRECEDES edges specifically ==='
-SELECT realize.render_text(c.subject_id, 40) AS subject,
-       realize.render_text(c.object_id, 40) AS object,
+SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject,
+       (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS object,
        consensus.eff_mu_display(c.rating, c.rd) AS mu,
        c.witness_count
 FROM consensus c
 WHERE c.type_id = relation_type_id('PRECEDES')
   AND (
-    (c.subject_id = word_id('capital') AND realize.render_text(c.object_id, 40) IN ('france','Paris','paris','France','of'))
+    (c.subject_id = word_id('capital') AND (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('france','Paris','paris','France','of'))
     OR (c.subject_id = word_id('of') AND c.object_id IN (word_id('france'), word_id('Paris'), word_id('paris')))
-    OR (realize.render_text(c.subject_id, 40) = 'capital' AND realize.render_text(c.object_id, 40) IN ('france','Paris','paris'))
+    OR ((SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.subject_id)::bytea],NULL)::public.blake3[]) lp_l) = 'capital' AND (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('france','Paris','paris'))
   )
 ORDER BY consensus.eff_mu(c.rating, c.rd) DESC;
 
@@ -90,8 +90,8 @@ seq AS (
     JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
 ),
 pairs AS (
-    SELECT realize.render_text(a.wid, 40) AS cur,
-           realize.render_text(b.wid, 40) AS nxt,
+    SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(a.wid)::bytea],NULL)::public.blake3[]) lp_l) AS cur,
+           (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(b.wid)::bytea],NULL)::public.blake3[]) lp_l) AS nxt,
            count(*) AS c
     FROM seq a
     JOIN seq b ON a.sid = b.sid AND b.ord = a.ord + 1
@@ -112,7 +112,7 @@ WITH t AS (
     ORDER BY p.entity_id, p.source_id LIMIT 20000
 ),
 seq AS (
-    SELECT t.sid, tc.ordinal AS ord, realize.render_text(tc.entity_id, 40) AS w
+    SELECT t.sid, tc.ordinal AS ord, (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(tc.entity_id)::bytea],NULL)::public.blake3[]) lp_l) AS w
     FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
     JOIN entities e ON e.id = tc.entity_id AND e.tier = 2
 ),
@@ -136,25 +136,25 @@ SELECT 'Paris' AS word, answer FROM generation.recall_trajectories('Paris', 8);
 
 \echo ''
 \echo '=== ATTESTATIONS OUT (top 30 per word) ==='
-SELECT 'capital' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
-       a.outcome, a.observation_count, realize.render(a.source_id) AS source
+SELECT 'capital' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS object,
+       a.outcome, a.observation_count, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.source_id)::bytea],NULL)::public.blake3[]) lp_l) AS source
 FROM attestations_out(word_id('capital'), 30) a;
-SELECT 'france' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
-       a.outcome, a.observation_count, realize.render(a.source_id) AS source
+SELECT 'france' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS object,
+       a.outcome, a.observation_count, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.source_id)::bytea],NULL)::public.blake3[]) lp_l) AS source
 FROM attestations_out(word_id('france'), 30) a;
-SELECT 'Paris' AS word, realize.render(a.type_id) AS rel, realize.render(a.object_id) AS object,
-       a.outcome, a.observation_count, realize.render(a.source_id) AS source
+SELECT 'Paris' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS object,
+       a.outcome, a.observation_count, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.source_id)::bytea],NULL)::public.blake3[]) lp_l) AS source
 FROM attestations_out(word_id('Paris'), 30) a;
 
 \echo ''
 \echo '=== ATTESTATIONS IN (top 20 per word) ==='
-SELECT 'capital' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
+SELECT 'capital' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel,
        a.outcome, a.observation_count
 FROM attestations_in(word_id('capital'), 20) a;
-SELECT 'france' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
+SELECT 'france' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel,
        a.outcome, a.observation_count
 FROM attestations_in(word_id('france'), 20) a;
-SELECT 'Paris' AS word, realize.render(a.subject_id) AS subject, realize.render(a.type_id) AS rel,
+SELECT 'Paris' AS word, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel,
        a.outcome, a.observation_count
 FROM attestations_in(word_id('Paris'), 20) a;
 
@@ -166,9 +166,9 @@ SELECT 'Paris' AS word, * FROM consensus_out_readable(word_id('Paris'), 25);
 
 \echo ''
 \echo '=== LEXICAL RELATIONS (foundry crawl edge set) involving these words ==='
-SELECT realize.render_text(c.subject_id, 40) AS subject,
-       realize.render(c.type_id) AS rel,
-       realize.render_text(c.object_id, 40) AS object,
+SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject,
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(c.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS rel,
+       (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS object,
        consensus.eff_mu_display(c.rating, c.rd) AS mu
 FROM consensus c
 WHERE (c.subject_id IN (word_id('capital'), word_id('france'), word_id('Paris'))
@@ -201,7 +201,7 @@ WHERE surface IN ('france','Paris','paris','France','capital');
 \echo '=== PRECEDES scaffold global rank (why scaffold misses france) ==='
 SELECT rank, surface, d FROM (
     SELECT row_number() OVER (ORDER BY d DESC) AS rank,
-           realize.render_text(id, 40) AS surface, d
+           (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(id)::bytea],NULL)::public.blake3[]) lp_l) AS surface, d
     FROM (
         SELECT c.subject_id AS id, count(*) AS d
         FROM consensus c JOIN entities e ON e.id = c.subject_id AND e.tier = 2

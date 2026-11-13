@@ -35,7 +35,7 @@ BEGIN ATOMIC
         SELECT i.id, i.s
         FROM ids,
              LATERAL ROWS FROM (
-                 unnest(ids.a), unnest(realize.render_text_batch(ids.a))
+                 unnest(ids.a), unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ids.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
              ) AS i(id, s)
     )
     SELECT n.entity_id, r.s, n.cnt

@@ -56,7 +56,7 @@ BEGIN ATOMIC
     ), labels AS MATERIALIZED (
         SELECT i.id,i.txt FROM ids,
           LATERAL ROWS FROM (
-            unnest(ids.a), unnest(realize.label_batch(ids.a))
+            unnest(ids.a), unnest(ARRAY(SELECT lp_l.content FROM unnest((ids.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
           ) i(id,txt)
     ), rel AS MATERIALIZED (
         SELECT t.type_id,
@@ -66,7 +66,7 @@ BEGIN ATOMIC
         JOIN labels l ON l.id=t.type_id
     ),
     lbl AS MATERIALIZED (
-        SELECT realize.batch(array_agg(k.nid ORDER BY k.ord), p_lang) AS l
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(k.nid ORDER BY k.ord))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(k.nid ORDER BY k.ord))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
         FROM ranked k
     )
     SELECT k.dir, rel.relation, k.nid,

@@ -24,7 +24,7 @@ SELECT
     AND object_id=realize.canonical_id('FrameNet_Frame'))   AS framenet_frames;
 
 \echo '== synset: identity reads back as the ILI (supermodel -> i93445); WN+OMW share the anchor =='
-SELECT realize.render(sn.synset_id) AS ili_readback FROM lexical.senses(word_id('supermodel')) sn;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(sn.synset_id)::bytea],NULL)::public.blake3[]) lp_l) AS ili_readback FROM lexical.senses(word_id('supermodel')) sn;
 SELECT count(*) AS synsets_with_wn_and_omw FROM (
   SELECT s.subject_id FROM consensus s
   WHERE s.type_id=relation_type_id('IS_A') AND s.object_id=realize.canonical_id('WordNet_Synset')
@@ -53,7 +53,7 @@ SELECT count(*) AS verbnet_to_wordnet_via_sense FROM (
 \echo '== content) grouped by type. Closed bootstrap anchors (substrate/type|source|trust_class,    =='
 \echo '== ordinal, relation_type) are legitimately content-free; ANY OTHER type here is a surviving  =='
 \echo '== blob -- e.g. Ud_Xpos / Ud_Feature (#16), or any *_Synset/_Sense if the de-blob regressed.  =='
-SELECT realize.render(e.type_id) AS entity_type, count(*) AS content_free
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(e.type_id)::bytea],NULL)::public.blake3[]) lp_l) AS entity_type, count(*) AS content_free
   FROM entities e
  WHERE NOT EXISTS (SELECT 1 FROM physicalities p WHERE p.entity_id = e.id)
  GROUP BY e.type_id

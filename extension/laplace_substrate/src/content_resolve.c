@@ -314,33 +314,3 @@ pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_word_segment);
-
-Datum
-pg_laplace_word_segment(PG_FUNCTION_ARGS)
-{
-    text         *t;
-    word_seg_ctx  ctx;
-    int           rc;
-
-    InitMaterializedSRF(fcinfo, 0);
-    if (PG_ARGISNULL(0))
-        return (Datum) 0;
-    t = PG_GETARG_TEXT_PP(0);
-    if (VARSIZE_ANY_EXHDR(t) == 0)
-        return (Datum) 0;
-    if (!laplace_perfcache_ready())
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("word_segment requires the T0 perfcache")));
-
-    ctx.rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    rc = laplace_content_word_segment((const uint8_t *) VARDATA_ANY(t),
-                                      (size_t) VARSIZE_ANY_EXHDR(t),
-                                      word_seg_emit, &ctx);
-    if (rc != 0)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("word_segment: segmentation failed (rc=%d)", rc)));
-    return (Datum) 0;
-}

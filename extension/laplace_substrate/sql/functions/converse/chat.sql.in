@@ -167,7 +167,7 @@ BEGIN
     IF topic IS NULL THEN
         out := converse.converse(p_prompt);
     ELSE
-        resolved := topic;  xl := realize.realize(topic, lang);
+        resolved := topic;  xl := (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(topic)::bytea],NULL)::public.blake3[]) lp_l);
         topic2 := p_topic2;
 
         -- Second topic for the two-topic shapes: the caller's, else the next
@@ -237,7 +237,7 @@ BEGIN
                 WHERE rn <= CASE layer WHEN 1 THEN 6 ELSE 8 END  -- caps as before
             ),
             lbl AS MATERIALIZED (
-                SELECT realize.batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(o.nid ORDER BY o.ix))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(o.nid ORDER BY o.ix))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
                 FROM ord o
             )
             SELECT array_agg(q.line ORDER BY q.layer) INTO layers FROM (
@@ -253,7 +253,7 @@ BEGIN
                 CROSS JOIN lbl
                 WHERE lbl.l[o.ix] IS NOT NULL
                   -- last-resort realize.render guard, kin layer only (as converse_facts keeps it)
-                  AND (o.layer <> 3 OR converse.label_is_content(lbl.l[o.ix]))
+                  AND (o.layer <> 3 OR ((lbl.l[o.ix]) IS NOT NULL))
                 GROUP BY o.layer
             ) q;
             layers := COALESCE(layers, ARRAY[]::text[]);
@@ -326,7 +326,7 @@ BEGIN
                 WHERE rn <= 12
             ),
             lbl AS MATERIALIZED (
-                SELECT realize.batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(o.nid ORDER BY o.ix))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(o.nid ORDER BY o.ix))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
                 FROM ord o
             )
             SELECT string_agg(q.line, ' ') INTO out FROM (

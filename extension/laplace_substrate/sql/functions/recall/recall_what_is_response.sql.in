@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION converse.recall_what_is_response(p_topic bytea, p_con
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH topic AS MATERIALIZED (SELECT realize.label(p_topic) AS label)
+    WITH topic AS MATERIALIZED (SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_topic)::bytea],NULL)::public.blake3[]) lp_l) AS label)
     SELECT t.label || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     CROSS JOIN topic t

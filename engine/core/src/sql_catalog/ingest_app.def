@@ -102,7 +102,7 @@ SQL_QUERY("language.tags", "text[]",
     "WHERE k.subject_id=n.id AND k.type_id=rel.scope)),"
     "tags AS (SELECT id FROM lang UNION SELECT c.object_id FROM laplace.consensus c JOIN lang l "
     "ON c.subject_id=l.id,rel WHERE c.type_id=rel.ext AND c.object_id IS NOT NULL) "
-    "SELECT t FROM unnest(realize.render_text_batch((SELECT array_agg(id) FROM tags))) t WHERE t IS NOT NULL")
+    "SELECT t FROM unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest(((SELECT array_agg(id) FROM tags))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(((SELECT array_agg(id) FROM tags))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) t WHERE t IS NOT NULL")
 
 /* Physical partition metadata used by the active COPY writer. */
 SQL_QUERY("write.partition_leaves", "",

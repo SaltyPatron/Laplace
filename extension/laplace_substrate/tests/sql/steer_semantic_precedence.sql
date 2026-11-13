@@ -83,7 +83,7 @@ BEGIN
              public.laplace_mantissa_pack(laplace.word_id('β'), 1, 1, 0),
              public.laplace_mantissa_pack(laplace.word_id('β'), 2, 1, 0)]),
          2, now());
-    IF realize.render_text(semantic) IS DISTINCT FROM 'ββ' THEN
+    IF (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(semantic)::bytea],NULL)::public.blake3[]) lp_l) IS DISTINCT FROM 'ββ' THEN
         RAISE EXCEPTION 'FAIL: semantic fixture is not realizable canonical content';
     END IF;
 
@@ -263,7 +263,7 @@ BEGIN
 
     -- A typed output can be a lexeme, frame, action, or other opaque identity.
     -- Content physicalities/renderable words are not a second admission rule.
-    IF realize.render_text(unrelated) IS NOT NULL THEN
+    IF (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(unrelated)::bytea],NULL)::public.blake3[]) lp_l) IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: opaque output fixture unexpectedly has content';
     END IF;
     INSERT INTO laplace.consensus

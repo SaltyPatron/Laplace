@@ -18,7 +18,7 @@ BEGIN ATOMIC
   )
   SELECT left(replace(t.s, chr(10), ' '), 180)
   FROM batch,
-       LATERAL unnest(realize.render_text_batch(batch.a)) WITH ORDINALITY AS t(s, ord)
+       LATERAL unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((batch.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((batch.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY AS t(s, ord)
   ORDER BY t.ord
 ;
 END;

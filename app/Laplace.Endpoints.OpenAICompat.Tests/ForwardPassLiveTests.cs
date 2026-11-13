@@ -31,7 +31,7 @@ public sealed class ForwardPassLiveTests
         await using (var cmd = new NpgsqlCommand(
             """
             SELECT t.step,
-                   converse.label_or_hex(t.entity),
+                   (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(t.entity)::bytea],NULL)::public.blake3[]) lp_l),
                    t.candidate_count,
                    t.ordered_context_count,
                    t.proposal_channel_count,

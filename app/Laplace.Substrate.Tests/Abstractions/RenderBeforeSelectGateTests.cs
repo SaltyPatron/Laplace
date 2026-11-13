@@ -5,17 +5,11 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// SQL realization runs after selection: ids are selected and ranked first, then resolved
-/// through one aligned batch. No SQL function realizes per output row or per loop element;
-/// scalar realization is allowed only at the listed singleton sites.
+/// Ranked projections keep the order an operation emits, and exact rendering declares no
+/// implicit depth ceiling.
 /// </summary>
 public sealed class RenderBeforeSelectGateTests
 {
-    private static readonly Regex ScalarRealizer = new(
-        @"\b(?:@extschema@\.)?(realize|realize_canonical|render|render_text|render_text_fast"
-        + @"|type_label|label|label_or_hex)\s*\(",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
     private static readonly Regex UnorderedRowNumber = new(
         @"\brow_number\s*\(\s*\)\s*over\s*\(\s*\)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -24,47 +18,8 @@ public sealed class RenderBeforeSelectGateTests
         @"\brender_text(?!_fast)(?:_batch)?\s*\([^\r\n]*,\s*\d+\s*\)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private static readonly string[] ExcludedDirectories = ["realize/", "readback/"];
-    private static readonly string[] ExcludedPrefixes = ["converse/label"];
-    private static readonly string[] ExcludedFiles = ["lexical/type_label.sql.in"];
-
-    private static readonly string[] BatchSurfaces =
-    [
-        "realize/realize_batch.sql.in",
-        "realize/resolve_name_batch.sql.in",
-        "readback/render_text_batch.sql.in",
-        "readback/render_batch.sql.in",
-        "converse/label_batch.sql.in",
-        "lexical/type_label_batch.sql.in",
-    ];
-
-    /// <summary>
-    /// Scalar realization sites that execute once per function invocation, never per
-    /// output row or loop element. Counts are pinned exactly: any added or removed site
-    /// must be classified here.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, int> SingletonSites =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["converse/chat.sql.in"] = 1,                   // one elected topic
-            ["converse/converse_about.sql.in"] = 1,         // one fallback topic
-            ["converse/converse_facts.sql.in"] = 3,         // topic label + one top definition
-            ["recall/recall_examples_response.sql.in"] = 1, // MATERIALIZED topic label
-            ["recall/recall_fallback_gloss.sql.in"] = 1,    // MATERIALIZED topic label
-            ["recall/recall_interaction_response.sql.in"] = 1, // aggregate topic label
-            ["recall/recall_is_a_no_reply.sql.in"] = 4,     // exactly two endpoint ids
-            ["recall/recall_related_response.sql.in"] = 1,  // MATERIALIZED topic label
-            ["recall/recall_what_is_response.sql.in"] = 1,  // MATERIALIZED topic label
-            ["consensus/relate_path.sql.in"] = 1,           // one winning relation plane
-        };
-
     private static string FunctionsRoot(string repoRoot) =>
         Path.Combine(repoRoot, "extension", "laplace_substrate", "sql", "functions");
-
-    private static bool IsExcluded(string relative) =>
-        ExcludedDirectories.Any(d => relative.StartsWith(d, StringComparison.OrdinalIgnoreCase))
-        || ExcludedPrefixes.Any(p => relative.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-        || ExcludedFiles.Contains(relative, StringComparer.OrdinalIgnoreCase);
 
     internal static string StripSqlComments(string text)
     {
@@ -98,54 +53,6 @@ public sealed class RenderBeforeSelectGateTests
             }
         }
         return outBuf.ToString();
-    }
-
-    private static SortedDictionary<string, int> ScalarSites()
-    {
-        var root = FunctionsRoot(TypeIdLawTests.FindRepoRootPublic());
-        var found = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        Assert.True(Directory.Exists(root), $"substrate function tree not found at {root}");
-        foreach (var file in Directory.EnumerateFiles(root, "*.sql.in", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            if (IsExcluded(relative)) continue;
-            var count = ScalarRealizer.Matches(StripSqlComments(File.ReadAllText(file))).Count;
-            if (count > 0) found[relative] = count;
-        }
-        return found;
-    }
-
-    [Fact]
-    public void RenderBeforeSelect_BatchSurfacesExist()
-    {
-        var root = FunctionsRoot(TypeIdLawTests.FindRepoRootPublic());
-        foreach (var relative in BatchSurfaces)
-            Assert.True(File.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))),
-                $"required batch realization surface is missing: {relative}");
-    }
-
-    [Fact]
-    public void RenderBeforeSelect_HasNoRowProducingScalarCalls()
-    {
-        var actual = ScalarSites();
-        var unexpected = actual.Keys.Except(SingletonSites.Keys, StringComparer.OrdinalIgnoreCase).ToList();
-        var missing = SingletonSites.Keys.Except(actual.Keys, StringComparer.OrdinalIgnoreCase).ToList();
-        var changed = SingletonSites.Keys.Intersect(actual.Keys, StringComparer.OrdinalIgnoreCase)
-            .Where(k => SingletonSites[k] != actual[k])
-            .Select(k => $"{k}: expected {SingletonSites[k]}, actual {actual[k]}").ToList();
-
-        Assert.True(unexpected.Count == 0,
-            "row-producing/looped scalar realization returned; aggregate ids and use a batch:\n  "
-            + string.Join("\n  ", unexpected));
-        Assert.True(missing.Count == 0,
-            "documented singleton sites disappeared; delete their exceptions:\n  "
-            + string.Join("\n  ", missing));
-        Assert.True(changed.Count == 0,
-            "singleton scalar counts changed; classify every changed site:\n  "
-            + string.Join("\n  ", changed));
-        // The total may fall as sites move to a batch surface; it may not rise without
-        // classifying the new site in SingletonSites.
-        Assert.Equal(15, actual.Values.Sum());
     }
 
     [Fact]

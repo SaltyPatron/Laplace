@@ -8,7 +8,7 @@ BEGIN ATOMIC
     -- eligible surface realization. Preserve the semantic row and render an
     -- explicit abstention marker; never turn NULL realization into a blank reply
     -- and never substitute the internal content hash as prose.
-    WITH topic AS MATERIALIZED (SELECT converse.label_or_hex(p_topic) AS label)
+    WITH topic AS MATERIALIZED (SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_topic)::bytea],NULL)::public.blake3[]) lp_l) AS label)
     SELECT replace(COALESCE(NULLIF(f.fact, ''), 'unrealized entity'), '%s', t.label),
            f.eff_mu, f.witnesses
     FROM consensus.related(p_topic, laplace.relation_type_id(p_type_name), converse.word_language(p_topic)) f

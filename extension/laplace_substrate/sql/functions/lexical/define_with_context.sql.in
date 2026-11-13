@@ -55,7 +55,7 @@ BEGIN ATOMIC
     ), numbered AS MATERIALIZED (
       SELECT d.*, row_number() OVER (ORDER BY COALESCE(d.sense_rank,0)+d.eff_mu DESC, d.object_id) AS rn FROM capped d
     ), batch AS MATERIALIZED (
-      SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn)) AS txt FROM numbered
+      SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((array_agg(object_id ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(object_id ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt FROM numbered
     )
     SELECT b.txt[d.rn], d.eff_mu, d.witnesses FROM numbered d CROSS JOIN batch b ORDER BY d.rn;
 END;

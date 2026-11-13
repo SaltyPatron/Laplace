@@ -32,7 +32,6 @@ set(EXT_EXECUTION_SOURCES
     src/content_resolve_phrase.c
     src/declared_paths.c
     src/constituents_closure.c
-    src/text_root_placements.c
     src/content_trajectory_read.c
     src/physicality_descriptor_readback.c
     src/content_carrier_vertices.c
@@ -68,9 +67,6 @@ set(EXT_EXECUTION_SOURCES
     src/trajectory_generate_election.c
     src/trajectory_generate_couple.c
     src/word_adjacency.c
-    src/realize_batch.c
-    src/realize_batch_arms.c
-    src/render_label_batch.c
     src/prompt_coherence.c
     src/prompt_coherence_scan.c
     src/prompt_language.c
@@ -81,10 +77,8 @@ set(EXT_EXECUTION_SOURCES
     src/band_leaders.c
     src/generate_walk.c
     src/generate_walk_plans.c
-    src/generate_walk_render.c
     src/laplace_substrate_relations.c
     src/lexical_case.c
-    src/lexical_case_batch.c
     src/lexical_case_peers.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
@@ -221,8 +215,6 @@ set(EXT_C_SOURCES
     src/consensus_fold_step.c
     src/generate_walk.c
     src/generate_walk_plans.c
-    src/generate_walk_render.c
-    src/variant_synth.c
     src/astar_path.c
     src/graph_taxonomy.c
     src/graph_taxonomy_relate.c
@@ -249,11 +241,8 @@ set(EXT_C_SOURCES
     src/entity_mask_write.c
     src/model_factor.c
     src/lexical_case.c
-    src/lexical_case_batch.c
     src/lexical_case_peers.c
     src/steered_walk.c
-    src/realize_batch.c
-    src/realize_batch_arms.c
 )
 
 if(WIN32)

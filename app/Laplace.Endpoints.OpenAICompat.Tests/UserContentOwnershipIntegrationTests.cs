@@ -127,7 +127,7 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
 
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         await using (var verify = new NpgsqlCommand(
-            "SELECT realize.render_text(@content), laplace.grammar_source_id(@source, @modality)",
+            "SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(@content)::bytea],NULL)::public.blake3[]) lp_l), laplace.grammar_source_id(@source, @modality)",
             conn))
         {
             verify.Parameters.Add("content", NpgsqlDbType.Bytea).Value = contentId;
@@ -142,7 +142,7 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
 
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         await using (var reconstruct = new NpgsqlCommand(
-            "SELECT realize.reconstruct_content(@content, @modality)", conn))
+            "SELECT (SELECT convert_to(lp_b.t,'UTF8') FROM (SELECT lp_r.id,public.laplace_text(lp_r.id) AS t FROM (SELECT public.blake3_from_bytea(@content) AS id) lp_r WHERE public.laplace_codepoint(lp_r.id) IS NOT NULL OR EXISTS (SELECT FROM public.laplace_physicalities(ARRAY[lp_r.id]))) lp_b WHERE (@modality)::text IS NOT NULL OR public.laplace_text_id(lp_b.t)=lp_b.id)", conn))
         {
             reconstruct.Parameters.Add("content", NpgsqlDbType.Bytea).Value = contentId;
             reconstruct.Parameters.Add("modality", NpgsqlDbType.Text).Value = "python";
@@ -464,14 +464,6 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
 
         if (!LaplaceInstall.TryRepoRoot(out string root))
             throw new InvalidOperationException("Cannot locate repository root for readback SQL");
-        string reconstructSql = Path.Combine(
-            root,
-            "extension",
-            "laplace_substrate",
-            "sql",
-            "functions",
-            "readback",
-            "reconstruct_content.sql.in");
         string grammarSourceIdSql = Path.Combine(
             root,
             "extension",
@@ -493,7 +485,6 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
             testConnection,
             grammarSourceIdSql,
             "laplace_substrate");
-        await ApplySqlFileAsync(testConnection, reconstructSql);
 
         command.CommandText = """
             INSERT INTO laplace.entities (id, tier, type_id)

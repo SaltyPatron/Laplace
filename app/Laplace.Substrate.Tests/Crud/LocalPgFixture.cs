@@ -119,7 +119,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
         await using var declare = connection.CreateCommand();
         declare.CommandText = """
             WITH basis AS MATERIALIZED (
-                SELECT root_id, tier FROM converse.text_root_placements($1)
+                SELECT public.blake3_send(public.laplace_text_id(t)) AS root_id, public.laplace_tier(t) AS tier FROM unnest($1::text[]) t
             )
             INSERT INTO laplace.entities(id,tier,type_id)
             SELECT root_id,0,laplace.entity_type_id('Codepoint')
@@ -132,7 +132,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
         await using var verify = connection.CreateCommand();
         verify.CommandText = """
             WITH basis AS MATERIALIZED (
-                SELECT root_id, tier FROM converse.text_root_placements($1)
+                SELECT public.blake3_send(public.laplace_text_id(t)) AS root_id, public.laplace_tier(t) AS tier FROM unnest($1::text[]) t
             )
             SELECT count(DISTINCT basis.root_id)
             FROM basis JOIN laplace.entities e ON e.id=basis.root_id

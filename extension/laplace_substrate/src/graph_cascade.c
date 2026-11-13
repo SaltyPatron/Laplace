@@ -253,7 +253,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
             static SPIPlanPtr plan_path = NULL;
             rc = SPI_execute_plan(
                 spi_common_ensure_plan(&plan_path,
-                    "SELECT realize.path($1::bytea[], $2::bytea[], $3::int[], $4)",
+                    "SELECT (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN ($3::int[])[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest(($1::bytea[])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1::bytea[])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest(($2::bytea[])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($2::bytea[])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1)",
                     4, argtypes),
                 args, nulls, true, 1);
         }

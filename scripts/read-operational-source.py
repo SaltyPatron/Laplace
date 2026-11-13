@@ -276,8 +276,8 @@ def readback_sql(cues: list[str], operands: list[str], candidates: int,
    'relation_directions','outgoing and incoming; witness subject/object direction retained',
    'relation_followup_hops',1,'target_label_inverse_hops',2,
    'relation_witness_limit_per_frontier_per_relation_per_direction',{witnesses},'render_limit_characters',1024,
-   'label_renderer','realize.label_batch; presentation only, raw witnesses retained separately',
-   'text_renderer','realize.batch with default NULL language; actual forward text realization ladder',
+   'label_renderer','public.laplace_labels; presentation only, raw witnesses retained separately',
+   'text_renderer','public.laplace_labels: the Native realization of each identity',
    'relation_witness_order','subject_id,attestation_id; all sources, contexts and outcomes',
    'relation_inverse_witness_order','object_id,subject_id,attestation_id; all sources, contexts and outcomes',
    'target_label_witness_order','object_id,subject_id,attestation_id; all sources, contexts and outcomes',
@@ -295,7 +295,7 @@ def readback_sql(cues: list[str], operands: list[str], candidates: int,
     'type8_frontier_scope','exact cue IDs; membership count only; SQL LIMIT sample does not reproduce native bitmap visitation order',
     'type8_frontier_predicates','raw_any: overlap; raw_all: contains all; schema_any: overlap plus UD schema; raw routes have no schema filter',
 """ if relations else ""
-    labels = ",realize.label_batch(ids) AS labels,realize.batch(ids) AS realized_texts" if relations else ""
+    labels = ",ARRAY(SELECT lp_l.content FROM unnest((ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS labels,ARRAY(SELECT lp_l.content FROM unnest((ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS realized_texts" if relations else ""
     surface = "left(r.surfaces[u.ord],1024)" if relations else "r.surfaces[u.ord]"
     surface_metadata = """,octet_length(r.surfaces[u.ord]) AS native_surface_bytes,
         char_length(r.surfaces[u.ord])>1024 AS surface_truncated,
@@ -436,7 +436,7 @@ render_input AS MATERIALIZED (
  SELECT array_agg(id ORDER BY id) AS ids FROM needed_ids WHERE id IS NOT NULL
 ),
 rendered AS MATERIALIZED (
- SELECT ids,realize.render_text_batch(ids) AS surfaces{labels} FROM render_input
+ SELECT ids,ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS surfaces{labels} FROM render_input
 ),
 entity_rows AS MATERIALIZED (
  SELECT e.id,jsonb_agg(jsonb_build_object('tier',e.tier,'type_id',encode(e.type_id,'hex'),

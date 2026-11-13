@@ -1,4 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.label_or_hex(p_id bytea)
-    RETURNS text
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_label_or_hex'
-    LANGUAGE C STABLE PARALLEL SAFE;

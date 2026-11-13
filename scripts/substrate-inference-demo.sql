@@ -18,7 +18,7 @@ SELECT word_id('hot') AS subject_id \gset
 \echo '== A. CONTENT ROUND-TRIP (entity -> its own text, no model in the path) =='
 SELECT encode(:'subject_id'::bytea, 'hex') AS subject_hex,
        render_text(:'subject_id'::bytea) AS recovered_surface,
-       realize.realize(:'subject_id'::bytea) AS realized;
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(:'subject_id'::bytea)::bytea],NULL)::public.blake3[]) lp_l) AS realized;
 
 \echo '== B. RANKED-μ: top EMBEDS channels of the subject (sorted index scan) =='
 SELECT left(encode(object_id,'hex'),16) AS channel,

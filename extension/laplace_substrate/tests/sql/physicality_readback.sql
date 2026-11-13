@@ -7,7 +7,7 @@ LANGUAGE SQL IMMUTABLE AS $$
 SELECT CASE WHEN value IS NULL THEN int4send(-1) ELSE int4send(octet_length(value)) || value END
 $$;
 CREATE TABLE physicality_readback_fixture.atoms AS
-SELECT * FROM converse.text_root_placements(ARRAY['A','B','AB','substrate/source/PhysicalityDescriptorAdmission/v1']);
+SELECT * FROM (SELECT lp_u.n::int AS ord,public.blake3_send(public.laplace_text_id(lp_u.t)) AS root_id,public.laplace_tier(lp_u.t) AS tier,ARRAY[public.ST_X(lp_g.c),public.ST_Y(lp_g.c),public.ST_Z(lp_g.c),public.ST_M(lp_g.c)] AS coord,public.laplace_text_hilbert(lp_u.t) AS hilbert_index,public.laplace_distance4d(lp_g.c,public.ST_MakePoint(0,0,0,0)) AS radius_origin FROM unnest((ARRAY['A')::text[]) WITH ORDINALITY lp_u(t,n) CROSS JOIN LATERAL (SELECT public.laplace_text_coord(lp_u.t) AS c) lp_g);
 CREATE TABLE physicality_readback_fixture.source AS
 SELECT p.root_id AS entity_id,
     public.laplace_hash128_blake3(p.root_id || decode('0100','hex')) AS placement_id,
@@ -33,8 +33,7 @@ SELECT p.root_id,p.tier,laplace.entity_type_id('Word')
 FROM physicality_readback_fixture.atoms p WHERE p.ord=3
 ON CONFLICT DO NOTHING;
 CREATE TEMP TABLE descriptor_floor ON COMMIT DROP AS
-SELECT * FROM converse.text_root_placements(
-    ARRAY(SELECT chr(cp) FROM generate_series(33,126) cp ORDER BY cp));
+SELECT * FROM (SELECT lp_u.n::int AS ord,public.blake3_send(public.laplace_text_id(lp_u.t)) AS root_id,public.laplace_tier(lp_u.t) AS tier,ARRAY[public.ST_X(lp_g.c),public.ST_Y(lp_g.c),public.ST_Z(lp_g.c),public.ST_M(lp_g.c)] AS coord,public.laplace_text_hilbert(lp_u.t) AS hilbert_index,public.laplace_distance4d(lp_g.c,public.ST_MakePoint(0,0,0,0)) AS radius_origin FROM unnest((ARRAY(SELECT chr(cp) FROM generate_series(33,126) cp ORDER BY cp))::text[]) WITH ORDINALITY lp_u(t,n) CROSS JOIN LATERAL (SELECT public.laplace_text_coord(lp_u.t) AS c) lp_g);
 DO $floor$
 BEGIN
     IF (SELECT count(*) FROM descriptor_floor)<>94

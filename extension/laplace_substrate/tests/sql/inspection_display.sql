@@ -15,7 +15,7 @@ BEGIN
         2176851004240,139542473703,60009621,8,now()
     FROM (VALUES (opaque_type,peer),(registered_type,peer),(opaque_type,NULL::bytea)) v(t,o);
 
-    SELECT d.label INTO opaque_label FROM realize.display_label_batch(ARRAY[opaque_type]) d;
+    SELECT d.label INTO opaque_label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY[opaque_type])::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY[opaque_type])::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d;
     IF opaque_label IS NULL OR position(left(encode(opaque_type,'hex'),12) IN opaque_label)=0 THEN
         RAISE EXCEPTION 'Opaque display lost its identity';
     END IF;

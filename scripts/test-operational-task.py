@@ -434,7 +434,7 @@ class OperationalTaskTests(unittest.TestCase):
         self.assertNotIn("operation'payload", sql)
         self.assertNotIn("WHERE a.outcome", sql)
         self.assertEqual(sql.count("generation.forward_program("), 1)
-        self.assertEqual(sql.count("realize.batch("), 1)
+        self.assertEqual(sql.count("public.laplace_labels("), 1)
         self.assertIn("public.laplace_hash128_merkle", sql)
         self.assertIn("laplace.entity_type_id('WordNet_Synset')", sql)
         registry = (ROOT / "app/Laplace.Substrate/Abstractions/EntityTypeRegistry.cs").read_text()
@@ -456,7 +456,7 @@ class OperationalTaskTests(unittest.TestCase):
         self.assertIn("target_senses AS MATERIALIZED", sql)
         self.assertIn("target_names AS MATERIALIZED", sql)
         self.assertIn("SELECT object_id AS id FROM relation_targets", sql)
-        self.assertEqual(sql.count("realize.batch("), 1)
+        self.assertEqual(sql.count("public.laplace_labels("), 1)
         self.assertNotIn("left(", sql)
         execution = sql.split("execution AS MATERIALIZED (", 1)[1].split("\n),", 1)[0]
         self.assertIn("generation.forward_program(" + proof.SOURCE.text_sql(prompt), execution)

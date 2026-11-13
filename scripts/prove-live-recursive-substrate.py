@@ -325,7 +325,7 @@ candidates AS MATERIALIZED (
   ORDER BY e.id LIMIT {proof_roots}
 ),
 checked AS MATERIALIZED (
-  SELECT c.id,realize.reconstruct_content(c.id) AS body FROM candidates c
+  SELECT c.id,(SELECT convert_to(lp_b.t,'UTF8') FROM (SELECT lp_r.id,public.laplace_text(lp_r.id) AS t FROM (SELECT public.blake3_from_bytea(c.id) AS id) lp_r WHERE public.laplace_codepoint(lp_r.id) IS NOT NULL OR EXISTS (SELECT FROM public.laplace_physicalities(ARRAY[lp_r.id]))) lp_b WHERE (NULL)::text IS NOT NULL OR public.laplace_text_id(lp_b.t)=lp_b.id) AS body FROM candidates c
 ),
 failed AS MATERIALIZED (SELECT id FROM checked WHERE body IS NULL)
 SELECT json_build_object(

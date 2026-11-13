@@ -106,8 +106,8 @@ def entities_estimate(fp: dict) -> int:
 def label(api: str, entity_id: str | None) -> str | None:
     if not entity_id:
         return None
-    rows = op_rows(api, "realize.label", {"p_id": entity_id}, max_rows=1)
-    return str(rows[0]["label"]) if rows and rows[0].get("label") is not None else None
+    rows = op_rows(api, "public.laplace_labels", {"ids": [entity_id]}, max_rows=1)
+    return str(rows[0]["content"]) if rows and rows[0].get("content") is not None else None
 
 
 def resolve_topic_surface(api: str, phrase: str) -> str | None:

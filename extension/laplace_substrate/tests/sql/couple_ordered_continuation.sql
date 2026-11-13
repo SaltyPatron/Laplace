@@ -34,7 +34,7 @@ BEGIN
     ), words AS (
         SELECT id,ord,sum(octet_length(word)) OVER (ORDER BY ord)-octet_length(word) AS byte_offset,
                octet_length(word) AS byte_length
-        FROM converse.word_segment(prompt)
+        FROM (SELECT lp_s.i::int AS ord,lp_s.segment AS word,public.blake3_send(lp_s.id) AS id FROM public.laplace_segments(prompt) lp_s)
     ), cut AS (
         SELECT w.id,w.ord,(SELECT min(t.tier) FROM tree t
             WHERE t.id=w.id AND t.byte_offset=w.byte_offset AND t.byte_length=w.byte_length) AS tier

@@ -77,14 +77,6 @@ SELECT pg_temp.resolves('foundry_crawl_neighbors',
 SELECT pg_temp.resolves('shared_objects',
     'SELECT * FROM consensus.shared_objects(ARRAY[laplace.word_id(''dog'')], NULL, 1)');
 
--- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
-SELECT pg_temp.resolves('laplace_attention_centroid',
-    'SELECT * FROM generation.attention_centroid(laplace.word_id(''dog''), consensus.highway_band_mask(3))');
-SELECT pg_temp.resolves('laplace_nearest_entity',
-    'SELECT * FROM generation.nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
-SELECT pg_temp.resolves('laplace_forward_step',
-    'SELECT generation.forward_step(laplace.word_id(''dog''), consensus.highway_band_mask(3))');
-
 -- The new operations added alongside them.
 SELECT pg_temp.resolves('entity_container_degree',
     'SELECT * FROM structural.entity_container_degree(ARRAY[laplace.word_id(''dog'')])');

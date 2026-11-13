@@ -14,9 +14,9 @@ SELECT a.id,
        a.sum_score_fp1e9,
        a.opponent_rd_fp1e9,
        a.last_observed_at,
-       converse.label_or_hex(a.subject_id) AS subject_label,
-       converse.label_or_hex(a.type_id)    AS type_label,
-       converse.label_or_hex(a.object_id)  AS object_label,
-       converse.label_or_hex(a.source_id)  AS source_label,
-       converse.label_or_hex(a.context_id) AS context_label
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject_label,
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.type_id)::bytea],NULL)::public.blake3[]) lp_l)    AS type_label,
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.object_id)::bytea],NULL)::public.blake3[]) lp_l)  AS object_label,
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.source_id)::bytea],NULL)::public.blake3[]) lp_l)  AS source_label,
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.context_id)::bytea],NULL)::public.blake3[]) lp_l) AS context_label
 FROM laplace.attestations a;

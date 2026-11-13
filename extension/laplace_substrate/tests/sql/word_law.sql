@@ -39,7 +39,7 @@ SELECT realize.codepoint_for_id(public.laplace_hash128_blake3(convert_to('字', 
     AS reverse_lookup_cjk;
 
 
-SELECT realize.render(public.laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 'A'
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.laplace_hash128_blake3(convert_to('A', 'UTF8')))::bytea],NULL)::public.blake3[]) lp_l) = 'A'
     AS render_t0_via_perfcache;
 
 

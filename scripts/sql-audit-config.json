@@ -13,8 +13,6 @@
   "expensive_functions": [
     "converse.attested_language",
     "lexical.lexical_peers",
-    "lexical.word_case_variants",
-    "realize.render_text",
     "structural.containers_of",
     "structural.geometry_neighbours"
   ],

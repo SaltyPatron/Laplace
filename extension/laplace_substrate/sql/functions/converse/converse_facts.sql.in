@@ -54,7 +54,7 @@ BEGIN
         RAISE EXCEPTION 'converse.facts: listing limits must be >= 0 or NULL for all rows';
     END IF;
 
-    v_lbl := COALESCE(realize.realize(p_syn, p_lang), realize.label(p_syn));
+    v_lbl := COALESCE((SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_syn)::bytea],NULL)::public.blake3[]) lp_l), (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_syn)::bytea],NULL)::public.blake3[]) lp_l));
 
     -- definition: highest consensus.eff_mu edge in the definitional band.
     -- RANK IN ID SPACE, RENDER THE WINNER. The ordering key is eff_mu, not the
@@ -76,7 +76,7 @@ BEGIN
         ORDER BY consensus.eff_mu(e.rating, e.rd) DESC, e.neighbour_id
         LIMIT 1)
     SELECT 'definition'::text,
-           initcap(v_lbl) || ' is ' || realize.render_text(b.object_id) || '.',
+           initcap(v_lbl) || ' is ' || (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(b.object_id)::bytea],NULL)::public.blake3[]) lp_l) || '.',
            consensus.eff_mu_display(b.rating, b.rd),
            b.witness_count::bigint,
            ARRAY[b.subject_id, b.object_id],
@@ -127,8 +127,8 @@ BEGIN
         ), ids AS MATERIALIZED (
             SELECT array_agg(entity_id ORDER BY i) AS a FROM steps
         ), labels AS MATERIALIZED (
-            SELECT realize.batch(a,p_lang) AS realized,
-                   realize.label_batch(a) AS fallback FROM ids
+            SELECT ARRAY(SELECT lp_l.content FROM unnest((a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS realized,
+                   ARRAY(SELECT lp_l.content FROM unnest((a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS fallback FROM ids
         )
         SELECT 'taxonomy'::text,
                initcap(v_lbl)
@@ -163,7 +163,7 @@ BEGIN
         LIMIT p_part_limit
     ),
     lbl AS MATERIALIZED (
-        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(r.nid ORDER BY r.ix))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(r.nid ORDER BY r.ix))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
         FROM ranked r
     )
     SELECT 'parts'::text,
@@ -206,7 +206,7 @@ BEGIN
         LIMIT p_kin_limit
     ),
     lbl AS MATERIALIZED (
-        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(r.nid ORDER BY r.ix))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(r.nid ORDER BY r.ix))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
         FROM ranked r
     )
     SELECT 'kin'::text,
@@ -216,7 +216,7 @@ BEGIN
            sum(r.wc)::bigint,
            NULL::bytea[], NULL::bytea[]
     FROM ranked r CROSS JOIN lbl
-    WHERE converse.label_is_content(lbl.l[r.ix])
+    WHERE ((lbl.l[r.ix]) IS NOT NULL)
     HAVING count(*) > 0;
 
     -- web: the strongest chain across ALL relations -- the explicit
@@ -228,11 +228,7 @@ BEGIN
     -- responders draw ' —type→ ', so one substrate spoke two arrow dialects
     -- depending on which surface answered.
     SELECT 'web'::text,
-           realize.path(
-               p_syn || array_agg(g.entity_id ORDER BY g.step),
-               array_agg(g.type_id ORDER BY g.step),
-               array_fill(1, ARRAY[count(*)::int]),
-               p_lang),
+           (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN (array_fill(1, ARRAY[count(*)::int]))[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest((p_syn || array_agg(g.entity_id ORDER BY g.step))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((p_syn || array_agg(g.entity_id ORDER BY g.step))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest((array_agg(g.type_id ORDER BY g.step))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(g.type_id ORDER BY g.step))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1),
            min(g.eff_mu),
            NULL::bigint,
            NULL::bytea[], NULL::bytea[]

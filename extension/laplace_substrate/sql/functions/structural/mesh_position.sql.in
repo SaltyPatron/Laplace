@@ -72,7 +72,7 @@ BEGIN ATOMIC
         FROM (SELECT id FROM raw UNION SELECT hub_id FROM raw WHERE hub_id IS NOT NULL) x
     ), labels AS MATERIALIZED (
         SELECT d.id, d.label AS txt
-        FROM ids CROSS JOIN LATERAL realize.display_label_batch(ids.a) d
+        FROM ids CROSS JOIN LATERAL (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d
     )
     SELECT r.dir, r.id, n.txt, r.relation,
            COALESCE(r.hub_literal, h.txt), r.eff_mu, r.witnesses

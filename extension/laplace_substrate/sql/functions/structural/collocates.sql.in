@@ -18,7 +18,7 @@ BEGIN ATOMIC
     ), numbered AS MATERIALIZED (
       SELECT s.*, row_number() OVER (ORDER BY s.seen DESC,s.successor_id) AS rn FROM raw s
     ), batch AS MATERIALIZED (
-      SELECT realize.render_batch(array_agg(successor_id ORDER BY rn)) AS labels FROM numbered
+      SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(successor_id ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(successor_id ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS labels FROM numbered
     )
     SELECT b.labels[s.rn],NULL::numeric,s.seen FROM numbered s CROSS JOIN batch b ORDER BY s.rn;
 END;

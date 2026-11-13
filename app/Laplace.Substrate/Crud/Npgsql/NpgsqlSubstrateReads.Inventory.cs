@@ -151,18 +151,6 @@ public static partial class NpgsqlSubstrateReads
             static r => (r.GetInt16(0), r.GetInt64(1)),
             ct: ct, label: "consensus_tier_distribution", onError: onError);
 
-    /// <summary><c>realize.render_gaps(limit)</c> — ids that consensus references but cannot render.</summary>
-    public static Task<IReadOnlyList<(string IdHex, string Roles, long Refs)>> RenderGapsAsync(
-        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("realize.render_gaps"),
-            static r => (
-                r.IsDBNull(0) ? "" : r.GetString(0),
-                r.IsDBNull(1) ? "" : r.GetString(1),
-                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
-            p => p.AddWithValue("limit", limit),
-            ct: ct, label: "render_gaps", onError: onError);
-
     /// <summary><c>ops.entity_type_counts()</c> — exact (slow); prefer EntityTypeCountsApproxAsync.</summary>
     public static Task<IReadOnlyList<(string Type, short Tier, long Entities)>> EntityTypeCountsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
