@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Exercise installed SQL/native owners in an owned database, then remove it.
+"""Exercise the installed SQL/native owners in the deployed database.
 
-Runs the real SQL fixtures with ON_ERROR_STOP, independently of pg_regress's
-presentation snapshots. Uses libpq's declared host identity and TLS environment.
+Runs the real SQL fixtures with ON_ERROR_STOP against the database delivery just migrated (PGDATABASE). Every case
+works inside a transaction it rolls back; the bootstrap case only confirms the installed extensions and their module
+binding. No database is created or dropped.
 """
 from pathlib import Path
 import argparse
@@ -11,7 +12,6 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("bootstrap", "render_depth", "prompt_segments", "native_consensus_endpoints", "session_identity", "declared_paths_input", "generation_corpus",
@@ -25,11 +25,10 @@ def main():
     parser.add_argument("--source-database", default=os.environ.get("PGDATABASE", "postgres"))
     args = parser.parse_args()
     args.results.mkdir(parents=True, exist_ok=True)
-    database = "laplace_sql_native_" + uuid.uuid4().hex[:16]
+    database = args.source_database
     suffix = ".exe" if os.name == "nt" else ""
     receipt = {"database": database, "source": subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), "cases": []}
-    created = False
 
     def run(tool, options, log, env=None, sql=None):
         with log.open("w", encoding="utf-8") as output:
@@ -38,33 +37,6 @@ def main():
                 stdout=output, stderr=subprocess.STDOUT, timeout=600).returncode
 
     try:
-        if run("createdb", ["--no-password", "--maintenance-db=postgres", database],
-               args.results / "create.log"):
-            raise RuntimeError("Could not create the isolated SQL verification database")
-        created = True
-        # Installed extension/cache paths may be database-scoped on Linux.
-        # Carry their actual values into this database without changing schema
-        # resolution, planner switches, roles, or the installed source database.
-        configure = """WITH installed AS (
- SELECT name,setting,3 AS priority FROM pg_settings
- UNION ALL
- SELECT split_part(value,'=',1),substr(value,strpos(value,'=')+1),
-        CASE WHEN s.setrole=0 THEN 1 ELSE 2 END
- FROM pg_db_role_setting s CROSS JOIN LATERAL unnest(s.setconfig) value
- WHERE s.setdatabase=(SELECT oid FROM pg_database WHERE datname=current_database())
-   AND s.setrole IN (0,(SELECT oid FROM pg_roles WHERE rolname=current_user))
-), selected AS (
- SELECT DISTINCT ON (name) name,setting FROM installed
- WHERE name IN ('extension_control_path','dynamic_library_path') OR name LIKE 'laplace.%'
- ORDER BY name,priority DESC
-)
-SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM selected
-\\gexec
-"""
-        if run("psql", ["-X", "--no-password", "--dbname=" + args.source_database,
-                "--set=ON_ERROR_STOP=1", "--set=target=" + database],
-                args.results / "configuration.log", sql=configure):
-            raise RuntimeError("Could not carry installed extension/cache configuration into the verification database")
         for name in CASES:
             started = time.monotonic()
             sql = ROOT / "extension/laplace_substrate/tests/sql" / (name + ".sql")
@@ -81,8 +53,7 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
         if receipt["cases"][0]["exit_code"] == 0:
             native = Path(os.environ.get("LAPLACE_POSTGRES_SOURCE", ROOT.parent / "Laplace-postgres"))
             started = time.monotonic()
-            # Laplace-postgres's lifecycle test runs against a deployed database, whose stage templates its deployment
-            # prepared; this owned database is prepared the same way, by the extension's own function.
+            # Laplace-postgres's lifecycle test, against the deployed database and its prepared stage.
             stage = run("psql", ["-X", "--no-password", "--dbname=" + database, "--set=ON_ERROR_STOP=1",
                                  "--command=SELECT public.laplace_ensure_stage();"], args.results / "stage.log")
             with (args.results / "native_load_lifecycle.log").open("w", encoding="utf-8") as output:
@@ -100,7 +71,7 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
             result = run("psql", [*options, "--file=" + str(grants)], args.results / "runtime_grants.log")
             receipt["cases"].append({"name": "runtime_grants", "exit_code": result})
             # A satisfied ACL must reconcile without locking the target table.
-            # This holder and the database both belong exclusively to this run.
+            # The holder rolls back; the declaration it replays is the one every delivery applies.
             if result == 0:
                 with (args.results / "acl_holder.log").open("w", encoding="utf-8") as errors:
                     holder = subprocess.Popen([str(args.pgbin / ("psql" + suffix)), *options, "-Atq"],
@@ -127,14 +98,8 @@ SELECT format('ALTER DATABASE %I SET %I TO %L', :'target',name,setting) FROM sel
         receipt.update(passed=False, error=str(error))
         print(str(error), file=sys.stderr)
     finally:
-        try:
-            receipt["database_removed"] = not created or run("dropdb",
-                ["--no-password", "--maintenance-db=postgres", "--force", database],
-                args.results / "cleanup.log") == 0
-        except (OSError, subprocess.TimeoutExpired) as error:
-            receipt.update(database_removed=False, cleanup_error=str(error))
         (args.results / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    return 0 if receipt.get("passed") and receipt["database_removed"] else 1
+    return 0 if receipt.get("passed") else 1
 
 
 if __name__ == "__main__":

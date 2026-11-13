@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION laplace WITH SCHEMA public;
-CREATE EXTENSION laplace_geom;
-CREATE EXTENSION laplace_substrate;
+CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
 -- PostgreSQL caches each loaded module for the backend lifetime. A delivery
 -- must bind every canonical Native function to the packaged byte generation.
