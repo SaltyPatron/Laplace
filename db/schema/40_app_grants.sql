@@ -29,3 +29,33 @@ BEGIN
                  GRANT USAGE, SELECT ON SEQUENCES TO laplace_readonly';
     END IF;
 END $$;
+
+-- Application runtime logins (provisioned outside this database, surviving its recreation):
+-- the serving login of each installation (laplace_staging_app, laplace_desktop_app, ...).
+-- Their grants live in this database, so a recreated database must get them back from this
+-- declaration, not from the one-time host installer.
+DO $$
+DECLARE
+    candidate text;
+BEGIN
+    FOR candidate IN
+        SELECT rolname FROM pg_roles
+        WHERE rolname LIKE 'laplace\_%\_app' ESCAPE '\' AND rolcanlogin
+        ORDER BY rolname
+    LOOP
+        IF EXISTS (SELECT FROM pg_roles WHERE rolname = candidate
+                   AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
+            RAISE EXCEPTION 'Application runtime must be an unprivileged role: %', candidate;
+        END IF;
+        IF NOT has_database_privilege(candidate, current_database(), 'CONNECT') THEN
+            EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), candidate);
+        END IF;
+        IF NOT has_schema_privilege(candidate, 'app', 'USAGE') THEN
+            EXECUTE format('GRANT USAGE ON SCHEMA app TO %I', candidate);
+        END IF;
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO %I', candidate);
+        EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO %I', candidate);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', candidate);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT USAGE, SELECT ON SEQUENCES TO %I', candidate);
+    END LOOP;
+END $$;
