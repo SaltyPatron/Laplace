@@ -295,15 +295,24 @@ phase_database() {
   # session_preload_libraries: laplace_execution_<hash>.so resolves laplace_substrate's symbols (dlopen RTLD_GLOBAL),
   # so the substrate is loaded first in every session of this database. The monorepo's own hosts put it in the
   # cluster's shared_preload_libraries; here the cluster is Operations' and the setting stays this database's.
-  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f
+  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f q declared=()
   for g in perfcache_path:tier0 highway_perfcache_path:highway \
            vocabulary_perfcache_path:laplace_vocabulary_perfcache; do
     f="$dir/${g#*:}.bin"
+    declared+=("laplace_substrate.${g%%:*}")
     [[ -s "$f" ]] || fail "laplace_substrate.${g%%:*}: missing installed cache $f"
     q="$(sql -d postgres -c "SELECT setting FROM pg_file_settings WHERE name = 'laplace_substrate.${g%%:*}' AND applied ORDER BY seqno DESC LIMIT 1")"
     [[ "$q" == "$f" ]] || sql -d postgres -c "ALTER SYSTEM SET laplace_substrate.${g%%:*} = '$f'" >/dev/null
     echo "  laplace_substrate.${g%%:*} = $f"
   done
+  # The declared set is the whole set: a laplace_substrate setting an earlier site wrote and this one no longer declares
+  # (laplace_substrate.chess_position_perfcache_path) is reset, or every session warns that its reserved prefix rejects it.
+  while IFS= read -r q; do
+    [[ -n "$q" ]] || continue
+    [[ " ${declared[*]} " == *" $q "* ]] && continue
+    sql -d postgres -c "ALTER SYSTEM RESET \"$q\"" >/dev/null
+    echo "  $q reset: no longer declared"
+  done < <(sql -d postgres -c "SELECT DISTINCT name FROM pg_file_settings WHERE name LIKE 'laplace\\_substrate.%' AND sourcefile LIKE '%postgresql.auto.conf'")
   for g in tier0:tier0.bin flags:tier0.flags highway:highway.bin; do
     f="$dir/${g#*:}"
     [[ -s "$f" ]] || fail "laplace.${g%%:*}: missing installed cache $f"
