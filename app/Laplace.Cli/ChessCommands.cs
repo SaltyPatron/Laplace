@@ -162,8 +162,10 @@ internal static class ChessCommands
             depth, EvalTerm.All, bias: null,
             tablebase: ChessTablebaseRuntime.ProbeSearch);
 
-        string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
-        var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
+        var book = seedOpenings
+            ? OpeningSeed.Fens(ArgStr(args, "--openings-dir", "") is { Length: > 0 } openingsDir ? openingsDir : null,
+                plies: ArgInt(args, "--openings-plies", 10))
+            : null;
 
         string desc = mode switch
         {
@@ -259,8 +261,10 @@ internal static class ChessCommands
         int concurrency = ArgInt(args, "--concurrency", 16);
         bool seedOpenings = HasFlag(args, "--openings");
         bool record = !HasFlag(args, "--no-record");
-        string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
-        var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
+        var book = seedOpenings
+            ? OpeningSeed.Fens(ArgStr(args, "--openings-dir", "") is { Length: > 0 } openingsDir ? openingsDir : null,
+                plies: ArgInt(args, "--openings-plies", 10))
+            : null;
 
         var terms = new[]
         {

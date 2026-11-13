@@ -51,24 +51,62 @@ public sealed class OpeningSeedReplayTests
                 Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", path);
                 var options = new CutechessOptions
                 {
-                    Rounds = 24,
+                    Rounds = 4,
                     OpeningPlies = 10,
                     PgnOut = Path.Combine(Path.GetDirectoryName(path)!, "games.pgn")
                 };
                 Assert.True(CutechessRunner.TryPrepareOpeningSuite(options,
                     out var suite, out int requested, out int available, out var error), error);
-                Assert.Equal(12, requested);
+                Assert.Equal(2, requested);
                 Assert.Equal(requested, available);
                 var positions = File.ReadAllLines(suite);
                 Assert.Equal(requested, positions.Length);
                 var modality = new ChessModality();
                 Assert.All(positions, fen => Assert.Null(modality.Terminal(modality.FromFen(fen))));
                 var arguments = CutechessRunner.BuildArguments(options, "laplace-uci", "stockfish").ToList();
-                Assert.Equal("12", arguments[arguments.IndexOf("-rounds") + 1]);
+                Assert.Equal("2", arguments[arguments.IndexOf("-rounds") + 1]);
                 Assert.Equal("2", arguments[arguments.IndexOf("-games") + 1]);
             }
             finally { Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", previous); }
         });
+    }
+
+    [Fact]
+    public void AShortCatalogFailsThePairedSuiteInsteadOfSubstitutingPositions()
+    {
+        WithCorpus(path =>
+        {
+            string? previous = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS");
+            try
+            {
+                Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", path);
+                var options = new CutechessOptions
+                {
+                    Rounds = 24,
+                    OpeningPlies = 10,
+                    PgnOut = Path.Combine(Path.GetDirectoryName(path)!, "games.pgn")
+                };
+                Assert.False(CutechessRunner.TryPrepareOpeningSuite(options, out _, out _, out _, out var error));
+                Assert.Contains(path, error, StringComparison.Ordinal);
+                Assert.Contains("yields 2 playable positions; 12 paired positions were requested", error, StringComparison.Ordinal);
+            }
+            finally { Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", previous); }
+        });
+    }
+
+    [Fact]
+    public void AMissingCatalogFailsThePairedSuiteWithThePath()
+    {
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_CHESS_OPENINGS");
+        string missing = Path.Combine(Path.GetTempPath(), "opening-missing-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", missing);
+            var options = new CutechessOptions { Rounds = 4, PgnOut = missing + ".pgn" };
+            Assert.False(CutechessRunner.TryPrepareOpeningSuite(options, out _, out _, out _, out var error));
+            Assert.Contains(missing, error, StringComparison.Ordinal);
+        }
+        finally { Environment.SetEnvironmentVariable("LAPLACE_CHESS_OPENINGS", previous); }
     }
 
     private static void WithCorpus(Action<string> test)

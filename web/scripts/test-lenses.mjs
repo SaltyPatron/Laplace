@@ -45,6 +45,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.route('**/v1/**', (route) => {
   const p = new URL(route.request().url()).pathname;
   if (p === '/v1/auth/me') return route.fulfill({ json: { authenticated: false, user: null, providers: [] } });
+  if (p === '/v1/capabilities') return route.fulfill({ json: { endpoints: {} } });
   if (p.startsWith('/v1/entities/')) return route.fulfill({ status: 404, json: { error: { message: 'not served' } } });
   if (p === `/v1/explore/entities/${DOG}`) return route.fulfill({ json: { id: 'x', object: 'explore.entity', created: 0, entity } });
   if (p.endsWith('/containers')) return route.fulfill({ json: containers });

@@ -266,14 +266,24 @@ phase_install() {
   echo "  native dependencies beside the libraries: ${#want[@]} files"
   LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib" native_runtime_libraries "${native_inputs[@]}" >/dev/null \
     || fail "Native release dependencies do not resolve"
-  local openings_src
-  for openings_src in "${LAPLACE_CHESS_OPENINGS:-}" "$LAPLACE_DATA/Games/Chess/lichess-openings" "$LAPLACE_DATA/Games/Chess/openings"; do
-    if [[ -n "$openings_src" && -f "$openings_src/a.tsv" ]]; then
-      mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings"
-      cp -f "$openings_src"/{a,b,c,d,e}.tsv "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings/" 2>/dev/null || true
-      break
-    fi
-  done
+  # The opening catalog is a.tsv through e.tsv. A declared or partially present catalog installs whole or fails.
+  local openings_src="${LAPLACE_CHESS_OPENINGS:-}" candidate letter
+  if [[ -z "$openings_src" ]]; then
+    for candidate in "$LAPLACE_DATA/Games/Chess/lichess-openings" "$LAPLACE_DATA/Games/Chess/openings"; do
+      for letter in a b c d e; do [[ -e "$candidate/$letter.tsv" ]] && { openings_src="$candidate"; break 2; }; done
+    done
+  fi
+  if [[ -n "$openings_src" ]]; then
+    for letter in a b c d e; do
+      [[ -s "$openings_src/$letter.tsv" ]] || fail "opening catalog $openings_src lacks $letter.tsv"
+    done
+    mkdir -p "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings"
+    cp -f "$openings_src"/{a,b,c,d,e}.tsv "$LAPLACE_INSTALL_PREFIX/share/laplace/chess-openings/" \
+      || fail "cannot install the opening catalog from $openings_src"
+    echo "  chess openings: $openings_src"
+  else
+    echo "  chess openings: no catalog under LAPLACE_CHESS_OPENINGS or $LAPLACE_DATA/Games/Chess; none installed"
+  fi
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
 }
 

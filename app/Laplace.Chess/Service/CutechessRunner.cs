@@ -205,18 +205,6 @@ public static partial class CutechessRunner
     [GeneratedRegex(@"option name UCI_Elo type spin.*?min (\d+) max (\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex UciEloRangeRegex();
 
-    // Legal two-ply positions used when the admitted opening corpus yields none, so a paired
-    // experiment never repeats startpos. OpeningSeed is consulted first.
-    private static readonly string[] BuiltinOpeningFens =
-    [
-        "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", // 1.e4 e5
-        "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2", // 1.d4 d5
-        "rnbqkbnr/pppp1ppp/8/4p3/2P5/8/PP1PPPPP/RNBQKBNR w KQkq - 0 2", // 1.c4 e5
-        "rnbqkbnr/ppp1pppp/8/3p4/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 2", // 1.Nf3 d5
-        "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", // 1.e4 c5
-        "rnbqkbnr/pppp1ppp/8/8/3pP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 3",   // 1.e4 e5 2.d4 exd4
-    ];
-
     public static bool ProbeCatalog(out bool cutechessOk, out bool stockfishOk, out bool qtOk)
     {
         var catalog = ChessLabPaths.Catalog;

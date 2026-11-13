@@ -163,42 +163,28 @@ internal static class SharedServiceProbe
         if (service == ManagedService.Lichess)
             return await LichessControlClient.TryProbeServiceControlAsync(ct);
 
-        // When MCP runs on the shared database host rather than a local unit on this machine,
-        // probe the configured MCP gateway when a shared environment is declared.
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CLIENT"))
-            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN"))
-            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_MCP_UPSTREAM")))
-            return null;
-
-        foreach (var candidate in new[]
+        // When MCP is not a local unit, the only listener this host declares is the MCP upstream it
+        // proxies to (site-host.sh). Its unauthenticated health route answers 200 when it is running.
+        var upstream = Laplace.Engine.Core.LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_MCP_UPSTREAM");
+        if (string.IsNullOrWhiteSpace(upstream)) return null;
+        var candidate = upstream.TrimEnd('/') + "/health/live";
+        try
         {
-            Environment.GetEnvironmentVariable("LAPLACE_MCP_UPSTREAM") is { Length: > 0 } u ? u.TrimEnd('/') + "/health/live" : null,
-            "http://127.0.0.1:8080/mcp",
-            Environment.GetEnvironmentVariable("LAPLACE_MCP_ORIGIN") is { Length: > 0 } o ? o.TrimEnd('/') + "/mcp" : "https://mcp.hartonomous.com/mcp",
-        })
+            using var req = new HttpRequestMessage(HttpMethod.Get, candidate);
+            using var resp = await ProbeHttp.SendAsync(req, ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                return new("mcp", $"laplace-mcp.service ({new Uri(candidate).Host})", "status", false,
+                    "loaded", "active", "running", "success", 0, "enabled", false);
+            }
+            Serilog.Log.ForContext("SourceContext", typeof(SharedServiceProbe).FullName)
+                .Warning("Declared MCP upstream {Candidate} answered {Status}.", candidate, (int)resp.StatusCode);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or UriFormatException
+            || ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
-            if (string.IsNullOrWhiteSpace(candidate)) continue;
-            try
-            {
-                using var req = candidate.EndsWith("/health/live", StringComparison.Ordinal)
-                    ? new HttpRequestMessage(HttpMethod.Get, candidate)
-                    : new HttpRequestMessage(HttpMethod.Post, candidate)
-                    {
-                        Content = new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", System.Text.Encoding.UTF8, "application/json")
-                    };
-                using var resp = await ProbeHttp.SendAsync(req, ct);
-                if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    return new("mcp", $"laplace-mcp.service ({new Uri(candidate).Host})", "status", false,
-                        "loaded", "active", "running", "success", 0, "enabled", false);
-                }
-            }
-            catch (Exception ex) when (ex is HttpRequestException or UriFormatException
-                || ex is OperationCanceledException && !ct.IsCancellationRequested)
-            {
-                Serilog.Log.ForContext("SourceContext", typeof(SharedServiceProbe).FullName)
-                    .Warning(ex, "Shared MCP service probe failed.");
-            }
+            Serilog.Log.ForContext("SourceContext", typeof(SharedServiceProbe).FullName)
+                .Warning(ex, "Declared MCP upstream probe {Candidate} failed.", candidate);
         }
         return null;
     }

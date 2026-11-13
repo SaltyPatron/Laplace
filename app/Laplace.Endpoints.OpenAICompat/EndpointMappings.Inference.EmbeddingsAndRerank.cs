@@ -63,9 +63,10 @@ internal static partial class InferenceEndpoints
                             trace.X, trace.Y, trace.Z, trace.M,
                             Radius: trace.Radius, Constituents: trace.Constituents);
                     }
-                    catch (InvalidOperationException)
+                    catch (InvalidOperationException ex)
                     {
-                        // Leave unresolved when T0 perfcache is unavailable.
+                        // Without the tier-0 floor no form exists; an empty vector is not an embedding.
+                        return EndpointJson.ServiceUnavailable("embedding_unavailable", ex.Message);
                     }
                 }
                 var vector = form is { } f
@@ -90,7 +91,8 @@ internal static partial class InferenceEndpoints
         .Accepts<EmbeddingsRequest>("application/json")
         .Produces<EmbeddingsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired);
+        .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/v1/rerank", async (
             HttpRequest request,
