@@ -10,7 +10,7 @@ rem table was skipped (Laplace#1879). No step runs as the tables' owner.
 
 echo ===== seed-foundation started %DATE% %TIME% =====
 
-for %%S in (unicode iso639 operational cili wordnet oewn propbank verbnet verbnet-gl framenet semlink predicatematrix mapnet verbatlas wordframenet universal-dependencies-tools brown framebase atomic2020 atomic-10x openings syzygy) do (
+for %%S in (unicode iso639 operational cili wordnet oewn propbank verbnet verbnet-gl framenet semlink predicatematrix mapnet verbatlas wordframenet universal-dependencies-tools brown framebase atomic2020 atomic-10x openings) do (
   echo.
   echo ==== %%S %TIME% ====
   call "%~dp0seed-step.cmd" %%S
