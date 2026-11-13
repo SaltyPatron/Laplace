@@ -220,6 +220,8 @@ SQL_QUERY("identity.update_profile", "uuid,text,text,text,text,text,text",
 SQL_QUERY("identity.upsert_client", "text,text,text",
     "INSERT INTO app.auth_clients(provider,client_id,authority,enabled,updated_at) VALUES($1,$2,$3,true,now()) "
     "ON CONFLICT(provider) DO UPDATE SET client_id=EXCLUDED.client_id,authority=EXCLUDED.authority,enabled=true,updated_at=now()")
+SQL_QUERY("chess.db_identity", "",
+    "SELECT system_identifier::text, current_database() FROM pg_control_system()")
 SQL_QUERY("owner.set_read_only", "",
     "SET TRANSACTION READ ONLY")
 SQL_QUERY("owner.lock_platform_roles", "",

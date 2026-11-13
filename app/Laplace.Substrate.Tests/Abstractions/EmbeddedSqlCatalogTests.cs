@@ -37,6 +37,35 @@ public sealed class EmbeddedSqlCatalogTests
         Assert.True(embedded.ContainsKey("owner.lock_platform_roles"));
     }
 
+    /// <summary>
+    /// Every catalog name the application asks for is declared. A statement removed from a .def file while a
+    /// caller still names it fails here, not at runtime (chess.db_identity stopped the UCI engine on Prepare).
+    /// The name is the first string literal of an NpgsqlCatalog call; a literal joined with + is a name prefix.
+    /// </summary>
+    [Fact]
+    public void EveryNamedCatalogQueryIsDeclared()
+    {
+        var declared = new HashSet<string>(Embedded().Keys, StringComparer.Ordinal);
+        // The repository root is the catalog directory's fourth ancestor (engine/core/src/sql_catalog).
+        var app = new DirectoryInfo(Path.Combine(FindRepoFile("engine/core/src/sql_catalog"), "..", "..", "..", "..", "app"));
+        var call = new Regex("NpgsqlCatalog\\.\\w+\\([^\";]*?\"(?<name>[a-z_]+\\.[a-z0-9_.]+)\"(?!\\s*\\+)");
+        var missing = new List<string>();
+        int checkedCalls = 0;
+        foreach (var file in app.EnumerateFiles("*.cs", SearchOption.AllDirectories))
+        {
+            var path = file.FullName.Replace('\\', '/');
+            if (path.Contains("/bin/") || path.Contains("/obj/") || path.Contains(".Tests/")) continue;
+            foreach (Match m in call.Matches(File.ReadAllText(file.FullName)))
+            {
+                checkedCalls++;
+                if (!declared.Contains(m.Groups["name"].Value))
+                    missing.Add($"{Path.GetRelativePath(app.FullName, file.FullName)}: {m.Groups["name"].Value}");
+            }
+        }
+        Assert.True(checkedCalls > 100, $"only {checkedCalls} catalog calls found; the pattern no longer matches the code");
+        Assert.True(missing.Count == 0, "Undeclared catalog queries:\n" + string.Join("\n", missing));
+    }
+
     private static string FindRepoFile(string relative)
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
