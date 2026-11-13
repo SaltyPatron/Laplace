@@ -59,31 +59,14 @@ internal static partial class WorkspaceCodeIndex
         "extern", "_deps", "TestResults", "artifacts", "coverage"
     };
 
+    /// <summary>The source tree this machine declares as LAPLACE_SRC (process environment, then machine.env).</summary>
     public static string ResolveWorkspaceRoot()
     {
-        var envRoot = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
-        if (!string.IsNullOrWhiteSpace(envRoot)) return RequireWorkspaceRoot(envRoot);
-
-        var machineEnv = OperatingSystem.IsWindows()
-            ? @"C:\ProgramData\Laplace\machine.env"
-            : "/etc/laplace/machine.env";
-        if (File.Exists(machineEnv))
-        {
-            foreach (var line in File.ReadLines(machineEnv))
-            {
-                var trimmed = line.Trim();
-                if (trimmed.StartsWith("LAPLACE_SOURCE_ROOT=", StringComparison.Ordinal))
-                {
-                    var val = trimmed["LAPLACE_SOURCE_ROOT=".Length..].Trim().Trim('"', '\'');
-                    if (!string.IsNullOrWhiteSpace(val)) return RequireWorkspaceRoot(val);
-                }
-            }
-        }
-
-        if (OperatingSystem.IsWindows() && Directory.Exists(@"E:\Repositories\Laplace"))
-            return @"E:\Repositories\Laplace";
-
-        return AppContext.BaseDirectory;
+        var declared = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_SRC");
+        if (string.IsNullOrWhiteSpace(declared))
+            throw new InvalidOperationException(
+                "No workspace source root is declared. Set LAPLACE_SRC in the process environment or machine.env.");
+        return RequireWorkspaceRoot(declared);
     }
 
     private static string RequireWorkspaceRoot(string path)

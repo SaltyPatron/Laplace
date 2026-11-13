@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Laplace.Modality.Chess;
@@ -40,22 +39,13 @@ public static partial class CutechessRunner
                 return true;
             }
 
-            var fens = new List<string>(openingCount);
-            try
-            {
-                foreach (var fen in OpeningSeed.Fens(OpeningSeed.DefaultDir, Math.Max(1, o.OpeningPlies), openingCount))
-                    if (!fens.Contains(fen, StringComparer.Ordinal)) fens.Add(fen);
-            }
-            catch (Exception failure)
-            {
-                // A missing opening corpus does not stop the run; the built-in positions
-                // below keep the gauntlet paired.
-                Trace.TraceWarning("CHESS_OPENINGS_FALLBACK directory={0}; using built-in positions: {1}",
-                    OpeningSeed.DefaultDir, failure);
-            }
-
-            for (int i = 0; fens.Count < openingCount; i++)
-                fens.Add(BuiltinOpeningFens[i % BuiltinOpeningFens.Length]);
+            // The paired suite comes from the opening catalog alone; a missing or short catalog
+            // fails the preparation with its path rather than substituting positions.
+            var catalog = OpeningSeed.DefaultDir;
+            var fens = OpeningSeed.Fens(catalog, Math.Max(1, o.OpeningPlies), openingCount);
+            if (fens.Count < openingCount)
+                throw new InvalidDataException(
+                    $"opening catalog {catalog} yields {fens.Count} playable positions; {openingCount} paired positions were requested");
 
             string? dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);

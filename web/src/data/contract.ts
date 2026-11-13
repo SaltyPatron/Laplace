@@ -18,9 +18,10 @@ export interface Identity {
   ref: EntityRef;
   /** Point on S³ / inside the 4-ball; null when the entity has no recorded placement. */
   coord: [number, number, number, number] | null;
-  hilbert: string;
-  /** Bank name → enum value. Banks filter; they are never strand targets. */
-  banks: Record<string, string>;
+  /** Null when the read that served this identity does not carry it. */
+  hilbert: string | null;
+  /** Bank name → enum value. Banks filter; they are never strand targets. Null when not read. */
+  banks: Record<string, string> | null;
   size: number;
   exists: boolean;
 }

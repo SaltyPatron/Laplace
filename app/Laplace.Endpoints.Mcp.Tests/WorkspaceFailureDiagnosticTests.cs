@@ -56,19 +56,39 @@ public sealed class WorkspaceFailureDiagnosticTests
     [InlineData(true)]
     public void AnInvalidDeclaredWorkspaceCannotSelectADifferentCheckout(bool file)
     {
-        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SRC");
         string selected = Path.Combine(Path.GetTempPath(), "workspace-root-" + Guid.NewGuid().ToString("N"));
         try
         {
             if (file) File.WriteAllText(selected, "not a directory");
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", selected);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", selected);
             if (file) Assert.Throws<InvalidDataException>(() => WorkspaceCodeIndex.ResolveWorkspaceRoot());
             else Assert.Throws<FileNotFoundException>(() => WorkspaceCodeIndex.ResolveWorkspaceRoot());
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", previous);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", previous);
             if (file) File.Delete(selected);
+        }
+    }
+
+    [Fact]
+    public void AnUndeclaredWorkspaceIsAnErrorNotTheBinaryFolder()
+    {
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SRC");
+        string? previousMachine = Environment.GetEnvironmentVariable("LAPLACE_MACHINE_ENV");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", null);
+            Environment.SetEnvironmentVariable("LAPLACE_MACHINE_ENV",
+                Path.Combine(Path.GetTempPath(), "missing-machine-env-" + Guid.NewGuid().ToString("N")));
+            var failure = Assert.Throws<InvalidOperationException>(() => WorkspaceCodeIndex.ResolveWorkspaceRoot());
+            Assert.Contains("LAPLACE_SRC", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", previous);
+            Environment.SetEnvironmentVariable("LAPLACE_MACHINE_ENV", previousMachine);
         }
     }
 
@@ -84,7 +104,7 @@ public sealed class WorkspaceFailureDiagnosticTests
     [Fact]
     public void ALockedSourceFileCannotProduceASuccessfulEmptyReindex()
     {
-        string? previousRoot = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+        string? previousRoot = Environment.GetEnvironmentVariable("LAPLACE_SRC");
         var previousLog = Log.Logger;
         string root = Path.Combine(Path.GetTempPath(), "locked-workspace-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -95,7 +115,7 @@ public sealed class WorkspaceFailureDiagnosticTests
             string path = Path.Combine(root, "locked.cs");
             File.WriteAllText(path, "public class InputFixture { }");
             using var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", root);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", root);
             Log.Logger = logger;
             var failure = Assert.Throws<AggregateException>(() => WorkspaceCodeIndex.EnsureIndex(forceReindex: true));
             Assert.All(failure.InnerExceptions, error => Assert.IsAssignableFrom<IOException>(error));
@@ -106,7 +126,7 @@ public sealed class WorkspaceFailureDiagnosticTests
         finally
         {
             Log.Logger = previousLog;
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", previousRoot);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", previousRoot);
             Directory.Delete(root, recursive: true);
         }
     }
@@ -116,21 +136,21 @@ public sealed class WorkspaceFailureDiagnosticTests
     [Fact]
     public void ARecentCacheCannotOverrideANewExplicitWorkspaceRoot()
     {
-        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SRC");
         string parent = Path.Combine(Path.GetTempPath(), "workspace-selection-" + Guid.NewGuid().ToString("N"));
         string first = Path.Combine(parent, "first"), second = Path.Combine(parent, "second");
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
         try
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", first);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", first);
             Assert.Equal(first, WorkspaceCodeIndex.EnsureIndex(forceReindex: true).RootPath);
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", second);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", second);
             Assert.Equal(second, WorkspaceCodeIndex.EnsureIndex(forceReindex: false).RootPath);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", previous);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", previous);
             Directory.Delete(parent, recursive: true);
         }
     }
@@ -138,7 +158,7 @@ public sealed class WorkspaceFailureDiagnosticTests
     [Fact]
     public void AFailedRebuildCannotChangeTheLastSuccessfulSnapshotsFileCount()
     {
-        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
+        string? previous = Environment.GetEnvironmentVariable("LAPLACE_SRC");
         string parent = Path.Combine(Path.GetTempPath(), "workspace-publication-" + Guid.NewGuid().ToString("N"));
         string good = Path.Combine(parent, "good"), rejected = Path.Combine(parent, "rejected");
         Directory.CreateDirectory(good);
@@ -146,23 +166,23 @@ public sealed class WorkspaceFailureDiagnosticTests
         try
         {
             File.WriteAllText(Path.Combine(good, "empty.cs"), "   ");
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", good);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", good);
             Assert.Equal(1, WorkspaceCodeIndex.EnsureIndex(forceReindex: true).FileCount);
             string blocked = Path.Combine(rejected, "blocked.cs");
             File.WriteAllText(blocked, "public class RejectedInput { }");
             using (var locked = new FileStream(blocked, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", rejected);
+                Environment.SetEnvironmentVariable("LAPLACE_SRC", rejected);
                 Assert.Throws<AggregateException>(() => WorkspaceCodeIndex.EnsureIndex(forceReindex: true));
             }
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", good);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", good);
             var retained = WorkspaceCodeIndex.EnsureIndex(forceReindex: false);
             Assert.Equal(good, retained.RootPath);
             Assert.Equal(1, retained.FileCount);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", previous);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", previous);
             Directory.Delete(parent, recursive: true);
         }
     }

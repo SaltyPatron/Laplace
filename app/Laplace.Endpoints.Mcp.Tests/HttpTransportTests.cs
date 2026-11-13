@@ -294,15 +294,15 @@ public sealed class HttpTransportTests
             .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
             .Cast<System.Reflection.AssemblyMetadataAttribute>()
             .First(a => a.Key == "LaplaceRepoRoot").Value!;
-        string? priorSourceRoot = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_ROOT");
-        Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", repo);
+        string? priorSourceRoot = Environment.GetEnvironmentVariable("LAPLACE_SRC");
+        Environment.SetEnvironmentVariable("LAPLACE_SRC", repo);
         try
         {
             await SubstrateToolsAgainstSourceRoot();
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SOURCE_ROOT", priorSourceRoot);
+            Environment.SetEnvironmentVariable("LAPLACE_SRC", priorSourceRoot);
         }
     }
 

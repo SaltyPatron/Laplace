@@ -10,7 +10,8 @@ namespace Laplace.Chess.Service;
 /// </summary>
 internal static class OpeningContinuationBook
 {
-    private static readonly Lazy<SearchContinuationTable> Book = new(Load, LazyThreadSafetyMode.ExecutionAndPublication);
+    // A missing catalog throws on every read rather than being cached, so installing it needs no restart.
+    private static readonly Lazy<SearchContinuationTable> Book = new(Load, LazyThreadSafetyMode.PublicationOnly);
 
     public static SearchContinuationTable Shared => Book.Value;
 
@@ -19,7 +20,7 @@ internal static class OpeningContinuationBook
         var table = new SearchContinuationTable();
         var modality = new ChessModality();
         var start = modality.Initial().Board;
-        foreach (var (_, _, sans) in OpeningClassifier.LoadLines(OpeningSeed.DefaultDir))
+        foreach (var (_, _, sans) in OpeningSeed.Lines(OpeningSeed.DefaultDir))
         {
             var state = modality.Initial();
             var moves = new List<ChessMove>(sans.Count);
