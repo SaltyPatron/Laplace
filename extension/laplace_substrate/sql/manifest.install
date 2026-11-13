@@ -45,7 +45,6 @@ functions/glicko2/laplace_glicko2_accumulate.sql.in
 functions/glicko2/laplace_score.sql.in
 functions/glicko2/laplace_score_inverse.sql.in
 functions/glicko2/laplace_glicko2_accumulate_period.sql.in
-functions/cascade/astar_path_raw.sql.in
 functions/trajectory/trajectory_point_count.sql.in
 functions/trajectory/trajectory_prefix_distance.sql.in
 schema/tables/consensus.sql.in
@@ -93,8 +92,6 @@ functions/readback/canonical_names.sql.in
 functions/readback/register_canonical.sql.in
 functions/readback/codepoint_for_id.sql.in
 functions/readback/is_all_whitespace.sql.in
-functions/readback/constituents.sql.in
-functions/readback/constituents_closure.sql.in
 functions/readback/content_carrier_vertices.sql.in
 functions/readback/physicality_descriptors.sql.in
 functions/readback/vertex_atom.sql.in
@@ -116,10 +113,8 @@ functions/readback/render_batch.sql.in
 functions/converse/label_batch.sql.in
 functions/lexical/type_label_batch.sql.in
 functions/readback/register_canonicals.sql.in
-functions/inspect/entity_facets.sql.in
 functions/inspect/claim_facts.sql.in
 functions/inspect/entity_physicalities.sql.in
-functions/inspect/entity_physicality_coords.sql.in
 functions/inspect/attestations_out.sql.in
 functions/inspect/attestations_in.sql.in
 functions/consensus/top_relations.sql.in
@@ -129,8 +124,6 @@ functions/consensus/consensus_by_ids.sql.in
 functions/consensus/consensus_in.sql.in
 functions/consensus/classify_circuit.sql.in
 functions/consensus/circuit_pair_proposals.sql.in
-functions/consensus/walk_branches.sql.in
-functions/consensus/walk_strongest.sql.in
 functions/consensus/consensus_stats.sql.in
 functions/consensus/consensus_stats_approx.sql.in
 functions/converse/label.sql.in
@@ -183,7 +176,6 @@ functions/converse/word_segment_resolved.sql.in
 functions/converse/label_is_content.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/text_root_placements.sql.in
-functions/structural/containers_of.sql.in
 functions/converse/forward_pass.sql.in
 functions/converse/attested_language_batch.sql.in
 functions/converse/attested_language.sql.in
@@ -241,8 +233,6 @@ functions/converse/links.sql.in
 functions/converse/correlate.sql.in
 seed/canonical_names_seed.sql.in
 generated/qualifier_bits.sql.in
-functions/cascade/astar_path.sql.in
-functions/cascade/cascade.sql.in
 functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
@@ -304,23 +294,17 @@ functions/generation/steer_candidates.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
-functions/consensus/consensus_walk_edges.sql.in
-functions/consensus/consensus_neighbors_directed.sql.in
-functions/consensus/consensus_neighbors_undirected.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
 functions/highway/relation_highway.sql.in
 functions/converse/relation_bands.sql.in
 functions/highway/laplace_highway_mask_bits.sql.in
 functions/relation/relation_mask_types.sql.in
 functions/generation/consensus_layer_plane_masked.sql.in
-functions/consensus/explore_web_neighbors.sql.in
-functions/consensus/explore_web.sql.in
 functions/generation/forward_frontier.sql.in
 functions/generation/walk_text.sql.in
 functions/converse/answer.sql.in
 functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
-functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
 functions/realize/realize_defines.sql.in
 functions/readback/render.sql.in
@@ -343,7 +327,6 @@ functions/consensus/belief_distribution.sql.in
 functions/consensus/set_members.sql.in
 functions/consensus/subjects_with.sql.in
 functions/consensus/usage_overlap.sql.in
-functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in
 functions/consensus/gaps.sql.in
 functions/taxonomy/bubble_up.sql.in
@@ -431,10 +414,8 @@ functions/analysis/laplace_translations.sql.in
 functions/analysis/placement_health.sql.in
 functions/analysis/metric_ladder.sql.in
 functions/analysis/ingest_integrity_gate.sql.in
-functions/analysis/render_trace.sql.in
 functions/inference/laplace_attention_centroid.sql.in
 functions/inference/laplace_nearest_entity.sql.in
-functions/inference/laplace_astar_path.sql.in
 functions/inference/laplace_forward_step.sql.in
 functions/inference/laplace_distill.sql.in
 functions/inference/laplace_witness.sql.in

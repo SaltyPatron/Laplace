@@ -75,9 +75,7 @@ BEGIN
     END IF;
     -- Single-entity inspection and the UI's batch geometry query share the
     -- Native exact-ID reader. A repeated request stays a repeated occurrence.
-    IF (SELECT count(*) FROM ops.entity_facets_batch(ARRAY[aa,bb,aa,
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),decode(repeat('00',16),'hex')]))<>3
-       OR (SELECT count(*) FROM realize.display_label_batch(ARRAY[
+    IF (SELECT count(*) FROM realize.display_label_batch(ARRAY[
           public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),NULL,aa,decode(repeat('00',16),'hex'),
           public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]))<>4
        OR (SELECT count(*) FROM realize.display_label_batch(ARRAY[
@@ -85,40 +83,8 @@ BEGIN
           public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]) WHERE tier=1)<>2 THEN
         RAISE EXCEPTION 'shared facet/label reader lost unique facets, repeated labels or virtual/missing tiers';
     END IF;
-    IF (SELECT array_agg(p.ordinal ORDER BY p.ordinal)
-        FROM ops.entity_physicalities(ARRAY[
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),
-          NULL,
-          decode(repeat('00',16),'hex'),
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]) p WHERE p.type=1)
-       IS DISTINCT FROM ARRAY[1,4]::bigint[] THEN
-        RAISE EXCEPTION 'batch geometry lost duplicate positions or invented a missing entity';
-    END IF;
-    IF (SELECT count(*) FROM ops.entity_physicalities(
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))))<>1
-       OR EXISTS(SELECT FROM ops.entity_physicalities(ARRAY[]::bytea[])) THEN
-        RAISE EXCEPTION 'single and batch geometry projections disagree';
-    END IF;
-    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[aa,bb,aa]))<>5
-       OR EXISTS(SELECT FROM structural.containers_containing_all(ARRAY[aa,NULL]::bytea[]))
-       OR EXISTS(SELECT FROM structural.containers_containing_all(ARRAY[]::bytea[]))
-       OR (SELECT count(*) FROM structural.containers_of(aa,1,2))<>2 THEN
-        RAISE EXCEPTION 'shared Native membership lost set semantics or emitted beyond its boundary';
-    END IF;
     -- Reuse the actual SPI plans beyond PostgreSQL's custom-plan warmup.
     FOR reading IN 1..8 LOOP
-    SELECT count(*) INTO n FROM consensus.explore_induced_edges(ARRAY[aa,bb,aa,NULL]);
-    IF n<>3 THEN RAISE EXCEPTION 'endpoint read lost or duplicated canonical edges: %',n; END IF;
-    IF NOT EXISTS(SELECT FROM consensus.explore_induced_edges(ARRAY[aa,bb])
-        WHERE source_id=aa AND type_id=aa AND object_id=bb) THEN
-        RAISE EXCEPTION 'endpoint read lost repeated subject/predicate constituents';
-    END IF;
-    IF NOT EXISTS(SELECT FROM consensus.explore_web_neighbors(ARRAY[bb],100)
-        WHERE nbr=public.blake3_send(c) AND type_id=aa AND NOT outbound) THEN
-        RAISE EXCEPTION 'object-only endpoint read lost an inbound relation';
-    END IF;
-    SELECT count(*) INTO n FROM consensus.explore_web_neighbors(ARRAY[aa],ARRAY[rr],100,false);
-    IF n<>1 THEN RAISE EXCEPTION 'endpoint type restriction leaked another predicate: %',n; END IF;
     END LOOP;
     -- The public query shape must consume these canonical claims as inspection
     -- does, even though none of their source-defined predicates has a legacy

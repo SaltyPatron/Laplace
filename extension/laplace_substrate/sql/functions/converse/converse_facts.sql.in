@@ -11,11 +11,11 @@
 --   kin         band 7 ranked listing                "X is related to a and b."
 --   web         strongest unfiltered chain           "X -IS_A-> A -HAS_PART-> b"
 --
--- The taxonomy row is the beam engine (walk_branches: Glicko-complete signed
+-- The taxonomy row is the beam engine (public.laplace_pull: Glicko-complete signed
 -- weight, partition-pruned by a CONCRETE relation type) -- the topic's own
 -- strongest band-2 edge picks that type, so no relation name is hardcoded and
 -- the partition-pruning law from recall_walk_response.sql.in holds. The web row
--- uses walk_strongest, the correct engine for the type-unfiltered case. The
+-- uses public.laplace_pull, the correct engine for the type-unfiltered case. The
 -- listing rows are 1-hop by nature (a parts inventory IS its ranked edges).
 -- Their capacity is caller-owned; NULL requests the complete ranked family.
 -- consensus.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
@@ -100,7 +100,17 @@ BEGIN
     IF tax_type IS NOT NULL THEN
         RETURN QUERY
         WITH branches AS (
-            SELECT * FROM consensus.walk_branches(p_syn, tax_type, 4, 3)
+            SELECT * FROM (SELECT w.hops AS depth,
+                ARRAY(SELECT public.blake3_send(u.x) FROM unnest(w.chain) WITH ORDINALITY u(x,n) ORDER BY u.n) AS path,
+                ARRAY(SELECT public.blake3_send((public.laplace_parts(pp.path))[2])
+                      FROM unnest(w.claims) WITH ORDINALITY u(c,n)
+                      JOIN public.laplace_paths(w.claims) pp ON pp.entity=u.c ORDER BY u.n) AS types,
+                public.blake3_send(w.id) AS entity_id,
+                (w.rating-2*w.deviation)::numeric AS eff_mu,
+                exp(-w.cost)::numeric AS path_mu,
+                0::bigint AS witnesses
+         FROM public.laplace_pull(ARRAY[public.blake3_from_bytea(p_syn)],NULL,4,3::bigint,4096::bigint,ARRAY[public.laplace_text_id('hypernym')]) w
+         WHERE w.hops>=1) wb
         ),
         winner AS (
             -- Deepest chain first: the beam never walks a consensus.refuted or
@@ -223,7 +233,7 @@ BEGIN
     -- pull-one-strand answer, rendered with its relation arrows.
     RETURN QUERY
     -- Third hand-rolled arrow realize.render, now the installed one (GH #906 item 2).
-    -- walk_strongest walks forward, so every direction is 1. This also unifies the
+    -- public.laplace_pull walks forward, so every direction is 1. This also unifies the
     -- glyphs: this copy drew ASCII ' -type-> ' where realize_path and both walk
     -- responders draw ' —type→ ', so one substrate spoke two arrow dialects
     -- depending on which surface answered.
@@ -236,7 +246,17 @@ BEGIN
            min(g.eff_mu),
            NULL::bigint,
            NULL::bytea[], NULL::bytea[]
-    FROM consensus.walk_strongest(p_syn, NULL, 5) g
+    FROM (SELECT (u.n-1)::int AS step,
+                public.blake3_send((public.laplace_parts(pp.path))[2]) AS type_id,
+                public.blake3_send(u.x) AS entity_id,
+                (st.rating-2*st.deviation)::numeric AS eff_mu
+         FROM (SELECT w.chain,w.claims FROM public.laplace_pull(ARRAY[public.blake3_from_bytea(p_syn)],NULL,
+                   COALESCE(5,4),64::bigint,4096::bigint,NULL::public.blake3[]) w
+               WHERE w.hops>=1 ORDER BY w.hops DESC,w.cost,w.ordinal LIMIT 1) b
+         CROSS JOIN LATERAL unnest(b.chain) WITH ORDINALITY u(x,n)
+         LEFT JOIN public.laplace_paths(b.claims) pp ON pp.entity=b.claims[u.n-1]
+         LEFT JOIN public.laplace_standings(b.claims) st ON st.claim=b.claims[u.n-1]
+         WHERE u.n>1) g
     HAVING count(*) > 0;
 END;
 $$;

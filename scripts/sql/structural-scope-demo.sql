@@ -43,8 +43,7 @@ ROLLBACK;
 -- Run separately to inspect the full result; timings depend on the current data.
 -- Exactly two upward composition hops, with no caller top-K ceiling.
 -- These are shortest containment hops, not arbitrary semantic relations.
--- SELECT encode(entity_id,'hex') AS containing_composition, tier,
---        encode(type_id,'hex') AS type, hops
--- FROM structural.containers_of(decode(:'captain','hex'), 2, NULL)
+-- SELECT entity::text AS containing_composition, tier, hops
+-- FROM public.laplace_above(ARRAY[public.blake3_from_bytea(decode(:'captain','hex'))], 2, 2147483647)
 -- WHERE hops = 2
--- ORDER BY entity_id;
+-- ORDER BY entity;

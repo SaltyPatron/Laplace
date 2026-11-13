@@ -68,24 +68,6 @@ candidate_names(ArrayType *members, int capacity, int *count, bool *truncated)
         capacity > 0 ? (uint64)capacity : 0, count, truncated);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_word_containers_containing_all);
-Datum
-pg_laplace_word_containers_containing_all(PG_FUNCTION_ARGS)
-{
-    InitMaterializedSRF(fcinfo, 0);
-    ReturnSetInfo *r = (ReturnSetInfo *)fcinfo->resultinfo;
-    if (PG_ARGISNULL(0)) return (Datum)0;
-    bool truncated;
-    int count;
-    hash128_t *ids = candidate_names(PG_GETARG_ARRAYTYPE_P(0),
-        PG_ARGISNULL(1) ? 0 : Max(PG_GETARG_INT32(1), 0), &count, &truncated);
-    for (int i = 0; i < count; ++i) {
-        Datum values[] = {hash128_to_datum(&ids[i]), Int64GetDatum(count), BoolGetDatum(truncated)};
-        bool nulls[] = {false, false, false};
-        tuplestore_putvalues(r->setResult, r->setDesc, values, nulls);
-    }
-    return (Datum)0;
-}
 
 typedef enum {
     BROWSE_MATCH_NAME = 0,

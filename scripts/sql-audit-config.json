@@ -15,7 +15,6 @@
     "lexical.lexical_peers",
     "lexical.word_case_variants",
     "realize.render_text",
-    "structural.containers_of",
     "structural.geometry_neighbours"
   ],
   "filter_key_functions": [

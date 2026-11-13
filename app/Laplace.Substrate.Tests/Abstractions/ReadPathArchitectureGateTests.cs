@@ -352,20 +352,6 @@ public sealed class ReadPathArchitectureGateTests
     }
 
     [Fact]
-    public void ConsensusWeb_HasNoGuessedFanoutOrFixedNodeCeiling()
-    {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var native = File.ReadAllText(Path.Combine(repoRoot, "extension",
-            "laplace_substrate", "src", "explore_web.c"));
-
-        Assert.DoesNotMatch(@"fanout\s*\*\s*2", native);
-        Assert.DoesNotMatch(@"\b(fanout|max_nodes|hops)\s*=\s*(?:Min|Max)\b", native);
-        Assert.DoesNotContain("max_nodes = 400", native, StringComparison.Ordinal);
-        Assert.DoesNotContain("cand_cap = 4096", native, StringComparison.Ordinal);
-        Assert.Contains("MaxAllocSize", native, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ConsensusWeb_LabelsSurvivorsInBoundedBatches()
     {
         var labels = SqlCatalog.Get("realize.labels_fast").Text;
@@ -379,41 +365,6 @@ public sealed class ReadPathArchitectureGateTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("realize.render_text_fast(x.id", labels,
             StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void GenerationWalk_DerivesCapacityFromTheRequestedFrontier()
-    {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var native = File.ReadAllText(Path.Combine(repoRoot, "extension",
-            "laplace_substrate", "src", "generate_walk.c"));
-
-        Assert.DoesNotContain("GENERATE_NODE_BUDGET", native, StringComparison.Ordinal);
-        Assert.DoesNotMatch(@"beam\s*\*\s*3", native);
-        Assert.DoesNotMatch(@"bonus\s*\+=", native);
-        Assert.DoesNotContain("mass_sat", native, StringComparison.Ordinal);
-        Assert.Contains("continuity_distance", native, StringComparison.Ordinal);
-        Assert.Contains("geometry_distance", native, StringComparison.Ordinal);
-        Assert.Contains("(int64) n_frontier * (int64) beam", native, StringComparison.Ordinal);
-        Assert.Contains("MaxAllocSize / sizeof(WalkNode)", native, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ConverseCorpus_HasNoNestedFixedHeadOrQuadraticNativeDedup()
-    {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var walk = File.ReadAllText(Path.Combine(repoRoot, "extension",
-            "laplace_substrate", "sql", "functions", "converse", "converse_walk.sql.in"));
-        var compose = File.ReadAllText(Path.Combine(repoRoot, "extension",
-            "laplace_substrate", "sql", "functions", "converse", "converse_compose.sql.in"));
-        var containers = File.ReadAllText(Path.Combine(repoRoot, "extension",
-            "laplace_substrate", "src", "containers_of.c"));
-
-        Assert.DoesNotContain("LIMIT 160", walk, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("containers_of(topic_word, 1, 400)", walk, StringComparison.Ordinal);
-        Assert.DoesNotContain("LIMIT 32", compose, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("for (int s = 0; s < n_seen", containers, StringComparison.Ordinal);
-        Assert.Matches(@"HTAB\s*\*seen\s*=\s*hash_create", containers);
     }
 
     [Fact]

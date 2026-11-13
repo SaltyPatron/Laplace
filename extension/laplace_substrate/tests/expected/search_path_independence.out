@@ -114,27 +114,6 @@ SELECT pg_temp.resolves('salient_facts',
  salient_facts: ok
 (1 row)
 
-SELECT pg_temp.resolves('consensus_neighbors_directed',
-    'SELECT * FROM consensus.neighbors_directed(laplace.word_id(''dog''), NULL, 1)');
-             resolves             
-----------------------------------
- consensus_neighbors_directed: ok
-(1 row)
-
-SELECT pg_temp.resolves('consensus_neighbors_undirected',
-    'SELECT * FROM consensus.neighbors_undirected(laplace.word_id(''dog''), NULL, 1)');
-              resolves              
-------------------------------------
- consensus_neighbors_undirected: ok
-(1 row)
-
-SELECT pg_temp.resolves('explore_web_neighbors',
-    'SELECT * FROM consensus.explore_web_neighbors(laplace.word_id(''dog''), 1)');
-         resolves          
----------------------------
- explore_web_neighbors: ok
-(1 row)
-
 SELECT pg_temp.resolves('foundry_crawl_neighbors',
     'SELECT * FROM consensus.foundry_crawl_neighbors(laplace.word_id(''dog''), 1, NULL)');
           resolves           

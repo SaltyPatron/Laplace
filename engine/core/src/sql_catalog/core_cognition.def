@@ -112,7 +112,15 @@ SQL_QUERY("browse.names", "bytea[]",
     "WHERE object_id = ANY($1) AND type_id = ANY("
     "consensus.relation_family_ids('HAS_NAME'))")
 SQL_QUERY("entity.facets", "bytea[]",
-    "SELECT entity_id,tier,type_id FROM ops.entity_facets_batch($1)")
+    "WITH ids AS MATERIALIZED (\n"
+    " SELECT DISTINCT u.id,public.blake3_from_bytea(u.id) AS key FROM unnest($1::bytea[]) u(id) WHERE u.id IS NOT NULL\n"
+    "), native AS MATERIALIZED (\n"
+    " SELECT e.id,e.tier FROM public.laplace_entities(ARRAY(SELECT key FROM ids)) e\n"
+    ")\n"
+    "SELECT i.id,coalesce(e.tier,0)::smallint,NULL::bytea\n"
+    "FROM ids i LEFT JOIN native e ON e.id=i.key\n"
+    "WHERE e.tier IS NOT NULL OR public.laplace_codepoint(i.key)>=0\n"
+    "ORDER BY i.id")
 
 SQL_QUERY("consensus.out_labeled", "bytea,int4",
     "SELECT c.type_label,c.object_label,encode(c.object_id,'hex'),c.eff_mu,c.witnesses "
@@ -207,10 +215,9 @@ SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
     "FROM consensus.browse_named_entities($1,$2,$3,$4,$5)")
 SQL_QUERY("display.labels", "bytea[]",
     "SELECT encode(d.id, 'hex'), d.label, d.tier FROM realize.display_label_batch($1) d")
-SQL_QUERY("containers.bound_surfaces", "bytea,bytea",
-    "SELECT subject_id FROM laplace.consensus WHERE object_id=$1 AND type_id=$2")
 SQL_QUERY("containers.page", "bytea,int4,int4",
-    "SELECT entity_id, tier, type_id, hops FROM structural.containers_of($1,$2,$3)")
+    "SELECT public.blake3_send(a.entity),a.tier,NULL::bytea,a.hops\n"
+    "FROM public.laplace_above(ARRAY[public.blake3_from_bytea($1)],$2,$3::bigint) a")
 SQL_QUERY("types.labels", "bytea[]",
     "SELECT lexical.type_label_batch($1)")
 SQL_QUERY("generation.separators", "", "SELECT generation.separator_ids()")
@@ -245,13 +252,6 @@ SQL_QUERY("query.lexicon_relations", "bytea[],text[]",
     "LEFT JOIN public.laplace_physicalities(ARRAY(SELECT key FROM ids)) e ON e.entity=i.key ORDER BY i.id")
 /* Selected roots keep their identity while the first-constituent frontier
  * descends. No reverse probe from a common scalar through the corpus. */
-SQL_QUERY("content.first_children", "bytea[],bytea[]",
-    "WITH frontier AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::bytea[]) f(root,node)), "
-    "children AS MATERIALIZED (SELECT p.entity_id AS id,(public.laplace_trajectory_constituent_ids(p.trajectory))[1] AS child "
-    "FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL AND p.entity_id=ANY($2::bytea[]) "
-    "UNION SELECT public.blake3_send(c.entity),public.blake3_send(c.child) FROM "
-    "public.laplace_constituents(ARRAY(SELECT DISTINCT public.blake3_from_bytea(node) FROM frontier)) c WHERE c.ordinal=1) "
-    "SELECT f.root,c.child FROM frontier f JOIN children c ON c.id=f.node WHERE c.child IS NOT NULL")
 SQL_QUERY("leaders.native_named", "int4[],int4",
     "WITH leaders AS MATERIALIZED (SELECT * FROM ops.claim_leaders($1,$2) WITH ORDINALITY)\nSELECT b.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory\nFROM converse.relation_band_catalog() b LEFT JOIN leaders n ON n.band=b.band\nWHERE b.band=ANY($1) ORDER BY b.band,n.ordinality")
 

@@ -581,21 +581,6 @@ SELECT reply FROM converse.recall_intent('is_a', laplace.word_id('h'), laplace.w
  Yes — h —is a→ c
 (1 row)
 
-SELECT g.step, lexical.type_label(g.type_id) AS rel_type,
-       g.entity_id = public.laplace_hash128_blake3('test/converse/synset2') AS is_synset2
-FROM consensus.walk_strongest(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('IS_A')) g;
- step | rel_type | is_synset2 
-------+----------+------------
-    1 | is a     | t
-(1 row)
-
-SELECT count(*) AS tree_nodes
-FROM consensus.walk_branches(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('IS_A'), 4, 5);
- tree_nodes 
-------------
-          1
-(1 row)
-
 SELECT reply, eff_mu FROM converse.recall_intent('walk', laplace.word_id('p'));
                  reply                  |  eff_mu  
 ----------------------------------------+----------
@@ -631,21 +616,6 @@ FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER B
    2 | dog    | t
    3 | dog    | t
 (3 rows)
-
-SELECT cardinality(nodes) = cardinality(types) + 1
-       AND cardinality(types) = cardinality(dirs) AS raw_path_shape,
-       plane_type = laplace.relation_type_id('IS_SYNONYM_OF') AS raw_direct_plane
-FROM consensus.relate_path_raw(laplace.word_id('dog'), laplace.word_id('h'));
- raw_path_shape | raw_direct_plane 
-----------------+------------------
- t              | t
-(1 row)
-
-SELECT plane AS reason_plane FROM consensus.relate_path(laplace.word_id('dog'), laplace.word_id('h'));
- reason_plane  
----------------
- is synonym of
-(1 row)
 
 SELECT count(*) AS band_rows FROM converse.relation_bands();
  band_rows 

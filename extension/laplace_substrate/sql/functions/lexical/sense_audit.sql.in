@@ -94,7 +94,7 @@ lang AS MATERIALIZED (
 facets AS MATERIALIZED (
     SELECT f.entity_id, f.type_id
     FROM capped_ids ci
-    CROSS JOIN LATERAL ops.entity_facets_batch(ci.arr) f
+    CROSS JOIN LATERAL (SELECT public.blake3_send(e.id) AS entity_id, NULL::bytea AS type_id FROM public.laplace_entities(ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest(ci.arr) x WHERE x IS NOT NULL)) e) f
 ),
 rows AS MATERIALIZED (
     SELECT c.rk, c.synset_id, COALESCE(e.type_id, f.type_id) AS type_id,

@@ -43,10 +43,10 @@ ensure_render_plans(void)
         Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
         SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("readback.constituent_edges"), 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
-            elog(ERROR, "render_text: SPI_prepare(constituents_closure) failed: %s",
+            elog(ERROR, "render_text: SPI_prepare(readback.constituent_edges) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "render_text: SPI_keepplan(constituents_closure) failed");
+            elog(ERROR, "render_text: SPI_keepplan(readback.constituent_edges) failed");
         closure_plan = plan;
     }
 }

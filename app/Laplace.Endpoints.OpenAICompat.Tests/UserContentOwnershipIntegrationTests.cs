@@ -244,8 +244,8 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
                 """
                 SELECT EXISTS (
                     SELECT 1
-                    FROM structural.containers_of(@content, 1, 32)
-                    WHERE entity_id = @file
+                    FROM public.laplace_above(ARRAY[public.blake3_from_bytea(@content)], 1, 32)
+                    WHERE entity = public.blake3_from_bytea(@file)
                 )
                 """, conn);
             containers.Parameters.Add("content", NpgsqlDbType.Bytea).Value =

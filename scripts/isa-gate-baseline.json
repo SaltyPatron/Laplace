@@ -226,7 +226,6 @@
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1
     },
     "g4_dead_canonical": {
-      "extension/laplace_substrate/sql/functions/cascade/cascade.sql.in::cascade": 1,
       "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::related_objects": 1,
       "extension/laplace_substrate/sql/functions/consensus/usage_overlap.sql.in::usage_overlap": 1,
       "extension/laplace_substrate/sql/functions/contrast/physicality_count.sql.in::physicality_count": 1,

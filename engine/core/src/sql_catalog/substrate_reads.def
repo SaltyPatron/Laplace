@@ -388,7 +388,18 @@ SQL_QUERY("ops.source_roster", "bytea,int4",
     "SELECT encode(subject_id, 'hex'), subject, relation,\n       encode(object_id, 'hex'), object, observations\nFROM ops.source_roster($1, $2)")
 
 SQL_QUERY("ops.entity_primary_forms_batch", "bytea[]",
-    "SELECT DISTINCT ON (p.ordinal) p.ordinal,p.x,p.y,p.z,p.m,p.radius,p.n_constituents\nFROM ops.entity_physicalities($1::bytea[]) p ORDER BY p.ordinal,p.type")
+    "WITH inputs AS MATERIALIZED (\n"
+    " SELECT u.n,row_number() OVER (ORDER BY u.n) AS k,public.blake3_from_bytea(u.id) AS id\n"
+    " FROM unnest($1::bytea[]) WITH ORDINALITY u(id,n) WHERE u.id IS NOT NULL\n"
+    "), req AS MATERIALIZED (\n"
+    " SELECT ARRAY(SELECT id FROM inputs ORDER BY k) AS ids\n"
+    ")\n"
+    "SELECT i.n,public.ST_X(e.coord),public.ST_Y(e.coord),public.ST_Z(e.coord),public.ST_M(e.coord),\n"
+    " public.laplace_distance4d(e.coord,public.ST_MakePoint(0,0,0,0)),coalesce(public.laplace_path_length(p.path),0)::int4\n"
+    "FROM req CROSS JOIN LATERAL public.laplace_entities(req.ids) e\n"
+    "JOIN inputs i ON i.k=e.ordinal\n"
+    "LEFT JOIN public.laplace_physicalities((SELECT ids FROM req)) p ON p.ordinal=e.ordinal\n"
+    "ORDER BY i.n")
 
 SQL_QUERY("structural.constellation_sample", "int4",
     "SELECT s.sample_ordinal, encode(s.entity_id, 'hex'), s.physicality_type,\n       s.x, s.y, s.z, s.m, s.radius, s.n_constituents,\n       encode(s.hilbert_index, 'hex')\nFROM structural.constellation_sample($1) s\nORDER BY s.sample_ordinal")
@@ -449,7 +460,25 @@ SQL_QUERY("ops.evidence_counts_batch", "bytea[]",
     "SELECT ordinal,evidence FROM ops.entity_evidence_counts($1)")
 
 SQL_QUERY("consensus.walk_branches_rendered", "text,int4,int4",
-    "SELECT\n    gt.depth,\n    ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.path) AS u(x)) AS path_hex,\n    ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.types) AS u(x)) AS type_path_hex,\n    encode(gt.entity_id, 'hex') AS entity_id_hex,\n    converse.label_or_hex(gt.entity_id) AS entity_label,\n    gt.eff_mu,\n    gt.path_mu,\n    gt.witnesses\nFROM consensus.walk_branches(converse.resolve($1), NULL, $2, $3) gt\nORDER BY gt.depth, gt.path_mu DESC")
+    "WITH w AS MATERIALIZED (\n"
+    " SELECT * FROM public.laplace_pull(ARRAY(SELECT x FROM (SELECT public.laplace_text_id($1) x) s WHERE x IS NOT NULL),\n"
+    "  NULL,$2,$3::bigint) WHERE hops>=1\n"
+    "), ties AS MATERIALIZED (\n"
+    " SELECT p.entity,(public.laplace_parts(p.path))[2] AS rel\n"
+    " FROM public.laplace_paths(ARRAY(SELECT DISTINCT x FROM w,unnest(w.claims) x)) p\n"
+    "), lab AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(\n"
+    "  SELECT x FROM w,unnest(w.chain) x UNION SELECT rel FROM ties WHERE rel IS NOT NULL)) l\n"
+    "), st AS MATERIALIZED (\n"
+    " SELECT s.claim,s.matches FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM w WHERE claim IS NOT NULL)) s\n"
+    ")\n"
+    "SELECT w.hops,\n"
+    " ARRAY(SELECT u.x::text FROM unnest(w.chain) WITH ORDINALITY u(x,n) ORDER BY u.n),\n"
+    " ARRAY(SELECT coalesce(t.rel::text,'') FROM unnest(w.claims) WITH ORDINALITY u(x,n) LEFT JOIN ties t ON t.entity=u.x ORDER BY u.n),\n"
+    " w.id::text,coalesce((SELECT l.content FROM lab l WHERE l.entity=w.id LIMIT 1),w.id::text),\n"
+    " (w.rating-2*w.deviation)::numeric,exp(-w.cost)::numeric,coalesce(st.matches,0)::bigint\n"
+    "FROM w LEFT JOIN st ON st.claim=w.claim\n"
+    "ORDER BY w.hops,w.cost,w.ordinal")
 
 SQL_QUERY("ops.attestations_out_batch", "bytea[],int4",
     "SELECT u.ord,\n    encode(a.type_id, 'hex'),\n    encode(a.object_id, 'hex'),\n    encode(a.source_id, 'hex'),\n    CASE WHEN a.context_id IS NULL THEN NULL ELSE encode(a.context_id, 'hex') END,\n    a.outcome,\n    a.observation_count\nFROM unnest($1::bytea[]) WITH ORDINALITY AS u(id, ord)\nCROSS JOIN LATERAL ops.attestations_out(u.id, $2)\n    WITH ORDINALITY AS a(type_id, object_id, source_id, context_id, outcome, observation_count, aord)\nORDER BY u.ord, a.aord")
@@ -458,7 +487,7 @@ SQL_QUERY("ops.evidence_for_target", "bytea,text,int4",
     "WITH resolved AS MATERIALIZED (SELECT id,label FROM ops.resolve_refs(ARRAY[$1::bytea],ARRAY[$2::text]) WHERE present)\nSELECT r.id,r.label,encode(e.type_id,'hex'),e.type_label,encode(e.object_id,'hex'),e.object_label,e.source_labels,e.witness_count,e.eff_mu\nFROM resolved r LEFT JOIN LATERAL ops.evidence_receipt(r.id,$3) e ON true")
 
 SQL_QUERY("inspection.embedding_lookup", "text,int4,bool,text[]",
-    "WITH resolved AS (\n    SELECT converse.resolve_ref($1) AS id\n),\ndirect_meaning AS (\n    SELECT sf.type AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, sf.ord\n    FROM resolved r\n    CROSS JOIN LATERAL consensus.salient_facts(r.id, NULL, $2)\n        WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, ord)\n    WHERE $3 AND r.id IS NOT NULL\n    UNION ALL\n    SELECT 'PEER'::text AS rel, cp.peer AS obj, round(cp.strength::numeric, 1) AS eff_mu, 1::bigint AS witnesses, (100 + cp.ord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL lexical.concept_peers(r.id, GREATEST(4, $2 / 2))\n        WITH ORDINALITY AS cp(peer, kind, strength, ord)\n    WHERE $3 AND r.id IS NOT NULL\n),\nfallback_direct AS (\n    SELECT m.type AS rel, m.object AS obj, m.eff_mu, m.witnesses, (200 + m.ord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL ops.consensus_out_readable(r.id, $2)\n        WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)\n    WHERE $3 AND r.id IS NOT NULL\n      AND NOT EXISTS (SELECT 1 FROM direct_meaning)\n),\nconstituent_meaning AS (\n    SELECT (u.term || ':' || sf.type) AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, (u.tord * 100 + sf.sord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL unnest(COALESCE($4, ARRAY[]::text[])) WITH ORDINALITY AS u(term, tord)\n    CROSS JOIN LATERAL (SELECT converse.resolve_ref(u.term) AS wid) w\n    CROSS JOIN LATERAL consensus.salient_facts(w.wid, NULL, GREATEST(2, $2 / GREATEST(1, COALESCE(array_length($4, 1), 1))))\n        WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, sord)\n    WHERE $3 AND r.id IS NULL AND w.wid IS NOT NULL\n),\nall_meaning AS (\n    SELECT rel, obj, eff_mu, witnesses, ord FROM (\n        SELECT rel, obj, eff_mu, witnesses, ord FROM direct_meaning\n        UNION ALL\n        SELECT rel, obj, eff_mu, witnesses, ord FROM fallback_direct\n        UNION ALL\n        SELECT rel, obj, eff_mu, witnesses, ord FROM constituent_meaning\n    ) combined\n    ORDER BY ord\n    LIMIT $2\n)\nSELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,\n       f.x, f.y, f.z, f.m, f.radius, f.n_constituents,\n       NULL::text, NULL::text, NULL::numeric, NULL::bigint\nFROM resolved r\nLEFT JOIN LATERAL (\n    SELECT x, y, z, m, radius, n_constituents\n    FROM ops.entity_physicalities(r.id)\n    ORDER BY type\n    LIMIT 1\n) f ON true\nUNION ALL\nSELECT 1 AS kind, m.ord, r.id,\n       NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::int,\n       m.rel, m.obj, m.eff_mu, m.witnesses\nFROM resolved r\nCROSS JOIN all_meaning m\nORDER BY kind, ord")
+    "WITH resolved AS (\n    SELECT converse.resolve_ref($1) AS id\n),\ndirect_meaning AS (\n    SELECT sf.type AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, sf.ord\n    FROM resolved r\n    CROSS JOIN LATERAL consensus.salient_facts(r.id, NULL, $2)\n        WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, ord)\n    WHERE $3 AND r.id IS NOT NULL\n    UNION ALL\n    SELECT 'PEER'::text AS rel, cp.peer AS obj, round(cp.strength::numeric, 1) AS eff_mu, 1::bigint AS witnesses, (100 + cp.ord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL lexical.concept_peers(r.id, GREATEST(4, $2 / 2))\n        WITH ORDINALITY AS cp(peer, kind, strength, ord)\n    WHERE $3 AND r.id IS NOT NULL\n),\nfallback_direct AS (\n    SELECT m.type AS rel, m.object AS obj, m.eff_mu, m.witnesses, (200 + m.ord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL ops.consensus_out_readable(r.id, $2)\n        WITH ORDINALITY AS m(type, object, eff_mu, witnesses, ord)\n    WHERE $3 AND r.id IS NOT NULL\n      AND NOT EXISTS (SELECT 1 FROM direct_meaning)\n),\nconstituent_meaning AS (\n    SELECT (u.term || ':' || sf.type) AS rel, sf.fact AS obj, sf.eff_mu, sf.witnesses, (u.tord * 100 + sf.sord) AS ord\n    FROM resolved r\n    CROSS JOIN LATERAL unnest(COALESCE($4, ARRAY[]::text[])) WITH ORDINALITY AS u(term, tord)\n    CROSS JOIN LATERAL (SELECT converse.resolve_ref(u.term) AS wid) w\n    CROSS JOIN LATERAL consensus.salient_facts(w.wid, NULL, GREATEST(2, $2 / GREATEST(1, COALESCE(array_length($4, 1), 1))))\n        WITH ORDINALITY AS sf(type, fact, eff_mu, witnesses, sord)\n    WHERE $3 AND r.id IS NULL AND w.wid IS NOT NULL\n),\nall_meaning AS (\n    SELECT rel, obj, eff_mu, witnesses, ord FROM (\n        SELECT rel, obj, eff_mu, witnesses, ord FROM direct_meaning\n        UNION ALL\n        SELECT rel, obj, eff_mu, witnesses, ord FROM fallback_direct\n        UNION ALL\n        SELECT rel, obj, eff_mu, witnesses, ord FROM constituent_meaning\n    ) combined\n    ORDER BY ord\n    LIMIT $2\n)\nSELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,\n       f.x, f.y, f.z, f.m, f.radius, f.n_constituents,\n       NULL::text, NULL::text, NULL::numeric, NULL::bigint\nFROM resolved r\nLEFT JOIN LATERAL (\n    SELECT public.ST_X(e.coord) AS x, public.ST_Y(e.coord) AS y, public.ST_Z(e.coord) AS z, public.ST_M(e.coord) AS m,\n           public.laplace_distance4d(e.coord, public.ST_MakePoint(0,0,0,0)) AS radius,\n           coalesce(public.laplace_path_length(p.path),0)::int4 AS n_constituents\n    FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(r.id)]) e\n    LEFT JOIN public.laplace_physicalities(ARRAY[public.blake3_from_bytea(r.id)]) p ON p.entity=e.id\n) f ON true\nUNION ALL\nSELECT 1 AS kind, m.ord, r.id,\n       NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::float8, NULL::int,\n       m.rel, m.obj, m.eff_mu, m.witnesses\nFROM resolved r\nCROSS JOIN all_meaning m\nORDER BY kind, ord")
 
 SQL_QUERY("consensus.top_relations_rendered", "int4",
     "WITH t AS MATERIALIZED (\n    SELECT r.subject_id, r.type_id, r.object_id, r.eff_mu, r.witnesses,\n           row_number() OVER () AS ord\n    FROM consensus.top_relations($1) r\n),\nids AS MATERIALIZED (\n    SELECT array_agg(v.id ORDER BY t.ord, v.slot) AS a\n    FROM t\n    CROSS JOIN LATERAL (VALUES (t.subject_id, 1), (t.object_id, 2)) AS v(id, slot)\n),\nrel AS MATERIALIZED (\n    SELECT d.type_id,\n           COALESCE(NULLIF(consensus.relation_canonical(d.type_id), ''),\n                    converse.label_or_hex(d.type_id)) AS relation\n    FROM (SELECT DISTINCT t.type_id FROM t) d\n),\nlbl AS MATERIALIZED (\n    SELECT realize.batch(ids.a, NULL) AS l FROM ids\n)\nSELECT\n    encode(t.subject_id, 'hex') AS subject_id_hex,\n    COALESCE(lbl.l[(t.ord - 1) * 2 + 1], converse.label_or_hex(t.subject_id)) AS subject_label,\n    encode(t.type_id, 'hex') AS type_id_hex,\n    rel.relation AS type_label,\n    encode(t.object_id, 'hex') AS object_id_hex,\n    COALESCE(lbl.l[(t.ord - 1) * 2 + 2], converse.label_or_hex(t.object_id)) AS object_label,\n    t.eff_mu,\n    t.witnesses\nFROM t\nJOIN rel ON rel.type_id = t.type_id\nCROSS JOIN lbl\nORDER BY t.ord")
@@ -467,19 +496,47 @@ SQL_QUERY("lexical.senses_rendered", "bytea",
     "WITH s AS MATERIALIZED (\n    SELECT sense_id, synset_id, eff_mu, witnesses, row_number() OVER () AS ord\n    FROM lexical.senses($1)\n), lang AS MATERIALIZED (\n    SELECT converse.word_language($1) AS id\n), ids AS MATERIALIZED (\n    SELECT COALESCE(array_agg(synset_id ORDER BY ord), '{}'::bytea[]) AS a FROM s\n), lex AS MATERIALIZED (\n    SELECT realize.lexicalize_batch(ids.a, lang.id) AS l, realize.render_text_batch(ids.a, 8) AS r\n    FROM ids CROSS JOIN lang\n)\nSELECT encode(s.sense_id, 'hex'), encode(s.synset_id, 'hex'),\n       COALESCE(\n           NULLIF(lex.l[s.ord::int], ''),\n           NULLIF(lex.r[s.ord::int], ''),\n           'Unrealized sense'),\n       s.eff_mu, s.witnesses\nFROM s CROSS JOIN lex\nORDER BY s.ord")
 
 SQL_QUERY("realize.constituents_rendered", "bytea",
-    "WITH children AS MATERIALIZED (SELECT * FROM realize.constituents($1)), labels AS MATERIALIZED (\n SELECT * FROM realize.display_label_batch(ARRAY(SELECT DISTINCT child_id FROM children ORDER BY child_id))\n) SELECT c.ordinal,encode(c.child_id,'hex'),c.run_length,c.flags,coalesce(l.label,encode(c.child_id,'hex'))\nFROM children c LEFT JOIN labels l ON l.id=c.child_id ORDER BY c.ordinal")
+    "WITH children AS MATERIALIZED (\n"
+    " SELECT c.ordinal,c.child,c.run_length,c.flags FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)]) c\n"
+    "), labels AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(SELECT DISTINCT child FROM children ORDER BY child)) l\n"
+    ")\n"
+    "SELECT c.ordinal,c.child::text,c.run_length,c.flags,coalesce(l.content,c.child::text)\n"
+    "FROM children c LEFT JOIN labels l ON l.entity=c.child ORDER BY c.ordinal")
 
 SQL_QUERY("inspection.packed_trajectory_vertices", "bytea",
     "WITH native AS MATERIALIZED (\n SELECT c.ordinal,public.ST_PointN(p.path,c.ordinal) AS vertex,c.child,c.run_length,c.flags\n FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)]) c\n JOIN public.physicality p ON p.entity=c.entity\n) SELECT ordinal,public.ST_X(vertex),public.ST_Y(vertex),public.ST_Z(vertex),public.ST_M(vertex),\n child::text,run_length,flags FROM native\nUNION ALL\nSELECT u.ordinal,public.ST_X(dp.geom),public.ST_Y(dp.geom),public.ST_Z(dp.geom),public.ST_M(dp.geom),\n encode(u.entity_id,'hex'),greatest(u.run_length,1),u.flags\nFROM (SELECT trajectory FROM laplace.v_word_points WHERE id=$1 AND trajectory IS NOT NULL\n AND NOT EXISTS(SELECT FROM public.entity WHERE id=public.blake3_from_bytea($1)) LIMIT 1) t,\n LATERAL public.ST_DumpPoints(t.trajectory) dp,LATERAL public.laplace_mantissa_unpack(dp.geom) u ORDER BY 1")
 
 SQL_QUERY("inspection.realized_trajectory_vertices", "bytea",
-    "WITH children AS MATERIALIZED (\n SELECT * FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)])\n), labels AS MATERIALIZED (\n SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT child FROM children ORDER BY child))\n), coords AS (\n SELECT c.ordinal,c.child,coalesce(e.coord,CASE WHEN public.laplace_codepoint(c.child)>=0 THEN\n public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(c.child))) END) AS coord\n FROM children c LEFT JOIN public.entity e ON e.id=c.child\n) SELECT c.ordinal,public.ST_X(c.coord),public.ST_Y(c.coord),public.ST_Z(c.coord),public.ST_M(c.coord),\n c.child::text,coalesce(l.content,c.child::text),public.laplace_radius_origin(c.coord)\nFROM coords c LEFT JOIN labels l ON l.entity=c.child WHERE c.coord IS NOT NULL\nUNION ALL\nSELECT c.ordinal,public.ST_X(p.coord),public.ST_Y(p.coord),public.ST_Z(p.coord),public.ST_M(p.coord),\n encode(c.child_id,'hex'),coalesce(nullif(realize.render_text_fast(c.child_id,8),''),'Unrealized entity'),p.radius_origin\nFROM realize.constituents($1) c JOIN laplace.physicalities p ON p.entity_id=c.child_id AND p.type=1\nWHERE p.coord IS NOT NULL AND NOT EXISTS(SELECT FROM public.entity WHERE id=public.blake3_from_bytea($1)) ORDER BY 1")
+    "WITH children AS MATERIALIZED (\n SELECT * FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)])\n), labels AS MATERIALIZED (\n SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT child FROM children ORDER BY child))\n), coords AS (\n SELECT c.ordinal,c.child,coalesce(e.coord,CASE WHEN public.laplace_codepoint(c.child)>=0 THEN\n public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(c.child))) END) AS coord\n FROM children c LEFT JOIN public.entity e ON e.id=c.child\n) SELECT c.ordinal,public.ST_X(c.coord),public.ST_Y(c.coord),public.ST_Z(c.coord),public.ST_M(c.coord),\n c.child::text,coalesce(l.content,c.child::text),public.laplace_radius_origin(c.coord)\nFROM coords c LEFT JOIN labels l ON l.entity=c.child WHERE c.coord IS NOT NULL ORDER BY 1")
 
 SQL_QUERY("consensus.explore_web_rendered", "bytea,int4,int4,int4",
-    "SELECT encode(w.source_id, 'hex'), encode(w.type_id, 'hex'), encode(w.object_id, 'hex'),\n       w.hop, consensus.eff_mu(w.rating, w.rd)::numeric, w.witness_count,\n       consensus.walk_edge_weight(w.rating, w.rd),\n       consensus.refuted(w.rating, w.rd)\nFROM consensus.explore_web($1, $2, $3, $4) w")
+    "WITH w AS MATERIALIZED (\n"
+    " SELECT * FROM public.laplace_pull(ARRAY[public.blake3_from_bytea($1)],NULL,$2,$3::bigint,$4::bigint)\n"
+    " WHERE claim IS NOT NULL\n"
+    "), p AS MATERIALIZED (\n"
+    " SELECT x.entity,public.laplace_parts(x.path) AS parts FROM public.laplace_paths(ARRAY(SELECT DISTINCT claim FROM w)) x\n"
+    "), st AS MATERIALIZED (\n"
+    " SELECT s.claim,s.matches FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM w)) s\n"
+    ")\n"
+    "SELECT p.parts[1]::text,p.parts[2]::text,p.parts[3]::text,w.hops::smallint,\n"
+    " (w.rating-2*w.deviation)::numeric,coalesce(st.matches,0)::bigint,\n"
+    " public.laplace_confidence(w.rating,w.deviation),(w.rating+2*w.deviation)<1500\n"
+    "FROM w JOIN p ON p.entity=w.claim LEFT JOIN st ON st.claim=w.claim\n"
+    "ORDER BY w.ordinal")
 
 SQL_QUERY("consensus.explore_induced_edges_rendered", "bytea[]",
-    "SELECT encode(e.source_id, 'hex'), encode(e.type_id, 'hex'), encode(e.object_id, 'hex'),\n       e.rating::numeric / 1000000000::numeric,\n       e.rd::numeric / 1000000000::numeric,\n       e.volatility::numeric / 1000000000::numeric,\n       consensus.eff_mu(e.rating, e.rd)::numeric,\n       e.witness_count,\n       consensus.walk_edge_weight(e.rating, e.rd),\n       consensus.refuted(e.rating, e.rd)\nFROM consensus.explore_induced_edges($1) e")
+    "WITH n AS MATERIALIZED (\n"
+    " SELECT ARRAY(SELECT DISTINCT public.blake3_from_bytea(x) FROM unnest($1::bytea[]) x WHERE x IS NOT NULL) AS ids\n"
+    "), c AS MATERIALIZED (\n"
+    " SELECT DISTINCT ON (c.entity) c.entity,public.laplace_parts(c.path) AS parts,c.rating,c.deviation,c.volatility,c.matches\n"
+    " FROM n CROSS JOIN LATERAL public.laplace_claims_each(n.ids,NULL::bigint,ARRAY[public.laplace_bank_bit('kind','claim')],'{}'::public.blake3[],\n"
+    "  1::smallint,NULL::public.blake3[],3::bigint,n.ids) c\n"
+    " ORDER BY c.entity\n"
+    ")\n"
+    "SELECT parts[1]::text,parts[2]::text,parts[3]::text,rating::numeric,deviation::numeric,volatility::numeric,\n"
+    " (rating-2*deviation)::numeric,matches,public.laplace_confidence(rating,deviation),(rating+2*deviation)<1500\n"
+    "FROM c ORDER BY entity")
 
 SQL_QUERY("realize.labels_fast", "bytea[]",
     "WITH inp AS MATERIALIZED (\n    SELECT x.id, x.ord, e.tier\n    FROM unnest($1::bytea[]) WITH ORDINALITY AS x(id, ord)\n    LEFT JOIN laplace.entities e ON e.id = x.id\n), names AS MATERIALIZED (\n    SELECT realize.resolve_name_batch($1::bytea[]) AS labels\n), shallow_ids AS MATERIALIZED (\n    SELECT COALESCE(\n               array_agg(i.id ORDER BY i.ord) FILTER (WHERE i.tier <= 3),\n               '{}'::bytea[]) AS ids\n    FROM inp i\n), shallow_labels AS MATERIALIZED (\n    SELECT s.ids, realize.render_text_batch(s.ids, 3) AS labels\n    FROM shallow_ids s\n), shallow AS MATERIALIZED (\n    SELECT s.ids[n] AS id, s.labels[n] AS label\n    FROM shallow_labels s,\n         generate_subscripts(s.ids, 1) AS n\n)\nSELECT encode(i.id, 'hex'),\n       COALESCE(\n           NULLIF(n.name, ''),\n           NULLIF(names.labels[i.ord], ''),\n           NULLIF(shallow.label, '')),\n       i.tier\nFROM inp i\nCROSS JOIN names\nLEFT JOIN shallow ON shallow.id = i.id\nLEFT JOIN laplace.canonical_names n ON n.id = i.id\nORDER BY i.ord")
@@ -494,7 +551,30 @@ SQL_QUERY("converse.translations", "text,int4",
     "SELECT t.translation, t.language, t.eff_mu, t.witnesses\nFROM converse.translations(converse.resolve_ref($1), $2) t")
 
 SQL_QUERY("consensus.walk_branches_for_prompt", "text,text,text,int4,int4",
-    "WITH node AS (SELECT CASE WHEN $2 IS NULL THEN converse.resolve($1)\n                          ELSE decode($2, 'hex') END AS id)\nSELECT w.depth,\n       realize.path(w.path, w.types) AS path,\n       w.eff_mu, w.path_mu, w.witnesses\nFROM node, consensus.walk_branches(\n         node.id,\n         CASE WHEN $3 IS NULL THEN NULL ELSE laplace.relation_type_id($3) END,\n         $4, $5) w\nORDER BY w.depth, w.path_mu DESC")
+    "WITH node AS MATERIALIZED (\n"
+    " SELECT CASE WHEN $2 IS NULL THEN public.laplace_text_id($1)\n"
+    "             ELSE public.blake3_from_bytea(decode($2,'hex')) END AS id\n"
+    "), w AS MATERIALIZED (\n"
+    " SELECT p.* FROM node CROSS JOIN LATERAL public.laplace_pull(ARRAY[node.id],NULL,$4,$5::bigint,4096::bigint,\n"
+    "  CASE WHEN $3::text IS NULL THEN NULL::public.blake3[] WHEN upper($3::text)='IS_A' THEN ARRAY[public.laplace_text_id('hypernym')] WHEN $3::text ~ '^[A-Z_]+$' THEN NULL::public.blake3[] ELSE ARRAY[public.laplace_text_id($3::text)] END) p\n"
+    " WHERE node.id IS NOT NULL AND p.hops>=1\n"
+    "), ties AS MATERIALIZED (\n"
+    " SELECT p.entity,(public.laplace_parts(p.path))[2] AS rel\n"
+    " FROM public.laplace_paths(ARRAY(SELECT DISTINCT x FROM w,unnest(w.claims) x)) p\n"
+    "), lab AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(\n"
+    "  SELECT x FROM w,unnest(w.chain) x UNION SELECT rel FROM ties WHERE rel IS NOT NULL)) l\n"
+    "), st AS MATERIALIZED (\n"
+    " SELECT s.claim,s.matches FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM w WHERE claim IS NOT NULL)) s\n"
+    ")\n"
+    "SELECT w.hops,(SELECT string_agg(CASE WHEN u.n=1 THEN '' ELSE ' -['||coalesce(lr.content,t.rel::text,'?')||']- ' END\n"
+    "   ||coalesce(lx.content,u.x::text),'' ORDER BY u.n)\n"
+    " FROM unnest(w.chain) WITH ORDINALITY u(x,n)\n"
+    " LEFT JOIN ties t ON t.entity=w.claims[u.n-1]\n"
+    " LEFT JOIN lab lx ON lx.entity=u.x LEFT JOIN lab lr ON lr.entity=t.rel),\n"
+    " (w.rating-2*w.deviation)::numeric,exp(-w.cost)::numeric,coalesce(st.matches,0)::bigint\n"
+    "FROM w LEFT JOIN st ON st.claim=w.claim\n"
+    "ORDER BY w.hops,w.cost,w.ordinal")
 
 SQL_QUERY("ops.api_catalog", "text",
     "SELECT name, args, returns, kind FROM ops.api($1) ORDER BY name, args")
@@ -503,13 +583,60 @@ SQL_QUERY("consensus.band_facts", "bytea,int4[],int4",
     "WITH requested_bands AS MATERIALIZED (\n    SELECT b.band, b.name, b.rank\n    FROM converse.relation_band_catalog() b\n    WHERE $2::int[] IS NULL OR b.band = ANY($2::int[])\n), edges AS MATERIALIZED (\n    SELECT z.*, consensus.relation_rank(z.type_id) AS rel_rank\n    FROM consensus.edges_raw($1, 'both', NULL, GREATEST($3 * 4, 64), true, 'eff_mu') z\n), ranked AS (\n    SELECT b.name, b.rank, z.*\n    FROM edges z\n    JOIN requested_bands b ON b.rank = z.rel_rank\n)\nSELECT z.name || ' · ' || COALESCE(consensus.relation_canonical(z.type_id), converse.label_or_hex(z.type_id))\n         || CASE z.direction WHEN 'in' THEN ' ← ' ELSE ' → ' END\n         || converse.label_or_hex(z.neighbour_id) AS reply,\n       consensus.eff_mu_display(z.rating, z.rd) AS eff_mu,\n       z.witness_count\nFROM ranked z\nORDER BY z.rank DESC,\n         consensus.eff_mu(z.rating, z.rd) DESC,\n         z.neighbour_id,\n         z.type_id,\n         CASE z.direction WHEN 'out' THEN 0 ELSE 1 END\nLIMIT $3")
 
 SQL_QUERY("consensus.walk_strongest_rendered", "bytea,int4",
-    "SELECT converse.label_or_hex(w.entity_id)\n         || ' (' || consensus.relation_canonical(w.type_id) || ')' AS reply,\n       w.eff_mu, NULL::bigint\nFROM consensus.walk_strongest($1, NULL, $2) w\nORDER BY w.step")
+    "WITH w AS MATERIALIZED (\n"
+    " SELECT * FROM public.laplace_pull(ARRAY[public.blake3_from_bytea($1)],NULL,$2)\n"
+    "), best AS MATERIALIZED (\n"
+    " SELECT chain,claims FROM w WHERE hops>=1 ORDER BY hops DESC,cost,ordinal LIMIT 1\n"
+    "), steps AS MATERIALIZED (\n"
+    " SELECT u.n,u.x,b.claims[u.n-1] AS claim FROM best b,unnest(b.chain) WITH ORDINALITY u(x,n) WHERE u.n>1\n"
+    "), ties AS MATERIALIZED (\n"
+    " SELECT p.entity,(public.laplace_parts(p.path))[2] AS rel FROM public.laplace_paths(ARRAY(SELECT claim FROM steps)) p\n"
+    "), st AS MATERIALIZED (\n"
+    " SELECT s.claim,s.rating,s.deviation FROM public.laplace_standings(ARRAY(SELECT claim FROM steps)) s\n"
+    "), lab AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(SELECT x FROM steps UNION SELECT rel FROM ties WHERE rel IS NOT NULL)) l\n"
+    ")\n"
+    "SELECT coalesce(lx.content,s.x::text)||' ('||coalesce(lr.content,t.rel::text,'?')||')',\n"
+    " (st.rating-2*st.deviation)::numeric,NULL::bigint\n"
+    "FROM steps s LEFT JOIN ties t ON t.entity=s.claim LEFT JOIN st ON st.claim=s.claim\n"
+    "LEFT JOIN lab lx ON lx.entity=s.x LEFT JOIN lab lr ON lr.entity=t.rel\n"
+    "ORDER BY s.n")
 
 SQL_QUERY("consensus.walk_branches_beam", "bytea,text,int4[],int4,int4,int4",
-    "WITH mask AS (\n    SELECT CASE WHEN $3::int[] IS NULL THEN NULL\n                ELSE consensus.highway_mask_from_bits(\n                         (SELECT array_agg(DISTINCT bit)\n                          FROM unnest($3::int[]) AS b(band),\n                               LATERAL unnest(consensus.highway_mask_bits(\n                                   consensus.highway_band_mask(b.band))) AS t(bit)))\n           END AS m\n)\nSELECT repeat('  ', w.depth) || realize.path(w.path, w.types) AS reply,\n       w.path_mu, w.witnesses\nFROM mask, consensus.walk_branches(\n         $1,\n         CASE WHEN $2::text IS NULL THEN NULL\n              ELSE laplace.relation_type_id($2::text) END,\n         $4, $5, mask.m) w\nORDER BY w.path_mu DESC\nLIMIT $6")
+    "WITH w AS MATERIALIZED (\n"
+    " SELECT * FROM public.laplace_pull(ARRAY[public.blake3_from_bytea($1)],NULL,$4,$5::bigint,4096::bigint,\n"
+    "  CASE WHEN $2::text IS NULL THEN NULL::public.blake3[] WHEN upper($2::text)='IS_A' THEN ARRAY[public.laplace_text_id('hypernym')] WHEN $2::text ~ '^[A-Z_]+$' THEN NULL::public.blake3[] ELSE ARRAY[public.laplace_text_id($2::text)] END) WHERE hops>=1\n"
+    "), ties AS MATERIALIZED (\n"
+    " SELECT p.entity,(public.laplace_parts(p.path))[2] AS rel\n"
+    " FROM public.laplace_paths(ARRAY(SELECT DISTINCT x FROM w,unnest(w.claims) x)) p\n"
+    "), lab AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(\n"
+    "  SELECT x FROM w,unnest(w.chain) x UNION SELECT rel FROM ties WHERE rel IS NOT NULL)) l\n"
+    "), st AS MATERIALIZED (\n"
+    " SELECT s.claim,s.matches FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM w WHERE claim IS NOT NULL)) s\n"
+    ")\n"
+    "SELECT repeat('  ',w.hops)||(SELECT string_agg(CASE WHEN u.n=1 THEN '' ELSE ' -['||coalesce(lr.content,t.rel::text,'?')||']- ' END\n"
+    "   ||coalesce(lx.content,u.x::text),'' ORDER BY u.n)\n"
+    " FROM unnest(w.chain) WITH ORDINALITY u(x,n)\n"
+    " LEFT JOIN ties t ON t.entity=w.claims[u.n-1]\n"
+    " LEFT JOIN lab lx ON lx.entity=u.x LEFT JOIN lab lr ON lr.entity=t.rel),exp(-w.cost)::numeric,coalesce(st.matches,0)::bigint\n"
+    "FROM w LEFT JOIN st ON st.claim=w.claim\n"
+    "ORDER BY w.cost,w.ordinal\n"
+    "LIMIT $6")
 
 SQL_QUERY("converse.astar_path_rendered", "bytea,bytea,int4,bool,bool",
-    "SELECT repeat('  ', p.step) || converse.label_or_hex(p.entity_id) AS reply,\n       p.g::numeric, NULL::bigint\nFROM converse.astar_path($1, ARRAY[$2]::bytea[], $3, NULL,\n                        $4, $5) p\nORDER BY p.step")
+    "WITH w AS MATERIALIZED (\n"
+    " SELECT * FROM public.laplace_pull(ARRAY[public.blake3_from_bytea($1)],ARRAY[public.blake3_from_bytea($2)],$3)\n"
+    "), best AS MATERIALIZED (\n"
+    " SELECT chain FROM w WHERE goal ORDER BY cost,ordinal LIMIT 1\n"
+    "), steps AS MATERIALIZED (\n"
+    " SELECT u.n-1 AS step,u.x FROM best b,unnest(b.chain) WITH ORDINALITY u(x,n)\n"
+    "), lab AS MATERIALIZED (\n"
+    " SELECT l.entity,l.content FROM public.laplace_labels(ARRAY(SELECT DISTINCT x FROM steps)) l\n"
+    ")\n"
+    "SELECT repeat('  ',s.step::int)||coalesce(l.content,s.x::text),r.cost::numeric,NULL::bigint\n"
+    "FROM steps s LEFT JOIN lab l ON l.entity=s.x LEFT JOIN w r ON r.id=s.x\n"
+    "ORDER BY s.step")
 
 SQL_QUERY("generation.walk_continuations_rendered", "bytea,int4,int4,float8,int4,int8",
     "SELECT converse.label_or_hex(w.entity) AS reply, NULL::numeric, NULL::bigint\nFROM generation.walk_continuations(ARRAY[$1]::bytea[], $2, $3,\n                                $4, $5, $6) w\nORDER BY w.step")

@@ -43,7 +43,6 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.Contains("WITH ORDINALITY", nativeFixture, StringComparison.Ordinal);
         Assert.Contains("labels IS DISTINCT FROM", nativeFixture, StringComparison.Ordinal);
         Assert.Contains("[dog · λ · 中]", nativeFixture, StringComparison.Ordinal);
-        Assert.Contains("type_id IS NULL", nativeFixture, StringComparison.Ordinal);
         Assert.DoesNotContain("INSERT INTO laplace.entities", nativeFixture, StringComparison.Ordinal);
     }
 
@@ -69,31 +68,5 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.DoesNotContain("var lab = row.Label ?? hex", source, StringComparison.Ordinal);
         Assert.DoesNotContain("r.Label ?? r.IdHex", source, StringComparison.Ordinal);
         Assert.DoesNotContain("NpgsqlSubstrateReads.LabelOrHexAsync", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void EntityFacets_KeepUnknownTypesUnknown_AndLexicalizationRemainsSeparate()
-    {
-        var root = TypeIdLawTests.FindRepoRootPublic();
-        var catalog = TypeIdLawTests.ReadSqlCatalog(root);
-        var facetsSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
-            "functions", "inspect", "entity_facets.sql.in"));
-        var realizeBatch = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",
-            "realize_batch.c")) + "\n" + File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src",
-            "realize_batch_arms.c"));
-        var synsetLemmaSql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
-            "functions", "realize", "realize_synset_lemma.sql.in"));
-
-        Assert.Contains("FROM @extschema:laplace@.laplace_entities(", facetsSql, StringComparison.Ordinal);
-        Assert.Contains("LEFT JOIN native e ON e.id=i.key", facetsSql, StringComparison.Ordinal);
-        Assert.Contains("@extschema:laplace@.laplace_codepoint", facetsSql, StringComparison.Ordinal);
-        // Preserve observed semantic roles without inferring Word from a tier.
-        // Native scalar identity is the only implicit type; other unknowns stay NULL.
-        Assert.Contains("coalesce(type_id,CASE WHEN scalar IS NOT NULL THEN laplace.entity_type_id('Codepoint') END)", facetsSql, StringComparison.Ordinal);
-        Assert.DoesNotContain("THEN laplace.entity_type_id('Word')", facetsSql, StringComparison.Ordinal);
-        Assert.DoesNotContain("laplace.consensus", facetsSql, StringComparison.Ordinal);
-        Assert.Contains("COALESCE(w.tier, 32767) ASC, cand.word_id", realizeBatch, StringComparison.Ordinal);
-        Assert.Contains("realize.lexicalize_batch(ARRAY[p_id], p_lang)", synsetLemmaSql, StringComparison.Ordinal);
-        Assert.DoesNotContain("ORDER BY", synsetLemmaSql, StringComparison.OrdinalIgnoreCase);
     }
 }
