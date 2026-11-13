@@ -37,7 +37,6 @@ set(EXT_EXECUTION_SOURCES
     src/display_native.c
     src/attestation_response.c
     src/observation_read.c
-    src/conversation_session.c
     src/recall.c
     src/recall_fast.c
     src/recall_route.c

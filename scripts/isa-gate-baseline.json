@@ -6,8 +6,6 @@
     "g12_string_sql_bodies": {},
     "g13_string_op_on_surface": {},
     "g14_case_fold": {
-      "extension/laplace_substrate/sql/functions/converse/chat_scaffold.sql.in::initcap": 10,
-      "extension/laplace_substrate/sql/functions/converse/chat_scaffold.sql.in::lower": 2,
       "extension/laplace_substrate/sql/functions/converse/converse_facts.sql.in::initcap": 4,
       "extension/laplace_substrate/sql/functions/converse/resolve_topic.sql.in::lower": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
@@ -104,10 +102,6 @@
       "extension/laplace_substrate/sql/functions/converse/epistemic_status.sql.in::HAS_SENSE": 1,
       "extension/laplace_substrate/sql/functions/converse/epistemic_status.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/converse/forward_pass.sql.in::IS_SENSE_OF": 2,
-      "extension/laplace_substrate/sql/functions/converse/session_turns.sql.in::APPEARS_IN": 1,
-      "extension/laplace_substrate/sql/functions/converse/session_turns.sql.in::AUTHORED_BY": 1,
-      "extension/laplace_substrate/sql/functions/converse/session_turns.sql.in::HAS_ROLE": 1,
-      "extension/laplace_substrate/sql/functions/converse/session_turns.sql.in::IS_INSTANCE_OF": 1,
       "extension/laplace_substrate/sql/functions/converse/witness_precedes_chain.sql.in::PRECEDES": 1,
       "extension/laplace_substrate/sql/functions/converse/word_language.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/corpus/corpus_whitespace_vocab_indices.sql.in::GC": 1,

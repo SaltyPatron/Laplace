@@ -31,7 +31,7 @@ public sealed class NativeSqlTransportCommandTests
         using var utility = NpgsqlCatalog.Command(connection, null, "maintenance.vacuum_plain_relation", identifiers: identifiers);
         Assert.Equal("VACUUM laplace.physicalities", utility.CommandText);
         Assert.Empty(utility.Parameters);
-        using var query = NpgsqlCatalog.Command(connection, null, "conversation.lock", id);
+        using var query = NpgsqlCatalog.Command(connection, null, "ingest.flush_receipt_exists", id);
         Assert.Equal("bytea", query.Parameters[0].DataTypeName);
         Assert.Same(id, query.Parameters[0].Value);
         identifiers["relation"] = "x; DROP SCHEMA public";
