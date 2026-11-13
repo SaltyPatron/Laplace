@@ -22,8 +22,8 @@ public sealed class CapabilitiesForwardBackendTests : IClassFixture<SignedWebhoo
         var chatBackend = endpoints.GetProperty("chat_completions").GetProperty("backend").GetString();
         var completionsBackend = endpoints.GetProperty("completions").GetProperty("backend").GetString();
 
-        Assert.Equal("converse.forward_turn -> generation.forward_program (native)", chatBackend);
-        Assert.Equal("converse.forward_turn -> generation.forward_program (native streaming)", completionsBackend);
+        Assert.Equal("laplace turn: the forward program, the turn witnessed by the Engine", chatBackend);
+        Assert.Equal("laplace turn: the forward program, each step streamed, the turn witnessed by the Engine", completionsBackend);
         Assert.DoesNotContain("recall_session", chatBackend ?? string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("consensus.completions", completionsBackend ?? string.Empty, StringComparison.Ordinal);
     }

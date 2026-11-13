@@ -39,6 +39,8 @@ internal sealed partial class SubstrateTools : IMcpTools
                 "-c default_transaction_read_only=on";
         }, connectionString);
         _ownsDataSources = true;
+        _turns = new Lazy<ConversationTurns>(() =>
+            new ConversationTurns(LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, connectionString)));
     }
 
     public SubstrateTools(NpgsqlDataSource db, NpgsqlDataSource dbReadOnly)
@@ -46,11 +48,11 @@ internal sealed partial class SubstrateTools : IMcpTools
         _db = db;
         _dbReadOnly = dbReadOnly;
         _ownsDataSources = false;
+        _turns = new Lazy<ConversationTurns>(ConversationTurns.Installed);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_turnCloser is not null) await _turnCloser.DisposeAsync();
         if (_plainWriter is IAsyncDisposable writer) await writer.DisposeAsync();
         if (_ownsDataSources)
         {
@@ -105,18 +107,10 @@ internal sealed partial class SubstrateTools : IMcpTools
             () => Schema(("bands", "string", "comma-separated band numbers, default '1,2,4,5'", false),
                          ("per_band", "integer", "rows per band, default 5", false)),
             (s, a) => s.Leaders(a)),
-        new("chat", "One conversational turn; reply is walk-driven and self-witnessing.",
-            "One conversational turn against the substrate (converse.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
+        new("chat", "One turn of a session, answered by the forward program and witnessed.",
+            "One turn of a session (Engine laplace turn): the forward program RESOLVE..WITNESS answers under its firmware, the session's earlier turns its discourse. The Engine witnesses the turn itself: this agent's [session, turn] at its ordinal under UserPromptContent and Laplace's [response, prompt] under ResponseContent, so the next turn reads it. Returns the reply and the receipt (turn id, ordinal, disposition).",
             () => Schema(("prompt", "string", "the message", true),
-                         ("session", "string", "session key for continuity", false),
-                         ("max_tokens", "integer", "maximum emitted constituents, default 128", false),
-                         ("window", "integer", "maximum ordered continuation stride, default 5", false),
-                         ("temperature", "number", "selection spread; zero selects deterministically", false),
-                         ("top_k", "integer", "candidate count for selection, default 10", false),
-                         ("shape", "string", "optional read shape (see converse.query_shapes())", false),
-                         ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
-                         ("language", "string", "operator primary language for this turn (ISO code or name)", false),
-                         ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false)),
+                         ("session", "string", "session key for continuity ([A-Za-z0-9._@-]{1,128}); default, this server process's session", false)),
             (s, a) => s.ChatTurn(a)),
         new("witness", "Deposit a fact as witnessed content (the write lane).",
             "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
@@ -307,24 +301,16 @@ internal sealed partial class SubstrateTools : IMcpTools
         return (payload.ToJsonString(), false);
     }
 
-    // One conversational turn: SQL converse.chat() composes the reply (read-side), then the
-    // turn is deposited through the writer spine — full content mint + turn-level
-    // evidence + inline fold under the mcp-local tenant's sources, session as
-    // context on every row (spec 34). This is converse.chat()'s OODA close; the SQL function
-    // itself stays read-only (session state aside).
+    // The MCP participant: the agent principal this server answers, a witness of its turns. A chat turn
+    // is the Engine's (ConversationTurns): [mcp-local, session] is the session, the turn witnessed there.
     private const string McpTenant = "mcp-local";
     private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
+    private readonly Lazy<ConversationTurns> _turns;
 
-    // TWO DISTINCT LANES, no longer sharing a writer or a broken-latch.
-    //   _turnCloser  — the spec-34 conversational close: tenant scope, session as
-    //                  context, attribution. Owned entirely by TurnCloser.
     //   _plainWriter — the untenanted agent-note lane (WitnessFact), which rides the
     //                  shared UserPrompt/Response sources because a standalone note
     //                  has no session or tenant to scope.
-    // These were one writer and one `_turnDepositBroken` flag, so a failure in the
-    // note lane silently disabled conversational deposits and vice versa.
     private readonly object _writerSync = new();
-    private TurnCloser? _turnCloser;
     private ISubstrateWriter? _plainWriter;
     private bool _plainBootstrapped;
     private bool _plainWriterBroken;

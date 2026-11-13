@@ -23,13 +23,21 @@
       {
         "index": 0,
         "delta": {
-          "content": " the"
+          "content": "the"
         },
         "finish_reason": null
       }
     ],
     "laplace": {
-      "ord_used": 5
+      "step": {
+        "step": 1,
+        "kind": "answers",
+        "id": "00000000000000000000000000000001",
+        "text": "the",
+        "grounds": 2,
+        "continuity": 0,
+        "confidence": 0.5
+      }
     }
   },
   {
@@ -47,7 +55,15 @@
       }
     ],
     "laplace": {
-      "ord_used": 4
+      "step": {
+        "step": 2,
+        "kind": "answers",
+        "id": "00000000000000000000000000000002",
+        "text": " whale",
+        "grounds": 2,
+        "continuity": 1,
+        "confidence": 0.5
+      }
     }
   },
   {
@@ -65,7 +81,15 @@
       }
     ],
     "laplace": {
-      "ord_used": 3
+      "step": {
+        "step": 3,
+        "kind": "answers",
+        "id": "00000000000000000000000000000003",
+        "text": " sings",
+        "grounds": 2,
+        "continuity": 2,
+        "confidence": 0.5
+      }
     }
   },
   {
@@ -84,8 +108,8 @@
       "performance": {
         "substrate_ms": 0,
         "elapsed_ms": 0,
-        "output_utf8_bytes": 16,
-        "output_codepoints": 16,
+        "output_utf8_bytes": 15,
+        "output_codepoints": 15,
         "output_words": 3,
         "first_result_ms": 0,
         "generated_tokens": 3,
@@ -93,97 +117,44 @@
       },
       "forward_proof": {
         "session": "<session>",
-        "prompt_occurrence_key": "<occurrence>",
-        "response_witnessed": true,
-        "completion": true,
-        "disposition": "complete",
-        "required_obligations": 0,
-        "satisfied_obligations": 0,
-        "remaining_required": 0,
-        "output_count": 3,
-        "prior_discourse_ids": [],
-        "events": [
+        "participant": "golden-gen-sse-tenant",
+        "prompt_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "response_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "turn_id": "cccccccccccccccccccccccccccccccc",
+        "ordinal": 1,
+        "turns_before": 0,
+        "witnessed": true,
+        "disposition": "complete: every obligation is grounded",
+        "steps": [
           {
             "step": 1,
-            "entity_id_hex": "",
-            "entity": " the",
-            "stride_used": 5,
-            "root_id_hex": "",
-            "candidate_count": 0,
-            "ordered_context_count": 0,
-            "proposal_channel_count": 0,
-            "exact_channel_count": 0,
-            "sequence_occurrences": 0,
-            "covered_occurrences": 0,
-            "relation_families": 0,
-            "opposed_occurrences": 0,
-            "support_sources": 0,
-            "support_contexts": 0,
-            "declared_result": false,
-            "event": "emit",
-            "routing_round": 0
+            "kind": "answers",
+            "id": "00000000000000000000000000000001",
+            "text": "the",
+            "grounds": 2,
+            "continuity": 0,
+            "confidence": 0.5
           },
           {
             "step": 2,
-            "entity_id_hex": "",
-            "entity": " whale",
-            "stride_used": 4,
-            "root_id_hex": "",
-            "candidate_count": 0,
-            "ordered_context_count": 0,
-            "proposal_channel_count": 0,
-            "exact_channel_count": 0,
-            "sequence_occurrences": 0,
-            "covered_occurrences": 0,
-            "relation_families": 0,
-            "opposed_occurrences": 0,
-            "support_sources": 0,
-            "support_contexts": 0,
-            "declared_result": false,
-            "event": "emit",
-            "routing_round": 0
+            "kind": "answers",
+            "id": "00000000000000000000000000000002",
+            "text": " whale",
+            "grounds": 2,
+            "continuity": 1,
+            "confidence": 0.5
           },
           {
             "step": 3,
-            "entity_id_hex": "",
-            "entity": " sings",
-            "stride_used": 3,
-            "root_id_hex": "",
-            "candidate_count": 0,
-            "ordered_context_count": 0,
-            "proposal_channel_count": 0,
-            "exact_channel_count": 0,
-            "sequence_occurrences": 0,
-            "covered_occurrences": 0,
-            "relation_families": 0,
-            "opposed_occurrences": 0,
-            "support_sources": 0,
-            "support_contexts": 0,
-            "declared_result": false,
-            "event": "emit",
-            "routing_round": 0
-          },
-          {
-            "step": 3,
-            "entity_id_hex": "",
-            "entity": "",
-            "stride_used": 0,
-            "root_id_hex": "",
-            "candidate_count": 0,
-            "ordered_context_count": 0,
-            "proposal_channel_count": 0,
-            "exact_channel_count": 0,
-            "sequence_occurrences": 0,
-            "covered_occurrences": 0,
-            "relation_families": 0,
-            "opposed_occurrences": 0,
-            "support_sources": 0,
-            "support_contexts": 0,
-            "declared_result": false,
-            "event": "witness",
-            "routing_round": 0
+            "kind": "answers",
+            "id": "00000000000000000000000000000003",
+            "text": " sings",
+            "grounds": 2,
+            "continuity": 2,
+            "confidence": 0.5
           }
-        ]
+        ],
+        "trace": "RESOLVE    prompt\nREALIZE    \"the whale sings\"\n"
       }
     }
   },

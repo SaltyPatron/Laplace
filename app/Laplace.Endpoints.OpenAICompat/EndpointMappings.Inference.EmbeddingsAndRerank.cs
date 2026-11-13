@@ -234,13 +234,14 @@ internal static partial class InferenceEndpoints
     }
 
     /// <summary>
-    /// The turn's provenance scope: the resolved tenant, the user within it (an authenticated
-    /// user_id claim overrides the body's 'user'), and the session. The session id is
-    /// computed server-side from (tenant, session key), so a key cannot address another
-    /// tenant's session. Without a client key the server mints one and returns it.
+    /// The turn's provenance scope: the resolved tenant, the participant within it, and the session. The
+    /// participant is the witness of the turn (Wiki Sequence 21.1): the authenticated user, else the
+    /// 'user' the caller names, else the tenant itself. The session is [participant, session key]; without
+    /// a client key the server mints one and returns it. The tenant is authorization and isolation, never
+    /// part of what is recorded.
     /// </summary>
     internal readonly record struct TurnScope(
-        string Tenant, string? UserKey, Guid? UserId, string SessionKey, Hash128 SessionId);
+        string Tenant, string Participant, Guid? UserId, string SessionKey);
 
     private static async ValueTask<(TurnScope Scope, IResult? Error)> ResolveTurnScopeAsync(
         HttpRequest request, ITenantResolver tenantResolver,
@@ -265,14 +266,12 @@ internal static partial class InferenceEndpoints
             && Guid.TryParse(claimedUser, out var parsedUser)
                 ? parsedUser
                 : null;
-        if (authenticatedUser is not null)
-            userKey = authenticatedUser.Value.ToString("D");
-        else if (userKey is not null && !ConversationContent.IsValidIdentifier(userKey))
+        if (authenticatedUser is null && userKey is not null && !ConversationContent.IsValidIdentifier(userKey))
             return (default, EndpointJson.BadRequest("invalid_user",
                 "Field 'user' must match [A-Za-z0-9._@-]{1,128}."));
+        string participant = authenticatedUser?.ToString("D") ?? userKey ?? tenant;
 
-        return (new TurnScope(tenant, userKey, authenticatedUser, sessionKey,
-            ConversationContent.SessionId(tenant, sessionKey)), null);
+        return (new TurnScope(tenant, participant, authenticatedUser, sessionKey), null);
     }
 
     private static Task CatalogConversationAsync(
@@ -328,114 +327,35 @@ internal static partial class InferenceEndpoints
         return list;
     }
 
-    private static IResult? RequireTurnWitness(IConversationWitness turnWitness) =>
-        turnWitness.IsAvailable
-            ? null
-            : EndpointJson.ServiceUnavailable(
-                "witness_unavailable", "Turn witness is unavailable; prompt turns cannot be recorded.");
+    private static IResult? RequireTurns(IConversationTurns turns) =>
+        turns.Unavailable is { } why
+            ? EndpointJson.ServiceUnavailable("turn_unavailable", "No turn can run here: " + why)
+            : null;
 
-    private static ForwardPassProof? BuildForwardProof(
-        IReadOnlyList<ForwardObservedEvent> rows,
-        string sessionKey,
-        string occurrenceKey,
-        bool responseWitnessed)
-    {
-        var terminal = rows.LastOrDefault(static row =>
-            row.Event is "complete" or "unresolved" or "ambiguous" or "budget_exhausted");
-        if (terminal is null)
-            return null;
-
-        var events = rows
-            .Where(static row => row.Event is
-                "resolve" or "couple" or "orient" or
-                "route" or "propose" or "scan" or "compose" or
-                "steer" or "select" or "emit" or "realize")
-            .Select(static row => new ForwardTraceStep(
-                Step: row.Step,
-                EntityIdHex: row.EntityIdHex,
-                Entity: row.Entity,
-                StrideUsed: row.StrideUsed,
-                RootIdHex: row.RootIdHex,
-                CandidateCount: row.CandidateCount,
-                OrderedContextCount: row.OrderedContextCount,
-                ProposalChannelCount: row.ProposalChannelCount,
-                ExactChannelCount: row.ExactChannelCount,
-                SequenceOccurrences: row.SequenceOccurrences,
-                CoveredOccurrences: row.CoveredOccurrences,
-                RelationFamilies: row.RelationFamilies,
-                OpposedOccurrences: row.OpposedOccurrences,
-                SupportAnchorIdHex: row.SupportAnchorIdHex,
-                SupportAnchor: row.SupportAnchor,
-                SupportRelationIdHex: row.SupportRelationIdHex,
-                SupportRelation: row.SupportRelation,
-                SupportOutbound: row.SupportOutbound,
-                SupportRating: row.SupportRating,
-                SupportRd: row.SupportRd,
-                SupportWitnesses: row.SupportWitnesses,
-                SupportSources: row.SupportSources,
-                SupportContexts: row.SupportContexts,
-                DeclaredResult: row.DeclaredResult,
-                Event: row.Event,
-                RoutingRound: row.RoutingRound))
-            .ToList();
-
-        if (responseWitnessed)
-            events.Add(new ForwardTraceStep(
-                Step: terminal.Step,
-                EntityIdHex: string.Empty,
-                Entity: string.Empty,
-                StrideUsed: 0,
-                RootIdHex: terminal.RootIdHex,
-                CandidateCount: terminal.CandidateCount,
-                OrderedContextCount: terminal.OrderedContextCount,
-                ProposalChannelCount: terminal.ProposalChannelCount,
-                ExactChannelCount: terminal.ExactChannelCount,
-                SequenceOccurrences: 0,
-                CoveredOccurrences: 0,
-                RelationFamilies: 0,
-                OpposedOccurrences: 0,
-                SupportAnchorIdHex: null,
-                SupportAnchor: null,
-                SupportRelationIdHex: null,
-                SupportRelation: null,
-                SupportOutbound: null,
-                SupportRating: null,
-                SupportRd: null,
-                SupportWitnesses: null,
-                SupportSources: 0,
-                SupportContexts: 0,
-                DeclaredResult: false,
-                Event: "witness",
-                RoutingRound: terminal.RoutingRound));
-
-        return new ForwardPassProof(
+    private static ForwardPassProof BuildForwardProof(NativeTurnReceipt turn, string sessionKey)
+        => new(
             Session: sessionKey,
-            PromptOccurrenceKey: occurrenceKey,
-            ResponseWitnessed: responseWitnessed,
-            ProgramId: terminal.ProgramIdHex,
-            SemanticActId: terminal.SemanticActIdHex,
-            OutputFingerprint: terminal.OutputFingerprintHex,
-            Completion: terminal.Completion,
-            Disposition: terminal.Disposition ?? terminal.Event,
-            RequiredObligations: terminal.RequiredObligations,
-            SatisfiedObligations: terminal.SatisfiedObligations,
-            RemainingRequired: terminal.RemainingRequired,
-            OutputCount: terminal.OutputCount,
-            PriorDiscourseIds: terminal.PriorDiscourseIds ?? Array.Empty<string>(),
-            Events: events.ToArray());
-    }
+            Participant: turn.Participant,
+            PromptId: turn.PromptId,
+            ResponseId: turn.ResponseId,
+            TurnId: turn.TurnId,
+            Ordinal: turn.Ordinal,
+            TurnsBefore: turn.TurnsBefore,
+            Witnessed: turn.Witnessed,
+            Reason: turn.Reason,
+            Disposition: turn.Disposition ?? "",
+            Steps: turn.Steps.Select(Step).ToArray(),
+            Trace: turn.Trace);
 
     private static ChatPerformance BuildPerformance(
-        string output, Stopwatch substrateClock, Stopwatch totalClock,
-        double? firstResultMs, int? generatedTokens = null)
+        string output, Stopwatch totalClock, double? firstResultMs, int? generatedTokens = null)
     {
-        double substrateMs = substrateClock.Elapsed.TotalMilliseconds;
         double elapsedMs = totalClock.Elapsed.TotalMilliseconds;
-        double? tokensPerSecond = generatedTokens is { } count && substrateMs > 0
-            ? count * 1000.0 / substrateMs
+        double? tokensPerSecond = generatedTokens is { } count && elapsedMs > 0
+            ? count * 1000.0 / elapsedMs
             : null;
         return new ChatPerformance(
-            SubstrateMs: substrateMs,
+            SubstrateMs: elapsedMs,
             ElapsedMs: elapsedMs,
             FirstResultMs: firstResultMs,
             OutputUtf8Bytes: Encoding.UTF8.GetByteCount(output),

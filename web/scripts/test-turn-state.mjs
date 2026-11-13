@@ -11,9 +11,10 @@ const exports = {};
 new Function('require', 'exports', compiled)(require, exports);
 const { classifyTurn, lastStage } = exports;
 
-const proof = (disposition, events) => ({ session: 's', prompt_occurrence_key: 'p', response_witnessed: false, completion: false,
-  disposition, required_obligations: 2, satisfied_obligations: 0, remaining_required: 2, output_count: 0, prior_discourse_ids: [],
-  events: events.map((event, step) => ({ step, event })) });
+// The Engine's receipt: each stage of its trace is a line that begins with the stage's name.
+const proof = (disposition, stages) => ({ session: 's', participant: 'u', prompt_id: 'p', ordinal: 1, turns_before: 0,
+  witnessed: false, disposition, steps: [],
+  trace: stages.map((stage) => `${stage.toUpperCase()}    what the stage did\n           a continued line`).join('\n') });
 
 test('content is an answer', () => {
   assert.deepEqual(classifyTurn({ content: 'Photosynthesis is…' }), { state: 'answered' });

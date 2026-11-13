@@ -85,51 +85,6 @@ public static partial class NpgsqlSubstrateReads
             p => p.AddWithValue("w", word),
             ct: ct, label: "first_placed_topic", onError: onError);
 
-    /// <summary>
-    /// <c>converse.chat(prompt, session, …)</c> — the conversational entry point.
-    /// Optional shape/bands/elaborate match the MCP/HTTP dials; omit for the CLI two-arg form.
-    /// </summary>
-    public static Task<string?> ChatAsync(
-        NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct,
-        string? shape = null, int[]? bands = null, bool elaborate = false,
-        byte[]? language = null,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ExecuteScalarAsync<string>(conn, SqlCatalog.Get("converse.chat"),
-            p =>
-            {
-                p.AddWithValue("p", prompt);
-                var sessionParam = p.Add("s", NpgsqlDbType.Bytea);
-                sessionParam.Value = session is null ? DBNull.Value : session;
-                p.Add(new NpgsqlParameter("lang", NpgsqlDbType.Bytea)
-                    { Value = (object?)language ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("shape", NpgsqlDbType.Text)
-                    { Value = (object?)shape ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer)
-                    { Value = (object?)bands ?? DBNull.Value });
-                p.AddWithValue("elab", elaborate);
-            }, ct: ct, label: "chat", onError: onError);
-
-    /// <inheritdoc cref="ChatAsync(NpgsqlConnection, string, byte[]?, CancellationToken, string?, int[]?, bool, byte[]?, NpgsqlRead.ErrorTranslator?)"/>
-    public static Task<string?> ChatAsync(
-        NpgsqlDataSource dataSource, string prompt, byte[]? session, CancellationToken ct,
-        string? shape = null, int[]? bands = null, bool elaborate = false,
-        byte[]? language = null,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ExecuteScalarAsync<string>(dataSource, SqlCatalog.Get("converse.chat"),
-            p =>
-            {
-                p.AddWithValue("p", prompt);
-                var sessionParam = p.Add("s", NpgsqlDbType.Bytea);
-                sessionParam.Value = session is null ? DBNull.Value : session;
-                p.Add(new NpgsqlParameter("lang", NpgsqlDbType.Bytea)
-                    { Value = (object?)language ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("shape", NpgsqlDbType.Text)
-                    { Value = (object?)shape ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer)
-                    { Value = (object?)bands ?? DBNull.Value });
-                p.AddWithValue("elab", elaborate);
-            }, ct: ct, label: "chat", onError: onError);
-
     public readonly record struct CompletionRow(
         string ObjectIdHex, string TypeIdHex, decimal EffectiveMu, long Witnesses, string ObjectLabel);
 
@@ -145,64 +100,6 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("prompt", prompt);
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "completions", onError: onError);
-
-    public readonly record struct WalkTextStepRow(int Step, string Entity, int StrideUsed);
-
-    public static async Task<string?> ForwardTurnAsync(
-        NpgsqlDataSource dataSource, string prompt, byte[]? session,
-        int steps, int maxStride, double spread, int topK, CancellationToken ct)
-    {
-        await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ForwardTurnAsync(connection, prompt, session,
-            steps, maxStride, spread, topK, ct).ConfigureAwait(false);
-    }
-
-    public static async Task<string?> ForwardTurnAsync(
-        NpgsqlConnection connection, string prompt, byte[]? session,
-        int steps, int maxStride, double spread, int topK, CancellationToken ct)
-    {
-        var text = new System.Text.StringBuilder();
-        bool hasRows = false;
-        await foreach (var row in ForwardTurnStepsAsync(connection, prompt, session,
-            steps, maxStride, spread, topK, ct).ConfigureAwait(false))
-        {
-            hasRows = true;
-            text.Append(row.Entity);
-        }
-        return hasRows ? text.ToString() : null;
-    }
-
-    public static async IAsyncEnumerable<WalkTextStepRow> ForwardTurnStepsAsync(
-        NpgsqlDataSource dataSource, string prompt, byte[]? session,
-        int steps, int maxStride, double spread, int topK,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await foreach (var row in ForwardTurnStepsAsync(connection, prompt, session,
-            steps, maxStride, spread, topK, ct).ConfigureAwait(false))
-            yield return row;
-    }
-
-    // Streaming and assembled replies consume the same ordered substrate rows.
-    // The adapter concatenates exact surfaces; it does not select or score them.
-    public static async IAsyncEnumerable<WalkTextStepRow> ForwardTurnStepsAsync(
-        NpgsqlConnection connection, string prompt, byte[]? session,
-        int steps, int maxStride, double spread, int topK,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var command = NpgsqlCatalog.Command(connection, null, "conversation.forward_turn",
-            prompt, session, steps, maxStride, spread, topK);
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            yield return new WalkTextStepRow(reader.GetInt32(0),
-                reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
-                reader.IsDBNull(2) ? 0 : reader.GetInt32(2));
-    }
-
-    public static IAsyncEnumerable<WalkTextStepRow> WalkTextAsync(
-        NpgsqlDataSource dataSource, string prompt, int steps, int maxOrder, double temperature, int topK,
-        CancellationToken ct) =>
-        ForwardTurnStepsAsync(dataSource, prompt, null, steps, maxOrder, temperature, topK, ct);
 
     public readonly record struct WalkBranchStepRow(
         int Depth, string[] PathHex, string[] TypePathHex, string EntityIdHex, string EntityLabel,

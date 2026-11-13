@@ -26,8 +26,8 @@ public sealed class GoldenFactory : WebApplicationFactory<Program>
             services.AddSingleton(new BrowserAuthSettings([]));
 
             services.RemoveAll<IHostedService>();
-            services.RemoveAll<IConversationWitness>();
-            services.AddSingleton<IConversationWitness,RecordingConversationWitness>();
+            services.RemoveAll<IConversationTurns>();
+            services.AddSingleton<IConversationTurns,RecordingConversationTurns>();
 
             services.PostConfigure<StripeBillingOptions>(o =>
             {

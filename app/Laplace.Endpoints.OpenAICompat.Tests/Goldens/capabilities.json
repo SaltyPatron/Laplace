@@ -3,12 +3,12 @@
   "endpoints": {
     "chat_completions": {
       "status": "live",
-      "backend": "converse.forward_turn -> generation.forward_program (native)",
+      "backend": "laplace turn: the forward program, the turn witnessed by the Engine",
       "billing": "preflight_quote_required"
     },
     "completions": {
       "status": "live",
-      "backend": "converse.forward_turn -> generation.forward_program (native streaming)",
+      "backend": "laplace turn: the forward program, each step streamed, the turn witnessed by the Engine",
       "billing": "preflight_quote_required"
     },
     "embeddings": {

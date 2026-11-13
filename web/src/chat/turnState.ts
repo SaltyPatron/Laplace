@@ -12,10 +12,13 @@ export type TurnOutcome =
 
 const STAGES = ['resolve', 'couple', 'orient', 'route', 'scan', 'compose', 'propose', 'steer', 'select', 'realize', 'witness'];
 
-/** The last pipeline stage the trace reached, in pipeline order. */
+/** The last pipeline stage the Engine's trace reached, in pipeline order: each stage line begins with its name. */
 export function lastStage(proof: ForwardPassProof | undefined): string | null {
   let best = -1;
-  for (const event of proof?.events ?? []) best = Math.max(best, STAGES.indexOf(event.event.toLowerCase()));
+  for (const line of (proof?.trace ?? '').split(/\r?\n/)) {
+    const word = /^([A-Z]+)\b/.exec(line)?.[1]?.toLowerCase();
+    if (word) best = Math.max(best, STAGES.indexOf(word));
+  }
   return best >= 0 ? STAGES[best] : null;
 }
 
