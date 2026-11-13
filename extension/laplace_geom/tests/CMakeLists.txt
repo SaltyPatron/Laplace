@@ -17,6 +17,12 @@ endif()
 if(NOT REGRESS_DB MATCHES "^laplace_[A-Za-z0-9_]+$")
     message(FATAL_ERROR "LAPLACE_REGRESS_DB must produce an isolated laplace_* database name")
 endif()
+# The role that owns the scratch regression database on the installed server (the runner's own role in CI).
+if(DEFINED ENV{LAPLACE_REGRESS_USER} AND NOT "$ENV{LAPLACE_REGRESS_USER}" STREQUAL "")
+    set(REGRESS_USER "$ENV{LAPLACE_REGRESS_USER}")
+else()
+    set(REGRESS_USER laplace_admin)
+endif()
 
 set(REGRESS_TESTS hash128 st_4d rle_trajectory karcher_mean_4d)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
@@ -24,7 +30,7 @@ file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 
 add_test(NAME regress_setup_laplace_geom
     COMMAND ${BASH} -c
-        "\"${LAPLACE_PG_BINDIR}/dropdb\" -U laplace_admin --if-exists ${REGRESS_DB} && \"${LAPLACE_PG_BINDIR}/createdb\" -U laplace_admin -O laplace_admin ${REGRESS_DB}"
+        "\"${LAPLACE_PG_BINDIR}/dropdb\" -U ${REGRESS_USER} --if-exists ${REGRESS_DB} && \"${LAPLACE_PG_BINDIR}/createdb\" -U ${REGRESS_USER} -O ${REGRESS_USER} ${REGRESS_DB}"
 )
 set_tests_properties(regress_setup_laplace_geom PROPERTIES
     FIXTURES_SETUP regress_db_geom
@@ -32,7 +38,7 @@ set_tests_properties(regress_setup_laplace_geom PROPERTIES
 )
 
 add_test(NAME regress_teardown_laplace_geom
-    COMMAND ${LAPLACE_PG_BINDIR}/dropdb -U laplace_admin --if-exists ${REGRESS_DB}
+    COMMAND ${LAPLACE_PG_BINDIR}/dropdb -U ${REGRESS_USER} --if-exists ${REGRESS_DB}
 )
 set_tests_properties(regress_teardown_laplace_geom PROPERTIES
     FIXTURES_CLEANUP regress_db_geom
@@ -45,7 +51,7 @@ add_test(NAME regress_laplace_geom
         --inputdir=${CMAKE_CURRENT_SOURCE_DIR}
         --outputdir=${REGRESS_OUTPUT_DIR}
         --dbname=${REGRESS_DB}
-        --user=laplace_admin
+        --user=${REGRESS_USER}
         --use-existing
         ${REGRESS_TESTS}
 )
