@@ -106,6 +106,22 @@ public sealed class NativeRecipeExecutionTests
                 NativeRecipeMode.Plan, null, [file], Witness: new NativeRuntimeWitness("Laplace", "AppDerived"))));
             Assert.Throws<ArgumentException>(() => execution.StartInfo(new NativeRecipeRequest(
                 NativeRecipeMode.Ingest, null, [file], Witness: new NativeRuntimeWitness("La"+(char)10+"place", "AppDerived"))));
+
+            // A root names the files' pathnames from there; every file is under it.
+            string root = Path.GetDirectoryName(Path.GetFullPath(file))!;
+            var rooted = execution.StartInfo(new NativeRecipeRequest(NativeRecipeMode.Ingest, null, [file],
+                ExpandPrerequisites: false, Witness: new NativeRuntimeWitness("Laplace", "UserPromptContent", Root: root)))
+                .ArgumentList.ToArray();
+            int r = Array.IndexOf(rooted, "--root");
+            Assert.True(r > 0 && rooted[r + 1] == root);
+            string elsewhere = Path.Combine(root, "elsewhere-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(elsewhere);
+            try
+            {
+                Assert.Throws<ArgumentException>(() => execution.StartInfo(new NativeRecipeRequest(
+                    NativeRecipeMode.Ingest, null, [file], Witness: new NativeRuntimeWitness("Laplace", "UserPromptContent", Root: elsewhere))));
+            }
+            finally { Directory.Delete(elsewhere); }
         }
         finally { File.Delete(file); }
     }

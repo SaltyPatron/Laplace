@@ -19,7 +19,7 @@ try {
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage(); const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const original = Buffer.from('\ufeff King != king\r\ne\u0301\n'); const calls = []; let held;
-  const receipt = { file_id: 'a'.repeat(32), document_id: 'b'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', bytes: original.length, modality: null };
+  const receipt = { file_id: 'a'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', path: 'exact.txt', bytes: original.length };
   await page.route('**/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/v1/content/text/raw') {
@@ -27,7 +27,7 @@ try {
       calls.push({ body: request.postDataBuffer(), query: new URL(request.url()).searchParams, contentType: request.headers()['content-type'] });
       held = route; return;
     }
-    if (path === `/v1/content/${receipt.file_id}`) return route.fulfill({ json: { ...receipt, kind: 'file', requested_id: receipt.file_id, name: 'exact.txt', path: 'exact.txt', text: original.toString('utf8'), content_base64: null, contexts: [], modified_at: null } });
+    if (path === `/v1/content/${receipt.file_id}`) return route.fulfill({ json: { file_id: receipt.file_id, content_id: receipt.content_id, metadata_id: receipt.metadata_id, source_id: receipt.source_id, source: receipt.source, text: original.toString('utf8'), content_base64: '', bytes: original.length } });
     if (path === `/v1/content/${receipt.file_id}/raw`) return route.fulfill({ body: original, contentType: 'application/octet-stream' });
     return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route ${path}` } } });
   });

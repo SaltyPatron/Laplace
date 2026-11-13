@@ -3,13 +3,13 @@ export type UploadStatus = 'queued' | 'reading' | 'submitting' | 'admitted' | 'i
 export interface UploadItem {
   id: string; name: string; path: string; mode: ContentMode; bytes: number;
   status: UploadStatus; error?: string; receipt?: ContentReceipt;
-  read: () => Promise<Uint8Array>; body?: () => BodyInit | Promise<BodyInit>; modifiedAt?: string;
+  read: () => Promise<Uint8Array>; body?: () => BodyInit | Promise<BodyInit>;
 }
 export interface UploadSnapshot { items: readonly UploadItem[]; running: boolean; stopping: boolean }
 export type SubmitContent = (mode: ContentMode, payload: ContentPayload) => Promise<ContentReceipt>;
 export type SubmitRawContent = (
   mode: ContentMode,
-  meta: { name: string; path: string; modified_at?: string },
+  meta: { name: string; path: string },
   body: BodyInit,
 ) => Promise<ContentReceipt>;
 let sequence = 0;
@@ -72,11 +72,7 @@ export class UploadQueue {
         if (this.state.stopping) { this.patch(item.id, { status: 'queued' }); break; }
         this.patch(item.id, { status: 'submitting' });
         try {
-          const receipt = await submit(item.mode, {
-            name: item.name,
-            path: item.path,
-            ...(item.modifiedAt ? { modified_at: item.modifiedAt } : {}),
-          }, body);
+          const receipt = await submit(item.mode, { name: item.name, path: item.path }, body);
           this.patch(item.id, { status: 'admitted', receipt });
         } catch (failure) {
           this.patch(item.id, { status: 'unconfirmed', error: `${failure instanceof Error ? failure.message : String(failure)}. No automatic retry was made. Inspect server state before resubmitting this artifact.` });
@@ -99,7 +95,7 @@ export class UploadQueue {
         if (!item || item.status !== 'queued') continue;
         this.patch(item.id, { status: 'reading', error: undefined });
         let payload: ContentPayload;
-        try { payload = contentPayload(item.name, item.path, await item.read(), item.modifiedAt); }
+        try { payload = contentPayload(item.name, item.path, await item.read()); }
         catch (failure) {
           this.patch(item.id, { status: 'invalid', error: failure instanceof Error ? failure.message : String(failure) }); continue;
         }

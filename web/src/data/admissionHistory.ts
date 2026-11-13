@@ -17,7 +17,6 @@ export interface AdmissionRecord {
   path: string;
   mode: ContentMode;
   bytes: number;
-  modality: string | null;
   admitted_at: string;
 }
 
@@ -51,8 +50,8 @@ export function recordAdmissions(
     known.add(receipt.file_id);
     added.push({
       file_id: receipt.file_id, content_id: receipt.content_id, source_id: receipt.source_id, source: receipt.source,
-      name: item.name, path: item.path, mode: item.mode, bytes: receipt.bytes ?? item.bytes,
-      modality: receipt.modality, admitted_at: now,
+      name: item.name, path: receipt.path, mode: item.mode, bytes: receipt.bytes ?? item.bytes,
+      admitted_at: now,
     });
   }
   if (added.length === 0) return current;

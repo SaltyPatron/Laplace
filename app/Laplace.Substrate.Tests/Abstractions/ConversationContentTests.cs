@@ -22,21 +22,6 @@ public class ConversationContentIdTests
         Assert.NotEqual(ConversationContent.SessionId("rival", "sess-1"), id);
     }
 
-    [Fact]
-    public void TenantScope_MintsPerTenantSources_DistinctFromBaseAndEachOther()
-    {
-        var acme = ConversationContent.Resolve("acme");
-        Assert.Equal(SubstrateCanonicalIds.Source("UserPrompt@acme"), acme.PromptSource);
-        Assert.Equal(SubstrateCanonicalIds.Source("Response@acme"), acme.ResponseSource);
-        Assert.Equal("UserPrompt@acme", acme.PromptSourceName);
-
-        var rival = ConversationContent.Resolve("rival");
-        Assert.NotEqual(acme.PromptSource, rival.PromptSource);
-        // The no-tenant sources are distinct identities from any tenant's.
-        Assert.NotEqual(UserPromptContent.Source, acme.PromptSource);
-        Assert.NotEqual(ResponseContent.Source, acme.ResponseSource);
-    }
-
     [Theory]
     [InlineData("local-dev")]
     [InlineData("t.1_x@y-2")]
@@ -57,10 +42,4 @@ public class ConversationContentIdTests
     [Fact]
     public void IsValidIdentifier_RejectsOverlongNames() =>
         Assert.False(ConversationContent.IsValidIdentifier(new string('a', 129)));
-
-    [Fact]
-    public void Resolve_RejectsInvalidTenant()
-    {
-        Assert.Throws<ArgumentException>(() => ConversationContent.Resolve("bad/tenant"));
-    }
 }

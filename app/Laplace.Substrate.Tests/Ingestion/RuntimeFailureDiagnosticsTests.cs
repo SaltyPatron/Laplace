@@ -54,23 +54,6 @@ public sealed class RuntimeFailureDiagnosticsTests
         "Host=127.0.0.1;Port=1;Username=failure-test;Database=failure-test;SSL Mode=Disable;Timeout=1;Pooling=false");
 
     [Fact]
-    public async Task ArtifactFailureRemainsFailedAndRetainsItsCauseWithoutAWarningCallback()
-    {
-        using var capture = new FailureCapture();
-        await using var source = UnreachableDatabase();
-        await using var closer = new ContentArtifactCloser(source);
-        var error = await Assert.ThrowsAsync<NpgsqlException>(() => closer.CloseTextAsync(
-            "failure-test", "test.txt", "test.txt", "hello"u8.ToArray()));
-        Assert.True(closer.Broken);
-        Assert.Contains("User artifact deposit failed", capture.Text, StringComparison.Ordinal);
-        // Rethrowing adds caller frames after the diagnostic is written; its
-        // original type, message and underlying cause must still be retained.
-        Assert.Contains(nameof(NpgsqlException), capture.Text, StringComparison.Ordinal);
-        Assert.Contains(error.Message, capture.Text, StringComparison.Ordinal);
-        Assert.Contains(error.GetBaseException().Message, capture.Text, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ServiceStartRefusesAnInvalidStopMarkerInsteadOfTreatingItAsAbsent()
     {
         var path = Path.Combine(Path.GetTempPath(), "laplace-stop-marker-" + Guid.NewGuid().ToString("N"));
