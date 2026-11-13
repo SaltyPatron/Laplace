@@ -175,7 +175,7 @@ jobs:
           for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do
             dotnet test "app/$project/$project.csproj" -c Release --nologo \
               -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
-              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests|FullyQualifiedName~UnicodeDecomposerTests|FullyQualifiedName~UcdNormalizationQcTests|FullyQualifiedName~NativeRecipeConcurrencyTests|FullyQualifiedName~SelectedRecipeSemanticsTests|FullyQualifiedName~NativeUnicodeTableTests' \
+              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests|FullyQualifiedName~UnicodeDecomposerTests|FullyQualifiedName~UcdNormalizationQcTests|FullyQualifiedName~NativeRecipeConcurrencyTests|FullyQualifiedName~RecipeLawGateTests|FullyQualifiedName~SelectedRecipeSemanticsTests|FullyQualifiedName~SourceGenerationRegressionTests|FullyQualifiedName~UnicodeSourceNameGateTests|FullyQualifiedName~NativeUnicodeTableTests|FullyQualifiedName~CorpusParsingHasNoManagedJsonCompilerOrUnicodeParser' \
               --logger "trx;LogFileName=$project.trx" --results-directory "$results"
           done
           python3 - "$results" <<'PY'
