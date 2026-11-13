@@ -41,6 +41,7 @@ try {
   await page.route('**/v1/**', route => {
     const url = new URL(route.request().url()), path = url.pathname;
     if (path === '/v1/auth/me') return route.fulfill({ json: { authenticated: false, user: null, providers: [] } });
+    if (path === '/v1/capabilities') return route.fulfill({ json: { endpoints: {} } });
     if (path === '/v1/query/shapes') return route.fulfill({ json: { shapes: [
       ...['define', 'describe', 'translate', 'band_facts', 'generate'].map(shape => ({ shape, summary: shape + ' fixture', needs_topic2: false, needs_type: false, accepts_lang: shape === 'translate' })),
       { shape: 'beam', summary: 'beam fixture', needs_topic2: false, needs_type: true },
