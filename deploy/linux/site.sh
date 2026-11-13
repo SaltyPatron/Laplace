@@ -865,9 +865,6 @@ if c.get('total') != c.get('passed') or int(c.get('total', '0')) == 0:
     raise SystemExit('Every platform authority check must run and pass without skips: %s' % c)
 PY2
   bash "$ROOT/tests/relation-band-health.sh"
-  # Every managed test that needs a database, against the deployed one: each writes only content it composes.
-  say "managed database tests against the deployed $LAPLACE_DBNAME"
-  LAPLACE_TEST_APP_DB="${LAPLACE_APP_DB:-$LAPLACE_DB}" dotnet_app test "$ROOT/app/Laplace.slnx" -c Release --nologo     -p:LAPLACE_BUILD_ROOT="$SITE_BUILD/managed-db" -p:OpenApiGenerateDocuments=false -m:1 -p:BuildInParallel=false     --filter 'Category=RequiresDatabase&Category!=RequiresQualification&Category!=RequiresNetwork'     --logger 'trx;LogFilePrefix=managed-db' --results-directory "$results" || fail "managed database tests failed"
 }
 phase_migrate_app() {
   [[ -n "${LAPLACE_APP_DB:-}" ]] || fail "migrate_app requires the declared application database"

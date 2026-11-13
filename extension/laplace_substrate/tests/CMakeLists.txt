@@ -67,3 +67,30 @@ set_tests_properties(regress_laplace_substrate PROPERTIES
     FIXTURES_REQUIRED regress_db_substrate
     LABELS "regress"
 )
+
+# Closed-world psql cases: each builds its own fixture, asserts exact results over it and rolls back, so it needs
+# a database holding only that fixture. They run in the same installed-server regression database as the suite above.
+foreach(case native_consensus_endpoints prompt_segments session_identity declared_paths_input)
+    add_test(NAME regress_psql_${case}
+        COMMAND ${LAPLACE_PG_BINDIR}/psql -X --no-password -U laplace_admin --dbname=${REGRESS_DB}
+            --set=ON_ERROR_STOP=1 --file=${CMAKE_CURRENT_SOURCE_DIR}/sql/${case}.sql)
+    set_tests_properties(regress_psql_${case} PROPERTIES FIXTURES_REQUIRED regress_db_substrate
+        DEPENDS regress_laplace_substrate LABELS "regress")
+endforeach()
+
+# A satisfied runtime ACL declaration must replay without locking its tables: a holder keeps ACCESS EXCLUSIVE on
+# public.entity while the declaration every delivery applies is replayed under a 2 s lock timeout. Run here, not on a
+# live substrate, where the holder would queue every reader and load behind it.
+set(_grants "${CMAKE_SOURCE_DIR}/db/schema/20_substrate_grants.sql")
+add_test(NAME regress_grants_locked_replay
+    COMMAND ${BASH} -c "set -euo pipefail
+psql() { \"${LAPLACE_PG_BINDIR}/psql\" -X --no-password -U laplace_admin --dbname=${REGRESS_DB} -v ON_ERROR_STOP=1 \"\$@\"; }
+psql -q -f '${_grants}'
+coproc holder { psql -Atq; }
+echo \"BEGIN; LOCK TABLE public.entity IN ACCESS EXCLUSIVE MODE; SELECT 'locked';\" >&\${holder[1]}
+read -r -t 30 line <&\${holder[0]}; [[ \$line == locked ]]
+status=0; PGOPTIONS='-c lock_timeout=2s -c statement_timeout=10s' psql -q -f '${_grants}' || status=\$?
+echo 'ROLLBACK;' >&\${holder[1]}; exec {holder[1]}>&-; wait \$holder_PID || true
+exit \$status")
+set_tests_properties(regress_grants_locked_replay PROPERTIES FIXTURES_REQUIRED regress_db_substrate
+    DEPENDS regress_laplace_substrate LABELS "regress")
