@@ -1,7 +1,7 @@
 -- Entity-id keyed structural KNN with S³ coords (explore glome overlay).
 -- Unlike structural.neighbors(text), does not re-resolve via prompt_state.
 --
--- Shape axis: Frechet over REALIZED curves (public.laplace_curve), never packed
+-- Shape axis: Frechet over REALIZED curves (public.laplace_curves), never packed
 -- laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- GH #862 / #860: structural.neighbors_of, no SET, real schema names.
 CREATE OR REPLACE FUNCTION structural.neighbors_of(
@@ -22,14 +22,14 @@ BEGIN ATOMIC
     WITH anchor AS MATERIALIZED (
         SELECT e.coord,c.curve
         FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(p_id)]) e
-        LEFT JOIN public.laplace_curve(ARRAY[e.id]) c ON true
+        LEFT JOIN LATERAL (SELECT k.entity AS id,public.ST_GeomFromEWKB(k.curve_ewkb) AS curve FROM public.laplace_curves(ARRAY[e.id]) k) c ON true
     ), nearest AS MATERIALIZED (
         SELECT n.* FROM anchor a CROSS JOIN LATERAL
             structural.angular_nearest(a.coord,p_k,NULL,p_id) n
     ), labels AS MATERIALIZED (
         SELECT * FROM public.laplace_labels(ARRAY(SELECT public.blake3_from_bytea(entity_id) FROM nearest ORDER BY entity_id))
     ), curves AS MATERIALIZED (
-        SELECT c.id,c.curve FROM public.laplace_curve(ARRAY(SELECT public.blake3_from_bytea(entity_id) FROM nearest ORDER BY entity_id)) c
+        SELECT c.entity AS id,public.ST_GeomFromEWKB(c.curve_ewkb) AS curve FROM public.laplace_curves(ARRAY(SELECT public.blake3_from_bytea(entity_id) FROM nearest ORDER BY entity_id)) c
     )
     SELECT n.entity_id,coalesce(l.content,'Unrealized entity'),
            public.ST_X(n.coord),public.ST_Y(n.coord),public.ST_Z(n.coord),public.ST_M(n.coord),

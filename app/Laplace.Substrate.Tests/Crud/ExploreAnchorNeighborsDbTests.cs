@@ -29,7 +29,7 @@ public sealed class ExploreAnchorNeighborsDbTests(LocalPgFixture pg)
             SELECT public.ST_X(e.coord),public.ST_Y(e.coord),public.ST_Z(e.coord),public.ST_M(e.coord),
                 public.ST_AsText(c.curve,53),public.ST_NPoints(c.curve)
             FROM public.laplace_entities(ARRAY[encode($1,'hex')::public.blake3]) e
-            JOIN public.laplace_curve(ARRAY[e.id]) c ON true
+            JOIN LATERAL (SELECT k.entity AS id,public.ST_GeomFromEWKB(k.curve_ewkb) AS curve FROM public.laplace_curves(ARRAY[e.id]) k) c ON true
             """, connection, transaction);
         anchor.Parameters.AddWithValue(word.Id.ToBytes());
         double[] coordinates; string trajectory;

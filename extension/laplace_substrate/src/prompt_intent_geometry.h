@@ -186,7 +186,7 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, uint32 root_node,
         elog(ERROR, "prompt geometry: realized root curve is invalid");
 
     /* One point per immediate ordered constituent of the root: the level
-     * public.laplace_curve realizes for each candidate. Points from another
+     * public.laplace_curves realizes for each candidate. Points from another
      * composition level would not give a Frechet distance over one physicality. */
     int point_count = (int) child_count;
     Datum *x = palloc(sizeof(Datum) * point_count);
