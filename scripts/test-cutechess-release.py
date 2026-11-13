@@ -712,7 +712,7 @@ main "$@"
         program = program[:offset] + (
             "if sys.argv[1:] != ['-platform', 'offscreen', '--version']:\n"
             "    names = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', "
-            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_CHESS_PERFCACHE_BIN', 'LAPLACE_CHESS_TRANSITION_BIN', 'LAPLACE_UCI_SUBSTRATE']\n"
+            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_UCI_SUBSTRATE']\n"
             "    Path(" + repr(str(observed)) + ").write_text(json.dumps({'argv': sys.argv, "
             "'environment': {key: os.environ.get(key) for key in names}}))\n"
             "    raise SystemExit(0)\n"
@@ -725,7 +725,7 @@ main "$@"
         installed = prefix / "bin/cutechess"
         installed.parent.mkdir(parents=True)
         shutil.copy2(binary, installed)
-        # Transport/configuration fixtures only, never actual engine or floor proof.
+        # Transport/configuration fixtures only, never actual engine proof.
         app = prefix / "app"
         app.mkdir()
         uci = app / "laplace-uci"
@@ -734,11 +734,6 @@ main "$@"
         share = prefix / "share/laplace"
         share.mkdir(parents=True)
         (share / "laplace_t0_perfcache_fixture.bin").write_bytes(b"configuration-path fixture")
-        generation = share / "chess-floor/generations/fixture"
-        generation.mkdir(parents=True)
-        for name in ("laplace_chess_position_perfcache.bin", "laplace_chess_transition_perfcache.bin"):
-            (generation / name).write_bytes(b"configuration-path fixture")
-        (share / "chess-floor/current").symlink_to("generations/fixture", target_is_directory=True)
         selected_perfcache = patch.dict(os.environ, {"LAPLACE_PERFCACHE_BIN": str(share / "laplace_t0_perfcache_fixture.bin")})
         selected_perfcache.start()
         self.addCleanup(selected_perfcache.stop)
@@ -785,8 +780,6 @@ main "$@"
                          [engine["command"] for engine in engines])
         self.assertEqual(str(prefix / "share/laplace/laplace_t0_perfcache_fixture.bin"),
                          child["environment"]["LAPLACE_PERFCACHE_BIN"])
-        self.assertEqual(str(prefix / "share/laplace/chess-floor/generations/fixture/laplace_chess_position_perfcache.bin"),
-                         child["environment"]["LAPLACE_CHESS_PERFCACHE_BIN"])
 
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux direct Stockfish launch identity")

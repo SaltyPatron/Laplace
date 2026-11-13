@@ -180,7 +180,6 @@ phase_build() {
   say "build: engine, perf-caches, extensions"
   oneapi
   local ucd="${LAPLACE_UCD_PATH:-$LAPLACE_DATA/UCD/Public/UCD/latest}"
-  local openings="${LAPLACE_CHESS_OPENINGS:-$LAPLACE_DATA/Games/Chess/lichess-openings}"
   local recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
   local operations_source="${LAPLACE_OPERATIONS:-$LAPLACE_DEPSRC/Laplace-Operations}"
@@ -212,10 +211,9 @@ phase_build() {
     -DLAPLACE_TIER0="$SITE_BUILD/engine/core/perfcache/tier0.bin" \
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
-    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
-    -DLAPLACE_CHESS_OPENINGS="$openings" 8>&-
+    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" 8>&-
   LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_chess_position_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
+    cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
   [[ -s "$SITE_BUILD/engine/core/perfcache/tier0.bin" ]] || fail "tier-0 perf-cache not produced"
   [[ -s "$SITE_BUILD/engine/core/perfcache/highway.bin" ]] || fail "highway perf-cache not produced"
 }
@@ -296,7 +294,7 @@ phase_database() {
   # cluster's shared_preload_libraries; here the cluster is Operations' and the setting stays this database's.
   local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f
   for g in perfcache_path:tier0 highway_perfcache_path:highway \
-           vocabulary_perfcache_path:laplace_vocabulary_perfcache chess_position_perfcache_path:laplace_chess_position_perfcache; do
+           vocabulary_perfcache_path:laplace_vocabulary_perfcache; do
     f="$dir/${g#*:}.bin"
     [[ -s "$f" ]] || fail "laplace_substrate.${g%%:*}: missing installed cache $f"
     q="$(sql -d postgres -c "SELECT setting FROM pg_file_settings WHERE name = 'laplace_substrate.${g%%:*}' AND applied ORDER BY seqno DESC LIMIT 1")"
@@ -461,7 +459,7 @@ phase_app() {
   local component cache
   for component in . cli mcp-runtime uci lichess-runtime; do
     mkdir -p "$stage/app/$component/share/laplace"
-    for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin laplace_chess_position_perfcache.bin; do
+    for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin; do
       cp "$SITE_BUILD/engine/core/perfcache/$cache" "$stage/app/$component/share/laplace/"
     done
   done
@@ -688,7 +686,7 @@ phase_bundle() {
 
 verify_cli_package() {
   local cli="$1" cache
-  for cache in tier0 highway laplace_chess_position_perfcache; do
+  for cache in tier0 highway; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
   for cache in tier0.flags tier0.flags.layout; do

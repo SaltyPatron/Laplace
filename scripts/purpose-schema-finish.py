@@ -30,7 +30,6 @@ DIR_SCHEMA: dict[str, str | None] = {
     "lexical": "lexical",
     "taxonomy": "taxonomy",
     "realize": "realize",
-    "chess": "chess",
     "generation": "generation",
     "structural": "structural",
     "geometry": "structural",
@@ -71,7 +70,6 @@ NAME_OVERRIDES: dict[str, tuple[str | None, str]] = {
     "chat": ("converse", "chat"),
     "consensus_in": ("consensus", "consensus_in"),
     "consensus_out": ("consensus", "consensus_out"),
-    "laplace_chess_position_ready": ("chess", "position_ready"),
 }
 
 RESERVED = {
@@ -82,7 +80,7 @@ RESERVED = {
 
 PURPOSE = {
     "consensus", "converse", "lexical", "taxonomy", "generation",
-    "structural", "chess", "realize", "ops",
+    "structural", "realize", "ops",
 }
 
 TABLES = {
@@ -147,7 +145,7 @@ MOVED_RE = re.compile(
     r"DROP\s+FUNCTION\s+IF\s+EXISTS\s+laplace\."
     r"([A-Za-z_][A-Za-z0-9_]*)\s*\([^;\n]*\);\s*"
     r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+"
-    r"(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\."
+    r"(consensus|converse|lexical|taxonomy|generation|structural|realize|ops)\."
     r"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
     re.IGNORECASE,
 )
@@ -159,10 +157,6 @@ def shorten(schema: str, name: str) -> str:
     if name.startswith(f"{schema}_"):
         rest = name[len(schema) + 1 :]
         if rest and rest not in RESERVED and not rest[0].isdigit():
-            return rest
-    if schema == "chess" and name.startswith("chess_"):
-        rest = name[6:]
-        if rest and rest not in RESERVED:
             return rest
     if schema == "realize" and name.startswith("realize_"):
         rest = name[8:]
@@ -225,7 +219,7 @@ def fix_contamination(text: str) -> str:
     text = re.sub(r"\bAS\s+laplace\.eff_mu\b", "AS eff_mu", text)
     text = re.sub(r"\bAS\s+laplace\.attention\b", "AS attention", text)
     text = re.sub(
-        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
+        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|ops)\.",
         r"\1.",
         text,
     )
@@ -264,7 +258,7 @@ def qualify_tables(text: str) -> str:
 def fix_table_schema_collision(text: str) -> str:
     """Undo FROM laplace.consensus.fn → FROM consensus.fn (table/schema clash)."""
     text = re.sub(
-        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
+        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|ops)\.",
         r"\1.",
         text,
     )
@@ -386,7 +380,7 @@ def rewrite_calls(
             text = re.sub(rf"(?<![.\w]){re.escape(old)}[ \t]*\(", f"{target}(", text)
     # undo double purpose: converse.converse.chat
     text = re.sub(
-        r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\.\1\.",
+        r"\b(consensus|converse|lexical|taxonomy|generation|structural|realize|ops)\.\1\.",
         r"\1.",
         text,
     )
@@ -407,7 +401,7 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = ANY (ARRAY[
             'laplace','consensus','converse','lexical','taxonomy',
-            'generation','structural','chess','realize','ops'
+            'generation','structural','realize','ops'
         ])
       AND (p_like IS NULL
            OR p.proname ILIKE '%'||p_like||'%'

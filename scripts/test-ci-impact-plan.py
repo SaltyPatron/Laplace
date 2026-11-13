@@ -138,14 +138,6 @@ class ImpactPlanTests(unittest.TestCase):
         )
         self.assertFalse(any(".Tests/" in p or p.endswith(".Tests.csproj")
                              for p in value["managed_delivery_build_projects"]))
-        self.assertNotIn(
-            "app/ChessComposeBench/ChessComposeBench.csproj",
-            value["managed_delivery_build_projects"],
-        )
-        self.assertNotIn(
-            "app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj",
-            value["managed_delivery_build_projects"],
-        )
         self.assertTrue(any(".Tests/" in p or p.endswith(".Tests.csproj")
                             for p in value["managed_build_projects"]))
 
@@ -165,14 +157,6 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["delivery_actions"], ["ingest-runtime", "publish"])
         self.assertIn(
             "app/Laplace.Cli/Laplace.Cli.csproj",
-            value["managed_delivery_build_projects"],
-        )
-        self.assertNotIn(
-            "app/ChessComposeBench/ChessComposeBench.csproj",
-            value["managed_delivery_build_projects"],
-        )
-        self.assertNotIn(
-            "app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj",
             value["managed_delivery_build_projects"],
         )
 

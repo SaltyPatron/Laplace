@@ -43,7 +43,7 @@ BEGIN ATOMIC
       AND (
             n.nspname = ANY (ARRAY[
                 'laplace','consensus','converse','lexical','taxonomy',
-                'generation','structural','chess','realize','ops'
+                'generation','structural','realize','ops'
             ])
             -- Public native helpers from laplace_geom listed so callers find
             -- them in the catalog instead of reimplementing them.

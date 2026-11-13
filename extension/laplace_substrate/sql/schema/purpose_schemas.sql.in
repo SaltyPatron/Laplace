@@ -7,7 +7,6 @@
 --   taxonomy    hierarchy traversal                  (TRAVERSE)
 --   generation  synthesis and the forward pass       (ELECT)
 --   structural  geometry, coordinates, trajectories
---   chess       chess grammar and presentation over the shared web
 --   realize     rendering and readback               (REALIZE)
 --   ops         diagnostics, census, health          (WITNESS)
 --
@@ -23,7 +22,6 @@ CREATE SCHEMA lexical;
 CREATE SCHEMA taxonomy;
 CREATE SCHEMA generation;
 CREATE SCHEMA structural;
-CREATE SCHEMA chess;
 CREATE SCHEMA realize;
 CREATE SCHEMA ops;
 
@@ -33,7 +31,6 @@ COMMENT ON SCHEMA lexical    IS 'Laplace: words, senses, definitions (spec 37 SE
 COMMENT ON SCHEMA taxonomy   IS 'Laplace: hierarchy traversal (spec 37 TRAVERSE).';
 COMMENT ON SCHEMA generation IS 'Laplace: synthesis and the forward pass (spec 37 ELECT).';
 COMMENT ON SCHEMA structural IS 'Laplace: geometry, coordinates, trajectories.';
-COMMENT ON SCHEMA chess      IS 'Laplace: the chess modality.';
 COMMENT ON SCHEMA realize    IS 'Laplace: rendering and readback (spec 37 REALIZE).';
 COMMENT ON SCHEMA ops        IS 'Laplace: diagnostics, census, health (spec 37 WITNESS).';
 
@@ -44,7 +41,7 @@ DECLARE
     s text;
 BEGIN
     FOREACH s IN ARRAY ARRAY['consensus','converse','lexical','taxonomy',
-                             'generation','structural','chess','realize','ops']
+                             'generation','structural','realize','ops']
     LOOP
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO PUBLIC', s);
     END LOOP;

@@ -46,7 +46,7 @@ cp "$work/stage/app/.laplace-source-revision" "$work/bundle/app/"
 cp "$work/stage/app/wwwroot/.laplace-web-source-revision" "$work/bundle/app/wwwroot/"
 touch "$work/bundle/app/Laplace.Endpoints.OpenAICompat.dll"
 mkdir -p "$work/bundle/app/cli/share/laplace"
-for cache in tier0 highway laplace_chess_position_perfcache; do
+for cache in tier0 highway; do
   printf fixture > "$work/bundle/app/cli/share/laplace/$cache.bin"
 done
 for cache in tier0.flags tier0.flags.layout; do

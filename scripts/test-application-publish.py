@@ -884,22 +884,22 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         first = self.stage / "Laplace.Core.dll"
         other = self.stage / "Laplace.Chess.dll"
         with first.open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ):
-            proof = self.api.floor.process(os.getpid(), {"controlled_file": self.api.floor.fact(first)})
+            proof = self.api.process(os.getpid(), {"controlled_file": self.api.fact(first)})
             self.assertEqual(os.getpid(), proof["pid"])
             with self.assertRaisesRegex(ValueError, "exact selected"):
-                self.api.floor.process(os.getpid(), {"controlled_file": self.api.floor.fact(other)})
+                self.api.process(os.getpid(), {"controlled_file": self.api.fact(other)})
 
     def test_runtime_proof_checks_pid_payload_and_only_used_lazy_modules(self):
         manifest = self.seal()
         service = {"MainPID": "123", "Id": "laplace-api.service"}
-        health = {"chess_perfcache": {"process_id": 123}}
+        health = {}
         process = {"pid": 123, "start_ticks": 99}
         with patch.object(self.api.release, "wait_for_readiness", return_value=(False, False)), \
              patch.object(self.api.release, "verify_spa"), \
              patch.object(self.api.release, "verify_typed_operation") as operation, \
              patch.object(self.api, "service", return_value=service), \
              patch.object(self.api, "health", return_value=health), \
-             patch.object(self.api.floor, "process", return_value=process) as observe:
+             patch.object(self.api, "process", return_value=process) as observe:
             result = self.api.verify(self.stage, manifest, "http://127.0.0.1:5187", 1)
             self.assertEqual("passed", result["status"])
             self.assertFalse(result["product_ready"])
@@ -909,16 +909,6 @@ class ApiPayloadVerificationTests(unittest.TestCase):
             observe.side_effect = [process, dict(process, start_ticks=100)]
             with self.assertRaisesRegex(ValueError, "process changed"):
                 self.api.verify(self.stage, manifest, "http://127.0.0.1:5187", 1)
-
-    def test_readiness_pid_mismatch_and_invalid_types_are_not_accepted(self):
-        value = DeploymentReadinessTests.readiness()
-        for pid in (122, True, "123", None):
-            value["chess_perfcache"] = {"process_id": pid}
-            with patch.object(self.api.release, "request",
-                              return_value=(503, "application/json", json.dumps(value).encode())):
-                with self.assertRaisesRegex(ValueError, "process differs"):
-                    self.api.health("http://127.0.0.1:5187", 123)
-
 
     def test_actual_managed_only_api_deploy_uses_prefix_native_and_preserves_other_products(self):
         import shutil
@@ -939,7 +929,6 @@ class ApiPayloadVerificationTests(unittest.TestCase):
             'laplace_reconcile_app_dir_contract() { test -d "$1"; }\n'
             'laplace_require_app_dir_contract() { test -d "$1"; }\n')
         for name in ("verify-api-payload.py", "verify-application-release.py",
-                     "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
                      "accept-chess-environment.py", "installation_paths.py", "machine-env.py", "web-artifact.py"):
             shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
         dotnet = repo / "tools/dotnet"
@@ -1028,7 +1017,6 @@ class UciOnlyDeploymentTests(unittest.TestCase):
             'laplace_reconcile_app_dir_contract() { test -d "$1"; }\n'
             'laplace_require_app_dir_contract() { test -d "$1"; }\n')
         for name in ("verify-api-payload.py", "verify-application-release.py",
-                     "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
                      "accept-chess-environment.py", "installation_paths.py", "machine-env.py", "check-uci-runtime.py", "publish-applications.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
         deploy = self.root / "deploy/linux/deploy.sh"

@@ -134,11 +134,7 @@ phase_publish
         modules.mkdir(parents=True)
         core = self.base / "install/lib/liblaplace_core.so"
         dynamics = self.base / "install/lib/liblaplace_dynamics.so"
-        floors = self.base / "install/share/laplace"
-        floors.mkdir(parents=True)
-        position = floors / "laplace_chess_position_perfcache.bin"
-        transition = floors / "laplace_chess_transition_perfcache.bin"
-        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics, position, transition):
+        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics):
             artifact.write_bytes(b"installed image")
 
         def digest():
@@ -149,8 +145,8 @@ phase_publish
         before = digest()
         self.assertEqual(before, digest())
         # An execution module can need new exports even when neither preload
-        # module changed. Each engine dependency and mapped chess floor independently requires reload.
-        for artifact in (core, dynamics, position, transition):
+        # module changed. Each engine dependency independently requires reload.
+        for artifact in (core, dynamics):
             with self.subTest(library=artifact.name):
                 artifact.write_bytes(b"new engine image")
                 self.assertNotEqual(before, digest())
@@ -471,10 +467,7 @@ class BuildInputTests(unittest.TestCase):
             (self.project / name).mkdir(parents=True, exist_ok=True)
         for name in ("scripts/postgresql-release.py", "deploy/postgresql-release.json"):
             shutil.copy2(ROOT / name, self.project / name)
-        # Only the export selector is replaced; the PG owner executes from source.
-        (self.project / "scripts/chess-floor-artifacts.py").write_text(
-            "import sys\nassert sys.argv[1] == 'selected-export'\nprint('')\n")
-        (self.project / "engine/core/CMakeLists.txt").write_text("# no chess producer in this protocol fixture\n")
+        # The PG owner executes from source.
         self.build = self.project / "build"
         self.build.mkdir()
         for name in ("laplace_t0_perfcache_fixture.bin", "laplace_highway_perfcache_fixture.bin"):
@@ -500,7 +493,6 @@ class BuildInputTests(unittest.TestCase):
 phase_build_web() { echo web-build >> "$CALLS"; }
 phase_clean() { echo clean >> "$CALLS"; }
 phase_codegen() { echo codegen >> "$CALLS"; }
-chess_openings_path() { printf '%s\n' "$ROOT/openings"; }
 cmake() { printf 'cmake %s\n' "$*" >> "$CALLS"; }
 phase_build_app() { echo managed-build >> "$CALLS"; }
 phase_build

@@ -1,4 +1,3 @@
-using Laplace.Chess.Service;
 using Laplace.Modality.Chess;
 using Xunit;
 
@@ -31,16 +30,6 @@ public sealed class ChessPositionIdentityCapacityTests
 
         var id = ChessPositionIdentity.PositionId(board);
         Assert.NotEqual(default, id);
-    }
-
-    [Theory]
-    [InlineData(OddsChessFen)]
-    [InlineData(FullBoardFen)]
-    public void Compose_UsesTheSameBoundAsPositionId(string fen)
-    {
-        // ChessCompose.Position uses the same atom bound as PositionId.
-        var composed = ChessCompose.Position(Board.FromFen(fen));
-        Assert.NotEqual(default, composed.Position.Id);
     }
 
     [Fact]

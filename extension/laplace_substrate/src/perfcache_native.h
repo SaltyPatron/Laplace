@@ -20,7 +20,6 @@ int laplace_substrate_native_mkl_threads(void);
 const char *laplace_substrate_perfcache_path(void);
 const char *laplace_substrate_highway_perfcache_path(void);
 const char *laplace_substrate_vocabulary_perfcache_path(void);
-const char *laplace_substrate_chess_position_perfcache_path(void);
 
 bool laplace_perfcache_ready(void);
 
@@ -28,9 +27,6 @@ bool laplace_highway_ready(void);
 
 /* The governed vocabulary ROM (laplace_vocabulary_perfcache.bin). */
 bool laplace_vocabulary_ready(void);
-
-/* Chess position id -> coordinate map (laplace_chess_position_perfcache.bin). */
-bool laplace_chess_position_ready(void);
 
 /* Under shared_preload_libraries: map and validate the perfcache blobs and
  * build the codepoint reverse index in the postmaster so forked backends

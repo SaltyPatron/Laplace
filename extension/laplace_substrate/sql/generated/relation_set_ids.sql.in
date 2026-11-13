@@ -5,8 +5,6 @@ CREATE OR REPLACE FUNCTION consensus.relation_set_ids(p_set text)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT CASE p_set
-        WHEN 'CHESS_PROFILE_FACTS' THEN ARRAY[laplace.relation_type_id('HAS_EXTERNAL_ID'), laplace.relation_type_id('HAS_FEATURE'), laplace.relation_type_id('HAS_NAME'), laplace.relation_type_id('HAS_RATING')]
-        WHEN 'CHESS_PROFILE_IDENTITY' THEN ARRAY[laplace.relation_type_id('CORRESPONDS_TO')]
         WHEN 'CONTINUATION_OUTPUT' THEN ARRAY[laplace.relation_type_id('COMPLETES_TO'), laplace.relation_type_id('CONTINUES_TO')]
         WHEN 'CONTRAST_FEATURES' THEN ARRAY[laplace.relation_type_id('CAUSES'), laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('IS_SIMILAR_TO'), laplace.relation_type_id('PERTAINS_TO'), laplace.relation_type_id('USED_FOR')]
         WHEN 'ISA_UPWARD' THEN ARRAY[laplace.relation_type_id('IS_A')]

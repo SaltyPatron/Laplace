@@ -149,7 +149,9 @@ CEILINGS = {
     # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
     # chess_game_plies body is now two DROP statements, so its 11 relation-name
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
-    "g3_sql_vocabulary_literalism": 152,
+    # 152 -> 88: the legacy laplace.* chess read family (sql/functions/chess/) is
+    # deleted; its 64 relation-name literals are gone rather than allowlisted.
+    "g3_sql_vocabulary_literalism": 88,
     "g3_c_vocabulary_literalism": 0,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -229,7 +231,9 @@ CEILINGS = {
     # textual mentions this census had been counting as callers. The 33 entries are
     # existing functions whose only "caller" was a retired DROP of an older name or
     # signature; no function was added. They are dead-code candidates to triage.
-    "g4_dead_canonical": 41,
+    # 41 -> 34: the seven zero-caller chess read functions were deleted with
+    # sql/functions/chess/, not wired.
+    "g4_dead_canonical": 34,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
@@ -277,7 +281,9 @@ CEILINGS = {
     #       that does nothing for a Japanese or Arabic pronoun — so anaphora
     #       resolution is a feature English speakers get and nobody else does.
     #       It is also on the elector path this session is measuring.
-    "g14_case_fold": 22,
+    # 22 -> 20: chess_opening_preference and chess_player_id were deleted with
+    # sql/functions/chess/.
+    "g14_case_fold": 20,
     # G15 — unqualified CREATE/DROP FUNCTION. Ceiling 0: measured 2026-08-10,
     # all 32 occurrences fixed in the same change that added this gate, so there
     # is no landing to grandfather.

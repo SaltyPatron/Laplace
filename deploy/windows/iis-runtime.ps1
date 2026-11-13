@@ -170,7 +170,7 @@ function Get-IisPageAssets([string]$Html) {
     @([regex]::Matches($Html,'(?:src|href)="(/assets/[^"]+)"') | ForEach-Object {$_.Groups[1].Value} | Select-Object -Unique)
 }
 function Test-IisCacheClosure([string]$Path) {
-    foreach($name in 'tier0.bin','tier0.flags','tier0.flags.layout','highway.bin','laplace_chess_position_perfcache.bin','laplace_chess_transition_perfcache.bin') {
+    foreach($name in 'tier0.bin','tier0.flags','tier0.flags.layout','highway.bin') {
         $expected=$null
         foreach($component in @('','cli','uci')) {
             $file=Join-Path (Join-Path $Path $component) ('share/laplace/'+$name)

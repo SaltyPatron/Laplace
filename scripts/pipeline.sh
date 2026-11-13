@@ -85,21 +85,6 @@ psql() {
   fi
 }
 
-chess_openings_path() {
-  if [[ -n "${LAPLACE_CHESS_OPENINGS:-}" ]]; then
-    printf '%s\n' "$LAPLACE_CHESS_OPENINGS"
-    return
-  fi
-  local chess_root="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}/Games/Chess" candidate
-  for candidate in "$chess_root/lichess-openings" "$chess_root/openings"; do
-    if [[ -d "$candidate" ]] && [[ -n "$(find -H "$candidate" -type f -name '*.tsv' -print -quit)" ]]; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  done
-  printf '%s\n' "$chess_root/lichess-openings"
-}
-
 # A down server (an installed native module that no longer loads) is repaired by
 # installing the new artifacts and restarting it; pre-install probes must not
 # refuse that delivery.
@@ -113,9 +98,7 @@ preloaded_so_digest() {
     "$LAPLACE_EXT_LIBDIR/laplace_substrate.so" \
     "$LAPLACE_EXT_LIBDIR/laplace_geom.so" \
     "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
-    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so" \
-    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_position_perfcache.bin" \
-    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_transition_perfcache.bin"; do
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so"; do
     [[ ! -f "$library" ]] || sha256sum "$library"
   done | sha256sum | cut -d' ' -f1
 }
@@ -332,10 +315,6 @@ phase_build_web() {
 configure_native_build_tree() {
   local data_root="${LAPLACE_DATA:?Declare LAPLACE_DATA as the corpus root}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
-  local chess_openings chess_corpus_export
-  chess_openings=$(chess_openings_path)
-  chess_corpus_export=$("$PYTHON" "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
-    --prefix "$LAPLACE_INSTALL_PREFIX" --path-only)
   cmake -S "$ROOT" -B "$LAPLACE_BUILD_DIRECTORY" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
     -DLAPLACE_REQUIRE_MKL=ON \
@@ -348,9 +327,7 @@ configure_native_build_tree() {
     -DLAPLACE_UCD_PATH="$ucd" \
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
-    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
-    -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
-    -DLAPLACE_CHESS_CORPUS_EXPORT="$chess_corpus_export"
+    -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
 }
 
 phase_build_extension_sql() {
@@ -378,21 +355,12 @@ phase_build_native() {
       all \
       laplace_t0_perfcache \
       laplace_highway_perfcache \
-      laplace_chess_position_perfcache \
       laplace_modality_number_perfcache
 
   local t0 hw
   t0=$(find -H "$ROOT/build" -name 'tier0.bin' 2>/dev/null | head -1 || true)
   hw=$(find -H "$ROOT/build" -name 'highway.bin' 2>/dev/null | head -1 || true)
   [[ -n "$t0" && -n "$hw" ]] || { echo "::error::required perfcache output missing" >&2; return 1; }
-  if grep -q 'add_custom_target(laplace_chess_position_perfcache' "$ROOT/engine/core/CMakeLists.txt"; then
-    test -n "$(find -H "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' -print -quit)" || {
-      echo "::error::declared chess position perfcache was not produced" >&2; return 1;
-    }
-    test -n "$(find -H "$ROOT/build" -name 'laplace_chess_transition_perfcache*.bin' -print -quit)" || {
-      echo "::error::declared chess transition perfcache was not produced" >&2; return 1;
-    }
-  fi
 }
 
 phase_build() {
@@ -841,14 +809,12 @@ SQL
 
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
-  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" bin flagsbin hwbin vocabbin chessbin transition preload newval
+  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" bin flagsbin hwbin vocabbin preload newval
   bin=$(find "$dir" -name 'tier0.bin' | sort -V | tail -1)
   flagsbin=$(find "$dir" -name 'tier0.flags' | sort -V | tail -1)
   hwbin=$(find "$dir" -name 'highway.bin' | sort -V | tail -1)
   vocabbin=$(find "$dir" -name 'laplace_vocabulary_perfcache*.bin' | sort -V | tail -1)
-  chessbin=$(find "$dir" -name 'laplace_chess_position_perfcache*.bin' | sort -V | tail -1)
-  transition=$(find "$dir" -name 'laplace_chess_transition_perfcache*.bin' | sort -V | tail -1)
-  [[ -n "$bin" && -n "$flagsbin" && -n "$hwbin" && -n "$vocabbin" && -n "$chessbin" && -n "$transition" ]] || {
+  [[ -n "$bin" && -n "$flagsbin" && -n "$hwbin" && -n "$vocabbin" ]] || {
     echo "::error::installed perfcache set incomplete" >&2; return 1;
   }
   psql -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 \
@@ -856,7 +822,6 @@ phase_perfcache_guc() {
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '$hwbin'" \
     -c "ALTER SYSTEM SET laplace_substrate.vocabulary_perfcache_path = '$vocabbin'" \
-    -c "ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '$chessbin'" \
     -c "ALTER DATABASE \"$PGDATABASE\" SET laplace.tier0 = '$bin'" \
     -c "ALTER DATABASE \"$PGDATABASE\" SET laplace.flags = '$flagsbin'" \
     -c "ALTER DATABASE \"$PGDATABASE\" SET laplace.highway = '$hwbin'" \

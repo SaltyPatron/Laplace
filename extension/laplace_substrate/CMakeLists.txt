@@ -78,7 +78,6 @@ set(EXT_EXECUTION_SOURCES
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/entity_mask_write.c
-    src/chess_syzygy.c
     src/band_leaders.c
     src/generate_walk.c
     src/generate_walk_plans.c
@@ -223,8 +222,6 @@ set(EXT_C_SOURCES
     src/generate_walk.c
     src/generate_walk_plans.c
     src/generate_walk_render.c
-    src/chess_learned_moves.c
-    src/chess_syzygy.c
     src/variant_synth.c
     src/astar_path.c
     src/graph_taxonomy.c
@@ -244,7 +241,6 @@ set(EXT_C_SOURCES
     src/browse_native.c
     src/band_leaders.c
     src/consensus_scan.c
-    src/chess_roster.c
     src/display_native.c
     src/geometry_successors.c
     src/highway_mask.c

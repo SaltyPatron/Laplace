@@ -86,8 +86,6 @@
       <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\tier0.flags" />
       <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\tier0.flags.layout" />
       <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\highway.bin" />
-      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_chess_position_perfcache.bin" />
-      <LaplacePublishedPerfcache Include="$(LaplaceBuildWin)\core\perfcache\laplace_chess_transition_perfcache.bin" />
     </ItemGroup>
     <Error Condition="!Exists('%(LaplacePublishedPerfcache.Identity)')"
            Text="Missing required runtime perfcache: %(LaplacePublishedPerfcache.Identity). Build the selected native runtime before publishing." />

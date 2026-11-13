@@ -38,11 +38,8 @@ if "%CHECK_CONNECTION%"=="1" exit /b 0
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
 for %%F in ("%T0_SRC%") do set "FLAGS_SRC=%%~dpnF.flags"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
-set "CHESS_SRC=%LAPLACE_CHESS_POSITION_PERFCACHE_BIN%"
-set "TRANSITION_SRC=%LAPLACE_ENGINE_BUILD%\core\perfcache\laplace_chess_transition_perfcache.bin"
 set "T0_DST=%DEPLOY%\share\tier0.bin"
 set "HW_DST=%DEPLOY%\share\highway.bin"
-set "CHESS_DST=%DEPLOY%\share\laplace_chess_position_perfcache.bin"
 
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share" mkdir "%DEPLOY%\share"
@@ -68,16 +65,6 @@ for %%F in ("%FLAGS_SRC%" "%FLAGS_SRC%.layout") do if not exist "%%~F" (
 if not exist "%HW_SRC%" (
   echo ERROR: highway perfcache missing at %HW_SRC%
   echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_highway_perfcache
-  exit /b 1
-)
-if not exist "%CHESS_SRC%" (
-  echo ERROR: chess position perfcache missing at %CHESS_SRC%
-  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_chess_position_perfcache
-  exit /b 1
-)
-if not exist "%TRANSITION_SRC%" (
-  echo ERROR: chess transition perfcache missing at %TRANSITION_SRC%
-  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_chess_transition_perfcache
   exit /b 1
 )
 
@@ -141,8 +128,6 @@ call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%FLAGS_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%FLAGS_SRC%.layout" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
-call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
-call :swapcopy "%TRANSITION_SRC%" "%DEPLOY%\share" || exit /b 1
 rem laplace_core's own run-time dependencies, the one list (engine-runtime.cmd): beside postgres.exe, where a backend
 rem module's dependencies are searched (LOAD_WITH_ALTERED_SEARCH_PATH), not on the service's PATH.
 call "%~dp0engine-runtime.cmd" "%PGRT%" || exit /b 1
@@ -168,7 +153,6 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo ALTER SYSTEM SET laplace.tier0 = '%LAPLACE_DEPLOY_PG%/share/tier0.bin';
   echo ALTER SYSTEM SET laplace.flags = '%LAPLACE_DEPLOY_PG%/share/tier0.flags';
   echo ALTER SYSTEM SET laplace.highway = '%LAPLACE_DEPLOY_PG%/share/highway.bin';
-  echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';
   rem laplace_substrate joins whatever the server already preloads (observability modules on a shared server), never replaces it
   echo SELECT CASE WHEN current_setting^('shared_preload_libraries'^) ~ '\mlaplace_substrate\M' THEN current_setting^('shared_preload_libraries'^) WHEN current_setting^('shared_preload_libraries'^) = '' THEN 'laplace_substrate' ELSE current_setting^('shared_preload_libraries'^) ^|^| ',laplace_substrate' END AS spl \gset
   rem unquoted: a list setting takes its elements one by one; one quoted text holding commas would be one library name
@@ -199,7 +183,7 @@ if "%FORCE_RECYCLE%"=="1" (
 exit /b 0
 
 :clients_refreshed
-echo wired: extension_control_path + dynamic_library_path + t0/highway/chess perfcache GUCs -^> %DEPLOY%
+echo wired: extension_control_path + dynamic_library_path + t0/highway perfcache GUCs -^> %DEPLOY%
 exit /b 0
 
 :check_connection
@@ -226,7 +210,6 @@ for %%P in (
   "%PGRT%\svml_dispmd.dll"
   "%T0_DST%"
   "%HW_DST%"
-  "%CHESS_DST%"
 ) do (
   if not exist "%%~P" (
     echo ERROR: deploy verify missing %%~P
@@ -251,13 +234,8 @@ comp "%HW_SRC:/=\%" "%HW_DST:/=\%" /M >nul 2>&1 || (
   echo ERROR: deployed highway perfcache does not match build output
   exit /b 1
 )
-comp "%CHESS_SRC:/=\%" "%CHESS_DST:/=\%" /M >nul 2>&1 || (
-  echo ERROR: deployed chess position perfcache does not match build output
-  exit /b 1
-)
 for %%F in ("%T0_DST%") do echo   T0 perfcache: %%~zF bytes
 for %%F in ("%HW_DST%") do echo   highway perfcache: %%~zF bytes
-for %%F in ("%CHESS_DST%") do echo   chess position perfcache: %%~zF bytes
 exit /b 0
 
 :swapcopy

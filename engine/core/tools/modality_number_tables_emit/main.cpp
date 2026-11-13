@@ -2,8 +2,8 @@
  * Build-time emit for laplace_modality_number_perfcache.bin
  * (spec 33 / modality-ladder-law codepoint floor).
  *
- * Peer of laplace_chess_position_tables_emit in ROLE: load canonical lower
- * generation → compose deterministic reusable records → mmap blob.
+ * Role: load canonical lower generation → compose deterministic reusable
+ * records → mmap blob.
  * Tier 0 remains CODEPOINTS only. This emits the dense canonical integer table
  * 0..255 whose ids are content roots of decimal digit strings — shared by
  * image, audio, video and any other consumer of those exact integers.

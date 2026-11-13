@@ -525,10 +525,8 @@ def worker(args):
         result["pgn"] = pgn_result
         require(all(digest(path) == expected for path, expected in files.items()),
                 "selected installed/verification bytes changed during GUI game")
-        require(Path(entries[1]["command"]).resolve(strict=True) == laplace_wrapper
-                and (Path(desktop["launch"]["chess_floor_root"]) / "current").resolve(strict=True)
-                    == Path(selected_env["LAPLACE_CHESS_PERFCACHE_BIN"]).parent,
-                "installed UCI or floor generation changed during GUI game")
+        require(Path(entries[1]["command"]).resolve(strict=True) == laplace_wrapper,
+                "installed UCI changed during GUI game")
         result.update(status="passed", game_completed=True, normal_gui_exit=True,
                       selected_files=files, direct_acceptance_sha256=digest(args.engine_acceptance_receipt))
     except BaseException as error:

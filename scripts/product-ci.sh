@@ -99,7 +99,6 @@ run_ci_contract_checks() {
   ci_contract_check python3 scripts/test-application-publish.py
   ci_contract_check python3 scripts/test-cutechess-calibration.py
   ci_contract_check python3 scripts/test-chess-x11-runtime.py
-  ci_contract_check python3 scripts/test-chess-floor-artifacts.py
   ci_contract_check python3 scripts/test-recorded-chess-selection.py
   ci_contract_check python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
   ci_contract_check python3 scripts/test-managed-db-scheduling.py

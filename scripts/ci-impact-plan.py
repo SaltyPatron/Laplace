@@ -450,8 +450,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         }
         # Delivery compiles exactly the payload roots selected above (API/UCI/MCP/
         # Lichess/Migrations and, when its dependency closure changed, the ingest
-        # CLI). Reverse-dependent developer tools such as ChessComposeBench and
-        # ChessCatalogSurfaces are qualification leaves, not deployed payloads.
+        # CLI).
         managed_delivery_build_projects = sorted(managed_build_required)
         selected_tests = set(managed_test_projects)
         selected_tests.update(managed_db_test_projects)
