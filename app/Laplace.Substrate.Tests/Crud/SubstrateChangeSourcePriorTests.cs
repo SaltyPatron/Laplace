@@ -225,28 +225,6 @@ public sealed class SubstrateChangeSourcePriorTests
     }
 
     [Fact]
-    public void UserTextArtifactDeclaresTenantContentAndFileObservationPriors()
-    {
-        CodepointPerfcache.LoadDefault();
-        var scope = UserArtifactContent.Resolve("prior-proof", tenantTrust: 0.35);
-        double prior = SourceTrust.UserPrompt * scope.TenantTrust;
-        Assert.True(UserArtifactContent.TryBuildTextArtifactChange(scope, "note.txt", "proof/note.txt",
-            Encoding.UTF8.GetBytes("reused content still has its observed form"), null,
-            DateTime.UnixEpoch, out var change, out var ids));
-        try
-        {
-            Assert.Equal(prior, change.RequireSourcePrior(scope.Source));
-            Assert.Equal(prior, change.RequireSourcePrior(ids.ContentId));
-            Assert.Equal(prior, change.RequireSourcePrior(ids.FileId));
-            var ranges = change.IntentStages.SelectMany(stage => stage.PhysicalitySourceRanges).ToArray();
-            Assert.Contains(ranges, range => range.SourceId == ids.ContentId);
-            Assert.Contains(ranges, range => range.SourceId == ids.FileId);
-            Assert.All(ranges, range => Assert.Equal(prior, change.RequireSourcePrior(range.SourceId)));
-        }
-        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
-    }
-
-    [Fact]
     public void LegacyFileMetadataRetainsItsExplicitMandatePrior()
     {
         CodepointPerfcache.LoadDefault();

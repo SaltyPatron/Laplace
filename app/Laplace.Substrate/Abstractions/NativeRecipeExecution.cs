@@ -12,9 +12,10 @@ public enum NativeRecipeMode { Ingest, Plan, Claims, NoLoad }
 /// <summary>
 /// A witness named at run time (Engine <c>laplace witness</c>): its name, the trust class it states at
 /// (Laplace-Native <c>manifest/trust_classes.toml</c>) and its lineage, its name when none is given. Its
-/// trunk is [its name, its files' trunks]; what it states again is the same lineage, never a second voice.
+/// trunk is [its name, its files' trunks]; what it states again is the same lineage, never a second voice. With a
+/// <see cref="Root"/>, every file is under it and its pathname is recorded from there (Engine <c>--root</c>).
 /// </summary>
-public sealed record NativeRuntimeWitness(string Name, string TrustClass, string? Lineage = null);
+public sealed record NativeRuntimeWitness(string Name, string TrustClass, string? Lineage = null, string? Root = null);
 
 public sealed record NativeRecipeRequest(
     NativeRecipeMode Mode, string? Source, IReadOnlyList<string> Paths,
@@ -166,6 +167,12 @@ public sealed partial class NativeRecipeExecution
             if (string.IsNullOrWhiteSpace(witness.Name) || string.IsNullOrWhiteSpace(witness.TrustClass)
                 || new[] { witness.Name, witness.TrustClass, witness.Lineage ?? "" }.Any(static text => text.Contains('\n') || text.Contains('\r')))
                 throw new ArgumentException("A runtime witness has a name and a trust class, each on one line.", nameof(request));
+            if (witness.Root is { } root)
+            {
+                string under = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
+                if (!Directory.Exists(under) || paths.Any(path => !path.StartsWith(under, StringComparison.Ordinal)))
+                    throw new ArgumentException("A runtime witness's files are under the root they are named from.", nameof(request));
+            }
         }
 
         var start = ProcessInfo(Executable, request.ConnectionInfo);
@@ -197,6 +204,7 @@ public sealed partial class NativeRecipeExecution
             start.ArgumentList.Add("--as"); start.ArgumentList.Add(stated.Name);
             start.ArgumentList.Add("--class"); start.ArgumentList.Add(stated.TrustClass);
             if (!string.IsNullOrWhiteSpace(stated.Lineage)) { start.ArgumentList.Add("--lineage"); start.ArgumentList.Add(stated.Lineage); }
+            if (stated.Root is { } root) { start.ArgumentList.Add("--root"); start.ArgumentList.Add(Path.GetFullPath(root)); }
         }
         if (request.Mode != NativeRecipeMode.Ingest)
             start.ArgumentList.Add(request.Mode switch
