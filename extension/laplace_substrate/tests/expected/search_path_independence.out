@@ -157,33 +157,4 @@ SELECT pg_temp.resolves('laplace_attention_centroid',
  laplace_attention_centroid: ok
 (1 row)
 
-SELECT pg_temp.resolves('laplace_nearest_entity',
-    'SELECT * FROM generation.nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
-          resolves          
-----------------------------
- laplace_nearest_entity: ok
-(1 row)
-
-SELECT pg_temp.resolves('laplace_forward_step',
-    'SELECT generation.forward_step(laplace.word_id(''dog''), consensus.highway_band_mask(3))');
-         resolves         
---------------------------
- laplace_forward_step: ok
-(1 row)
-
--- The new operations added alongside them.
-SELECT pg_temp.resolves('entity_container_degree',
-    'SELECT * FROM structural.entity_container_degree(ARRAY[laplace.word_id(''dog'')])');
-          resolves           
------------------------------
- entity_container_degree: ok
-(1 row)
-
-SELECT pg_temp.resolves('election_token_profile',
-    'SELECT * FROM converse.election_token_profile(ARRAY[''dog''])');
-          resolves          
-----------------------------
- election_token_profile: ok
-(1 row)
-
 ROLLBACK;

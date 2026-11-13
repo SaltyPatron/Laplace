@@ -1,6 +1,0 @@
-CREATE OR REPLACE FUNCTION structural.entity_physicality_coord(p_entity bytea)
-    RETURNS geometry
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT e.coord FROM public.laplace_entities(ARRAY[public.blake3_from_bytea(p_entity)]) e;
-END;

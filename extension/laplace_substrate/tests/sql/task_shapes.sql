@@ -291,8 +291,10 @@ BEGIN
     -- The declaration contains only the exemplar, predicate, slot and mode;
     -- neither the novel Word nor any possible result is an encoded operand.
     FOREACH v_carrier IN ARRAY ARRAY[v_exemplar,v_v1,v_v2_semantic,v_v2_form] LOOP
-        IF EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_carrier,8::smallint) p
-                    WHERE p.entity_id=ANY(ARRAY[v_original,v_answer,v_changed,v_answer_a,v_answer_b])) THEN
+        IF EXISTS (SELECT 1 FROM laplace.physicalities ph
+                    CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(ph.trajectory)) p(entity_id)
+                    WHERE ph.entity_id=v_carrier AND ph.type=8
+                      AND p.entity_id=ANY(ARRAY[v_original,v_answer,v_changed,v_answer_a,v_answer_b])) THEN
             RAISE EXCEPTION 'FAIL: binding-mode declaration pre-encoded a novel input or answer';
         END IF;
     END LOOP;
@@ -418,8 +420,9 @@ BEGIN
         public.laplace_hash128_blake3('laplace/task-shape/token-slot/v1'),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
     IF EXISTS (SELECT 1 FROM laplace.attestations
                 WHERE subject_id=v_root AND type_id IN (v_calls,v_inputs,v_has_parse))
-       OR EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_exemplar,8::smallint) p
-                   WHERE p.entity_id=v_input) THEN
+       OR EXISTS (SELECT 1 FROM laplace.physicalities ph
+                   CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(ph.trajectory)) p(entity_id)
+                   WHERE ph.entity_id=v_exemplar AND ph.type=8 AND p.entity_id=v_input) THEN
         RAISE EXCEPTION 'FAIL: novel input/request was pre-bound by the fixture';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt);

@@ -18,10 +18,10 @@ public static class NpgsqlFoundryReads
     public readonly record struct SurfaceWeightRow(string Surface, long Weight);
     public readonly record struct CoordRow(byte[] EntityId, double X, double Y, double Z, double M);
     /// <summary>
-    /// One row of <c>generation.entity_hilbert_keys</c>: the 128-bit Hilbert index of the
-    /// entity's coordinate physicality. Equal indexes mean shared S³ locality, not identity.
+    /// One entity's Native Hilbert key (laplace_entities): the 4D 16-bit Skilling index of its
+    /// coordinate in unsigned order. Equal keys mean shared S³ locality, not identity.
     /// </summary>
-    public readonly record struct EntityHilbertKey(byte[] EntityId, Hilbert128 HilbertIndex);
+    public readonly record struct EntityHilbertKey(byte[] EntityId, ulong Hilbert);
     public readonly record struct GapEdgeRow(int Gap, byte[] SubjectId, byte[] ObjectId, double W);
     public readonly record struct PosRow(byte[] WordId, byte[] PosId);
     public readonly record struct HighwayMaskRow(byte[] EntityId, byte[] HighwayMask);
@@ -169,8 +169,8 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<EntityHilbertKey>> EntityHilbertKeysAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("generation.entity_hilbert_keys"),
-            static r => new EntityHilbertKey(
-                (byte[])r[0], Hilbert128.FromBytes((byte[])r[1])),
+            // Stored as h ^ 2^63 so signed bigint order is unsigned Hilbert order; undo it.
+            static r => new EntityHilbertKey((byte[])r[0], unchecked((ulong)r.GetInt64(1)) ^ 0x8000000000000000UL),
             p => p.Add(ByteaArray("vocab", vocab)),
             timeoutSeconds: 600, ct: ct, label: "entity_hilbert_keys");
 

@@ -30,12 +30,10 @@ set(EXT_EXECUTION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/content_resolve_phrase.c
-    src/declared_paths.c
+    src/query_program.c
     src/constituents_closure.c
     src/text_root_placements.c
     src/content_trajectory_read.c
-    src/physicality_descriptor_readback.c
-    src/content_carrier_vertices.c
     src/identity_scan.c
     src/content_membership_read.c
     src/containers_of.c
@@ -74,7 +72,6 @@ set(EXT_EXECUTION_SOURCES
     src/prompt_coherence.c
     src/prompt_coherence_scan.c
     src/prompt_language.c
-    src/geometry_successors.c
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/entity_mask_write.c
@@ -222,7 +219,6 @@ set(EXT_C_SOURCES
     src/generate_walk.c
     src/generate_walk_plans.c
     src/generate_walk_render.c
-    src/variant_synth.c
     src/astar_path.c
     src/graph_taxonomy.c
     src/graph_taxonomy_relate.c
@@ -242,12 +238,10 @@ set(EXT_C_SOURCES
     src/band_leaders.c
     src/consensus_scan.c
     src/display_native.c
-    src/geometry_successors.c
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/vocabulary.c
     src/entity_mask_write.c
-    src/model_factor.c
     src/lexical_case.c
     src/lexical_case_batch.c
     src/lexical_case_peers.c

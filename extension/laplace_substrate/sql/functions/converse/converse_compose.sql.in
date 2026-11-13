@@ -141,9 +141,11 @@ BEGIN ATOMIC
     toks AS (
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
-        CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
-             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE u.ctier = 2
+        CROSS JOIN LATERAL (
+            SELECT public.blake3_send(v.id) AS entity_id, v.ord
+            FROM public.laplace_physicalities(ARRAY[public.blake3_from_bytea(g.gid)]) h
+            CROSS JOIN LATERAL unnest(public.laplace_parts(h.path)) WITH ORDINALITY AS v(id, ord)
+        ) u
     ),
     ws AS MATERIALIZED (
         SELECT DISTINCT t.entity_id AS id,

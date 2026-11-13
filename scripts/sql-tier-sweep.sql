@@ -74,7 +74,7 @@ INSERT INTO fixture VALUES
   (NULL,      'bytea[]','ARRAY[laplace.word_id(''hot''), laplace.word_id(''dog'')]'),
   (NULL,      'text[]','ARRAY[''wolf'']'),
   (NULL,      'integer[]','ARRAY[1]'),
-  (NULL,      'geometry','(SELECT trajectory FROM laplace.v_word_points WHERE trajectory IS NOT NULL LIMIT 1)'),
+  (NULL,      'geometry','(SELECT path FROM public.physicality LIMIT 1)'),
   (NULL,      'timestamp with time zone','now()'),
   (NULL,      'jsonb','''{}''::jsonb');
 

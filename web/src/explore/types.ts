@@ -216,7 +216,7 @@ export interface ExplorePackedVertexRow {
   run_length: number;
   flags: number;
 }
-/** Realized curve vertex — child live coords (entity_curve). */
+/** Realized curve vertex — child live coords (public.laplace_curve). */
 export interface ExploreRealizedVertexRow {
   ordinal: number;
   x: number;

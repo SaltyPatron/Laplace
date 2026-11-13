@@ -59,7 +59,7 @@ public sealed partial class NativeSqlCatalogPreparationTests
         var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims,localizedDefinition,nonLanguagePair]);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
-        await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(structural.entity_curve($1))", connection, transaction))
+        await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(c.curve) FROM public.laplace_curve(ARRAY[encode($1,'hex')::public.blake3]) c", connection, transaction))
         {
             curve.Parameters.AddWithValue(witness.Id.ToBytes());
             // The repeated xc run must remain three ordered points. The curve

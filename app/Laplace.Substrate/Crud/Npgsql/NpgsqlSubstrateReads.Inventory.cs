@@ -170,7 +170,7 @@ public static partial class NpgsqlSubstrateReads
             static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.GetInt16(1), r.GetInt64(2)),
             ct: ct, label: "entity_type_counts", onError: onError);
 
-    /// <summary><c>structural.entities_at_depth(tier)</c>.</summary>
+    /// <summary>How many Native entities stand at one tier (Merkle height).</summary>
     public static async Task<long> EntitiesAtDepthCountAsync(
         NpgsqlDataSource dataSource, short depth, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null)

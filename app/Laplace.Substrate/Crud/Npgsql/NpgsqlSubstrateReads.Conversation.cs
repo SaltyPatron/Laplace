@@ -248,7 +248,7 @@ public static partial class NpgsqlSubstrateReads
                 p.Add(new NpgsqlParameter("seed", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)seed ?? DBNull.Value });
             }, ct: ct, label: "walk_continuations", onError: onError);
 
-    /// <summary><c>generation.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
+    /// <summary>The observation holding the word nearest a sentence in length, as text; a word held by more than k observations is a hub and answers nothing.</summary>
     public static Task<string?> RecallTrajectoryAnswerAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>

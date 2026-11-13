@@ -21,7 +21,8 @@ BEGIN ATOMIC
         -- Interpretations select membership without duplicating the physical
         -- observations counted below. Each existing physicality remains one row.
         SELECT w.id AS wid, w.trajectory
-        FROM laplace.v_word_points w
+        FROM (SELECT e.id, e.type_id, p.id AS physicality_id, p.trajectory
+              FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1) w
         WHERE w.type_id = laplace.entity_type_id('Word')
           AND w.trajectory IS NOT NULL
         -- Sample deterministically by content hash and physicality id.

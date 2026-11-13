@@ -169,9 +169,6 @@ SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
     "AS s(subject_id,type_id,source_id,context_id) ON a.subject_id=s.subject_id "
     "AND a.type_id=s.type_id AND a.source_id=s.source_id "
     "AND a.context_id IS NOT DISTINCT FROM s.context_id WHERE a.type_id=ANY($2)")
-SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
-    "SELECT parent_id,n_constituents,ordinal,child_id,run_length,flags "
-    "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
 SQL_QUERY("entities.mask_targets", "bytea[]",
     "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
 SQL_QUERY("entities.complete_highway_masks", "bytea[]",

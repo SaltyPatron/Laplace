@@ -16,7 +16,6 @@
 #include "laplace/core/firmware_law.h"
 #include "cognition_program.h"
 #include "consensus_scan.h"
-#include "declared_paths.h"
 #include "walk_score.h"
 #include "spi_nested.h"
 

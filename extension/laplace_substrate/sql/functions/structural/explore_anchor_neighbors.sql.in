@@ -14,9 +14,9 @@
 --     the glome. Positional/content proximity; centroids commute, so it mixes
 --     tiers/modalities. Fast: index-ordered coord <<->> prefilter.
 --   shape    -- nearest witnessed WORDS by REALIZED curve shape (Frechet over
---     entity_curve = ST_MakeLine(child.coord ORDER BY ordinal)). p_traj_wkt from
+--     laplace_curve = the line(child.coord ORDER BY ordinal)). p_traj_wkt from
 --     ExploreDecomposeService is already a realized LINESTRING ZM of child
---     coords; candidates must use entity_curve, never packed
+--     coords; candidates must use laplace_curve, never packed
 --     laplace.physicalities.trajectory (Rule #3 / Issue 51).
 CREATE OR REPLACE FUNCTION structural.explore_anchor_neighbors(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
@@ -42,9 +42,12 @@ BEGIN ATOMIC
     ), shape_candidates AS MATERIALIZED (
         SELECT n.* FROM params p CROSS JOIN LATERAL structural.angular_nearest(p.anchor,p_frechet_k) n
         WHERE p.curve IS NOT NULL
+    ), curves AS MATERIALIZED (
+        SELECT c.id,c.curve FROM public.laplace_curve(ARRAY(SELECT DISTINCT public.blake3_from_bytea(entity_id) FROM shape_candidates ORDER BY 1)) c
     ), shapes AS MATERIALIZED (
-        SELECT n.*,public.laplace_frechet_4d(structural.entity_curve(n.entity_id),p.curve) AS shape
+        SELECT n.*,public.laplace_frechet_4d(cv.curve,p.curve) AS shape
         FROM shape_candidates n CROSS JOIN params p
+        LEFT JOIN curves cv ON cv.id=public.blake3_from_bytea(n.entity_id)
     ), admitted AS MATERIALIZED (
         SELECT 'geodesic'::text AS axis,entity_id,tier,distance AS geodesic,NULL::float8 AS frechet FROM geo
         UNION ALL SELECT 'shape',entity_id,tier,NULL::float8,shape FROM shapes WHERE shape<=p_frechet_max

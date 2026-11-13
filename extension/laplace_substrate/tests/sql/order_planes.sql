@@ -104,16 +104,6 @@ BEGIN
         RAISE EXCEPTION 'FAIL: word_order dropped a legitimately repeated token: % row(s)', n;
     END IF;
 
-    -- sentence_order reads document trajectories and must find the sentence pair. This
-    -- also pins the type_id role predicate: the document is selected by
-    -- realize.canonical_id('Document'), so a regression to a tier test shows up as zero rows.
-    SELECT count(*) INTO n
-    FROM generation.sentence_order(1000, 1)
-    WHERE subject_id = sent AND object_id = sent_rep;
-    IF n <> 1 THEN
-        RAISE EXCEPTION 'FAIL: sentence_order did not pair the document constituents: %', n;
-    END IF;
-
     RAISE NOTICE 'order planes: no fabricated adjacency, repeats kept, roles by type';
 END $$;
 

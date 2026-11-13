@@ -224,7 +224,7 @@ SQL_QUERY("laplace.score_pair", "float8,float8",
     "SELECT s.score, laplace.laplace_score_inverse(s.score, $2)\nFROM (SELECT laplace.laplace_score($1, $2) AS score) s")
 
 SQL_QUERY("structural.entities_at_depth_count", "int2",
-    "SELECT count(*)::bigint FROM structural.entities_at_depth($1)")
+    "SELECT count(*)::bigint FROM public.entity e WHERE e.tier=$1")
 
 SQL_QUERY("ops.entity_attestations", "bytea",
     "SELECT encode(type_id, 'hex'), encode(object_id, 'hex'), eff_mu_raw\nFROM ops.entity_attestations($1, 0)")
@@ -391,7 +391,29 @@ SQL_QUERY("ops.entity_primary_forms_batch", "bytea[]",
     "SELECT DISTINCT ON (p.ordinal) p.ordinal,p.x,p.y,p.z,p.m,p.radius,p.n_constituents\nFROM ops.entity_physicalities($1::bytea[]) p ORDER BY p.ordinal,p.type")
 
 SQL_QUERY("structural.constellation_sample", "int4",
-    "SELECT s.sample_ordinal, encode(s.entity_id, 'hex'), s.physicality_type,\n       s.x, s.y, s.z, s.m, s.radius, s.n_constituents,\n       encode(s.hilbert_index, 'hex')\nFROM structural.constellation_sample($1) s\nORDER BY s.sample_ordinal")
+    "WITH bounds AS (\n"
+    " SELECT g.i,((g.i::bigint*65536)/n.n)::integer AS lo16,(((g.i+1)::bigint*65536)/n.n)::integer AS hi16\n"
+    " FROM (SELECT LEAST(GREATEST(COALESCE($1,0),0),1024) AS n) n\n"
+    " CROSS JOIN LATERAL generate_series(0,n.n-1) AS g(i) WHERE n.n>0\n"
+    "), sampled AS (\n"
+    " SELECT b.i,e.id,e.coord,e.hilbert\n"
+    " FROM bounds b\n"
+    " CROSS JOIN LATERAL (\n"
+    "  SELECT e.id,e.coord,e.hilbert FROM public.entity e\n"
+    "  WHERE e.hilbert>=((b.lo16::bigint-32768)<<48)\n"
+    "    AND (b.hi16>=65536 OR e.hilbert<((b.hi16::bigint-32768)<<48))\n"
+    "  ORDER BY e.hilbert,e.id LIMIT 1) e\n"
+    "), distinct_entities AS (\n"
+    " SELECT s.*,row_number() OVER (PARTITION BY s.id ORDER BY s.i) AS entity_ord FROM sampled s\n"
+    ")\n"
+    "SELECT row_number() OVER (ORDER BY d.i)::integer,encode(public.blake3_send(d.id),'hex'),1::smallint,\n"
+    " public.ST_X(d.coord),public.ST_Y(d.coord),public.ST_Z(d.coord),public.ST_M(d.coord),\n"
+    " public.laplace_radius_origin(d.coord),COALESCE(public.laplace_path_length(p.path)::integer,0),\n"
+    " encode(int8send(d.hilbert # '-9223372036854775808'::bigint),'hex')\n"
+    "FROM distinct_entities d\n"
+    "LEFT JOIN public.physicality p ON p.entity=d.id\n"
+    "WHERE d.entity_ord=1\n"
+    "ORDER BY d.i")
 
 SQL_QUERY("ops.evidence_receipt", "bytea,int4",
     "SELECT encode(type_id,'hex'),type_label,encode(object_id,'hex'),object_label,source_labels,witness_count,eff_mu FROM ops.evidence_receipt($1,$2)")
@@ -470,7 +492,12 @@ SQL_QUERY("realize.constituents_rendered", "bytea",
     "WITH children AS MATERIALIZED (SELECT * FROM realize.constituents($1)), labels AS MATERIALIZED (\n SELECT * FROM realize.display_label_batch(ARRAY(SELECT DISTINCT child_id FROM children ORDER BY child_id))\n) SELECT c.ordinal,encode(c.child_id,'hex'),c.run_length,c.flags,coalesce(l.label,encode(c.child_id,'hex'))\nFROM children c LEFT JOIN labels l ON l.id=c.child_id ORDER BY c.ordinal")
 
 SQL_QUERY("inspection.packed_trajectory_vertices", "bytea",
-    "WITH native AS MATERIALIZED (\n SELECT c.ordinal,public.ST_PointN(p.path,c.ordinal) AS vertex,c.child,c.run_length,c.flags\n FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)]) c\n JOIN public.physicality p ON p.entity=c.entity\n) SELECT ordinal,public.ST_X(vertex),public.ST_Y(vertex),public.ST_Z(vertex),public.ST_M(vertex),\n child::text,run_length,flags FROM native\nUNION ALL\nSELECT u.ordinal,public.ST_X(dp.geom),public.ST_Y(dp.geom),public.ST_Z(dp.geom),public.ST_M(dp.geom),\n encode(u.entity_id,'hex'),greatest(u.run_length,1),u.flags\nFROM (SELECT trajectory FROM laplace.v_word_points WHERE id=$1 AND trajectory IS NOT NULL\n AND NOT EXISTS(SELECT FROM public.entity WHERE id=public.blake3_from_bytea($1)) LIMIT 1) t,\n LATERAL public.ST_DumpPoints(t.trajectory) dp,LATERAL public.laplace_mantissa_unpack(dp.geom) u ORDER BY 1")
+    "SELECT c.ordinal,public.ST_X(v.vertex),public.ST_Y(v.vertex),public.ST_Z(v.vertex),public.ST_M(v.vertex),\n"
+    " c.child::text,c.run_length,c.flags\n"
+    "FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)]) c\n"
+    "JOIN public.laplace_physicalities(ARRAY[public.blake3_from_bytea($1)]) p ON p.entity=c.entity\n"
+    "CROSS JOIN LATERAL (SELECT public.ST_PointN(p.path,c.ordinal) AS vertex) v\n"
+    "ORDER BY c.ordinal")
 
 SQL_QUERY("inspection.realized_trajectory_vertices", "bytea",
     "WITH children AS MATERIALIZED (\n SELECT * FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)])\n), labels AS MATERIALIZED (\n SELECT * FROM public.laplace_labels(ARRAY(SELECT DISTINCT child FROM children ORDER BY child))\n), coords AS (\n SELECT c.ordinal,c.child,coalesce(e.coord,CASE WHEN public.laplace_codepoint(c.child)>=0 THEN\n public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(c.child))) END) AS coord\n FROM children c LEFT JOIN public.entity e ON e.id=c.child\n) SELECT c.ordinal,public.ST_X(c.coord),public.ST_Y(c.coord),public.ST_Z(c.coord),public.ST_M(c.coord),\n c.child::text,coalesce(l.content,c.child::text),public.laplace_radius_origin(c.coord)\nFROM coords c LEFT JOIN labels l ON l.entity=c.child WHERE c.coord IS NOT NULL\nUNION ALL\nSELECT c.ordinal,public.ST_X(p.coord),public.ST_Y(p.coord),public.ST_Z(p.coord),public.ST_M(p.coord),\n encode(c.child_id,'hex'),coalesce(nullif(realize.render_text_fast(c.child_id,8),''),'Unrealized entity'),p.radius_origin\nFROM realize.constituents($1) c JOIN laplace.physicalities p ON p.entity_id=c.child_id AND p.type=1\nWHERE p.coord IS NOT NULL AND NOT EXISTS(SELECT FROM public.entity WHERE id=public.blake3_from_bytea($1)) ORDER BY 1")
@@ -513,15 +540,6 @@ SQL_QUERY("converse.astar_path_rendered", "bytea,bytea,int4,bool,bool",
 
 SQL_QUERY("generation.walk_continuations_rendered", "bytea,int4,int4,float8,int4,int8",
     "SELECT converse.label_or_hex(w.entity) AS reply, NULL::numeric, NULL::bigint\nFROM generation.walk_continuations(ARRAY[$1]::bytea[], $2, $3,\n                                $4, $5, $6) w\nORDER BY w.step")
-
-SQL_QUERY("generation.content_trajectory_constituents", "bytea[]",
-    "SELECT d.id, p.entity_id, p.ordinal::integer\nFROM generation.typed_trajectory_points($1, ARRAY[1::smallint]) p\nJOIN unnest($1) d(id) ON d.id = p.parent_id\nORDER BY d.id, p.ordinal")
-
-SQL_QUERY("generation.typed_trajectory_constituents", "bytea[],int2[]",
-    "SELECT d.id, lane.type, p.entity_id, p.ordinal::integer\nFROM generation.typed_trajectory_points($1, $2) p\nJOIN unnest($1) d(id) ON d.id = p.parent_id\nJOIN unnest($2) lane(type) ON lane.type = p.physicality_type\nORDER BY d.id, lane.type, p.ordinal")
-
-SQL_QUERY("generation.nested_trajectory_constituents", "bytea[]",
-    "SELECT d.id, a.ord::integer, a.entity_id, f.ord::integer, f.entity_id\nFROM unnest($1) AS d(id)\nCROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id)\n     WITH ORDINALITY AS a(entity_id, run_length, ctier, ord)\nCROSS JOIN LATERAL generation.trajectory_unpacked_points(a.entity_id)\n     WITH ORDINALITY AS f(entity_id, run_length, ctier, ord)\nORDER BY d.id, a.ord, f.ord")
 
 SQL_QUERY("ops.entity_counts_by_types", "bytea[]",
     "SELECT type_id, entities FROM ops.entity_counts_by_types($1)")

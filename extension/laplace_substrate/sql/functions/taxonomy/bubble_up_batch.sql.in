@@ -56,8 +56,15 @@ BEGIN
     SELECT m.synset_id, count(*)::bigint AS domain_hits
     FROM members m
     JOIN domain d ON true
-    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
-      ON gn.neighbour_id = d.id
+    JOIN LATERAL (
+        SELECT DISTINCT public.blake3_send(n.id) AS neighbour_id
+        FROM (SELECT public.blake3_from_bytea(m.member_id) AS id) k
+        CROSS JOIN LATERAL public.laplace_holders(ARRAY[k.id], '{}'::public.blake3[], true, -1::smallint,
+            4096::bigint, 2::smallint) h
+        CROSS JOIN LATERAL unnest(public.laplace_follows(h.path, ARRAY[k.id])
+                                  || public.laplace_precedes(h.path, ARRAY[k.id])) AS n(id)
+        WHERE h.path IS NOT NULL
+    ) gn ON gn.neighbour_id = d.id
     GROUP BY m.synset_id;
 END;
 $$;

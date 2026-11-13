@@ -15,8 +15,7 @@
     "lexical.lexical_peers",
     "lexical.word_case_variants",
     "realize.render_text",
-    "structural.containers_of",
-    "structural.geometry_neighbours"
+    "structural.containers_of"
   ],
   "filter_key_functions": [
     "consensus.relation_highway_band",

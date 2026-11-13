@@ -387,7 +387,7 @@ internal static partial class FoundryExport
     internal static double[] BuildBasis(
         int vocab, int dModel, PlaneCoo leGraph, double[]?[] anchors, Hash128 seed,
         out BasisStats stats, bool coordDirect = false, double? coordScale = null,
-        Hilbert128?[]? hilbertKeys = null)
+        ulong?[]? hilbertKeys = null)
     {
         bool coordOnly = FoundryDefaults.CoordOnly;
         // Hilbert content-PE reserves its trailing dims before choosing k, so a
@@ -606,12 +606,9 @@ internal static partial class FoundryExport
                 {
                     if (i >= hilbertKeys.Length || hilbertKeys[i] is not { } hb) continue;
                     long off = (long)i * dModel;
-                    // Leading bytes of the packed 128-bit index = coarsest S³ locality.
-                    unsafe
-                    {
-                        for (int d = 0; d < peDims; d++)
-                            e[off + peBase + d] = (2.0 * hb.Bytes[d] / 255.0 - 1.0) * peScale;
-                    }
+                    // Most significant octets of the Hilbert key = coarsest S³ locality.
+                    for (int d = 0; d < peDims; d++)
+                        e[off + peBase + d] = (2.0 * (byte)(hb >> (56 - 8 * d)) / 255.0 - 1.0) * peScale;
                     placedPe++;
                 }
                 Console.WriteLine($"  hilbert content-PE: {placedPe:N0} tokens in {peDims} trailing dims (scale {peScale})");
