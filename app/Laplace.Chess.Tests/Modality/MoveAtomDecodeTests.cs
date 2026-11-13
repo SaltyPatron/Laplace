@@ -1,5 +1,4 @@
 using System;
-using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Xunit;
@@ -22,7 +21,7 @@ public sealed class MoveAtomDecodeTests
     public void ComposedMoveId_MatchesTheStoredCorpusId()
     {
         var move = new ChessMove(Board.Sq(4, 1), Board.Sq(4, 3), Piece.Empty, MoveFlags.DoublePush);
-        var id = ChessCompose.MoveId(Piece.WPawn, move);
+        var id = ChessPositionIdentity.MoveId(Piece.WPawn, move);
         Assert.Equal(StoredE4, Convert.ToHexString(id.ToBytes()).ToLowerInvariant());
     }
 

@@ -15,11 +15,6 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
     AS 'EXECUTION_LIBRARY', 'pg_laplace_containers_of'
     LANGUAGE C STABLE;
 
-CREATE OR REPLACE FUNCTION structural.text_containers(p_forms text[])
-    RETURNS TABLE(entity_id bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_content_text_containers'
-    LANGUAGE C STABLE PARALLEL RESTRICTED;
-
 CREATE OR REPLACE FUNCTION structural.starts_with(p_entities bytea[],p_first bytea[])
     RETURNS TABLE(entity_id bytea)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_starts_with'

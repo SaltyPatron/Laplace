@@ -279,7 +279,6 @@ def main() -> int:
         for target in (
             "laplace_t0_perfcache",
             "laplace_highway_perfcache",
-            "laplace_chess_position_perfcache",
             "laplace_modality_number_perfcache",
         ):
             if not re.search(

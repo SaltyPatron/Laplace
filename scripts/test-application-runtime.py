@@ -59,7 +59,7 @@ class RuntimeGuardTests(unittest.TestCase):
             self.database["roms"][setting] = str(path)
             self.write(path, filename)
             self.write(self.root / "build/engine/core/perfcache" / filename, filename)
-        for filename in ("laplace_chess_transition_perfcache.bin", "laplace_modality_number_perfcache.bin"):
+        for filename in ("laplace_modality_number_perfcache.bin",):
             self.write(self.prefix / "share/laplace" / filename, filename)
             self.write(self.root / "build/engine/core/perfcache" / filename, filename)
         self.database["native_mappings"] = [
@@ -251,41 +251,6 @@ class RuntimeGuardTests(unittest.TestCase):
             guard.mapped_native_identities(self.prefix, {"native_mappings": []}, hashes)
         with self.assertRaisesRegex(ValueError, "mappings are missing"):
             guard.mapped_native_identities(self.prefix, {}, hashes, required=())
-
-    def install_pair_receipt(self):
-        files = {}
-        for name in ("laplace_chess_position_perfcache.bin", "laplace_chess_transition_perfcache.bin"):
-            files[name] = {"sha256": guard.digest(self.prefix / "share/laplace" / name)}
-        pair = {"schema": "laplace.chess-floor-pair/v1", "files": files, "export": None}
-        built = self.root / "build/engine/core/perfcache/chess-floor-pair.json"
-        installed = self.prefix / "share/laplace/chess-floor/current/receipt.json"
-        for path in (built, installed):
-            self.write(path, json.dumps(pair))
-        return built, installed, pair
-
-    def test_pair_receipt_binds_generation_even_when_floor_bytes_are_unchanged(self):
-        built, installed, pair = self.install_pair_receipt()
-        state = self.snapshot()
-        self.assertEqual(guard.digest(installed), state["artifacts"]["chess_floor_pair_receipt"])
-        changed = dict(pair, export={"unverified": "different corpus"})
-        self.write(installed, json.dumps(changed))
-        with self.assertRaisesRegex(ValueError, "sealed build pair"):
-            self.snapshot()
-        self.write(installed, json.dumps(pair))
-        built.unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.snapshot()
-
-    def test_pair_receipt_cannot_certify_other_bytes_or_missing_generation(self):
-        built, installed, pair = self.install_pair_receipt()
-        pair["files"]["laplace_chess_transition_perfcache.bin"]["sha256"] = "0" * 64
-        for path in (built, installed):
-            self.write(path, json.dumps(pair))
-        with self.assertRaisesRegex(ValueError, "installed-file bytes"):
-            self.snapshot()
-        installed.unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.snapshot()
 
     def test_build_identity_uses_real_configuration_without_obsolete_stamps(self):
         baseline = self.snapshot()

@@ -859,6 +859,7 @@ public sealed class DecomposerArchitectureGateTests
         var execution = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate",
             "Abstractions", "NativeRecipeExecution.cs"));
         Assert.Contains("start.ArgumentList.Add(\"ingest\")", execution, StringComparison.Ordinal);
+        Assert.Contains("start.ArgumentList.Add(\"witness\")", execution, StringComparison.Ordinal);
         Assert.Contains("process.WaitForExitAsync(ct)", execution, StringComparison.Ordinal);
         Assert.Contains("process.Kill(entireProcessTree: true)", execution, StringComparison.Ordinal);
     }

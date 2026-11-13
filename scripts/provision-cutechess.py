@@ -279,8 +279,7 @@ def install_desktop(prefix, verified, stockfish, work_root=None, calibration_rep
                  "environment": expected, "qt_library_path": library,
                  "session_helper": str(session_helper), "session_helper_sha256": digest(session_helper),
                  "engine_catalog": str(engine_catalog), "engine_catalog_sha256": digest(engine_catalog),
-                 "work_root": str(work_root), "t0_perfcache": str(perfcache),
-                 "chess_floor_root": str(prefix / "share/laplace/chess-floor")}
+                 "work_root": str(work_root), "t0_perfcache": str(perfcache)}
     # Preserve the invoking user's display, settings and extra search paths.
     # Do not publish provisioning-process environment or read the API's secrets.
     program = '''#!/usr/bin/env python3

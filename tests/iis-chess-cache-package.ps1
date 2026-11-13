@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../deploy/windows/iis-runtime.ps1"
 $work=Join-Path ([IO.Path]::GetTempPath()) ('iis-cache-closure-'+[Guid]::NewGuid().ToString('N'))
 $files=@()
-$names=@('tier0.bin','tier0.flags','tier0.flags.layout','highway.bin','laplace_chess_position_perfcache.bin','laplace_chess_transition_perfcache.bin')
+$names=@('tier0.bin','tier0.flags','tier0.flags.layout','highway.bin')
 foreach($component in @('','cli','uci')) {
     $share=Join-Path (Join-Path $work $component) 'share/laplace'
     $null=New-Item -ItemType Directory -Path $share -Force
@@ -37,4 +37,4 @@ foreach($component in 'cli','uci') {
   }
 }
 Test-IisCacheClosure $work
-Write-Host 'PASS package closure requires matching Tier-0, highway and chess files for API, CLI and UCI; binary semantics are checked by the cache loader.'
+Write-Host 'PASS package closure requires matching Tier-0 and highway files for API, CLI and UCI; binary semantics are checked by the cache loader.'

@@ -38,7 +38,6 @@ PROJECTS = {
 NATIVE_TARGETS = (
     "laplace_core", "laplace_syzygy", "laplace_dynamics", "laplace_synthesis",
     "laplace_t0_perfcache", "laplace_highway_perfcache",
-    "laplace_chess_position_perfcache", "laplace_chess_transition_perfcache",
 )
 SCHEMA = "laplace.component-artifact/v1"
 PUBLISH_OPTIONS = ("-c", "Release", "--no-self-contained", "--nologo", "-p:DefaultItemExcludes=wwwroot/**")

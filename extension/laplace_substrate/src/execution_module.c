@@ -4,16 +4,15 @@
  *
  * Each versioned execution module links its own static core and Native closure,
  * giving it module-local perfcache state on every platform.
- * Redirecting laplace_perfcache_ready / laplace_highway_ready / laplace_vocabulary_ready /
- * laplace_chess_position_ready inside the execution module ensures the execution DLL's
- * static tables are populated on demand using the GUC paths owned by the host module. */
+ * Redirecting laplace_perfcache_ready / laplace_highway_ready / laplace_vocabulary_ready
+ * inside the execution module ensures the execution DLL's static tables are populated
+ * on demand using the GUC paths owned by the host module. */
 #include "postgres.h"
 #include "fmgr.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "varatt.h"
 
-#include "laplace/core/chess_position_table.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/highway_table.h"
 #include "laplace/core/vocabulary_table.h"
@@ -84,26 +83,6 @@ laplace_vocabulary_ready(void)
         ereport(ERROR,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR),
                  errmsg("laplace_substrate: failed to load vocabulary perfcache \"%s\" in execution module (rc=%d)",
-                        path, rc)));
-    return true;
-}
-
-bool
-laplace_chess_position_ready(void)
-{
-    const char *path;
-    int rc;
-
-    if (chess_position_table_is_loaded())
-        return true;
-    path = GetConfigOptionByName("laplace_substrate.chess_position_perfcache_path", NULL, true);
-    if (path == NULL || path[0] == '\0')
-        return false;
-    rc = chess_position_table_load(path);
-    if (rc != 0)
-        ereport(ERROR,
-                (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                 errmsg("laplace_substrate: failed to load chess position perfcache \"%s\" in execution module (rc=%d)",
                         path, rc)));
     return true;
 }

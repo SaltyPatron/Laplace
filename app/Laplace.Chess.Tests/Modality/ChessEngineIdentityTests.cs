@@ -1,4 +1,3 @@
-using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Xunit;
 
@@ -58,7 +57,7 @@ public sealed class ChessEngineIdentityTests
     {
         // The id the domain-tagged atoms compose: this is the divergence the Engine id replaces.
         var start = Board.FromFen(ChessModality.StartFen);
-        lock (ChessCompose.Gate)
+        lock (LaplaceCoreGate.Native)
             Assert.NotEqual(EngineStart, EngineHeldHex(ChessPositionIdentity.PositionId(start)));
     }
 

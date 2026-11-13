@@ -257,21 +257,11 @@ def launch_environment(selection, session_environment):
     environment = dict(os.environ)
     environment.update(session_environment)
     environment.update(selection["environment"])
-    floor_root = Path(selection["chess_floor_root"])
-    generation = (floor_root / "current").resolve(strict=True)
-    if generation.parent != (floor_root / "generations").resolve(strict=True):
-        raise RuntimeError("installed chess floor selection is not an owned generation")
     t0 = Path(selection["t0_perfcache"])
     if not t0.is_file():
         raise RuntimeError("selected installed T0 perfcache is unavailable")
     environment["LAPLACE_PERFCACHE_BIN"] = str(t0)
     environment["LAPLACE_UCI_SUBSTRATE"] = "substrate"
-    for key, filename in (("LAPLACE_CHESS_PERFCACHE_BIN", "laplace_chess_position_perfcache.bin"),
-                          ("LAPLACE_CHESS_TRANSITION_BIN", "laplace_chess_transition_perfcache.bin")):
-        path = generation / filename
-        if not path.is_file():
-            raise RuntimeError("installed chess floor is unavailable")
-        environment[key] = str(path)
     selected = selection["qt_library_path"]
     inherited = [item for item in environment.get("LD_LIBRARY_PATH", "").split(os.pathsep)
                  if item and item != selected]

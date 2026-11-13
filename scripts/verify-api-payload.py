@@ -17,10 +17,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_FILES = 20000
 MAX_MANIFEST = 16 * 1024 * 1024
+MAX_PROC_BYTES = 8 * 1024 * 1024
 REQUIRED = ("Laplace.Endpoints.OpenAICompat.dll", "Laplace.Core.dll",
             "Laplace.Chess.dll", "liblaplace_core.so", "liblaplace_dynamics.so",
             "liblaplace_synthesis.so", "liblaplace_syzygy.so")
@@ -39,8 +41,80 @@ def owner(name, filename):
     return module
 
 
-floor = owner("api_payload_floor", "verify-chess-floor-serving.py")
+acceptance = owner("api_payload_acceptance", "accept-chess-environment.py")
 release = owner("api_payload_release", "verify-application-release.py")
+
+
+def read_bytes(path, limit):
+    with Path(path).open("rb") as source:
+        value = source.read(limit + 1)
+    if len(value) > limit:
+        raise ValueError("bounded observation exceeded: " + str(path))
+    return value
+
+
+def fact(path):
+    path = Path(path).resolve(strict=True)
+    initial = path.stat()
+    if not stat.S_ISREG(initial.st_mode):
+        raise ValueError("selected input is not a regular file")
+    digest = acceptance.sha256(path)
+    final = path.stat()
+    identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+    if identity(initial) != identity(final):
+        raise ValueError("selected input changed while hashing")
+    return {"path": str(path), "bytes": initial.st_size, "sha256": digest,
+            "device_major": os.major(initial.st_dev), "device_minor": os.minor(initial.st_dev),
+            "inode": initial.st_ino}
+
+
+def local_base(value):
+    parsed = urllib.parse.urlsplit(value)
+    if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "::1", "localhost")
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in ("", "/")):
+        raise ValueError("API observation requires a plain loopback HTTP origin")
+    return value.rstrip("/")
+
+
+def mapped_rows(text, selected):
+    """Bind kernel device/inode, not a filename substring or a stale symlink."""
+    found = {name: [] for name in selected}
+    for line in text.splitlines():
+        columns = line.split(None, 5)
+        if len(columns) < 5:
+            continue
+        try:
+            major, minor = (int(part, 16) for part in columns[3].split(":"))
+            inode, offset = int(columns[4]), int(columns[2], 16)
+        except ValueError:
+            raise ValueError("malformed proc mapping observation") from None
+        for name, item in selected.items():
+            if (major, minor, inode) == (item["device_major"], item["device_minor"], item["inode"]):
+                found[name].append({"address": columns[0], "permissions": columns[1],
+                                    "offset": offset, "path": columns[5] if len(columns) > 5 else ""})
+    for name, rows in found.items():
+        if not any(row["offset"] == 0 and "r" in row["permissions"] for row in rows):
+            raise ValueError("serving process does not map the exact selected artifact: " + name)
+    return found
+
+
+def process(pid, selected):
+    root = Path("/proc") / str(pid)
+    def start():
+        text = read_bytes(root / "stat", 65536).decode()
+        end = text.rfind(")")
+        fields = text[end + 2:].split()
+        if end < 0 or len(fields) < 20:
+            raise ValueError("malformed process identity")
+        return int(fields[19])  # field 22; fields after comm start at field 3
+    before = start()
+    executable = fact(root / "exe")
+    maps = read_bytes(root / "maps", MAX_PROC_BYTES).decode("utf-8", "strict")
+    rows = mapped_rows(maps, selected)
+    if before != start():
+        raise ValueError("serving process changed during mapping observation")
+    return {"pid": pid, "start_ticks": before, "executable": executable, "mappings": rows}
 
 
 def save(path, value):
@@ -76,7 +150,7 @@ def files(directory, required=REQUIRED, spa=True, wrapped_uci=False):
                 if not stat.S_ISREG(entry.st_mode):
                     raise ValueError("API payload contains a non-regular file")
                 relative = path.relative_to(directory).as_posix()
-                result[relative] = floor.fact(path)
+                result[relative] = fact(path)
                 if len(result) > MAX_FILES:
                     raise ValueError("API payload exceeds declared file bound")
     for name in required:
@@ -107,7 +181,7 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
             for path in sorted((native_build / component).glob("*.so*")):
                 if path.name in native:
                     raise ValueError("duplicate native publication filename")
-                expected = floor.fact(path)
+                expected = fact(path)
                 actual = rows.get(path.name)
                 if actual is None or (actual["sha256"], actual["bytes"]) != (
                         expected["sha256"], expected["bytes"]):
@@ -126,7 +200,7 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
         for path in sorted(native_installed.glob("liblaplace_*.so*")):
             if path.name in native:
                 raise ValueError("duplicate installed native publication filename")
-            expected = floor.fact(path)
+            expected = fact(path)
             actual = rows.get(path.name)
             if actual is None or (actual["sha256"], actual["bytes"]) != (
                     expected["sha256"], expected["bytes"]):
@@ -209,7 +283,7 @@ def installed(directory, manifest, remap=None):
         path = directory / (remap or {}).get(name, name)
         if path.is_symlink() or not path.resolve(strict=True).is_relative_to(directory):
             raise ValueError("installed API file escapes its payload")
-        actual = floor.fact(path)
+        actual = fact(path)
         if (actual["sha256"], actual["bytes"]) != (expected["sha256"], expected["bytes"]):
             raise ValueError("installed API bytes differ from sealed payload: " + name)
         result[name] = actual
@@ -234,34 +308,30 @@ def service():
     return value
 
 
-def health(base, pid):
+def health(base):
     status, content_type, body = release.request("GET", base + "/health/ready")
     if status not in (200, 503) or "json" not in content_type.lower():
         raise ValueError("API readiness response is invalid")
     value = release.json_object(body, "readiness")
     release.classify_readiness(value)
-    chess = value.get("chess_perfcache")
-    if (not isinstance(chess, dict) or type(chess.get("process_id")) is not int
-            or chess["process_id"] != pid):
-        raise ValueError("API readiness process differs from systemd MainPID")
     return value
 
 
 def verify(directory, manifest, base, timeout_seconds):
-    base = floor.local_base(base)
+    base = local_base(base)
     first = installed(directory, manifest)
     has_data, product_ready = release.wait_for_readiness(base, timeout_seconds)
     release.verify_spa(base)
     release.verify_typed_operation(base)
     before = service()
     pid = int(before["MainPID"])
-    health_before = health(base, pid)
+    health_before = health(base)
     mapped = {name: first[name] for name in MAPPED}
-    process_before = floor.process(pid, mapped)
+    process_before = process(pid, mapped)
     # An actual typed operation is bracketed by the same serving identity.
     release.verify_typed_operation(base)
-    health_after = health(base, pid)
-    process_after = floor.process(pid, mapped)
+    health_after = health(base)
+    process_after = process(pid, mapped)
     after = service()
     if before["MainPID"] != after["MainPID"] or process_before != process_after:
         raise ValueError("API serving process changed during verification")
@@ -272,7 +342,7 @@ def verify(directory, manifest, base, timeout_seconds):
     # and typed operations leave these lazy libraries unloaded.
     return {"schema": "laplace.api-payload-verification/v1", "status": "passed",
             "has_data": has_data, "product_ready": product_ready,
-            "boot_id": floor.acceptance.boot_id(),
+            "boot_id": acceptance.boot_id(),
             "service": after, "process": process_after,
             "health_before": health_before, "health_after": health_after,
             "payload": last, "provenance": manifest["provenance"],
@@ -288,14 +358,14 @@ def verify_uci(executable, manifest):
         raise ValueError("selected UCI is not the installed lease launcher")
     remap = {} if manifest["wrapped"] else {"laplace-uci": "laplace-uci.native"}
     before = installed(selected.parent, manifest, remap)
-    wrapper = floor.fact(selected)
+    wrapper = fact(selected)
     lease = selected.parent.parent / ".runtime-lease"
     if not lease.is_file() or lease.is_symlink():
         raise ValueError("UCI immutable runtime lease is unavailable")
     runtime = owner("uci_payload_protocol", "check-uci-runtime.py")
     move = runtime.check_runtime(executable)
     after = installed(selected.parent, manifest, remap)
-    if (before != after or wrapper != floor.fact(selected)
+    if (before != after or wrapper != fact(selected)
             or executable.resolve(strict=True) != selected):
         raise ValueError("UCI selection changed during runtime verification")
     return {"schema": "laplace.uci-payload-verification/v1", "status": "passed",
@@ -332,7 +402,7 @@ def main():
         started = time.monotonic()
         receipt = {"schema": "laplace.uci-payload-verification/v1", "status": "failed"}
         try:
-            with floor.acceptance.deadline(args.timeout_seconds + 30):
+            with acceptance.deadline(args.timeout_seconds + 30):
                 receipt = verify_uci(args.verify_uci, read_manifest(args.manifest, uci=True))
             return 0
         except (OSError, ValueError, RuntimeError, KeyError, TypeError,
@@ -356,7 +426,7 @@ def main():
     started = time.monotonic()
     receipt = {"schema": "laplace.api-payload-verification/v1", "status": "failed"}
     try:
-        with floor.acceptance.deadline(args.timeout_seconds + 30):
+        with acceptance.deadline(args.timeout_seconds + 30):
             receipt = verify(args.app_dir, read_manifest(args.manifest),
                              args.base, args.timeout_seconds)
         return 0

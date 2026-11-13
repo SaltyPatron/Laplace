@@ -247,17 +247,6 @@ def mapped_closure(process, directory):
     return result
 
 
-def mapped_floor_pair(process, environment):
-    """Reuse the real serving observer for this owned UCI process's selected pair."""
-    floor = load_module("uci_selected_floor_observer", ROOT / "scripts/verify-chess-floor-serving.py")
-    selected = {"position": floor.fact(environment["LAPLACE_CHESS_PERFCACHE_BIN"]),
-                "transition": floor.fact(environment["LAPLACE_CHESS_TRANSITION_BIN"])}
-    observation = floor.process(process.pid, selected)
-    floor.require_same_files(selected)
-    return {"files": selected, "process": observation,
-            "scope": "Read-only kernel device/inode mappings of the selected pair after a real UCI search"}
-
-
 def provider_receipt(lines):
     rows = [line.removeprefix("info string providers ") for line in lines
             if line.startswith("info string providers ")
@@ -332,8 +321,6 @@ def uci(entry, environment, output, deadline, expected, substrate=False, depth=2
         if substrate:
             result["providers"] = provider_receipt(search_lines)
             result["native_closure"] = mapped_closure(running.process, Path(expected).parent)
-            if any(environment.get(key) for key in ("LAPLACE_CHESS_PERFCACHE_BIN", "LAPLACE_CHESS_TRANSITION_BIN")):
-                result["mapped_floor_pair"] = mapped_floor_pair(running.process, environment)
         require(process_identity(running.process, expected) == identity,
                 "engine process identity changed during the search")
         running.send("quit")
@@ -367,7 +354,6 @@ def authenticate_desktop(prefix, receipt_path, gui_receipt):
             and selected["stockfish"] == value["stockfish"]
             and selected["work_root"] == value["session_work_root"]
             and selected["t0_perfcache"] == value["t0_perfcache"]
-            and selected["chess_floor_root"] == str(prefix / "share/laplace/chess-floor")
             and selected["qt_library_path"] == str(Path(value["qt_prefix"]) / "lib")
             and selected["environment"] == {
                 "QT_PLUGIN_PATH": str(Path(value["qt_prefix"]) / "plugins"),
@@ -543,22 +529,15 @@ def main(argv=None):
             require(native.is_file(), "installed Laplace UCI generation lease has no native executable")
             closure = [laplace_wrapper, native, *native.parent.glob("*.dll"),
                        *native.parent.glob("*.json"), *native.parent.glob("liblaplace_*.so")]
-            generation = Path(environment["LAPLACE_CHESS_PERFCACHE_BIN"]).parent
-            closure += [Path(environment["LAPLACE_PERFCACHE_BIN"]), generation / "receipt.json",
-                        Path(environment["LAPLACE_CHESS_PERFCACHE_BIN"]),
-                        Path(environment["LAPLACE_CHESS_TRANSITION_BIN"])]
+            closure += [Path(environment["LAPLACE_PERFCACHE_BIN"])]
             files.update({str(path): digest(path) for path in closure})
             result["selected_files"] = files
-            result["floor_generation"] = str(generation)
             result["engines"].append(uci(entries[0], environment, output / "stockfish-uci.log",
                                          deadline, Path(desktop["stockfish"]["binary"])))
             result["engines"].append(uci(entries[1], environment, output / "laplace-uci.log",
                                          deadline, native, substrate=True))
-            require("mapped_floor_pair" in result["engines"][-1],
-                    "searched public UCI process did not verify the selected floor mappings")
-            require(Path(entries[1]["command"]).resolve(strict=True) == laplace_wrapper
-                    and (Path(desktop["launch"]["chess_floor_root"]) / "current").resolve(strict=True) == generation,
-                    "installed application or floor generation changed during acceptance")
+            require(Path(entries[1]["command"]).resolve(strict=True) == laplace_wrapper,
+                    "installed application changed during acceptance")
             require(all(digest(path) == expected for path, expected in files.items()),
                     "selected installed bytes changed during acceptance")
             require(digest(config_path) == result["engine_manager"]["sha256"],

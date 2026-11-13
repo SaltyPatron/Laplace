@@ -177,8 +177,7 @@ native() {
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING=ON \
     -DLAPLACE_EXTERNAL="$EXT" -DLAPLACE_NATIVE="$LAPLACE_NATIVE" -DLAPLACE_UCD_PATH="$UCD" \
     -DLAPLACE_OPERATIONS="$LAPLACE_OPERATIONS" -DLAPLACE_RECIPE_ENGINE_SOURCE="$LAPLACE_RECIPE_ENGINE_SOURCE" \
-    -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR" \
-    -DLAPLACE_CHESS_OPENINGS="$DATA/Games/Chess/lichess-openings"
+    -DLAPLACE_TREESITTER="$LAPLACE_TREESITTER" -DLAPLACE_TIER0="$LAPLACE_TIER0" -DICU_ROOT="$LAPLACE_ICU_DIR"
   cmake --build "$BUILD" -j "$(nproc)"
   cmake --build "$BUILD" --target laplace laplace_highway_perfcache -j "$(nproc)"
   python3 scripts/ingest_catalog.py --check-engine "$BUILD/core/recipe_engine/laplace"

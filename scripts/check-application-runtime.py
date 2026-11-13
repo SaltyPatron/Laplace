@@ -32,7 +32,6 @@ ROMS = {
     "laplace_substrate.perfcache_path": "laplace_t0_perfcache.bin",
     "laplace_substrate.highway_perfcache_path": "laplace_highway_perfcache.bin",
     "laplace_substrate.vocabulary_perfcache_path": "laplace_vocabulary_perfcache.bin",
-    "laplace_substrate.chess_position_perfcache_path": "laplace_chess_position_perfcache.bin",
 }
 SQL = """
 BEGIN READ ONLY;
@@ -58,8 +57,7 @@ SELECT json_build_object(
  'running_ingests',(SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'),
  'roms',(SELECT json_object_agg(name,setting) FROM pg_settings
      WHERE name IN ('laplace_substrate.perfcache_path','laplace_substrate.highway_perfcache_path',
-                   'laplace_substrate.vocabulary_perfcache_path',
-                   'laplace_substrate.chess_position_perfcache_path')),
+                   'laplace_substrate.vocabulary_perfcache_path')),
  'extension_functions',(SELECT md5(string_agg(pg_get_functiondef(p.oid),E'\\n' ORDER BY p.oid))
      FROM pg_proc p JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
        AND d.refclassid='pg_extension'::regclass AND d.deptype='e'
@@ -302,24 +300,11 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         if digest(build / "engine/core/perfcache" / filename) != actual:
             raise ValueError(f"installed ROM differs from tested build: {filename}")
         hashes[setting] = actual
-    for filename in ("laplace_chess_transition_perfcache.bin", "laplace_modality_number_perfcache.bin"):
+    for filename in ("laplace_modality_number_perfcache.bin",):
         actual = digest(prefix / "share/laplace" / filename)
         if digest(build / "engine/core/perfcache" / filename) != actual:
             raise ValueError(f"installed ROM differs from tested build: {filename}")
         hashes[filename] = actual
-    pair = build / "engine/core/perfcache/chess-floor-pair.json"
-    installed_pair = prefix / "share/laplace/chess-floor/current/receipt.json"
-    if pair.is_file() or installed_pair.exists():
-        expected_pair = json.loads(pair.read_text())
-        actual_pair = json.loads(installed_pair.read_text())
-        if expected_pair != actual_pair:
-            raise ValueError("installed chess floor generation differs from the sealed build pair")
-        for filename, field in (
-                ("laplace_chess_position_perfcache.bin", "laplace_substrate.chess_position_perfcache_path"),
-                ("laplace_chess_transition_perfcache.bin", "laplace_chess_transition_perfcache.bin")):
-            if actual_pair["files"][filename]["sha256"] != hashes[field]:
-                raise ValueError("installed chess floor generation receipt differs from installed-file bytes")
-        hashes["chess_floor_pair_receipt"] = digest(installed_pair)
     if build_identity(root, prefix) != identity:
         raise ValueError("configured native build changed during runtime observation")
     state = {"format": FORMAT, "build": identity, "artifacts": hashes,
@@ -371,11 +356,8 @@ def installed_runtime_snapshot(root, prefix, database):
         if not path.is_absolute() or not path.resolve().is_relative_to(prefix.resolve()):
             raise ValueError(f"unverified installed ROM path: {setting}")
         hashes[setting] = digest(path)
-    for filename in ("laplace_chess_transition_perfcache.bin", "laplace_modality_number_perfcache.bin"):
+    for filename in ("laplace_modality_number_perfcache.bin",):
         hashes[filename] = digest(prefix / "share/laplace" / filename)
-    installed_pair = prefix / "share/laplace/chess-floor/current/receipt.json"
-    if installed_pair.exists():
-        hashes["chess_floor_pair_receipt"] = digest(installed_pair)
 
     state = {"format": FORMAT, "scope": "installed-runtime", "artifacts": hashes,
              "database": copy.deepcopy(database)}
