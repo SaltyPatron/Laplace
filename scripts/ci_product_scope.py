@@ -28,12 +28,10 @@ PRODUCT_IGNORED_SUFFIXES = (
 PRODUCT_IGNORED_EXACT = frozenset({
     "vault-data-inventory.tsv",
     "vault-data-directories.list",
-    "scripts/api-diagnostics.py",
     "scripts/site-status.py",
     "scripts/platform-access-audit.py",
     "scripts/platform-access-enroll.py",
     "scripts/platform-owner-enroll.py",
-    "web/scripts/capture-ui-diagnostics.mjs",
     "scripts/ci-impact-plan.py",
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
