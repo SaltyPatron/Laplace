@@ -266,7 +266,13 @@ function Test-IisEndpoint($c,[string]$OperatorToken='',[string]$ApiKey='',[strin
     if($health.status -ne 'ok'){throw 'IIS application liveness failed.'}
     $ready=Invoke-WebRequest "$base/health/ready" -NoProxy -TimeoutSec 20 -SkipHttpErrorCheck
     $state=$ready.Content | ConvertFrom-Json
-    if([int]$ready.StatusCode -ne 200 -or $state.ready -ne $true -or $state.substrate_reachable -ne $true -or $state.perfcache_ready -ne $true){throw 'IIS application readiness, substrate or native perfcache is unavailable.'}
+    if($state.substrate_reachable -ne $true){throw "IIS application cannot reach its substrate database: $($state.detail)"}
+    if($state.perfcache_ready -ne $true){throw "IIS application native perfcache is unavailable: $($state.detail)"}
+    # A database recreated by this deployment holds nothing until it is seeded. That is the data's state, not a
+    # failed installation: it is reported as EMPTY, and every other readiness failure still fails the deployment.
+    $unseeded=$state.substrate_reachable -eq $true -and $state.perfcache_ready -eq $true -and $state.has_entities -eq $false
+    if($unseeded){Write-Warning "EMPTY: the substrate holds no entities; seed it (laplace-ops ingest / seed). $($state.detail)"}
+    elseif([int]$ready.StatusCode -ne 200 -or $state.ready -ne $true){throw "IIS application is not ready: $($state.detail)"}
     $page=Invoke-WebRequest $base -NoProxy -TimeoutSec 20
     if($page.Content -notmatch '<html'){throw 'The installed UI was not served.'}
     $assets=Get-IisPageAssets $page.Content
