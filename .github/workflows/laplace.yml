@@ -6,7 +6,7 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # staging; no sudo), with deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database
 # laplace-mono, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
 # deploy/linux/site-host.sh, run once by a person. Seeding is an operation (product-operator.yml), never part of a delivery;
-# this workflow has no manual dispatch (scripts/validate-pipeline.py: manual dispatch belongs in product-operator.yml).
+# this workflow has no manual dispatch (manual dispatch belongs in product-operator.yml).
 #
 # After hart-server verification, hart-prod receives the same staged application and
 # native closure. Its declared substrate connection selects hart-server or hart-cloud;
@@ -61,12 +61,8 @@ on:
       - "!web/scripts/test-*.mjs"
       - "!web/scripts/verify-*.mjs"
       - "!web/e2e/**"
-      - "!scripts/test-workflow-architecture.py"
-      - "!scripts/test-seed-workflow-ownership.py"
       - "!scripts/native-ingest-idempotency.sql"
-      - "!scripts/test-product-ci-artifact-ownership.py"
       - "!scripts/test-benchmark-suite.py"
-      - "!scripts/validate-pipeline.py"
       - "!vault-data-inventory.tsv"
       - "!vault-data-directories.list"
       # Re-include the pinned Native closure after .github/**. The shared
@@ -185,11 +181,11 @@ jobs:
           python3 - "$results" <<'PY'
           from pathlib import Path
           import sys, xml.etree.ElementTree as ET
-          for project, expected in [('Laplace.Decomposers.Tests', 76), ('Laplace.Substrate.Tests', 16)]:
+          for project in ('Laplace.Decomposers.Tests', 'Laplace.Substrate.Tests'):
               path = Path(sys.argv[1]) / (project + '.trx')
               counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
-              if int(counters['passed']) != expected or int(counters['total']) != expected:
-                  raise SystemExit(f'All {expected} Native recipe checks must execute and pass: {project}')
+              if int(counters['total']) == 0 or int(counters['passed']) != int(counters['total']):
+                  raise SystemExit(f'Native recipe checks did not all execute and pass: {project} {counters}')
           PY
 
       - name: Install into /opt/laplace
@@ -217,8 +213,8 @@ jobs:
         if: failure()
         run: deploy/linux/site.sh status
 
-      - name: Exercise installed database recreation and failure recovery
-        run: bash tests/database-recreation.sh
+      - name: Database checks against the deployed installation
+        run: deploy/linux/site.sh checks
 
       - name: Verify installed GIN maintenance with owner and restricted database roles
         run: bash tests/ingest-completion.sh

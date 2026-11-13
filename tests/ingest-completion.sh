@@ -11,13 +11,10 @@ export LAPLACE_HIGHWAY="$prefix/share/laplace/highway.bin"
   echo "Installed canonical caches are missing under $prefix/share/laplace" >&2; exit 1;
 }
 source "$root/deploy/linux/host-lock.sh"
-# Serialize this fixed-name test database separately. Library readers may run
-# together; only installation needs the exclusive host lock.
+# One completion check at a time against the deployed database; installation holds the host lock exclusively.
 locks="${LAPLACE_LOCKS:-/run/lock/laplace}"
 host_lock_hold exclusive 9 "$locks/ingest-completion.lock" "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}"
 host_lock_hold shared 8 "${LAPLACE_HOST_LOCK:-$locks/host-resource.lock}" "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}"
-existing=$(psql -X -Atq -d postgres -c "SELECT count(*) FROM pg_database WHERE datname='laplace_substratecrud_test'")
-[[ "$existing" == 0 ]] || { echo 'Completion test database is already in use; refusing to replace it.' >&2; exit 1; }
 major=$(pg_config --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')
 export PGOPTIONS="-c dynamic_library_path=$prefix/lib/postgresql/$major:\$libdir -c extension_control_path=$prefix/share/postgresql/$major:\$system -c session_preload_libraries=laplace_substrate"
 export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
@@ -47,4 +44,3 @@ c = ET.parse(sys.argv[1]).getroot().find('.//{*}Counters')
 if c is None or int(c.attrib['passed']) != 3 or int(c.attrib['total']) != 3:
     raise SystemExit('All three installed Native reader/binding regressions must execute and pass.')
 PY
-[[ "$(psql -X -Atq -d postgres -c "SELECT count(*) FROM pg_database WHERE datname='laplace_substratecrud_test'")" == 0 ]]

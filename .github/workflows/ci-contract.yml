@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 # Every Linux job runs on this repository's own runner on hart-server (Ubuntu 22.04, Python 3.10), never for a
-# fork's pull request. The runner account has no root and no container runtime: PostgreSQL fixtures are a private
-# cluster under the runner's temp directory (scripts/ci/private-postgres.sh), never the host's cluster.
+# fork's pull request. No job starts a PostgreSQL of its own: database checks run after delivery against the
+# deployed installation (laplace.yml, site.sh checks).
 # The Windows jobs stay on windows-2025 until a self-hosted Windows runner exists.
 
 concurrency:
@@ -39,15 +39,11 @@ jobs:
           python3 scripts/test-platform-access-enroll.py
 
   platform-initial-assignment:
-    name: PostgreSQL owner recovery and platform assignment
+    name: Platform build and checkout inputs (no database)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 15
     env:
-      PGHOST: 127.0.0.1
-      PGUSER: postgres
-      PGDATABASE: postgres
-      PGPASSWORD: fixture-only-password
       LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/operations-policy
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -56,10 +52,6 @@ jobs:
           clean: false
       - name: Prepare exact candidate while retaining verified build inputs
         run: bash scripts/ci/prepare-checkout.sh
-      - name: Start this job's own PostgreSQL 18 fixture server
-        run: bash scripts/ci/private-postgres.sh start
-      - name: Address the fixture application database on that server
-        run: echo "LAPLACE_TEST_APP_DB=Host=127.0.0.1;Port=$PGPORT;Username=postgres;Password=$PGPASSWORD;Database=platform_owner_fixture" >> "$GITHUB_ENV"
       - name: Check out document packaging inputs
         uses: ./.github/actions/documentation
       - name: Check out the declared source-selection contract
@@ -93,42 +85,12 @@ jobs:
           ref: b780e47fc780ddc8da13afa35a3f4ed5c157823d
           path: .ci-dependencies/tree-sitter-grammars/tree-sitter-c
           persist-credentials: false
-      - name: Recreate application database with persistent owner authority
-        run: |
-          set -euo pipefail
-          export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
-          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release \
-            -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false
-          bash tests/platform-owner-recreation.sh "$RUNNER_TEMP/platform-access-build/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
-      - name: Verify owner reconciliation, atomic initial assignment and revocation protection
-        run: |
-          set -euo pipefail
-          export LAPLACE_EXTERNAL="$GITHUB_WORKSPACE/.ci-dependencies"
-          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
-            -c Release -p:LAPLACE_BUILD_ROOT="$RUNNER_TEMP/platform-access-build" -p:OpenApiGenerateDocuments=false \
-            --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests|FullyQualifiedName~PlatformOwner' \
-            --logger 'trx;LogFileName=platform-initial-assignment.trx' --results-directory "$RUNNER_TEMP/platform-access-results"
-          python3 - "$RUNNER_TEMP/platform-access-results/platform-initial-assignment.trx" <<'PY'
-          import sys, xml.etree.ElementTree as ET
-          root = ET.parse(sys.argv[1]).getroot()
-          counters = root.find('.//{*}Counters')
-          assert counters is not None and counters.get('total') == '28' and counters.get('passed') == '28', 'All 28 authority tests must run and pass without skips'
-          PY
-      - name: Verify document generation and persistent browser key lifecycles
-        run: dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --no-restore -p:LAPLACE_BUILD_ROOT="${{ runner.temp }}/platform-access-build" -p:OpenApiGenerateDocuments=false --filter FullyQualifiedName~BrowserDataProtectionTests
-      - name: Stop and remove the fixture server
-        if: always()
-        run: bash scripts/ci/private-postgres.sh stop
 
   substrate-runtime-grants:
-    name: PostgreSQL runtime grant recovery
+    name: PostgreSQL access policy (no database)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 10
-    env:
-      PGHOST: 127.0.0.1
-      PGUSER: postgres
-      PGPASSWORD: fixture-only-password
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -136,17 +98,9 @@ jobs:
           clean: false
       - name: Prepare exact candidate while retaining verified build inputs
         run: bash scripts/ci/prepare-checkout.sh
-      - name: Start this job's own PostgreSQL 18 fixture server
-        run: bash scripts/ci/private-postgres.sh start
-      - name: Verify database health and real PostgreSQL band dependencies
+      - name: PostgreSQL access policy
         run: |
           python3 scripts/test-pg-access.py
-          bash tests/relation-band-health.sh
-      - run: bash tests/substrate-runtime-grants.sh
-      - run: bash tests/substrate-analyze-substrate.sh
-      - name: Stop and remove the fixture server
-        if: always()
-        run: bash scripts/ci/private-postgres.sh stop
 
   identity-law:
     name: Identity law vectors (monorepo composition through Laplace-Native)

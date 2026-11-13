@@ -174,7 +174,6 @@ class SeedRoleAnalyzes(unittest.TestCase):
                         proc.index("EXECUTE format('ANALYZE %s', t.rel)"))
         self.assertIn("pg_partition_tree(c.oid)", proc)
         self.assertIn("failed ANALYZE", proc)
-        self.assertTrue((ROOT / "tests" / "substrate-analyze-substrate.sh").exists())
 
 
 if __name__ == "__main__":

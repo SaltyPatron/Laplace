@@ -851,6 +851,21 @@ phase_serve() {
     exec dotnet "$app/Laplace.Endpoints.OpenAICompat.dll"
 }
 
+# Database checks of the deployed installation, run against what delivery just installed and migrated, never a
+# database of their own: the platform authority tests touch only the users and owners they create and remove, and the
+# band-health contract runs inside a transaction it rolls back.
+phase_checks() {
+  say "checks against the deployed $LAPLACE_DBNAME${LAPLACE_APP_DBNAME:+ and $LAPLACE_APP_DBNAME}"
+  local results="${RUNNER_TEMP:-$SITE_WORK}/authority-results"
+  LAPLACE_TEST_APP_DB="${LAPLACE_APP_DB:-$LAPLACE_DB}" dotnet_app test     "$ROOT/app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" -c Release --nologo     -p:LAPLACE_BUILD_ROOT="$SITE_BUILD/authority" -p:OpenApiGenerateDocuments=false     --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests|FullyQualifiedName~PlatformOwner|FullyQualifiedName~BrowserDataProtectionTests'     --logger 'trx;LogFileName=authority.trx' --results-directory "$results" || fail "platform authority checks failed"
+  python3 - "$results/authority.trx" <<'PY2'
+import sys, xml.etree.ElementTree as ET
+c = ET.parse(sys.argv[1]).getroot().find('.//{*}Counters').attrib
+if c.get('total') != c.get('passed') or int(c.get('total', '0')) == 0:
+    raise SystemExit('Every platform authority check must run and pass without skips: %s' % c)
+PY2
+  bash "$ROOT/tests/relation-band-health.sh"
+}
 phase_migrate_app() {
   [[ -n "${LAPLACE_APP_DB:-}" ]] || fail "migrate_app requires the declared application database"
   local app="$SITE_WORK/stage/app"
@@ -872,7 +887,7 @@ done
 for p in "${phases[@]}"; do
   case "$p" in
     chess-lab) phase_chess_lab ;;
-    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|status|reconcile|seed|serve|qualification|competitive) "phase_$p" ;;
+    externals|build|install|database|reset|migrate|migrate_app|extensions|app|bundle|receive|publish|configure|restart|smoke|checks|status|reconcile|seed|serve|qualification|competitive) "phase_$p" ;;
     *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
