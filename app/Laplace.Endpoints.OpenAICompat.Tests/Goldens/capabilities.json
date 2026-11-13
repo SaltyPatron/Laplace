@@ -40,7 +40,7 @@
     },
     "feedback": {
       "status": "live",
-      "backend": "laplace.attestations (confirm/refute) + consensus fold"
+      "backend": "laplace witness: the caller's statement at UserPromptContent, its standing folded by the Engine"
     },
     "recipe_compile": {
       "status": "live",

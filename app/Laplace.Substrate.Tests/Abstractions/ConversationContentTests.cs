@@ -33,8 +33,6 @@ public class ConversationContentIdTests
         var rival = ConversationContent.Resolve("rival");
         Assert.NotEqual(acme.PromptSource, rival.PromptSource);
         // The no-tenant sources are distinct identities from any tenant's.
-        Assert.NotEqual(UserPromptContent.Source, acme.PromptSource);
-        Assert.NotEqual(ResponseContent.Source, acme.ResponseSource);
     }
 
     [Theory]

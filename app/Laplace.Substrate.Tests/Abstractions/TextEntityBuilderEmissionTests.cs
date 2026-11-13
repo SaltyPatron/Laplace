@@ -206,26 +206,6 @@ public sealed class TextEntityBuilderEmissionTests
         if (!known) Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities, expectedRoot));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void TextWitnessConsumersAddNoExtraCanonicalEntities(bool response)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes("alpha alpha. alpha beta.");
-        Hash128 source = response ? ResponseContent.Source : UserPromptContent.Source;
-        Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, source, 1.0,
-            out var entities, out _, out _, out var expectedRoot, out _));
-        SubstrateChange change;
-        Hash128 root;
-        bool built = response
-            ? ResponseContent.TryBuildWitnessChange(bytes, "facet-response", null, out change, out root)
-            : UserPromptContent.TryBuildWitnessChange(bytes, "facet-prompt", out change, out root);
-        Assert.True(built);
-        Assert.Equal(expectedRoot, root);
-        Assert.True(entities.Select(row => row.Id).ToHashSet()
-            .SetEquals(change.Entities.Select(row => row.Id)));
-    }
-
     [Fact]
     public unsafe void RowExportRefusesAStageOnlyGrantAndCanRetry()
     {
@@ -261,25 +241,6 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.NotEmpty(physicalities);
         Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities,
             tree.GetNode(tree.NaturalUnitIndex()).Id));
-    }
-
-    [Fact]
-    public void PromptSourceUnitsRetainExplicitPriorAndAnAtomicPhysicalityEach()
-    {
-        Assert.True(UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes("A"), "prompt-one",
-            out var first, out var firstRoot));
-        Assert.True(UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes("A"), "prompt-two",
-            out var second, out var secondRoot));
-        Assert.Equal(firstRoot, secondRoot);
-        Assert.NotEqual(first.Metadata.IntentId, second.Metadata.IntentId);
-        foreach (var change in new[] { first, second })
-        {
-            var physicality = Assert.Single(change.Physicalities);
-            Assert.Equal(firstRoot, physicality.EntityId);
-            Assert.Equal(UserPromptContent.Source, physicality.SourceId);
-            Assert.Equal(SourceTrust.UserPrompt, change.RequireSourcePrior(physicality.SourceId));
-            Assert.Empty(change.Attestations); // Occurrence evidence is admitted later by the writer's native path.
-        }
     }
 
     [Fact]

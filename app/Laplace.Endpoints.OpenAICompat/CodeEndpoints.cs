@@ -8,7 +8,6 @@ internal static class CodeEndpoints
     {
         app.MapPost("/v1/code/completions", async (
             HttpRequest request,
-            SubstrateClient substrate,
             IBillingOrchestrator billing,
             CancellationToken ct) =>
         {
@@ -25,15 +24,13 @@ internal static class CodeEndpoints
                 return EndpointJson.BadRequest("invalid_code_language",
                     "Field 'code_language' must name an installed Tree-sitter code modality.");
 
-            int steps = payload.MaxTokens ?? 384;
-            int window = payload.Window ?? 8;
-            double temperature = payload.Temperature ?? 0.2;
-            int topK = payload.TopK ?? 24;
+            if (payload.MaxTokens is not null || payload.Window is not null
+                || payload.Temperature is not null || payload.TopK is not null)
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "The forward program answers under its firmware; the request cannot set its emission budget or sampling.");
             int attempts = payload.MaxAttempts ?? 4;
-            if (steps is < 1 or > 4096 || window is < 1 or > 64 || topK is < 1 or > 4096
-                || attempts is < 1 or > 8 || !double.IsFinite(temperature) || temperature < 0)
-                return EndpointJson.BadRequest("invalid_request_error",
-                    "max_tokens 1..4096, window 1..64, top_k 1..4096, max_attempts 1..8, and finite nonnegative temperature are required.");
+            if (attempts is < 1 or > 8)
+                return EndpointJson.BadRequest("invalid_request_error", "max_attempts 1..8 is required.");
 
             var gate = await QuoteGate.RequireQuoteAsync(request, billing, "chat.completions", ct);
             if (!gate.Allowed)
@@ -44,8 +41,7 @@ internal static class CodeEndpoints
             if (gate.Quote is not null)
                 await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            var result = await new CodePlayerService(substrate).GenerateAsync(
-                payload.Prompt, modality, steps, window, temperature, topK, attempts, ct);
+            var result = await new CodePlayerService().GenerateAsync(payload.Prompt, modality, attempts, ct);
             var response = new CodeCompletionResponse(
                 Id: $"codecmpl-{Guid.NewGuid():N}",
                 Object: "code.completion",

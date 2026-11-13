@@ -1,19 +1,19 @@
 using Laplace.Api.Contracts;
-using Laplace.Decomposers.Abstractions;
-using Laplace.Engine.Core;
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Ingestion;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Confirm/refute testimony on a PRECEDES token chain or one (subject, relation, object)
-/// triple. Deposits go through <c>FeedbackContent</c>, as the CLI's attest does, and fold
-/// into consensus in the same apply, so the next read sees the new standing.
+/// The caller confirms or refutes one claim. The participant, the authenticated user or else the tenant, is a
+/// runtime witness at UserPromptContent: its verdict is a statement the Engine records (FeedbackStatements, the lane
+/// MCP feedback and the CLI attest share), and the response carries the claim's Native standing before and after.
 /// </summary>
 internal static class FeedbackEndpoints
 {
     public static void MapFeedbackEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/feedback", async (HttpRequest request, SubstrateClient substrate, CancellationToken ct) =>
+        app.MapPost("/v1/feedback", async (HttpRequest request, SubstrateClient substrate, ITenantResolver tenants, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<FeedbackRequest>(request, ct);
             if (payload is null)
@@ -22,126 +22,52 @@ internal static class FeedbackEndpoints
             string verdict = payload.Verdict?.Trim().ToLowerInvariant() ?? "";
             if (verdict is not ("confirm" or "refute"))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'verdict' must be 'confirm' or 'refute'.");
-            bool confirm = verdict == "confirm";
-            string occurrenceKey = payload.RequestId
-                ?? request.Headers["Idempotency-Key"].FirstOrDefault()
-                ?? Guid.NewGuid().ToString("N");
-            if (!ConversationContent.IsValidIdentifier(occurrenceKey))
-                return EndpointJson.BadRequest("invalid_request_error", "Invalid feedback request_id.");
+            if (string.IsNullOrEmpty(payload.Subject) || string.IsNullOrEmpty(payload.Relation))
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Feedback names one claim: 'subject' and 'relation', and 'object' unless the claim has none. "
+                    + "Order is what content shows, not a claim: a sequence of tokens is not feedback.");
 
-            bool tripleMode = !string.IsNullOrWhiteSpace(payload.Subject)
-                || !string.IsNullOrWhiteSpace(payload.Relation)
-                || !string.IsNullOrWhiteSpace(payload.Object);
+            var tenant = await tenants.ResolveAsync(request.HttpContext, ct);
+            string participant = tenant.Claims.TryGetValue("user_id", out var user) && Guid.TryParse(user, out var id)
+                ? id.ToString("D")
+                : tenant.TenantId;
+            if (!Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(participant))
+                return EndpointJson.BadRequest("invalid_tenant", "Tenant id must match [A-Za-z0-9._@-]{1,128}.");
 
+            FeedbackStatements.Result result;
             try
             {
-                CodepointPerfcache.LoadDefault();
-
-                if (tripleMode)
-                {
-                    if (string.IsNullOrWhiteSpace(payload.Subject)
-                        || string.IsNullOrWhiteSpace(payload.Relation)
-                        || string.IsNullOrWhiteSpace(payload.Object))
-                        return EndpointJson.BadRequest("invalid_request_error",
-                            "Triple feedback requires 'subject', 'relation', and 'object'.");
-                    return await TripleAsync(substrate, payload.Subject.Trim(),
-                        payload.Relation.Trim(), payload.Object.Trim(), verdict, confirm, occurrenceKey, ct);
-                }
-
-                if (payload.Tokens is null || payload.Tokens.Count < 2)
-                    return EndpointJson.BadRequest("invalid_request_error",
-                        "Chain feedback requires 'tokens' with at least 2 entries (or use subject/relation/object).");
-                return await ChainAsync(substrate, payload.Tokens, verdict, confirm, occurrenceKey, ct);
+                result = await FeedbackStatements.StateAsync(RuntimeWitnessRecorder.Installed(), substrate.DataSource,
+                    participant, payload.Subject, payload.Relation, payload.Object ?? "", verdict == "confirm", ct);
             }
             catch (Npgsql.NpgsqlException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("witness_unavailable", ex.Message);
+            }
+
+            return Results.Json(new FeedbackResponse(
+                Object: "laplace.feedback",
+                Verdict: verdict,
+                Participant: participant,
+                Subject: payload.Subject,
+                Relation: payload.Relation,
+                ClaimObject: payload.Object ?? "",
+                WitnessId: result.WitnessId,
+                ClaimId: result.ClaimId,
+                StandingBefore: Standing(result.Before),
+                StandingAfter: Standing(result.After)));
         })
         .WithTags("feedback")
         .Accepts<FeedbackRequest>("application/json")
         .Produces<FeedbackResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-        .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
-    private static async Task<IResult> ChainAsync(
-        SubstrateClient substrate, IReadOnlyList<string> tokens, string verdict, bool confirm,
-        string occurrenceKey, CancellationToken ct)
-    {
-        var cleaned = tokens.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList();
-        var resolved = await FeedbackContent.ResolveTokensAsync(substrate.DataSource, cleaned, ct);
-
-        var statuses = new List<FeedbackTokenStatus>(resolved.Count);
-        var ids = new List<Hash128>(resolved.Count);
-        foreach (var t in resolved)
-        {
-            if (t.Usable)
-            {
-                ids.Add(t.Id!.Value);
-                statuses.Add(new FeedbackTokenStatus(t.Token, "resolved"));
-            }
-            else
-                statuses.Add(new FeedbackTokenStatus(t.Token, t.Id is null ? "empty" : "unknown_entity"));
-        }
-
-        if (ids.Count < 2)
-            return EndpointJson.NotFound("entity_not_found",
-                $"Need at least 2 tokens with substrate entities for a PRECEDES pair (got {ids.Count}).");
-
-        var result = await FeedbackContent.ApplyAsync(
-            substrate.DataSource, FeedbackContent.BuildPrecedesChain(ids, confirm, occurrenceKey), ct);
-
-        return Results.Json(new FeedbackResponse(
-            Object: "laplace.feedback",
-            Verdict: verdict,
-            Mode: "chain",
-            AttestationsInserted: result.AttestationsInserted,
-            ConsensusUpdated: result.ConsensusUpdated,
-            Tokens: statuses,
-            Relation: "PRECEDES"));
-    }
-
-    private static async Task<IResult> TripleAsync(
-        SubstrateClient substrate, string subject, string relation, string obj,
-        string verdict, bool confirm, string occurrenceKey, CancellationToken ct)
-    {
-        if (!FeedbackContent.TryResolveRelation(relation, out var rel))
-            return EndpointJson.BadRequest("invalid_request_error",
-                $"'{relation}' is not a canonical relation type (expected e.g. IS_A, PRECEDES, RELATED_TO).");
-
-        var resolved = await FeedbackContent.ResolveTokensAsync(substrate.DataSource, [subject, obj], ct);
-        foreach (var t in resolved)
-            if (!t.Usable)
-                return EndpointJson.NotFound("entity_not_found",
-                    $"'{t.Token}' has no substrate entity.");
-
-        Hash128 subjectId = resolved[0].Id!.Value;
-        Hash128 objectId = resolved[1].Id!.Value;
-
-        var before = await FeedbackContent.ConsensusStateAsync(
-            substrate.DataSource, subjectId, rel.Id, objectId, ct);
-
-        var result = await FeedbackContent.ApplyAsync(
-            substrate.DataSource, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm, occurrenceKey), ct);
-
-        var after = await FeedbackContent.ConsensusStateAsync(
-            substrate.DataSource, subjectId, rel.Id, objectId, ct);
-
-        return Results.Json(new FeedbackResponse(
-            Object: "laplace.feedback",
-            Verdict: verdict,
-            Mode: "triple",
-            AttestationsInserted: result.AttestationsInserted,
-            ConsensusUpdated: result.ConsensusUpdated,
-            Tokens:
-            [
-                new FeedbackTokenStatus(subject, "resolved"),
-                new FeedbackTokenStatus(obj, "resolved")
-            ],
-            Relation: rel.Canonical,
-            ConsensusBefore: before is null ? null : new FeedbackConsensusState(before.Rating, before.Rd, before.WitnessCount),
-            ConsensusAfter: after is null ? null : new FeedbackConsensusState(after.Rating, after.Rd, after.WitnessCount)));
-    }
+    private static FeedbackStanding? Standing(FeedbackStatements.Standing? s)
+        => s is null ? null : new FeedbackStanding(s.Rating, s.Deviation, s.Matches, s.Confidence);
 }

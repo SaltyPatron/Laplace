@@ -115,17 +115,18 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 return;
             }
 
-            int steps = IntOrDefault(root, "max_completion_tokens",
-                IntOrDefault(root, "max_tokens", 384));
-            int window = IntOrDefault(root, "window", 8);
-            int topK = IntOrDefault(root, "top_k", 24);
+            // The forward program answers under its firmware: a request cannot set its emission budget or sampling.
+            foreach (var governed in new[] { "max_tokens", "max_completion_tokens", "window", "top_k", "temperature" })
+                if (root.TryGetProperty(governed, out _))
+                {
+                    await WriteAsync(context, EndpointJson.BadRequest("unsupported_parameter",
+                        "The forward program answers under its firmware; the request cannot set its emission budget or sampling."));
+                    return;
+                }
             int maxAttempts = IntOrDefault(root, "max_attempts", 4);
-            double temperature = DoubleOrDefault(root, "temperature", 0.2);
-            if (steps is < 1 or > 4096 || window is < 1 or > 64 || topK is < 1 or > 4096
-                || maxAttempts is < 1 or > 8 || !double.IsFinite(temperature) || temperature < 0)
+            if (maxAttempts is < 1 or > 8)
             {
-                await WriteAsync(context, EndpointJson.BadRequest("invalid_request_error",
-                    "max_tokens 1..4096, window 1..64, top_k 1..4096, max_attempts 1..8, and finite nonnegative temperature are required."));
+                await WriteAsync(context, EndpointJson.BadRequest("invalid_request_error", "max_attempts 1..8 is required."));
                 return;
             }
 
@@ -144,10 +145,8 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
             if (gate.Quote is not null)
                 await billing.MarkConsumedAndRecordAsync(gate.Quote, context.RequestAborted);
 
-            var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
-            var result = await new CodePlayerService(substrate).GenerateAsync(
-                prompt, modality, steps, window, temperature, topK, maxAttempts,
-                context.RequestAborted);
+            var result = await new CodePlayerService().GenerateAsync(
+                prompt, modality, maxAttempts, context.RequestAborted);
 
             if (!result.Verified)
             {
@@ -206,10 +205,6 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
 
     private static int IntOrDefault(JsonElement root, string name, int fallback)
         => root.TryGetProperty(name, out var value) && value.TryGetInt32(out var parsed)
-            ? parsed : fallback;
-
-    private static double DoubleOrDefault(JsonElement root, string name, double fallback)
-        => root.TryGetProperty(name, out var value) && value.TryGetDouble(out var parsed)
             ? parsed : fallback;
 
     private static Task WriteAsync(HttpContext context, IResult result)

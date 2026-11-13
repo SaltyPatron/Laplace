@@ -262,155 +262,72 @@ internal sealed partial class SubstrateTools : IMcpTools
         return (result.ToJsonString(), !turn.Witnessed && turn.Response.Length > 0);
     }
 
-    // The agent write lane: mint a note as witnessed content and fold it, so the
-    // substrate is the shared memory between every agent on this repo. Same spine
-    // and trust class as a chat turn; the note is one outrankable voice, not truth.
-    // Plain (untenanted) UserPrompt/Response sources — the same path the CLI and
-    // OpenAICompat/TurnWitness.cs use — deliberately distinct from the tenant-scoped
-    // ConversationContent path a chat turn deposits through (spec 34): a standalone
-    // note has no session/tenant to scope, so it rides the shared base sources.
+    // The agent write lane: a note is content this agent gives, recorded by the Engine as what the runtime witness
+    // mcp-local states at UserPromptContent (laplace witness): an observation, outranked by every curated source,
+    // the same content wherever its text stands. The same note given again is the same file and adds nothing.
     private (string, bool) WitnessFact(JsonObject? args)
     {
         var text = Req(args, "text");
-        var origin = Opt(args, "origin") ?? "agent/note";
-
-        lock (_writerSync)
+        if (text.Length == 0) return ("text is empty", true);
+        RuntimeWitnessReceipt receipt;
+        try
         {
-            EnsurePlainWriter();
-            if (_plainWriterBroken)
-                return ("witness lane offline (writer spine failed earlier in this session)", true);
-
-            if (!UserPromptContent.TryBuildWitnessChange(
-                    Encoding.UTF8.GetBytes(text), origin, out var change, out var root))
-                return ("text produced no witnessable content", true);
-
-            _plainWriter!.ApplyAsync(change).GetAwaiter().GetResult();
-
-            var result = new JsonObject
-            {
-                ["rows"] = new JsonArray(new JsonObject
-                {
-                    ["root"] = Convert.ToHexStringLower(root.ToBytes()),
-                    ["origin"] = origin,
-                    ["witnessed"] = true,
-                })
-            };
-            return (result.ToJsonString(), false);
+            receipt = _witnesses.Value.RecordAsync(new NativeRuntimeWitness(McpTenant, FeedbackStatements.TrustClass),
+                "note.txt", Encoding.UTF8.GetBytes(text)).GetAwaiter().GetResult();
         }
+        catch (InvalidOperationException failure) { return ($"The note was not recorded: {failure.Message}", true); }
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["witness"] = receipt.WitnessId,
+                ["file"] = receipt.FileId,
+                ["witnessed"] = true,
+            })
+        };
+        return (result.ToJsonString(), false);
     }
 
-    // Confirm/refute through the one canonical implementation (FeedbackContent —
-    // the same lane as HTTP /v1/feedback and the CLI attest). Immediate fold;
-    // the next walk reads the moved rating.
+    // Confirm or refute one claim: this agent states its verdict through the one feedback lane
+    // (FeedbackStatements, as HTTP /v1/feedback and the CLI attest), and the claim's Native standing is read
+    // before and after.
     private (string, bool) Feedback(JsonObject? args)
     {
         var verdict = Req(args, "verdict").Trim().ToLowerInvariant();
         if (verdict is not ("confirm" or "refute"))
             return ("verdict must be 'confirm' or 'refute'", true);
-        bool confirm = verdict == "confirm";
-
-        CodepointPerfcache.LoadDefault();
         var subject = Opt(args, "subject");
         var relation = Opt(args, "relation");
-        var obj = Opt(args, "object");
-        var tokensCsv = Opt(args, "tokens");
-
-        if (subject is not null || relation is not null || obj is not null)
+        var obj = Opt(args, "object") ?? "";
+        if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(relation))
+            return ("feedback names one claim: subject and relation, and object unless the claim has none", true);
+        FeedbackStatements.Result applied;
+        try
         {
-            if (subject is null || relation is null || obj is null)
-                return ("triple mode needs subject, relation and object", true);
-            if (!FeedbackContent.TryResolveRelation(relation, out var rel))
-                return ($"'{relation}' is not a canonical relation type", true);
-
-            var resolved = FeedbackContent.ResolveTokensAsync(_db, [subject, obj]).GetAwaiter().GetResult();
-            foreach (var t in resolved)
-                if (!t.Usable)
-                    return ($"'{t.Token}' has no substrate entity", true);
-            var subjectId = resolved[0].Id!.Value;
-            var objectId = resolved[1].Id!.Value;
-
-            var before = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
-            var applied = FeedbackContent.ApplyAsync(
-                _db, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm)).GetAwaiter().GetResult();
-            var after = FeedbackContent.ConsensusStateAsync(_db, subjectId, rel.Id, objectId).GetAwaiter().GetResult();
-
-            static JsonObject? State(FeedbackContent.ConsensusState? s) => s is null ? null : new JsonObject
-            {
-                ["rating"] = s.Rating,
-                ["rd"] = s.Rd,
-                ["witnesses"] = s.WitnessCount,
-            };
-
-            var result = new JsonObject
-            {
-                ["rows"] = new JsonArray(new JsonObject
-                {
-                    ["mode"] = "triple",
-                    ["verdict"] = verdict,
-                    ["relation"] = rel.Canonical,
-                    ["attestations_inserted"] = applied.AttestationsInserted,
-                    ["consensus_updated"] = applied.ConsensusUpdated,
-                    ["before"] = State(before),
-                    ["after"] = State(after),
-                })
-            };
-            return (result.ToJsonString(), false);
+            applied = FeedbackStatements.StateAsync(_witnesses.Value, _db, McpTenant, subject, relation, obj,
+                verdict == "confirm").GetAwaiter().GetResult();
         }
+        catch (InvalidOperationException failure) { return ($"The verdict was not recorded: {failure.Message}", true); }
 
-        if (string.IsNullOrWhiteSpace(tokensCsv))
-            return ("provide subject/relation/object, or tokens for chain mode", true);
-        var tokens = tokensCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length < 2)
-            return ("chain mode needs 2+ comma-separated tokens", true);
-
-        var chainResolved = FeedbackContent.ResolveTokensAsync(_db, tokens).GetAwaiter().GetResult();
-        var ids = chainResolved.Where(t => t.Usable).Select(t => t.Id!.Value).ToList();
-        if (ids.Count < 2)
-            return ($"need 2+ tokens with substrate entities (got {ids.Count})", true);
-
-        var chainApplied = FeedbackContent.ApplyAsync(
-            _db, FeedbackContent.BuildPrecedesChain(ids, confirm)).GetAwaiter().GetResult();
-
-        var chainResult = new JsonObject
+        static JsonObject? State(FeedbackStatements.Standing? s) => s is null ? null : new JsonObject
+        {
+            ["rating"] = s.Rating,
+            ["deviation"] = s.Deviation,
+            ["matches"] = s.Matches,
+            ["confidence"] = s.Confidence,
+        };
+        var result = new JsonObject
         {
             ["rows"] = new JsonArray(new JsonObject
             {
-                ["mode"] = "chain",
                 ["verdict"] = verdict,
-                ["relation"] = "PRECEDES",
-                ["pairs"] = ids.Count - 1,
-                ["attestations_inserted"] = chainApplied.AttestationsInserted,
-                ["consensus_updated"] = chainApplied.ConsensusUpdated,
+                ["claim"] = applied.ClaimId,
+                ["witness"] = applied.WitnessId,
+                ["before"] = State(applied.Before),
+                ["after"] = State(applied.After),
             })
         };
-        return (chainResult.ToJsonString(), false);
-    }
-
-    private void EnsurePlainWriter()
-    {
-        if (_plainWriterBroken || (_plainWriter is not null && _plainBootstrapped)) return;
-        try
-        {
-            if (_plainWriter is null)
-            {
-                CodepointPerfcache.LoadDefault();
-                _plainWriter = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_db), _db);
-            }
-            if (!_plainBootstrapped)
-            {
-                _plainWriter.ApplyManyAsync([
-                    UserPromptContent.BuildBootstrapChange(),
-                    ResponseContent.BuildBootstrapChange(),
-                ]).GetAwaiter().GetResult();
-                _plainBootstrapped = true;
-            }
-        }
-        catch (Exception ex)
-        {
-            _plainWriterBroken = true;
-            Serilog.Log.ForContext<SubstrateTools>().Error(ex, "MCP writer initialization failed.");
-            Console.Error.WriteLine($"laplace-mcp: writer spine offline: {ex.Message}");
-        }
+        return (result.ToJsonString(), false);
     }
 
     // The outbound lane: this substrate as a CLIENT of other models, symmetric with
