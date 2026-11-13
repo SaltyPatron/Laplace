@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
@@ -16,11 +15,16 @@ public sealed class LocalPgFixture : IAsyncLifetime
     private static NpgsqlDataSource? _sharedDataSource;
     private static bool _nativeFoundationReady;
 
-    // Share within this test host, never drop another test process's database.
-    public static readonly string DatabaseName = $"laplace_substratecrud_test_{Environment.ProcessId}";
-
+    // The deployed installation's database (LAPLACE_DB, which delivery's site.sh exports): tests run against what
+    // was built, installed and migrated, never a database of their own. Every test writes only content it composes
+    // and reads only what it wrote; nothing here creates, drops or reinstalls a database or an extension.
     private static readonly NpgsqlConnectionStringBuilder Conn =
-        new(LaplaceInstall.PostgresConnectionString(DatabaseName));
+        new(Environment.GetEnvironmentVariable("LAPLACE_DB") is { Length: > 0 } deployed
+            ? deployed
+            : throw new InvalidOperationException(
+                "LAPLACE_DB must name the deployed database: these tests run against the installed Laplace, after delivery"));
+
+    public static readonly string DatabaseName = Conn.Database!;
 
     public static readonly string PgHost = Conn.Host!;
     public static readonly string PgUser = Conn.Username!;
@@ -45,27 +49,21 @@ public sealed class LocalPgFixture : IAsyncLifetime
             if (_refCount == 0)
             {
                 _nativeFoundationReady = false;
-                await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
-                await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
-                // The database is shared across fixtures; its connection pool must
-                // be shared too. Independent default-sized pools retained idle
-                // sessions and exhausted the server during parallel CI tests.
+                // One pool for every fixture of this test host: independent default-sized pools retained idle
+                // sessions and exhausted the server during parallel tests.
                 var candidate = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnectionString);
                 try
                 {
                     await using var conn = await candidate.OpenConnectionAsync();
                     await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = @"
-            CREATE EXTENSION IF NOT EXISTS postgis;
-            CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
-            CREATE EXTENSION IF NOT EXISTS laplace_geom;
-            CREATE EXTENSION IF NOT EXISTS laplace_substrate;
-            SET search_path TO laplace, public;
-        ";
-                    await cmd.ExecuteNonQueryAsync();
-                    // This connection loaded types before CREATE EXTENSION.
-                    // Publish its newly installed Native scalar/array OIDs once.
-                    await conn.ReloadTypesAsync();
+                    // The deployed database carries the extensions delivery installed; a missing one is a failed
+                    // deployment, reported here rather than installed by a test.
+                    cmd.CommandText = """
+                        SELECT string_agg(name, ', ') FROM unnest(ARRAY['postgis','laplace','laplace_geom','laplace_substrate']) name
+                        WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_extension e WHERE e.extname = name)
+                        """;
+                    if (await cmd.ExecuteScalarAsync() is string missing)
+                        throw new InvalidOperationException($"The deployed database lacks extensions: {missing}");
                     _sharedDataSource = candidate;
                 }
                 catch
@@ -219,47 +217,11 @@ public sealed class LocalPgFixture : IAsyncLifetime
                 await _sharedDataSource!.DisposeAsync();
                 _sharedDataSource = null;
                 _nativeFoundationReady = false;
-                await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
             }
         }
         finally
         {
             InitGate.Release();
         }
-    }
-
-    private static async Task RunPsqlAdminAsync(string program, string args)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = ResolvePgTool(program),
-            Arguments = args,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        if (PgPassword is not null) psi.Environment["PGPASSWORD"] = PgPassword;
-        using var p = Process.Start(psi)!;
-        await p.WaitForExitAsync();
-        if (p.ExitCode != 0)
-        {
-            var stderr = await p.StandardError.ReadToEndAsync();
-            throw new InvalidOperationException(
-                $"{program} {args} exited {p.ExitCode}: {stderr}");
-        }
-    }
-
-    private static string ResolvePgTool(string program)
-    {
-        if (!OperatingSystem.IsWindows()) return program;
-        var declaredPgDir = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_PG_DIR");
-        if (!string.IsNullOrWhiteSpace(declaredPgDir))
-        {
-            string declaredExe = Path.Combine(declaredPgDir, "bin", program + ".exe");
-            if (File.Exists(declaredExe)) return declaredExe;
-        }
-        const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
-        string exe = Path.Combine(pgBin, program + ".exe");
-        return File.Exists(exe) ? exe : program;
     }
 }

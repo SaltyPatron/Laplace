@@ -503,14 +503,15 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
 public sealed class LocalPgFixture : IAsyncLifetime
 {
-    private static readonly SemaphoreSlim InitGate = new(1, 1);
-    private static int _refCount;
-
-    public const string DatabaseName = "laplace_ingest_test";
-
+    // The deployed installation's database (LAPLACE_DB, exported by delivery's site.sh): the ingest gates run against
+    // what was built, installed and migrated. Nothing here creates, drops or reinstalls a database or an extension.
     private static readonly NpgsqlConnectionStringBuilder Conn =
-        new(LaplaceInstall.PostgresConnectionString(DatabaseName));
+        new(Environment.GetEnvironmentVariable("LAPLACE_DB") is { Length: > 0 } deployed
+            ? deployed
+            : throw new InvalidOperationException(
+                "LAPLACE_DB must name the deployed database: these tests run against the installed Laplace, after delivery"));
 
+    public static readonly string DatabaseName = Conn.Database!;
     public static readonly string PgHost = Conn.Host!;
     public static readonly string PgUser = Conn.Username!;
     public static readonly string? PgPassword = Conn.Password;
@@ -522,75 +523,20 @@ public sealed class LocalPgFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await InitGate.WaitAsync();
-        try
-        {
-            if (_refCount++ == 0)
-            {
-                await RunAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
-                await RunAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
-            }
-
-            var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
-            _ds = dsb.Build();
-            await using var conn = await _ds.OpenConnectionAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-            CREATE EXTENSION IF NOT EXISTS postgis;
-            CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
-            CREATE EXTENSION IF NOT EXISTS laplace_geom;
-            CREATE EXTENSION IF NOT EXISTS laplace_substrate;
-            SET search_path TO laplace, public;
-        ";
-            await cmd.ExecuteNonQueryAsync();
-        }
-        finally
-        {
-            InitGate.Release();
-        }
+        _ds = new NpgsqlDataSourceBuilder(ConnectionString).Build();
+        await using var conn = await _ds.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT string_agg(name, ', ') FROM unnest(ARRAY['postgis','laplace','laplace_geom','laplace_substrate']) name
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_extension e WHERE e.extname = name)
+            """;
+        if (await cmd.ExecuteScalarAsync() is string missing)
+            throw new InvalidOperationException($"The deployed database lacks extensions: {missing}");
     }
 
     public async Task DisposeAsync()
     {
-        await InitGate.WaitAsync();
-        try
-        {
-            if (_ds is not null) { await _ds.DisposeAsync(); _ds = null; }
-            if (--_refCount == 0)
-                await RunAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
-        }
-        finally
-        {
-            InitGate.Release();
-        }
-    }
-
-    private static async Task RunAdminAsync(string program, string args)
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = ResolvePgTool(program),
-            Arguments = args,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-        if (PgPassword is not null) psi.Environment["PGPASSWORD"] = PgPassword;
-        using var p = System.Diagnostics.Process.Start(psi)!;
-        await p.WaitForExitAsync();
-        if (p.ExitCode != 0)
-        {
-            var stderr = await p.StandardError.ReadToEndAsync();
-            throw new InvalidOperationException($"{program} {args} exited {p.ExitCode}: {stderr}");
-        }
-    }
-
-    private static string ResolvePgTool(string program)
-    {
-        if (!OperatingSystem.IsWindows()) return program;
-        const string pgBin = @"C:\Program Files\PostgreSQL\18\bin";
-        string exe = Path.Combine(pgBin, program + ".exe");
-        return File.Exists(exe) ? exe : program;
+        if (_ds is not null) { await _ds.DisposeAsync(); _ds = null; }
     }
 }
 
