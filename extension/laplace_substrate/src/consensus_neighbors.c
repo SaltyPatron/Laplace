@@ -9,7 +9,6 @@
 #include "relation_symmetry.h"
 #include "walk_score.h"
 
-PG_FUNCTION_INFO_V1(pg_laplace_explore_web_neighbors);
 
 typedef struct NeighborEntry
 {
@@ -246,67 +245,3 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
     return rows;
 }
 
-Datum
-pg_laplace_explore_web_neighbors(PG_FUNCTION_ARGS)
-{
-    ReturnSetInfo *rsinfo;
-    ArrayType *frontier, *types;
-    Datum *input;
-    bool *input_nulls;
-    int n_input, count, limit;
-    LaplaceNeighbor *rows;
-    bool include_default = !PG_ARGISNULL(3) && PG_GETARG_BOOL(3);
-    if (PG_ARGISNULL(0)) PG_RETURN_NULL();
-    frontier = PG_GETARG_ARRAYTYPE_P(0);
-    types = PG_ARGISNULL(1) ? NULL : PG_GETARG_ARRAYTYPE_P(1);
-    limit = PG_ARGISNULL(2) ? 0 : PG_GETARG_INT32(2);
-    InitMaterializedSRF(fcinfo, 0);
-    rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    rows = laplace_consensus_neighbors(frontier, types, limit, include_default, false, false, &count, NULL);
-    if (rows != NULL && count > 0)
-        LAPLACE_CONSENSUS_ENRICH(rows, (size_t) count, LaplaceNeighbor);
-    deconstruct_array(frontier, BYTEAOID, -1, false, TYPALIGN_INT,
-                      &input, &input_nulls, &n_input);
-    /* Preserve input ordinals and duplicate frontier entries at the SQL edge;
-     * storage access and reduction operate over the distinct set only once. */
-    for (int i = 0; i < n_input; ++i)
-    {
-        bytea *id;
-        int low = 0, high = count;
-        if (input_nulls[i]) continue;
-        id = DatumGetByteaPP(input[i]);
-        if (VARSIZE_ANY_EXHDR(id) != 16)
-            ereport(ERROR, (errmsg("consensus neighbors require 16-byte frontier identities")));
-        while (low < high)
-        {
-            int mid = low + (high - low) / 2;
-            if (memcmp(&rows[mid].frontier, VARDATA_ANY(id), 16) < 0) low = mid + 1;
-            else high = mid;
-        }
-        for (int r = low; r < count &&
-             memcmp(&rows[r].frontier, VARDATA_ANY(id), 16) == 0; ++r)
-        {
-            Datum values[7];
-            bool nulls[7] = {false, false, false, false, false, false, false};
-            bytea *neighbor = palloc(VARHDRSZ + 16), *type = palloc(VARHDRSZ + 16);
-            SET_VARSIZE(neighbor, VARHDRSZ + 16);
-            SET_VARSIZE(type, VARHDRSZ + 16);
-            memcpy(VARDATA(neighbor), &rows[r].neighbor, 16);
-            memcpy(VARDATA(type), &rows[r].type, 16);
-            values[0] = input[i];
-            values[1] = PointerGetDatum(neighbor);
-            values[2] = PointerGetDatum(type);
-            values[3] = Int64GetDatum(rows[r].rating);
-            values[4] = Int64GetDatum(rows[r].rd);
-            values[5] = Int64GetDatum(rows[r].witnesses);
-            values[6] = BoolGetDatum(rows[r].outbound);
-            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-            pfree(neighbor);
-            pfree(type);
-        }
-    }
-    pfree(input);
-    pfree(input_nulls);
-    if (rows != NULL) pfree(rows);
-    return (Datum) 0;
-}

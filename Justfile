@@ -139,8 +139,6 @@ audit-source-fidelity:
 query sql:
     psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace}" -c "{{sql}}"
 
-cascade prompt: build
-    scripts/laplace cascade --prompt "{{prompt}}"
 
 synthesize subcommand *args: build
     scripts/laplace synthesize {{subcommand}} {{args}}

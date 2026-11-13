@@ -27,8 +27,8 @@ public static partial class NpgsqlSubstrateReads
         r.GetDouble(4), r.GetDouble(5), r.GetInt32(6));
 
     /// <summary>
-    /// <c>ops.entity_physicalities(id)</c> — every physicality of one entity, ordered by
-    /// physicality type.
+    /// Native placement of one entity: <c>public.laplace_entities</c> coordinate and
+    /// <c>public.laplace_physicalities</c> path length.
     /// </summary>
     public static Task<IReadOnlyList<EntityPlacementRow>> EntityPhysicalitiesAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
@@ -101,7 +101,7 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct EntityConstituentRow(
         int Ordinal, string ChildIdHex, int RunLength, long Flags, string ChildLabel);
 
-    /// <summary><c>realize.constituents(id)</c>, lossless for every constituent.</summary>
+    /// <summary><c>public.laplace_constituents(id)</c>, lossless for every constituent.</summary>
     public static Task<IReadOnlyList<EntityConstituentRow>> ConstituentsAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>

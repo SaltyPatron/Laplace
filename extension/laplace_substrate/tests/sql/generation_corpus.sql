@@ -231,50 +231,6 @@ BEGIN
         RAISE EXCEPTION 'FAIL: gap is not the witnessed ordinal offset';
     END IF;
 
-    -- Multi-identity containment is one shared GIN probe.  It returns the
-    -- composition carrying both points, not a manufactured capital->of edge.
-    IF NOT EXISTS (
-        SELECT 1
-        FROM structural.containers_containing_all(ARRAY[w_capital, w_of]) c
-        WHERE c.entity_id = sent) THEN
-        RAISE EXCEPTION 'FAIL: shared container for capital/of missing';
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM structural.containers_containing_all(ARRAY[]::bytea[])) THEN
-        RAISE EXCEPTION 'FAIL: empty shared-container set scanned physicalities';
-    END IF;
-    IF EXISTS (SELECT 1 FROM structural.containers_containing_all(NULL::bytea[]))
-       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,NULL]))
-       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,w_end])) THEN
-        RAISE EXCEPTION 'FAIL: containment admitted absent or NULL member';
-    END IF;
-    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_capital,w_of])) <> 1
-       OR (SELECT structural.containers_containing_all(ARRAY[w_capital,w_of])) <> sent THEN
-        RAISE EXCEPTION 'FAIL: duplicate operand or scalar SRF changed containment';
-    END IF;
-    IF (SELECT candidate_count FROM structural.word_containers_containing_all(ARRAY[w_capital,w_of],0)) <> 1 THEN
-        RAISE EXCEPTION 'FAIL: Browse capacity hid containing identities';
-    END IF;
-    BEGIN
-        PERFORM structural.containers_containing_all(ARRAY[decode('01','hex')]);
-        RAISE EXCEPTION 'FAIL: containment accepted a malformed identity';
-    EXCEPTION WHEN internal_error THEN
-        IF SQLERRM <> 'content membership requires 16-byte identities' THEN RAISE; END IF;
-    END;
-    -- Distinct entity output survives duplicate physicalities, while ordinal
-    -- consumers still count each witnessed physicality. Updates remain MVCC reads.
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-        SELECT public.laplace_hash128_blake3('test/corpus/duplicate-physicality'),
-               entity_id, type, coord, hilbert_index, trajectory, n_constituents,
-               observed_at
-        FROM laplace.physicalities
-        WHERE id=public.laplace_hash128_blake3('test/corpus/phys-sentence');
-    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_of])) <> 1 THEN
-        RAISE EXCEPTION 'FAIL: duplicate physicalities duplicated containing entity';
-    END IF;
-    DELETE FROM laplace.physicalities
-        WHERE id=public.laplace_hash128_blake3('test/corpus/duplicate-physicality');
 
     -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -584,15 +540,6 @@ BEGIN
                    WHERE v::text::bigint > 0) THEN
         RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap: %',plan;
     END IF;
-    SELECT array_agg(entity_id) INTO actual
-      FROM structural.containers_containing_all(ARRAY[needle,needle]);
-    IF actual IS DISTINCT FROM ARRAY[matched] THEN
-        RAISE EXCEPTION 'FAIL: lossy AND membership admitted a wrong entity/type';
-    END IF;
-    SELECT array_agg(entity_id) INTO actual FROM structural.containers_of(needle,1,NULL);
-    IF actual IS DISTINCT FROM ARRAY[matched] THEN
-        RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
-    END IF;
 END
 $membership_bitmap$;
 ROLLBACK TO SAVEPOINT membership_bitmap_fixture;
@@ -772,11 +719,6 @@ DO $$ BEGIN
     RAISE EXCEPTION 'FAIL: native observation read bypassed SELECT privilege';
 EXCEPTION WHEN insufficient_privilege THEN NULL;
 END $$;
-DO $$ BEGIN
-    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
-    RAISE EXCEPTION 'FAIL: native membership bypassed SELECT privilege';
-EXCEPTION WHEN insufficient_privilege THEN NULL;
-END $$;
 RESET ROLE;
 GRANT SELECT ON laplace.attestations TO laplace_membership_reader_test;
 ALTER TABLE laplace.attestations ENABLE ROW LEVEL SECURITY;
@@ -813,11 +755,5 @@ ALTER TABLE public.physicality DISABLE ROW LEVEL SECURITY;
 GRANT SELECT ON laplace.physicalities TO laplace_membership_reader_test;
 ALTER TABLE laplace.physicalities ENABLE ROW LEVEL SECURITY;
 SET LOCAL ROLE laplace_membership_reader_test;
-DO $$ BEGIN
-    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
-    RAISE EXCEPTION 'FAIL: native membership bypassed row security';
-EXCEPTION WHEN internal_error THEN
-    IF SQLERRM <> 'native content membership read cannot bypass row security' THEN RAISE; END IF;
-END $$;
 RESET ROLE;
 ROLLBACK;

@@ -350,8 +350,8 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		rc = SPI_execute_plan(
 			ensure_lexical_plan(
 				&scalar_constituents_plan,
-				"SELECT ordinal, child_id, run_length "
-				"FROM realize.constituents($1) ORDER BY ordinal",
+				"SELECT c.ordinal, public.blake3_send(c.child), c.run_length "
+				"FROM public.laplace_constituents(ARRAY[public.blake3_from_bytea($1)]) c ORDER BY c.ordinal",
 				1, at, "word_case_variants"),
 			av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)

@@ -528,8 +528,8 @@ BEGIN ATOMIC
     ), usage AS (
         SELECT p_x AS x_key, p_y AS y_key, 'usage'::text AS channel, NULL::bytea AS relation,
                cx.entity_id AS via, 1::bigint AS sharing, 0 AS depth
-        FROM structural.containers_of(p_x, 1, 4096) cx
-        JOIN structural.containers_of(p_y, 1, 4096) cy USING (entity_id)
+        FROM (SELECT public.blake3_send(a.entity) AS entity_id, a.tier FROM public.laplace_above(ARRAY[public.blake3_from_bytea(p_x)], 1, 4096::bigint) a) cx
+        JOIN (SELECT public.blake3_send(a.entity) AS entity_id, a.tier FROM public.laplace_above(ARRAY[public.blake3_from_bytea(p_y)], 1, 4096::bigint) a) cy USING (entity_id)
     ), xf AS MATERIALIZED (
         SELECT f.key, f.type_id, f.object_id FROM converse.key_facts(ARRAY(SELECT key FROM xk), 64) f
     ), yf AS MATERIALIZED (

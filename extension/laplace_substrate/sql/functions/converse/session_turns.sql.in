@@ -65,7 +65,7 @@ WITH requested AS MATERIALIZED (
 ), members AS MATERIALIZED (
     SELECT c.parent_id, c.child_id
     FROM (SELECT array_agg(m.id ORDER BY m.id) AS ids FROM messages m) batch,
-         realize.constituents_closure(batch.ids, 1) c
+         LATERAL (SELECT public.blake3_send(b.parent) AS parent_id, public.blake3_send(b.child) AS child_id, b.ordinal, b.run_length FROM public.laplace_below(ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest(batch.ids) x), 1) b) c
     WHERE c.ordinal <= 2 AND c.ordinal::bigint + c.run_length > 2
 )
 SELECT r.id,

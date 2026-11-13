@@ -50,10 +50,10 @@ internal static class CoreEndpoints
                 // Chat and text completion both run the one forward program (Engine laplace turn).
                 ChatCompletions: new CapabilityStatus("live", Backend: "laplace turn: the forward program, the turn witnessed by the Engine", Billing: "preflight_quote_required"),
                 Completions: new CapabilityStatus("live", Backend: "laplace turn: the forward program, each step streamed, the turn witnessed by the Engine", Billing: "preflight_quote_required"),
-                Embeddings: new CapabilityStatus("live", Backend: "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),
+                Embeddings: new CapabilityStatus("live", Backend: "public.laplace_entities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),
                 AuditReports: new CapabilityStatus("live", Backend: "ops.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
-                Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + ops.entity_physicalities", Billing: "visualization.deep_export"),
-                ExplainabilityReports: new CapabilityStatus("live", Backend: "consensus.walk_branches + ops.attestations_out", Billing: "explain.trace"),
+                Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + public.laplace_entities", Billing: "visualization.deep_export"),
+                ExplainabilityReports: new CapabilityStatus("live", Backend: "public.laplace_pull + ops.attestations_out", Billing: "explain.trace"),
                 Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
                 Models: new CapabilityStatus("live"),
                 Feedback: new CapabilityStatus("live", Backend: "laplace.attestations (confirm/refute) + consensus fold"),

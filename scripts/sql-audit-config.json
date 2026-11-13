@@ -14,8 +14,7 @@
     "converse.attested_language",
     "lexical.lexical_peers",
     "lexical.word_case_variants",
-    "realize.render_text",
-    "structural.containers_of"
+    "realize.render_text"
   ],
   "filter_key_functions": [
     "consensus.relation_highway_band",

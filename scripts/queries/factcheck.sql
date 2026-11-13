@@ -20,4 +20,4 @@ SELECT * FROM consensus.relation_summary(word_id('Paris'), word_id('France'));
 \echo 
 SELECT * FROM converse.links('Paris');
 \echo 
-SELECT * FROM consensus.relate_path(word_id('Paris'), word_id('France'), 7);
+SELECT * FROM public.laplace_pull(ARRAY[public.laplace_text_id('Paris')], ARRAY[public.laplace_text_id('France')], 7) WHERE goal;

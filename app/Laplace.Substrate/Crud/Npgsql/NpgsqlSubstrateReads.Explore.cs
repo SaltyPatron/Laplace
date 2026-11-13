@@ -141,12 +141,9 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "containers", onError: onError);
         if (rows.Count == 0) return [];
-        var types = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("types.labels"),
-            static r => r.GetFieldValue<string?[]>(0),
-            p => p.Add("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = rows.Select(r => r.Type).ToArray(),
-            ct: ct, label: "container_types", onError: onError);
-        return rows.Select((r, i) => new ContainerRow(
-            Convert.ToHexString(r.Id).ToLowerInvariant(), r.Tier, types[0][i], r.Hops, "")).ToArray();
+        // Native containment has no entity types: every container row's type is NULL.
+        return rows.Select(r => new ContainerRow(
+            Convert.ToHexString(r.Id).ToLowerInvariant(), r.Tier, null, r.Hops, "")).ToArray();
     }
 
     public readonly record struct EmbeddingLookupRow(
@@ -197,10 +194,10 @@ public static partial class NpgsqlSubstrateReads
         long WitnessCount, double CompleteWeight, bool Refuted);
 
     /// <summary>
-    /// <c>consensus.explore_web</c> — native sparse star expansion from <paramref name="seed"/>
-    /// over consensus in both directions, up to <paramref name="hops"/> hops, at most
-    /// <paramref name="fanout"/> new nodes per frontier parent and <paramref name="maxNodes"/>
-    /// in total.
+    /// <c>public.laplace_pull</c> — Native best-first expansion over rated claims from
+    /// <paramref name="seed"/>, up to <paramref name="hops"/> hops, reading at most
+    /// <paramref name="fanout"/> claims per entity and closing at most <paramref name="maxNodes"/>;
+    /// every crossed claim is an edge.
     /// </summary>
     public static Task<IReadOnlyList<ExploreWebEdgeRow>> ExploreWebAsync(
         NpgsqlConnection conn, byte[] seed, int hops, int fanout, int maxNodes, int timeoutSeconds,

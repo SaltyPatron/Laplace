@@ -118,7 +118,7 @@ BEGIN ATOMIC
         SELECT co.entity_id AS gid
         FROM elected el
         CROSS JOIN params pr
-        CROSS JOIN LATERAL structural.containers_containing_all(pr.prompt_ids) co
+        CROSS JOIN LATERAL (SELECT public.blake3_send(h.entity) AS entity_id FROM public.laplace_holders(ARRAY(SELECT DISTINCT public.blake3_from_bytea(x) FROM unnest(pr.prompt_ids) x WHERE x IS NOT NULL), ARRAY(SELECT DISTINCT public.blake3_from_bytea(x) FROM unnest(pr.prompt_ids) x WHERE x IS NOT NULL), false, -1::smallint, -1::bigint, 2::smallint) h) co
         WHERE el.syn IS NOT NULL
     ),
     gids AS MATERIALIZED (

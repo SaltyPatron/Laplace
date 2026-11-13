@@ -55,7 +55,6 @@ public sealed class RenderBeforeSelectGateTests
             ["recall/recall_is_a_no_reply.sql.in"] = 4,     // exactly two endpoint ids
             ["recall/recall_related_response.sql.in"] = 1,  // MATERIALIZED topic label
             ["recall/recall_what_is_response.sql.in"] = 1,  // MATERIALIZED topic label
-            ["consensus/relate_path.sql.in"] = 1,           // one winning relation plane
         };
 
     private static string FunctionsRoot(string repoRoot) =>
@@ -145,7 +144,7 @@ public sealed class RenderBeforeSelectGateTests
             + string.Join("\n  ", changed));
         // The total may fall as sites move to a batch surface; it may not rise without
         // classifying the new site in SingletonSites.
-        Assert.Equal(15, actual.Values.Sum());
+        Assert.Equal(14, actual.Values.Sum());
     }
 
     [Fact]
@@ -205,9 +204,6 @@ public sealed class RenderBeforeSelectGateTests
             + "use render_text_fast for an explicit preview budget:\n  "
             + string.Join("\n  ", violations));
 
-        var closure = File.ReadAllText(Path.Combine(
-            FunctionsRoot(repoRoot), "readback", "constituents_closure.sql.in"));
-        Assert.Contains("p_max_depth integer DEFAULT 0", closure, StringComparison.Ordinal);
 
         // Cycle termination, exact bytes and scalar/batch depth are proven against
         // PostgreSQL in NpgsqlContentReconstructorTests, not by source-string assertions.
