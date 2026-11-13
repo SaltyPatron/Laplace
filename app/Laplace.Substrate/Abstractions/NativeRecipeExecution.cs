@@ -169,7 +169,9 @@ public sealed class NativeRecipeExecution
         }
 
         var start = ProcessInfo(Executable, request.ConnectionInfo);
-        start.ArgumentList.Add(request.Witness is null ? "ingest" : "witness");
+        // A source or files of no corpus: the Engine's ingest. Files a witness named at run time states: its witness.
+        if (request.Witness is null) start.ArgumentList.Add("ingest");
+        else start.ArgumentList.Add("witness");
         start.ArgumentList.Add("-r"); start.ArgumentList.Add(Recipes);
         start.ArgumentList.Add("-t"); start.ArgumentList.Add(Tier0);
         // A root request owns prerequisite expansion. An entry in an explicit
