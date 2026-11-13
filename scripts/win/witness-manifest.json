@@ -32,8 +32,7 @@
       "framebase",
       "atomic2020",
       "atomic-10x",
-      "openings",
-      "syzygy"
+      "openings"
     ]
   },
   "vault_root": "D:/Data/Ingest on Windows (env.cmd sets INGEST and LAPLACE_DATA); /vault/Data on Linux. Override LAPLACE_DATA only when the vault lives elsewhere.",
