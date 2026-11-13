@@ -28,9 +28,6 @@ SQL_QUERY("converse.resolve_ref", "text",
 SQL_QUERY("laplace.word_id", "text",
     "SELECT laplace.word_id($1)")
 
-SQL_QUERY("converse.chat", "text,bytea,bytea,text,int4[],bool",
-    "SELECT converse.chat($1, $2, $3, $4, $5, NULL, NULL, NULL, $6)")
-
 SQL_QUERY("readiness.perfcache_probe", "",
     "SELECT laplace.word_id('the');")
 

@@ -48,8 +48,8 @@ public sealed class KeyModeFactory : WebApplicationFactory<Program>
             services.RemoveAll<ISubstrateClient>();
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
             services.RemoveAll<IHostedService>();
-            services.RemoveAll<IConversationWitness>();
-            services.AddSingleton<IConversationWitness,RecordingConversationWitness>();
+            services.RemoveAll<IConversationTurns>();
+            services.AddSingleton<IConversationTurns,RecordingConversationTurns>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
                 TestBillingOptions.IsolateFromHostStripe(o);

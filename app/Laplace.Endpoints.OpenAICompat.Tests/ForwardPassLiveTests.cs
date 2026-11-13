@@ -7,8 +7,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// <summary>
 /// Live: one witnessed prompt through <c>generation.forward_trace</c> (the traceable
 /// forward program), <c>SubstrateClient.ForwardTraceAsync</c> (the receipt read behind
-/// /v1/explain/report), <c>generation.forward_text</c>, and
-/// <c>SubstrateClient.ConverseAsync</c>. Every receipt row carries a root, candidates
+/// /v1/explain/report) and <c>generation.forward_text</c>. Every receipt row carries a root, candidates
 /// and ordered context, and the expected answer is emitted with IS_ANTONYM_OF support,
 /// so a non-empty reply cannot hide a disconnected evidence path. The answer depends on
 /// the seeded substrate's standing.
@@ -21,7 +20,7 @@ public sealed class ForwardPassLiveTests
     private const string Expected = "cold";
 
     [SkippableFact]
-    public async Task DefaultForwardPass_ReachesWitnessedAnswerThroughDirectAndConversationPaths()
+    public async Task DefaultForwardPass_ReachesWitnessedAnswerThroughTraceAndTextPaths()
     {
         Skip.IfNot(CanReachSeededSubstrate(), "seeded Postgres substrate not reachable");
 
@@ -135,17 +134,6 @@ public sealed class ForwardPassLiveTests
         Assert.Contains(emitted, value =>
             string.Equals(value, Expected, StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(emitted, LooksLikeInternalIdentity);
-
-        var rows = await client.ConverseAsync(
-            Prompt,
-            session: null,
-            options: new ConverseOptions(MaxTokens: 24, Window: 5, Temperature: 0.0, TopK: 10),
-            ct: CancellationToken.None);
-        Assert.NotEmpty(rows);
-        var reply = string.Concat(rows.Select(static row => row.Reply));
-        Assert.Contains(Expected, reply, StringComparison.OrdinalIgnoreCase);
-        Assert.False(LooksLikeInternalIdentity(reply.Trim()),
-            $"default conversation leaked an internal identity surface: {reply}");
     }
 
     private readonly record struct ForwardReceipt(

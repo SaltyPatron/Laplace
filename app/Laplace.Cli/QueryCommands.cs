@@ -162,19 +162,16 @@ internal static class QueryCommands
         return 0;
     }
 
+    /// <summary>
+    /// The forward program read, nothing witnessed (Engine <c>laplace turn --read</c>): a prompt, or a prompt a
+    /// line until a blank one, each answered under the firmware with the Engine's trace.
+    /// </summary>
     public static async Task<int> WalkAsync(string[] args)
     {
-        const int steps = 20;
-        const int order = 5;
-        const int topk = 8;
-        const double temp = 0.6;
-        const bool verbose = false;
-
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-
+        var turns = ConversationTurns.Installed();
         string prompt = string.Join(' ', args).Trim();
         if (!string.IsNullOrWhiteSpace(prompt))
-            return await WalkOnceAsync(ds, prompt, steps, order, temp, topk, verbose);
+            return await WalkOnceAsync(turns, prompt);
 
         Console.WriteLine("laplace walk — type a prompt, Enter. Blank line or Ctrl-D quits.");
         while (true)
@@ -182,81 +179,50 @@ internal static class QueryCommands
             Console.Write("\nprompt> ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await WalkOnceAsync(ds, line, steps, order, temp, topk, verbose);
+            await WalkOnceAsync(turns, line);
         }
         return 0;
     }
 
-    private static async Task<int> WalkOnceAsync(
-        NpgsqlDataSource ds, string prompt, int steps, int order, double temp, int topk, bool verbose)
+    private static async Task<int> WalkOnceAsync(ConversationTurns turns, string prompt)
     {
         var sw = Stopwatch.StartNew();
-        var toks = new List<(string entity, int strideUsed)>();
-        await foreach (var row in NpgsqlSubstrateReads.WalkTextAsync(
-            ds, prompt, steps, order, temp, topk, default))
-            toks.Add((row.Entity, row.StrideUsed));
+        var turn = await turns.TurnAsync(CliParticipant, CliSession, prompt, read: true);
         sw.Stop();
-
-        Console.WriteLine(prompt + string.Concat(toks.Select(t => t.entity)));
-        if (verbose)
-            for (int i = 0; i < toks.Count; i++)
-                Console.WriteLine($"    {i + 1,2}. {toks[i].entity,-22} stride={toks[i].strideUsed}");
-        Console.WriteLine($"    [{toks.Count} entities, {sw.Elapsed.TotalMilliseconds:F0} ms — native stride descent, no GPU]");
+        Console.WriteLine(turn.Response);
+        Console.WriteLine($"    [{turn.Steps.Count} steps, {sw.Elapsed.TotalMilliseconds:F0} ms — {turn.Disposition}; a read, nothing witnessed]");
         return 0;
     }
 
-
-
-
-
+    /// <summary>
+    /// One turn of the CLI's session, answered by the forward program and witnessed by the Engine
+    /// (<c>laplace turn</c>), the same program the OpenAI-compatible endpoints and MCP run.
+    /// </summary>
     public static async Task<int> ChatAsync(string[] args)
     {
         string prompt = string.Join(' ', args).Trim();
         if (string.IsNullOrWhiteSpace(prompt))
             return Fail("usage: laplace-mono chat <prompt>");
 
-        CodepointPerfcache.Load(ResolveBlob());
-
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        await using var conn = await ds.OpenConnectionAsync();
-
-        // The turn is one admitted observation run through converse.chat(), the same forward
-        // pass the OpenAI-compatible endpoint and MCP call; the CLI adds only the system
-        // language hint and the session id.
-        var languageCode = LanguageReference.ResolveSystemCode();
-        var language = languageCode is null
-            ? null
-            : LanguageReference.IdForResolvedCode(languageCode).ToBytes();
-        var response = await NpgsqlSubstrateReads.ChatAsync(
-            conn, prompt, SessionId.ToBytes(), default,
-            language: language) ?? string.Empty;
-        Console.WriteLine(response);
-
-        // WITNESS: TurnCloser deposits the prompt/response pair under this tenant and session
-        // with conversational provenance, as the MCP tool and HTTP endpoint do.
-        await using var closer = new TurnCloser(ds, w => Console.Error.WriteLine($"laplace: {w}"));
-        if (await closer.CloseAsync(CliTenant, SessionId, prompt, response))
-            Console.WriteLine($"    [turn deposited @ session {Convert.ToHexStringLower(SessionId.ToBytes())[..16]} "
-                + $"— content-addressed, citable, self-extending]");
-
-        return 0;
+        var turn = await ConversationTurns.Installed().TurnAsync(CliParticipant, CliSession, prompt);
+        Console.WriteLine(turn.Response);
+        Console.WriteLine(turn.Witnessed
+            ? $"    [turn {turn.TurnId} at {turn.Ordinal} in session \"{CliSession}\" of {CliParticipant}; {turn.Disposition}]"
+            : $"    [not witnessed: {turn.Reason}; {turn.Disposition}]");
+        return turn.Witnessed || turn.Response.Length == 0 ? 0 : 1;
     }
 
     /// <summary>
-    /// The CLI's conversational identity, minted by the same canonical id law as the MCP
-    /// tool and the HTTP surface: equal tenant+key is the same context entity whichever
-    /// interface opened it. The key is content, not a random id, so re-running converges.
-    ///
-    /// LAPLACE_SESSION_KEY names a session explicitly, which is how a CLI invocation joins
-    /// an endpoint or MCP conversation. Unset, the key is "cli": one stable context.
+    /// The CLI's session is [the operator, its name]: the operator is the account running the CLI, a witness
+    /// of its turns, and LAPLACE_SESSION_KEY names the session (how a CLI invocation continues a session the
+    /// endpoint or MCP opened under the same participant). Unset, the session is "cli".
     /// </summary>
-    private const string CliTenant = "cli-local";
-    private static readonly Hash128 SessionId = ConversationContent.SessionId(
-        CliTenant,
+    private static string CliParticipant => Environment.UserName;
+    private static string CliSession =>
         Environment.GetEnvironmentVariable("LAPLACE_SESSION_KEY") is { Length: > 0 } k
             && ConversationContent.IsValidIdentifier(k)
             ? k
-            : "cli");
+            : "cli";
 
 
 

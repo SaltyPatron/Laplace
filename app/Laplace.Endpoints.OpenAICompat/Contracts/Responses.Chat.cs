@@ -56,27 +56,39 @@ public sealed record ProvenanceLine(
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses);
 
 
+/// <summary>
+/// The receipt of the turn that produced the response: the Engine's own (<c>laplace turn --receipt</c>),
+/// with its trace. The session is [participant, session]; the turn, when witnessed, is at its ordinal.
+/// </summary>
 public sealed record ForwardPassProof(
     [property: JsonPropertyName("session")] string Session,
-    [property: JsonPropertyName("prompt_occurrence_key")] string PromptOccurrenceKey,
-    [property: JsonPropertyName("response_witnessed")] bool ResponseWitnessed,
-    [property: JsonPropertyName("program_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProgramId,
-    [property: JsonPropertyName("semantic_act_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SemanticActId,
-    [property: JsonPropertyName("output_fingerprint"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OutputFingerprint,
-    [property: JsonPropertyName("completion")] bool Completion,
+    [property: JsonPropertyName("participant")] string Participant,
+    [property: JsonPropertyName("prompt_id")] string PromptId,
+    [property: JsonPropertyName("response_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResponseId,
+    [property: JsonPropertyName("turn_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TurnId,
+    [property: JsonPropertyName("ordinal")] int Ordinal,
+    [property: JsonPropertyName("turns_before")] int TurnsBefore,
+    [property: JsonPropertyName("witnessed")] bool Witnessed,
+    [property: JsonPropertyName("reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason,
     [property: JsonPropertyName("disposition")] string Disposition,
-    [property: JsonPropertyName("required_obligations")] int RequiredObligations,
-    [property: JsonPropertyName("satisfied_obligations")] int SatisfiedObligations,
-    [property: JsonPropertyName("remaining_required")] int RemainingRequired,
-    [property: JsonPropertyName("output_count")] int OutputCount,
-    [property: JsonPropertyName("prior_discourse_ids")] IReadOnlyList<string> PriorDiscourseIds,
-    [property: JsonPropertyName("events")] IReadOnlyList<ForwardTraceStep> Events);
+    [property: JsonPropertyName("steps")] IReadOnlyList<ForwardTurnStep> Steps,
+    [property: JsonPropertyName("trace")] string Trace);
+
+/// <summary>One step of the turn: what it emitted, by which kind of proposal, and what it added to the response.</summary>
+public sealed record ForwardTurnStep(
+    [property: JsonPropertyName("step")] int Step,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("grounds")] double Grounds,
+    [property: JsonPropertyName("continuity")] int Continuity,
+    [property: JsonPropertyName("confidence")] double Confidence);
 
 
 public sealed record ChunkProvenance(
     [property: JsonPropertyName("eff_mu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? EffMu = null,
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses = null,
-    [property: JsonPropertyName("ord_used"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? OrdUsed = null,
+    [property: JsonPropertyName("step"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ForwardTurnStep? Step = null,
     [property: JsonPropertyName("performance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatPerformance? Performance = null,
     [property: JsonPropertyName("forward_proof"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ForwardPassProof? ForwardProof = null);
 

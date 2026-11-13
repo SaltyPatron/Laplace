@@ -132,16 +132,16 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
-    public async Task ChatCompletions_AvailableWitnessWithoutQuote_ReturnsPaymentRequired()
+    public async Task ChatCompletions_AvailableEngineWithoutQuote_ReturnsPaymentRequired()
     {
         await using var available = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services =>
             {
-                services.RemoveAll<IConversationWitness>();
-                services.AddSingleton<IConversationWitness, RecordingConversationWitness>();
+                services.RemoveAll<IConversationTurns>();
+                services.AddSingleton<IConversationTurns, RecordingConversationTurns>();
             }));
         using var client = available.CreateClient();
-        Assert.True(available.Services.GetRequiredService<IConversationWitness>().IsAvailable);
+        Assert.Null(available.Services.GetRequiredService<IConversationTurns>().Unavailable);
         using var response = await client.PostAsJsonAsync("/v1/chat/completions", new
         {
             model = "laplace-converse-001",
@@ -155,10 +155,16 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
-    public async Task ChatCompletions_UnavailableWitnessIsRejectedBeforeTheMissingQuote()
+    public async Task ChatCompletions_MissingEngineIsRejectedBeforeTheMissingQuote()
     {
-        Assert.False(_factory.Services.GetRequiredService<IConversationWitness>().IsAvailable);
-        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        await using var missing = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IConversationTurns>();
+                services.AddSingleton<IConversationTurns, MissingConversationTurns>();
+            }));
+        using var client = missing.CreateClient();
+        using var response = await client.PostAsJsonAsync("/v1/chat/completions", new
         {
             model = "laplace-converse-001",
             messages = new[] { new { role = "user", content = "hello" } }
@@ -167,7 +173,7 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetProperty("type").GetString());
-        Assert.Equal("witness_unavailable", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal("turn_unavailable", json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]

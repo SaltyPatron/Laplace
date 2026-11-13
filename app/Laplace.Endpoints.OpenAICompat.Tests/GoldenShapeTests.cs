@@ -179,42 +179,30 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         Assert.Equal(string.Empty, (string?)body["choices"]?[0]?["message"]?["content"]);
     }
 
-    [Fact]
-    public async Task Chat_ConverseDials_ReachTheSubstrateClient()
-    {
-        var quoteId = await ApproveQuoteAsync("chat.completions", "dial-routing-tenant", "evt_dial_routing");
-        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
-        {
-            model = "laplace-converse-001",
-            shape = "define",
-            messages = new[] { new { role = "user", content = "whale" } }
-        }, quoteId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        Assert.Equal("shape=define;bands=;elaborate=False",
-            (string?)body["choices"]?[0]?["message"]?["content"]);
-    }
-
-    // A language tag is content: a region-qualified tag and a tag no ISO 639 source
-    // attests both reach the substrate as written, after billing, rather than being
-    // rewritten to another code or refused.
+    // The forward program answers under its firmware: a request that asks for another emission budget,
+    // sampler, read shape, band, scope or language is told so before anything is billed, never ignored.
     [Theory]
-    [InlineData("ja-JP", "evt_language_routing_region")]
-    [InlineData("zz-not-a-language", "evt_language_routing_unattested")]
-    public async Task Chat_OperatorLanguage_ReachesTheSubstrateClientAsWritten(string tag, string evt)
+    [InlineData("shape", "define")]
+    [InlineData("bands", "[4]")]
+    [InlineData("elaborate", "true")]
+    [InlineData("language", "\"ja-JP\"")]
+    [InlineData("scope", "\"tenant\"")]
+    [InlineData("max_tokens", "3")]
+    [InlineData("temperature", "0.6")]
+    [InlineData("top_k", "10")]
+    [InlineData("window", "5")]
+    public async Task Chat_RefusesWhatTheFirmwareGoverns(string control, string value)
     {
-        var quoteId = await ApproveQuoteAsync("chat.completions", "language-routing-" + tag, evt);
-        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        var payload = new JsonObject
         {
-            model = "laplace-converse-001",
-            language = tag,
-            messages = new[] { new { role = "user", content = "犬" } }
-        }, quoteId);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            ["model"] = "laplace-converse-001",
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = "whale" }),
+            [control] = control == "shape" ? JsonValue.Create(value) : JsonNode.Parse(value),
+        };
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", payload);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        Assert.Equal($"language={tag}", (string?)body["choices"]?[0]?["message"]?["content"]);
+        Assert.Equal("unsupported_parameter", (string?)body["error"]?["code"]);
     }
 
     [Theory]
@@ -258,23 +246,23 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     [Theory]
     [InlineData("laplace-converse-001")]
     [InlineData("laplace-completions-001")]
-    public async Task ForwardAliases_PreserveExactSurfacesAndStepControlAcrossStreaming(string model)
+    public async Task ForwardAliases_PreserveExactSurfacesAcrossStreaming(string model)
     {
         var quote = await ApproveQuoteAsync("chat.completions", "forward-buffered-" + model, "evt_buffered_" + model);
         using var buffered = await PostWithQuoteAsync("/v1/chat/completions", new
         {
-            model, max_tokens = 1,
+            model,
             messages = new[] { new { role = "user", content = "whale" } }
         },quote);
         Assert.Equal(HttpStatusCode.OK,buffered.StatusCode);
         var body = JsonNode.Parse(await buffered.Content.ReadAsStringAsync())!;
         var content = (string?)body["choices"]?[0]?["message"]?["content"];
-        Assert.Equal(" the",content);
+        Assert.Equal("the whale sings",content);
 
         var streamQuote = await ApproveQuoteAsync("chat.completions", "forward-stream-" + model, "evt_stream_" + model);
         using var streamed = await PostWithQuoteAsync("/v1/chat/completions", new
         {
-            model, max_tokens = 1, stream = true,
+            model, stream = true,
             messages = new[] { new { role = "user", content = "whale" } }
         },streamQuote);
         Assert.Equal(HttpStatusCode.OK,streamed.StatusCode);
@@ -291,7 +279,6 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var response = await PostWithQuoteAsync("/v1/chat/completions", new
         {
             model = "laplace-completions-001",
-            max_tokens = 3,
             messages = new[] { new { role = "user", content = "the whale" } }
         }, quoteId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -359,10 +346,10 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         var events = await ReadSseAsync(response);
         var proof = Assert.Single(events.OfType<JsonObject>()
             .Select(e => e["laplace"]?["forward_proof"]).OfType<JsonObject>());
-        Assert.False((bool)proof["response_witnessed"]!);
-        Assert.False((bool)proof["completion"]!);
-        Assert.Equal("unresolved", (string?)proof["disposition"]);
-        Assert.DoesNotContain(proof["events"]!.AsArray(), e => (string?)e?["event"] == "witness");
+        Assert.False((bool)proof["witnessed"]!);
+        Assert.StartsWith("unresolved", (string?)proof["disposition"]);
+        Assert.Empty(proof["steps"]!.AsArray());
+        Assert.Null(proof["turn_id"]);
     }
 
     [Fact]
@@ -403,7 +390,6 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         {
             model = "laplace-completions-001",
             stream = true,
-            max_tokens = 3,
             messages = new[] { new { role = "user", content = "the whale" } }
         }, quoteId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -418,7 +404,6 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         {
             model = "laplace-completions-001",
             stream = true,
-            max_tokens = 8,
             messages = new[] { new { role = "user", content = "trigger-stream-error please" } }
         }, quoteId);
 
@@ -462,26 +447,28 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var response = await PostWithQuoteAsync("/v1/completions", new
         {
             model = "laplace-completions-001",
-            prompt = "the whale",
-            max_tokens = 3
+            prompt = "the whale"
         }, quoteId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GoldenJson.Match("completions-200", await response.Content.ReadAsStringAsync());
     }
 
-    [Fact]
-    public async Task Golden_Completions_Logprobs()
+    [Theory]
+    [InlineData("logprobs", "1")]
+    [InlineData("max_tokens", "3")]
+    [InlineData("echo", "true")]
+    public async Task Completions_RefusesWhatTheFirmwareGoverns(string control, string value)
     {
-        var quoteId = await ApproveQuoteAsync("completions", "golden-cmpl-lp-tenant", "evt_golden_cmpl_lp");
-        using var response = await PostWithQuoteAsync("/v1/completions", new
+        var payload = new JsonObject
         {
-            model = "laplace-completions-001",
-            prompt = "the whale",
-            max_tokens = 3,
-            logprobs = 1
-        }, quoteId);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        GoldenJson.Match("completions-200-logprobs", await response.Content.ReadAsStringAsync());
+            ["model"] = "laplace-completions-001",
+            ["prompt"] = "the whale",
+            [control] = JsonNode.Parse(value),
+        };
+        using var response = await _client.PostAsJsonAsync("/v1/completions", payload);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("unsupported_parameter", (string?)body["error"]?["code"]);
     }
 
     [Fact]
@@ -492,9 +479,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         {
             model = "laplace-completions-001",
             prompt = "the whale",
-            max_tokens = 3,
-            stream = true,
-            logprobs = 1
+            stream = true
         }, quoteId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GoldenJson.MatchNode("completions-sse", await ReadSseAsync(response));
@@ -822,8 +807,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         using var execute = await PostWithQuoteAsync("/v1/completions", new
         {
             model = "laplace-completions-001",
-            prompt = "the whale",
-            max_tokens = 3
+            prompt = "the whale"
         }, quoteId);
         Assert.Equal(HttpStatusCode.OK, execute.StatusCode);
 

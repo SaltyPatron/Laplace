@@ -4,23 +4,6 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal readonly record struct ConverseOptions(
-    string? Shape = null,
-    int[]? Bands = null,
-    bool Elaborate = false,
-    string? LanguageCode = null,
-    byte[]? Language = null,
-    string? LanguageSource = null,
-    int? MaxTokens = null,
-    int? Window = null,
-    double? Temperature = null,
-    int? TopK = null);
-
-
-
-
-
-
 internal interface ISubstrateClient
 {
 
@@ -40,21 +23,6 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<QueryRow>> QueryAsync(
         string shape, byte[] topic, byte[]? topic2, string? relationType, string? lang,
         byte[][]? contextIds, int[]? bands, QueryDials dials, CancellationToken ct);
-
-    Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, CancellationToken ct);
-
-    Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
-        ConverseAsync(prompt, session, ct);
-
-    Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
-        string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct);
-
-    Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
-        string prompt, byte[]? session, byte[][] scopeSources,
-        ConverseOptions options, CancellationToken ct) =>
-        ConverseTenantScopedAsync(prompt, session, scopeSources, ct);
 
     Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct);
 
@@ -76,26 +44,6 @@ internal interface ISubstrateClient
 
     Task<ResponseFieldResponse?> ResponseFieldAsync(string xRef, string yRef, int fanout, int nearest, CancellationToken ct);
     Task<ResponseFieldResponse?> LexiconAsync(string xRef, string? yRef, CancellationToken ct);
-
-    Task<IReadOnlyList<ConverseRow>> ConverseTurnsAsync(
-        IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct);
-
-
-    IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
-        string prompt,
-        int steps = 32,
-        int maxOrder = 5,
-        double temperature = 0.7,
-        int topK = 10,
-        CancellationToken ct = default);
-
-    IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
-        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
-        throw new NotSupportedException("This adapter does not implement session-aware forward-turn streaming.");
-
-    IAsyncEnumerable<ForwardObservedEvent> ForwardTurnObservedStreamAsync(
-        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
-        throw new NotSupportedException("This adapter does not expose receipts from the ordinary forward turn.");
 
     Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct);
 

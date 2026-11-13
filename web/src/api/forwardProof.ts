@@ -27,19 +27,32 @@ export interface ForwardTraceStep {
   routing_round: number;
 }
 
+/** One step of a turn: what the forward program emitted and what it added to the response. */
+export interface ForwardTurnStep {
+  step: number;
+  kind: string;
+  id: string;
+  text: string;
+  grounds: number;
+  continuity: number;
+  confidence: number;
+}
+
+/**
+ * The receipt of the turn that produced a response: the Engine's own (laplace turn --receipt) with its
+ * trace. The session is [participant, session]; a witnessed turn is at its ordinal.
+ */
 export interface ForwardPassProof {
   session: string;
-  prompt_occurrence_key: string;
-  response_witnessed: boolean;
-  program_id?: string;
-  semantic_act_id?: string;
-  output_fingerprint?: string;
-  completion: boolean;
+  participant: string;
+  prompt_id: string;
+  response_id?: string;
+  turn_id?: string;
+  ordinal: number;
+  turns_before: number;
+  witnessed: boolean;
+  reason?: string;
   disposition: string;
-  required_obligations: number;
-  satisfied_obligations: number;
-  remaining_required: number;
-  output_count: number;
-  prior_discourse_ids: string[];
-  events: ForwardTraceStep[];
+  steps: ForwardTurnStep[];
+  trace: string;
 }

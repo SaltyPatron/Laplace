@@ -47,9 +47,9 @@ internal static class CoreEndpoints
         app.MapGet("/v1/capabilities", () =>
         {
             var endpoints = new CapabilityEndpoints(
-                // Chat and text completion both run the native forward program.
-                ChatCompletions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native)", Billing: "preflight_quote_required"),
-                Completions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native streaming)", Billing: "preflight_quote_required"),
+                // Chat and text completion both run the one forward program (Engine laplace turn).
+                ChatCompletions: new CapabilityStatus("live", Backend: "laplace turn: the forward program, the turn witnessed by the Engine", Billing: "preflight_quote_required"),
+                Completions: new CapabilityStatus("live", Backend: "laplace turn: the forward program, each step streamed, the turn witnessed by the Engine", Billing: "preflight_quote_required"),
                 Embeddings: new CapabilityStatus("live", Backend: "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),
                 AuditReports: new CapabilityStatus("live", Backend: "ops.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
                 Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + ops.entity_physicalities", Billing: "visualization.deep_export"),

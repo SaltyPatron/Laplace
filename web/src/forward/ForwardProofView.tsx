@@ -53,7 +53,7 @@ export function ForwardProofView() {
         >
           <div className={styles.turnHead}>
             <span>Chat turn {ordinal + 1}</span>
-            <code>{turn.proof.program_id ?? 'no program receipt'}</code>
+            <code>{turn.proof.turn_id ?? 'no witnessed turn'}</code>
           </div>
           <div className={styles.exchange}>
             <div><strong>Prompt already executed</strong><p>{turn.prompt}</p></div>

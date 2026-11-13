@@ -7,22 +7,17 @@ function compact(value: string | undefined): string {
   return value.length <= 24 ? value : `${value.slice(0, 10)}…${value.slice(-10)}`;
 }
 
-function fp1e9(value: number | undefined): string {
-  if (value == null) return '—';
-  return (value / 1_000_000_000).toFixed(3);
-}
-
+/** The receipt of the turn that produced this response, as the Engine wrote it, and the Engine's trace. */
 export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
   return (
     <details open className={styles.proof} data-forward-pass-proof="ordinary-chat-turn">
       <summary>
         Forward pass proof
-        <span>{proof.completion ? 'complete' : proof.disposition}</span>
+        <span>{proof.disposition || 'no disposition'}</span>
         <span>exact producing turn · no replay</span>
-        <span>program {compact(proof.program_id)}</span>
-        <span>{proof.response_witnessed ? 'response persisted' : 'response witness missing'}</span>
-        <span>{proof.events.length} native receipts</span>
-        <span>{proof.prior_discourse_ids.length} discourse ids</span>
+        <span>{proof.witnessed ? `turn ${proof.ordinal} witnessed` : 'not witnessed'}</span>
+        <span>{proof.steps.length} steps</span>
+        <span>{proof.turns_before} earlier turns</span>
       </summary>
 
       <div className={styles.body}>
@@ -31,67 +26,44 @@ export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
         </div>
 
         <dl className={styles.receipt}>
-          <div><dt>session</dt><dd><code>{proof.session}</code></dd></div>
-          <div><dt>prompt occurrence</dt><dd><code>{compact(proof.prompt_occurrence_key)}</code></dd></div>
-          <div><dt>program</dt><dd><code title={proof.program_id}>{compact(proof.program_id)}</code></dd></div>
-          <div><dt>semantic act</dt><dd><code title={proof.semantic_act_id}>{compact(proof.semantic_act_id)}</code></dd></div>
-          <div><dt>output fingerprint</dt><dd><code title={proof.output_fingerprint}>{compact(proof.output_fingerprint)}</code></dd></div>
-          <div><dt>terminal</dt><dd>{proof.disposition} · {proof.output_count} outputs</dd></div>
-          <div><dt>obligations</dt><dd>{proof.satisfied_obligations}/{proof.required_obligations} satisfied · {proof.remaining_required} remaining</dd></div>
-          <div><dt>response witness</dt><dd>{proof.response_witnessed ? 'persisted before this receipt was returned' : 'not confirmed'}</dd></div>
+          <div><dt>session</dt><dd><code>{proof.session}</code> of <code>{proof.participant}</code></dd></div>
+          <div><dt>prompt</dt><dd><code title={proof.prompt_id}>{compact(proof.prompt_id)}</code></dd></div>
+          <div><dt>response</dt><dd><code title={proof.response_id}>{compact(proof.response_id)}</code></dd></div>
+          <div><dt>turn</dt><dd><code title={proof.turn_id}>{compact(proof.turn_id)}</code></dd></div>
+          <div><dt>place in the session</dt><dd>{proof.ordinal} · {proof.turns_before} before it</dd></div>
+          <div><dt>witness</dt><dd>{proof.witnessed ? 'recorded by the Engine before this receipt was returned' : proof.reason ?? 'not recorded'}</dd></div>
         </dl>
 
         <section>
-          <h4>Substrate discourse consumed by this turn</h4>
-          {proof.prior_discourse_ids.length === 0 ? (
-            <p className={styles.empty}>No prior discourse identities were supplied.</p>
+          <h4>Steps</h4>
+          {proof.steps.length === 0 ? (
+            <p className={styles.empty}>Nothing was emitted.</p>
           ) : (
-            <div className={styles.ids}>
-              {proof.prior_discourse_ids.map((id, i) => (
-                <code key={`${id}-${i}`} title={id}>{i + 1}. {compact(id)}</code>
-              ))}
+            <div className={styles.tableWrap}>
+              <Table>
+                <thead>
+                  <tr><th>step</th><th>kind</th><th>emitted</th><th>grounds</th><th>continuity</th><th>confidence</th></tr>
+                </thead>
+                <tbody>
+                  {proof.steps.map((step) => (
+                    <tr key={step.step}>
+                      <td>{step.step}</td>
+                      <td>{step.kind}</td>
+                      <td title={step.id}>{step.text}</td>
+                      <td>{step.grounds.toFixed(2)}</td>
+                      <td>{step.continuity}</td>
+                      <td>{step.confidence.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
             </div>
           )}
         </section>
 
         <section>
-          <h4>Exact producing lifecycle receipts</h4>
-          <div className={styles.tableWrap}>
-            <Table>
-              <thead>
-                <tr>
-                  <th>step</th><th>stage</th><th>entity</th><th>candidates</th>
-                  <th>context</th><th>Q→K</th><th>exact</th><th>trajectory</th>
-                  <th>support</th><th>standing</th>
-                </tr>
-              </thead>
-              <tbody>
-                {proof.events.map((row, i) => (
-                  <tr key={`${row.step}-${row.routing_round}-${row.event}-${i}`}>
-                    <td>{row.step}.{row.routing_round}</td>
-                    <td>{row.event}</td>
-                    <td title={row.entity_id_hex}>{row.entity || compact(row.entity_id_hex)}</td>
-                    <td>{row.candidate_count}</td>
-                    <td>{row.ordered_context_count}</td>
-                    <td>{row.proposal_channel_count}</td>
-                    <td>{row.exact_channel_count}</td>
-                    <td>{row.sequence_occurrences}</td>
-                    <td>
-                      {row.support_relation
-                        ? `${row.support_outbound === false ? '←' : '→'} ${row.support_relation}`
-                        : row.declared_result ? 'declared result' : '—'}
-                      {row.support_witnesses != null ? ` · ${row.support_witnesses} wit` : ''}
-                    </td>
-                    <td>
-                      {row.support_rating != null
-                        ? `μ ${fp1e9(row.support_rating)} · RD ${fp1e9(row.support_rd)}`
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+          <h4>The Engine's trace of this turn</h4>
+          <pre className={styles.trace}>{proof.trace}</pre>
         </section>
       </div>
     </details>
