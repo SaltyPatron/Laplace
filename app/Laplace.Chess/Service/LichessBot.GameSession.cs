@@ -20,6 +20,7 @@ public sealed partial class LichessBot
         var modality = new ChessModality();
         var substrateGameId = ChessLiveGameHost.LichessGameId(lichessGameId);
         LichessGameReplay? replay = null;
+        var rules = ChessVariantRules.Standard;             // the game's law, from gameFull's variant
         GameOutcome? outcome = null;
         ILichessMoveProvider? provider = null;
         var receipts = new List<EngineReceipt>();
@@ -94,12 +95,19 @@ public sealed partial class LichessBot
                     initialFen = "startpos";
                 }
 
-                var startFen = initialFen is "startpos" or "" ? ChessModality.StartFen : initialFen;
+                if (type == "gameFull")
+                {
+                    // no variant named: the firmware's default law, as for a PGN with no Variant tag
+                    string? variantName = ev.TryGetProperty("variant", out var gv) && gv.TryGetProperty("name", out var gn) ? gn.GetString() : null;
+                    rules = ChessVariants.ByLaw(variantName)
+                        ?? throw new InvalidDataException($"Lichess game's variant {variantName} names no law the Engine's chess firmware declares.");
+                }
+                var startFen = LichessGameReplay.StartOf(initialFen, rules);
                 if (replay is null)
                 {
                     if (type != "gameFull")
                         throw new InvalidDataException("Lichess game stream did not start with gameFull.");
-                    replay = new LichessGameReplay(startFen);
+                    replay = new LichessGameReplay(startFen, rules);
                 }
                 else if (type == "gameFull" && startFen != replay.InitialFen)
                     throw new InvalidDataException("Lichess initial position changed during replay.");
@@ -160,7 +168,7 @@ public sealed partial class LichessBot
                         provider.Identity.Via?.Name ?? provider.Identity.Name,
                         (provider.Identity.Via ?? provider.Identity).ExeSha256[..12]);
                 }
-                var position = ChessPosition.From(replay.InitialFen, replay.AcceptedMoves);
+                var position = ChessPosition.From(replay.InitialFen, replay.AcceptedMoves, replay.Rules.Law);
                 // The Lichess clock in milliseconds; the provider takes the network overhead off before the engine sees it.
                 var clock = new UciClock(wtime, btime, winc, binc);
                 var decision = await Task.Run(() => provider.Choose(position, clock, ct), ct).ConfigureAwait(false);
@@ -304,8 +312,11 @@ public sealed partial class LichessBot
 
     private bool ShouldAccept(JsonElement challenge)
     {
+        // Every variant the Engine's chess firmware declares a law for, by Lichess's name for it (Standard, Chess960,
+        // Crazyhouse, Antichess, Atomic, Horde, King of the Hill, Racing Kings, Three-check, From Position).
         if (!challenge.TryGetProperty("variant", out var v)
-            || !v.TryGetProperty("key", out var vk) || vk.GetString() != "standard")
+            || !v.TryGetProperty("name", out var vn) || ChessVariants.ByLaw(vn.GetString()) is not { } rules
+            || !NativeChessRules.Supports(rules))
             return false;
         bool rated = challenge.TryGetProperty("rated", out var r) && r.ValueKind == JsonValueKind.True;
         return _policy.Accepts(SpeedOf(challenge), rated);

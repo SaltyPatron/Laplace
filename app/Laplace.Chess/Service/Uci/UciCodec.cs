@@ -7,7 +7,8 @@ namespace Laplace.Chess.Service.Uci;
 // request encodes from it. Notation stays notation here (FEN, UCI moves): the content-addressed position and move
 // identities belong to the native core, reached through IChessIdentityResolver, never minted from these strings.
 
-/// <summary>A move in UCI long algebraic notation (e2e4, e7e8q). Notation only, never an identity.</summary>
+/// <summary>A move in UCI long algebraic notation (e2e4, e7e8q; a drop P@e4; Antichess's e7e8k). Notation only, never an
+/// identity.</summary>
 public readonly partial record struct UciMove
 {
     public string Text { get; }
@@ -26,25 +27,28 @@ public readonly partial record struct UciMove
 
     public override string ToString() => Text;
 
-    [GeneratedRegex("^[a-h][1-8][a-h][1-8][qrbn]?$")]
+    [GeneratedRegex("^(?:[a-h][1-8][a-h][1-8][qrbnk]?|[PNBRQ]@[a-h][1-8])$")]
     private static partial Regex Shape();
 }
 
 /// <summary>A position as notation: a start FEN and the UCI moves played from it. <see cref="WhiteToMove"/> is read from
-/// the FEN's side field and the move count, which is all the codec needs to orient a score; it never validates chess.</summary>
-public sealed record ChessPosition(string Fen, IReadOnlyList<UciMove> Moves)
+/// the FEN's side field and the move count, which is all the codec needs to orient a score; it never validates chess.
+/// <see cref="Law"/>: the variant the game is played under, as the Engine's chess firmware names it (sent as
+/// UCI_Variant); "" is Standard.</summary>
+public sealed record ChessPosition(string Fen, IReadOnlyList<UciMove> Moves, string Law = "")
 {
     public const string StartFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
     public static ChessPosition Start { get; } = new(StartFen, []);
 
-    public static ChessPosition From(string? fen, IEnumerable<string>? moves = null)
+    public static ChessPosition From(string? fen, IEnumerable<string>? moves = null, string law = "")
     {
         string f = string.IsNullOrWhiteSpace(fen) || fen.Trim() == "startpos" ? StartFen : fen.Trim();
-        if (f.Contains('\n') || f.Contains('\r') || f.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length is < 2 or > 6)
+        // seven fields at most: a law's checks given follow the clocks (+0+0)
+        if (f.Contains('\n') || f.Contains('\r') || f.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length is < 2 or > 7)
             throw new FormatException("FEN must be one line with at least a board and a side to move.");
         var list = (moves ?? []).Where(static m => !string.IsNullOrWhiteSpace(m)).Select(static m => UciMove.Parse(m.Trim())).ToList();
-        return new ChessPosition(f, list);
+        return new ChessPosition(f, list, law);
     }
 
     public bool WhiteToMove

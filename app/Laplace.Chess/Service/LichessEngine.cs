@@ -125,6 +125,15 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
                     throw new UciEngineException(UciFailure.Rejected,
                         DatabaseIdentityMismatch(requiredDatabase, process.DatabaseIdentity, "after refreshing its database snapshot"));
             }
+            // The game's law: an engine that cannot be told it is never asked to play another game than this one.
+            if (position.Law is not ("" or "Standard"))
+            {
+                if (!process.Supports("UCI_Variant"))
+                    throw new UciEngineException(UciFailure.Rejected,
+                        $"{process.Identity.Name} has no UCI_Variant option; it cannot play {position.Law}.");
+                process.SetOption("UCI_Variant", position.Law);
+            }
+            else if (process.Supports("UCI_Variant")) process.SetOption("UCI_Variant", "Standard");
             ct.ThrowIfCancellationRequested();
             long preparationMs = preparation.ElapsedMilliseconds;
             clock = position.WhiteToMove

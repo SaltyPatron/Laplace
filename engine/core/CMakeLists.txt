@@ -87,7 +87,7 @@ set(LAPLACE_CORE_SOURCES
     src/score.c
     src/codepoint_table.c
     src/unicode_properties.c
-    src/chess_rules.c
+    src/chess_board.c
     src/modality_number_table.c
     src/vocabulary_table.c
     src/astar.cpp
@@ -294,6 +294,12 @@ if(NOT EXISTS "${LAPLACE_RECIPE_ENGINE_SOURCE}/src/record_stream.c"
     message(FATAL_ERROR "The canonical Laplace-Engine checkout is required at ${LAPLACE_RECIPE_ENGINE_SOURCE}. Set LAPLACE_RECIPE_ENGINE_SOURCE to its existing local checkout.")
 endif()
 add_subdirectory("${LAPLACE_RECIPE_ENGINE_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine")
+# Chess's laws have one implementation, the Engine's (src/chess_rules.c, which needs only Native and Tree-sitter);
+# src/chess_board.c crosses the managed board's state into it. The Engine's headers are seen by those two files alone.
+set(_engine_chess "${LAPLACE_RECIPE_ENGINE_SOURCE}/src/chess_rules.c")
+target_sources(laplace_core_objects PRIVATE "${_engine_chess}")
+set_source_files_properties("${_engine_chess}" "${CMAKE_CURRENT_SOURCE_DIR}/src/chess_board.c"
+    TARGET_DIRECTORY laplace_core_objects PROPERTIES INCLUDE_DIRECTORIES "${LAPLACE_RECIPE_ENGINE_SOURCE}/src")
 set(LAPLACE_RECIPE_RUNTIME "${CMAKE_CURRENT_BINARY_DIR}/recipe_engine/runtime")
 file(GLOB_RECURSE _recipe_runtime_sources CONFIGURE_DEPENDS
     "${LAPLACE_RECIPE_ENGINE_SOURCE}/recipes/*.recipe"

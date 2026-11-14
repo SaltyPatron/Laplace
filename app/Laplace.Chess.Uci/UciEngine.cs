@@ -70,7 +70,7 @@ public sealed class UciEngine
                 bool startpos = Array.IndexOf(tok, "startpos") >= 0;
                 if (!startpos && fenIdx < 0) return true;
                 string? fen = startpos ? null
-                    : string.Join(' ', tok.Skip(fenIdx + 1).TakeWhile(static t => t != "moves").Take(6));
+                    : string.Join(' ', tok.Skip(fenIdx + 1).TakeWhile(static t => t != "moves"));       // every field: a law's checks follow the clocks
                 _backend.SetPosition(fen, movesIdx >= 0 ? tok[(movesIdx + 1)..] : []);
                 return true;
 
