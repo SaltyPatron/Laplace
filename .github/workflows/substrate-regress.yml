@@ -27,6 +27,8 @@ jobs:
     runs-on: [self-hosted, laplace, Laplace, staging]
     timeout-minutes: 240
     env:
+      # site.sh's host lock: wait for a delivery or an ingest that holds it, as the delivery does
+      LAPLACE_HOST_LOCK_WAIT_SECONDS: ${{ vars.LAPLACE_HOST_LOCK_WAIT_SECONDS || 'wait' }}
       LAPLACE_CONNINFO: ""
       LAPLACE_NATIVE: ${{ github.workspace }}/.ci-dependencies/Laplace-Native
       LAPLACE_OPERATIONS: ${{ github.workspace }}/.ci-dependencies/Laplace-Operations
