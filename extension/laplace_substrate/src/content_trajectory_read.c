@@ -239,3 +239,19 @@ laplace_content_trajectory_read(ArrayType *entities,
 {
     laplace_typed_trajectory_read(entities, 1, consume, context);
 }
+
+PG_FUNCTION_INFO_V1(pg_laplace_physicality_id);
+
+/* (entity bytea, type smallint) -> bytea: the typed physicality id these
+ * readers probe, from the one native law (laplace_physicality_id_compute). */
+Datum
+pg_laplace_physicality_id(PG_FUNCTION_ARGS)
+{
+    hash128_t entity = datum_to_hash128(PG_GETARG_DATUM(0)), physicality;
+    int16 physicality_type = PG_GETARG_INT16(1);
+    if (physicality_type <= 0)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("physicality_id: the physicality type must be positive")));
+    laplace_physicality_id_compute(entity, physicality_type, &physicality);
+    PG_RETURN_DATUM(hash128_to_datum(&physicality));
+}
