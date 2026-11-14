@@ -3,8 +3,9 @@ using System.Text;
 
 namespace Laplace.Modality.Chess;
 
-// Native rule execution is separate from observed game testimony. The board and
-// move values returned here are composed by the same substrate owners as chess.
+// Native rule execution is separate from observed game testimony. The rules are the Engine's one implementation of
+// chess's laws (Laplace-Engine src/chess_rules.c, built into laplace_core), each law a variant its
+// firmware/chess.firmware declares; this class only carries the managed board across.
 internal static unsafe class NativeChessRules
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -15,10 +16,8 @@ internal static unsafe class NativeChessRules
         public ulong Promoted;
         public int White, Castle, Ep, Halfmove, Fullmove;
         public fixed int RookFiles[4];
-        public int Drops;
         public fixed uint Checks[2];
-        public uint CheckTarget;
-        public ulong WinningSquares;
+        public fixed byte Law[64];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -38,6 +37,64 @@ internal static unsafe class NativeChessRules
     [DllImport("laplace_core", EntryPoint = "laplace_chess_replay", CallingConvention = CallingConvention.Cdecl)]
     private static extern int ReplayNative(State* initial, byte* sans, nuint bytes, nuint count,
         State* states, Move* moves, nuint* failedPly);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_result", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ResultNative(State* state);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_laws", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawsNative(byte* path);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_known", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawKnownNative(byte* name);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_start", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawStartNative(byte* name, byte* output, nuint capacity);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_canonical", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawCanonicalNative(byte* name, byte* output, nuint capacity);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_name", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawNameNative(int index, byte* output, nuint capacity);
+
+    /// <summary>The law's own name for a name it goes by (a PGN tag, Lichess's API key, a UCI_Variant value), as the
+    /// Engine's firmware declares it; null when no law has that name.</summary>
+    internal static string? LawCanonical(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        _ = Laws.Value;
+        byte[] bytes = Encoding.UTF8.GetBytes(name + "\0"); Span<byte> output = stackalloc byte[64];
+        int n;
+        fixed (byte* p = bytes) fixed (byte* o = output) n = LawCanonicalNative(p, o, (nuint)output.Length);
+        return n < 0 ? null : Encoding.UTF8.GetString(output[..n]);
+    }
+
+    /// <summary>Every name a law goes by, in the firmware's order.</summary>
+    internal static IReadOnlyList<string> LawNames()
+    {
+        _ = Laws.Value;
+        var names = new List<string>(); Span<byte> output = stackalloc byte[64];
+        for (int i = 0; ; i++)
+        {
+            int n;
+            fixed (byte* o = output) n = LawNameNative(i, o, (nuint)output.Length);
+            if (n < 0) return names;
+            names.Add(Encoding.UTF8.GetString(output[..n]));
+        }
+    }
+
+    /// <summary>The Engine's chess firmware, beside the program firmware of the recipe estate this host runs
+    /// (LAPLACE_CHESS_FIRMWARE names another); read once per process.</summary>
+    private static readonly Lazy<int> Laws = new(() =>
+    {
+        var configured = Environment.GetEnvironmentVariable("LAPLACE_CHESS_FIRMWARE");
+        var path = !string.IsNullOrWhiteSpace(configured) ? configured
+            : Path.Combine(Directory.GetParent(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot)!.FullName, "firmware", "chess.firmware");
+        byte[] bytes = Encoding.UTF8.GetBytes(path + '\0');
+        fixed (byte* p = bytes) return LawsNative(p);
+    });
+
+    /// <summary>Whether the Engine's firmware declares a law of this name, as a PGN Variant tag or Lichess writes it.</summary>
+    internal static bool LawKnown(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        _ = Laws.Value;
+        byte[] bytes = Encoding.UTF8.GetBytes(name + '\0');
+        fixed (byte* p = bytes) return LawKnownNative(p) != 0;
+    }
 
     private static State Pack(Board board)
     {
@@ -50,11 +107,10 @@ internal static unsafe class NativeChessRules
         s.Ep = board.EpSquare; s.Halfmove = board.HalfmoveClock; s.Fullmove = board.FullmoveNumber;
         s.RookFiles[0] = board.WhiteKingRookFile; s.RookFiles[1] = board.WhiteQueenRookFile;
         s.RookFiles[2] = board.BlackKingRookFile; s.RookFiles[3] = board.BlackQueenRookFile;
-        s.Drops = board.Rules.Drops ? 1 : 0;
         s.Checks[0] = board.Checks[0]; s.Checks[1] = board.Checks[1];
-        s.CheckTarget = (uint)board.Rules.WinByCheckCount;
-        foreach (var square in board.Rules.WinBySquares.Split(',', StringSplitOptions.RemoveEmptyEntries))
-            s.WinningSquares |= 1UL << Bitboards.Bit(Board.AlgebraicToSquare(square));
+        var law = Encoding.UTF8.GetBytes(board.Rules.Law);
+        if (law.Length >= 64) throw new NotSupportedException($"Law name too long: {board.Rules.Law}");
+        for (int i = 0; i < law.Length; i++) s.Law[i] = law[i];
         return s;
     }
 
@@ -70,8 +126,31 @@ internal static unsafe class NativeChessRules
         board.BlackKingRookFile = (sbyte)s.RookFiles[2]; board.BlackQueenRookFile = (sbyte)s.RookFiles[3];
     }
 
-    internal static bool Supports(ChessVariantRules rules) => rules.IsStandard
-        || rules == ChessVariants.Crazyhouse || rules == ChessVariants.ThreeCheck || rules == ChessVariants.KingOfTheHill;
+    /// <summary>The FEN the law starts from, as the Engine's firmware declares it; null when it starts from
+    /// Standard's array.</summary>
+    internal static string? LawStart(string name)
+    {
+        if (!LawKnown(name)) throw new InvalidDataException($"The Engine's chess firmware declares no law {name}.");
+        byte[] bytes = Encoding.UTF8.GetBytes(name + '\0'); Span<byte> fen = stackalloc byte[128];
+        int n;
+        fixed (byte* p = bytes) fixed (byte* f = fen) n = LawStartNative(p, f, (nuint)fen.Length);
+        if (n < 0) throw new InvalidDataException($"The start of law {name} does not fit.");
+        return n == 0 ? null : Encoding.UTF8.GetString(fen[..n]);
+    }
+
+    internal static bool Supports(ChessVariantRules rules) => rules.IsStandard || LawKnown(rules.Law);
+
+    /// <summary>How the board stands by its law alone: null while play goes on, else the winner (0 White, 1 Black) or a
+    /// draw (-1). The clocks, repetition and material are the caller's.</summary>
+    internal static int? Result(Board board)
+    {
+        var s = Pack(board);
+        return ResultNative(&s) switch
+        {
+            0 => null, 1 => 0, 2 => 1, 3 => -1,
+            _ => throw new InvalidDataException($"The Engine's chess firmware declares no law {board.Rules.Law}."),
+        };
+    }
 
     internal static void Moves(Board board, List<ChessMove> output, bool legal, int? from = null)
     {

@@ -125,6 +125,13 @@ public sealed class UciLichessEngine(string name, UciProcessStart start, IReadOn
                     throw new UciEngineException(UciFailure.Rejected,
                         DatabaseIdentityMismatch(requiredDatabase, process.DatabaseIdentity, "after refreshing its database snapshot"));
             }
+            // The game's law, by a UCI_Variant name: an engine that cannot be told it is never asked to play another
+            // game than this one.
+            string variant = position.Law is "" ? "standard" : position.Law;
+            if (process.Supports("UCI_Variant")) process.SetOption("UCI_Variant", variant);
+            else if (Laplace.Modality.Chess.ChessVariants.ByLaw(variant) is not { IsStandard: true })
+                throw new UciEngineException(UciFailure.Rejected,
+                    $"{process.Identity.Name} has no UCI_Variant option; it cannot play {variant}.");
             ct.ThrowIfCancellationRequested();
             long preparationMs = preparation.ElapsedMilliseconds;
             clock = position.WhiteToMove

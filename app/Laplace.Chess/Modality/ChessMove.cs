@@ -31,6 +31,7 @@ public readonly record struct ChessMove(int From, int To, Piece Promotion, MoveF
                 Piece.WBishop => 'b',
                 Piece.WRook => 'r',
                 Piece.WQueen => 'q',
+                Piece.WKing => 'k',                                     // Antichess promotes to a king
                 _ => '?',
             };
             s += c;

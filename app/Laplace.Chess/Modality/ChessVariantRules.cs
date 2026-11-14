@@ -69,6 +69,15 @@ public sealed record ChessVariantRules
     /// <summary>Giving check is illegal (Racing Kings).</summary>
     public bool CheckForbidden { get; init; }
 
+    /// <summary>A pawn on its side's first rank steps one or two (Horde).</summary>
+    public bool PawnsDoubleFromFirstRank { get; init; }
+
+    /// <summary>The law the Engine plays these rules by: its name as the Engine's firmware/chess.firmware declares it
+    /// (a PGN Variant tag as written). Moves, results and SAN under any law but Standard's come from the Engine
+    /// (<see cref="NativeChessRules"/>); "" is Standard. It names the law and is no rule axis, so it is in no
+    /// surface.</summary>
+    public string Law { get; init; } = "";
+
     /// <summary>Ordinary chess. The identity-neutral default.</summary>
     public static readonly ChessVariantRules Standard = new();
 
@@ -99,6 +108,7 @@ public sealed record ChessVariantRules
         if (WinBySquares.Length > 0) Add("winsq", WinBySquares);
         if (WinByCheckCount > 0) Add("winchk", WinByCheckCount.ToString());
         if (CheckForbidden) Add("nocheck", "1");
+        if (PawnsDoubleFromFirstRank) Add("firstdouble", "1");
         return sb.ToString();
     }
 
@@ -123,27 +133,31 @@ public static class ChessVariants
     public static readonly ChessVariantRules Chess960 = ChessVariantRules.Standard;
 
     public static readonly ChessVariantRules KingOfTheHill =
-        ChessVariantRules.Standard with { WinBySquares = "d4,d5,e4,e5" };
+        ChessVariantRules.Standard with { WinBySquares = "d4,d5,e4,e5", Law = "King of the Hill" };
 
     public static readonly ChessVariantRules ThreeCheck =
-        ChessVariantRules.Standard with { WinByCheckCount = 3 };
+        ChessVariantRules.Standard with { WinByCheckCount = 3, Law = "Three-check" };
 
     public static readonly ChessVariantRules Antichess = ChessVariantRules.Standard with
     {
         Castling = false, CaptureCompulsory = true, BareKingWins = true,
-        PromotionPieces = "QRBNK",
+        PromotionPieces = "QRBNK", Law = "Antichess",
     };
 
     public static readonly ChessVariantRules Atomic =
-        ChessVariantRules.Standard with { CaptureExplodes = true };
+        ChessVariantRules.Standard with { CaptureExplodes = true, Law = "Atomic" };
 
     public static readonly ChessVariantRules Crazyhouse =
-        ChessVariantRules.Standard with { Drops = true };
+        ChessVariantRules.Standard with { Drops = true, Law = "Crazyhouse" };
 
     public static readonly ChessVariantRules RacingKings = ChessVariantRules.Standard with
     {
-        Castling = false, CheckForbidden = true, WinBySquares = "a8,b8,c8,d8,e8,f8,g8,h8",
+        Castling = false, CheckForbidden = true, WinBySquares = "a8,b8,c8,d8,e8,f8,g8,h8", Law = "Racing Kings",
     };
+
+    /// <summary>Horde: Standard's rules from Horde's start (the array is the FEN's), where a pawn on its first rank
+    /// steps one or two and the side left with nothing has lost; the Engine's law says so.</summary>
+    public static readonly ChessVariantRules Horde = ChessVariantRules.Standard with { PawnsDoubleFromFirstRank = true, Law = "Horde" };
 
     public static readonly ChessVariantRules Capablanca = ChessVariantRules.Standard with
     {
@@ -171,9 +185,25 @@ public static class ChessVariants
             "atomic" => Atomic,
             "crazyhouse" or "zh" => Crazyhouse,
             "racingkings" or "racing" => RacingKings,
+            "horde" => Horde,
             "capablanca" => Capablanca,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The rules of a law, by its name exactly as the Engine's firmware/chess.firmware declares it (a PGN Variant tag,
+    /// Lichess's variant name, a UCI_Variant value): a pre-seeded rule set whose law it is, else Standard's surface
+    /// played under that law; null when the firmware declares no law of that name. Nothing is folded: the name is the
+    /// firmware's.
+    /// </summary>
+    public static ChessVariantRules? ByLaw(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return Standard;
+        if (NativeChessRules.LawCanonical(name) is not { } law) return null;           // every name a law goes by: its own
+        if (law == "Standard") return Standard;
+        foreach (var (_, rules) in Conventional) if (rules.Law == law) return rules;
+        return ChessVariantRules.Standard with { Law = law };
     }
 
     /// <summary>Every pre-seeded rule set, for bootstrap and for narrowing.</summary>
@@ -186,6 +216,7 @@ public static class ChessVariants
         ("Atomic", Atomic),
         ("Crazyhouse", Crazyhouse),
         ("RacingKings", RacingKings),
+        ("Horde", Horde),
         ("Capablanca", Capablanca),
     ];
 }

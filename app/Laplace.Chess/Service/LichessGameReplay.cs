@@ -33,11 +33,21 @@ internal sealed class LichessGameReplay
     private readonly List<string> _acceptedMoves = new();
     private LichessPendingSubmission? _pending;
 
-    public LichessGameReplay(string initialFen)
+    public LichessGameReplay(string initialFen, ChessVariantRules? rules = null)
     {
-        InitialFen = initialFen is "startpos" or "" ? ChessModality.StartFen : initialFen;
-        State = _modality.FromFen(InitialFen);
+        Rules = rules ?? ChessVariantRules.Standard;
+        InitialFen = StartOf(initialFen, Rules);
+        State = _modality.FromFen(InitialFen, Rules);
     }
+
+    /// <summary>The FEN a game starts from: the one Lichess gives, or for "startpos" its law's start as the Engine's
+    /// firmware declares it (Horde, Racing Kings), else Standard's array.</summary>
+    public static string StartOf(string initialFen, ChessVariantRules rules)
+        => initialFen is not ("startpos" or "") ? initialFen
+            : rules.IsStandard ? ChessModality.StartFen : NativeChessRules.LawStart(rules.Law) ?? ChessModality.StartFen;
+
+    /// <summary>The law the game is played under (Lichess's variant name, as the Engine's firmware names it).</summary>
+    public ChessVariantRules Rules { get; }
 
     public string InitialFen { get; }
     public ChessState State { get; private set; }

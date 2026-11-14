@@ -30,6 +30,8 @@ public sealed class ManagedSearchBackend : IChessBackend
     private ChessSearchProviders? _providers;
     private string? _positionFen;
     private string[] _positionMoves = [];
+    // The law the game is played under (UCI_Variant: a variant as the Engine's firmware/chess.firmware names it).
+    private ChessVariantRules _rules = ChessVariantRules.Standard;
 
     public ManagedSearchBackend() => _state = _modality.Initial();
 
@@ -37,10 +39,25 @@ public sealed class ManagedSearchBackend : IChessBackend
     public string Author => "Laplace";
     public IReadOnlyList<string> OptionLines =>
         [$"option name Substrate type combo default {_substrateMode} var substrate var off",
-         "option name Refresh Database Snapshot type button"];
+         "option name Refresh Database Snapshot type button",
+         VariantOption];
+
+    /// <summary>UCI_Variant as the convention cutechess, Fairy-Stockfish and lichess-bot keep: a combo of the names, without
+    /// spaces, that the Engine's chess firmware says its laws go by.</summary>
+    private static readonly string VariantOption = "option name UCI_Variant type combo default standard"
+        + string.Concat(NativeChessRules.LawNames().Where(static n => !n.Contains(' ')).Select(static n => " var " + n));
 
     public void SetOption(string name, string value)
     {
+        if (name == "UCI_Variant")
+        {
+            // A law the firmware does not declare is refused; the game in hand keeps its law.
+            if (ChessVariants.ByLaw(value) is { } rules) { _rules = rules; _state = _modality.Initial(rules); }
+            else Laplace.Ops.LaplaceLogging.LogWarning(typeof(ManagedSearchBackend),
+                new InvalidDataException($"UCI_Variant {value} names no law the Engine's chess firmware declares."),
+                "UCI_Variant {Variant} refused; the variant is unchanged.", value);
+            return;
+        }
         if (name.Equals("Refresh Database Snapshot", StringComparison.OrdinalIgnoreCase))
         {
             // The live writer may be another process or host. Its local invalidation
@@ -69,7 +86,7 @@ public sealed class ManagedSearchBackend : IChessBackend
 
     public void NewGame(Action<string> info)
     {
-        _state = _modality.Initial();
+        _state = _modality.Initial(_rules);
         // A preceding game can have been recorded by another process or machine.
         SetOption("Refresh Database Snapshot", "");
     }
@@ -78,7 +95,7 @@ public sealed class ManagedSearchBackend : IChessBackend
     {
         try
         {
-            ChessState next = fen is null ? _modality.Initial() : _modality.FromFen(fen);
+            ChessState next = fen is null ? _modality.Initial(_rules) : _modality.FromFen(fen, _rules);
             foreach (var move in moves) next = ApplyUciMove(next, move);
             _state = next;
             _positionFen = fen;
@@ -97,7 +114,7 @@ public sealed class ManagedSearchBackend : IChessBackend
     {
         // Board is mutable; repetition history is immutable. Snapshot both so a later UCI
         // "position" command cannot mutate the in-flight decision's game context.
-        var state = new ChessState(Board.FromFen(_state.Board.ToFen()), _state.RepetitionHistory);
+        var state = new ChessState(Board.FromFen(_state.Board.ToFen(), _state.Board.Rules), _state.RepetitionHistory);
         var limits = ToSearchLimits(uciLimits);
         var search = _search;
         var continuations = SearchContinuationSeed.ForUci(_modality, _positionFen, _positionMoves);

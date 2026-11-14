@@ -12,6 +12,11 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
     public ChessState Initial() => FromFen(StartFen);
 
+    /// <summary>The position a game under these rules starts from: its law's start as the Engine's firmware declares
+    /// it (Horde, Racing Kings), else Standard's array.</summary>
+    public ChessState Initial(ChessVariantRules rules)
+        => FromFen(rules.IsStandard ? StartFen : NativeChessRules.LawStart(rules.Law) ?? StartFen, rules);
+
     public ChessState FromFen(string fen, ChessVariantRules? rules = null)
     {
         var board = Board.FromFen(fen, rules);
@@ -104,16 +109,12 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
         return null;
     }
 
+    /// <summary>The side a law other than Standard's says has won here (0 White, 1 Black), by the Engine's judgment of
+    /// the position (<see cref="NativeChessRules.Result"/>: the hill, the checks, an exploded king, Antichess's side
+    /// with no move, mate); null under Standard's law or while play goes on. A draw by the law is left to the caller's
+    /// no-move handling.</summary>
     internal static int? RuleWinner(Board b)
-    {
-        if (b.Rules.WinByCheckCount > 0) for (int side = 0; side < 2; side++)
-            if (b.Checks[side] >= b.Rules.WinByCheckCount) return side;
-        if (b.Rules.WinBySquares.Length > 0) foreach (var square in b.Rules.WinBySquares.Split(',')) {
-            var piece = b.Squares[Board.AlgebraicToSquare(square)];
-            if (Board.TypeOf(piece) == Piece.WKing) return Board.IsWhite(piece) ? 0 : 1;
-        }
-        return null;
-    }
+        => b.Rules.IsStandard ? null : NativeChessRules.Result(b) is int r and >= 0 ? r : null;
 
     private static bool IsThreefold(ChessState state)
     {
