@@ -430,9 +430,12 @@ laplace_tg_couple_and_orient(
         OriginEntry *root_origin = laplace_tg_origin_get(origins, &input->root, true);
         for (int i = 0; i < context_length; ++i)
             root_origin->occurrences = bms_add_member(root_origin->occurrences, i);
+        /* The program id fingerprints each channel's witnesses, distinct sources
+         * and contexts and provenance root: the channels are bound to their exact
+         * testimony before ORIENT, or that typed COUPLE state reads as empty. */
         int initial_channel_count = 0;
         const LaplaceQueryChannel *initial_channels =
-            laplace_query_state_channels_unbound(query_state, &initial_channel_count);
+            laplace_query_state_channels(query_state, &initial_channel_count);
         cognition = laplace_cognition_program_create(
             input, context_length, initial_channels, initial_channel_count, intent);
         if (intent && intent->ambiguous)

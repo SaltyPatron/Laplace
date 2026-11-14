@@ -105,7 +105,12 @@ BEGIN
     RAISE EXCEPTION 'an older success concealed a newer failed Native ingest';
   END IF;
 END $$;
+-- The stage schema is the Native writer's, made on demand as the Engine does before a load.
+DO $$ BEGIN PERFORM public.laplace_ensure_stage(); END $$;
 CREATE UNLOGGED TABLE stage.leader_pending (claim blake3,witness blake3,lineage blake3,games bigint,score double precision,trust double precision);
+-- Standings come from attestation series alone (there is no witness registry to derive them
+-- from containment): the trunk's series for each claim it holds, 1000 confirmations at its trust.
+INSERT INTO stage.leader_pending SELECT c.id,w.id,NULL,1000,1.0,0.85 FROM leader_claims c CROSS JOIN leader_witness w;
 DO $$ BEGIN PERFORM public.laplace_attest_series('stage.leader_pending',ARRAY(SELECT id FROM leader_claims)); END $$;
 CREATE TEMP TABLE leader_page AS
 SELECT * FROM ops.claim_leaders(ARRAY[(SELECT band::int FROM laplace.relation_registry() WHERE canonical='IS_A')],20);
