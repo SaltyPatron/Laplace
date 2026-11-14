@@ -11,3 +11,7 @@ extension/*/tests/expected/*.out whitespace=-blank-at-eol,-blank-at-eof
 
 # Generated manifest tables are hashed into perf-caches; their bytes must not depend on the host.
 engine/manifest/**/*.tsv text eol=lf
+
+# Written by scripts/codegen-attestation-law.py as LF, rewriting a file whose bytes differ: an LF checkout keeps a
+# Windows build (core.autocrlf) from leaving these tracked files modified after every run.
+extension/laplace_substrate/sql/generated/*.sql.in text eol=lf
