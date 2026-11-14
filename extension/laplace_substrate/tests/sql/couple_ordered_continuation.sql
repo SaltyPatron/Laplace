@@ -4,8 +4,8 @@ BEGIN;
 DO $couple_ordered_continuation$
 DECLARE
     prompt text := 'zzcouplealphaqv zzcouplebetaqv';
-    successor bytea := laplace.word_id('zzcouplegammaqv');
-    sequence_root bytea := public.laplace_hash128_blake3('test/coupling/ordered-sequence');
+    successor bytea := public.blake3_send(public.laplace_text_id('zzcouplegammaqv'));
+    sequence_root bytea := public.blake3_send(public.laplace_text_id('test/coupling/ordered-sequence'));
     context_ids bytea[];
     context_tiers smallint[];
     context_count int;
@@ -63,7 +63,7 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
     VALUES
-        (public.laplace_hash128_blake3('test/coupling/ordered-physicality'),
+        (public.blake3_send(public.laplace_text_id('test/coupling/ordered-physicality')),
          sequence_root,1,public.ST_MakePoint(11,11,11,11),
          decode(repeat('00',16),'hex'),trajectory,context_count + 1,now());
 

@@ -2,13 +2,13 @@ BEGIN;
 
 DO $$
 DECLARE
-    type_t   bytea := public.laplace_hash128_blake3('Type');
-    src      bytea := public.laplace_hash128_blake3('test/upsert/source');
-    rel_a    bytea := public.laplace_hash128_blake3('test/upsert/rel_a');
+    type_t   bytea := public.blake3_send(public.laplace_text_id('Type'));
+    src      bytea := public.blake3_send(public.laplace_text_id('test/upsert/source'));
+    rel_a    bytea := public.blake3_send(public.laplace_text_id('test/upsert/rel_a'));
     rel_hot  bytea := laplace.relation_type_id('IS_A');
-    subj     bytea := public.laplace_hash128_blake3('test/upsert/subject');
-    o1       bytea := public.laplace_hash128_blake3('test/upsert/obj1');
-    o2       bytea := public.laplace_hash128_blake3('test/upsert/obj2');
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/upsert/subject'));
+    o1       bytea := public.blake3_send(public.laplace_text_id('test/upsert/obj1'));
+    o2       bytea := public.blake3_send(public.laplace_text_id('test/upsert/obj2'));
     phi      bigint := 30000000000;
     s_conf   bigint := 900000000;
     s_ref    bigint := 100000000;
@@ -24,9 +24,8 @@ DECLARE
 BEGIN
     -- The writer and SQL must compose exactly the existing strand vertices.
     -- A missing object is absent, and is distinct from an explicit zero ID.
-    IF laplace.consensus_id(subj,rel_a,NULL) <> public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[subj,rel_a]) WITH ORDINALITY u(c, o) ORDER BY o)))
-       OR laplace.consensus_id(subj,rel_a,NULL) = laplace.consensus_id(
-            subj,rel_a,decode(repeat('00',16),'hex')) THEN
+    IF public.blake3_send(public.laplace_compose(ARRAY[subj, rel_a]::public.blake3[])) <> public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[subj,rel_a]) WITH ORDINALITY u(c, o) ORDER BY o)))
+       OR public.blake3_send(public.laplace_compose(ARRAY[subj, rel_a]::public.blake3[])) = public.blake3_send(public.laplace_compose(array_remove(ARRAY[subj, rel_a, decode(repeat('00',16),'hex')]::public.blake3[], NULL))) THEN
         RAISE EXCEPTION 'FAIL: consensus identity invents a missing object vertex';
     END IF;
     INSERT INTO laplace.entities (id, tier, type_id) VALUES
@@ -131,9 +130,9 @@ END $$;
 -- Every mathematical input is independently varied, twice, to exercise both
 -- memo hits and misses. A key omitting ANY input must disagree with the scalar.
 CREATE TEMP TABLE fold_cases AS
-SELECT i, public.laplace_hash128_blake3(convert_to('memo/s/' || i, 'UTF8')) s,
+SELECT i, public.blake3_send(public.laplace_text_id('memo/s/' || i)) s,
        CASE WHEN i % 4 = 0 THEN NULL::bytea
-            ELSE public.laplace_hash128_blake3(convert_to('memo/o/' || i, 'UTF8')) END o,
+            ELSE public.blake3_send(public.laplace_text_id('memo/o/' || i)) END o,
        1500000000000::bigint + CASE WHEN i % 8 = 1 THEN 200000000000 ELSE 0 END r,
        -- RD=350 is the declared Glicko ceiling. Vary the memo-key input downward,
        -- not above the admissible state domain: the fail-closed kernel must reject
@@ -156,7 +155,7 @@ BEGIN
         IF phase = 1 THEN
             UPDATE laplace.consensus c
             SET rating=f.r, rd=f.rd, volatility=f.vol
-            FROM fold_cases f WHERE c.id=laplace.consensus_id(f.s,t,f.o)
+            FROM fold_cases f WHERE c.id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[f.s, t, f.o]::public.blake3[], NULL)))
                 AND c.type_id=t AND c.subject_id=f.s;
         END IF;
         SELECT consensus.upsert_type(t, array_agg(s ORDER BY i), array_agg(o ORDER BY i),
@@ -166,7 +165,7 @@ BEGIN
         IF affected <> 16 THEN RAISE EXCEPTION 'memo fold affected %', affected; END IF;
         IF EXISTS (
             SELECT FROM fold_cases f
-            JOIN laplace.consensus c ON c.id=laplace.consensus_id(f.s,t,f.o)
+            JOIN laplace.consensus c ON c.id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[f.s, t, f.o]::public.blake3[], NULL)))
                 AND c.type_id=t AND c.subject_id=f.s
             CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_period(
                 CASE WHEN phase=0 THEN 1500000000000::bigint ELSE f.r END,
@@ -188,8 +187,8 @@ END $$;
 DO $fold_failure$
 DECLARE
     t bytea := laplace.relation_type_id('IS_A');
-    s bytea := public.laplace_hash128_blake3('test/fold-failure/subject');
-    o bytea := public.laplace_hash128_blake3('test/fold-failure/object');
+    s bytea := public.blake3_send(public.laplace_text_id('test/fold-failure/subject'));
+    o bytea := public.blake3_send(public.laplace_text_id('test/fold-failure/object'));
     prior jsonb;
     after_failure jsonb;
     detail text;
@@ -200,10 +199,10 @@ BEGIN
         (id, subject_id, type_id, object_id, rating, rd, volatility,
          witness_count, last_observed_at)
     VALUES
-        (laplace.consensus_id(s,t,o),s,t,o,1800000000000,80000000000,70000000,
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL))),s,t,o,1800000000000,80000000000,70000000,
          7,'2026-01-01 00:00:00+00');
     SELECT to_jsonb(c) INTO STRICT prior FROM laplace.consensus c
-    WHERE c.id=laplace.consensus_id(s,t,o) AND c.type_id=t AND c.subject_id=s;
+    WHERE c.id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL))) AND c.type_id=t AND c.subject_id=s;
     BEGIN
         -- A score larger than the one-game maximum deterministically fails
         -- inside the kernel without depending on a convergence edge case.
@@ -230,7 +229,7 @@ BEGIN
         END IF;
     END;
     SELECT to_jsonb(c) INTO STRICT after_failure FROM laplace.consensus c
-    WHERE c.id=laplace.consensus_id(s,t,o) AND c.type_id=t AND c.subject_id=s;
+    WHERE c.id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL))) AND c.type_id=t AND c.subject_id=s;
     IF NOT refused OR after_failure IS DISTINCT FROM prior THEN
         RAISE EXCEPTION 'failed native fold accepted invalid evidence or changed the stored prior';
     END IF;

@@ -10,13 +10,13 @@ CREATE TABLE physicality_readback_fixture.atoms AS
 SELECT * FROM converse.text_root_placements(ARRAY['A','B','AB','substrate/source/PhysicalityDescriptorAdmission/v1']);
 CREATE TABLE physicality_readback_fixture.source AS
 SELECT p.root_id AS entity_id,
-    public.laplace_hash128_blake3(p.root_id || decode('0100','hex')) AS placement_id,
+    public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(p.root_id), public.laplace_cp_id(1)])) AS placement_id,
     public.ST_MakePoint(p.coord[1],p.coord[2],p.coord[3],p.coord[4]) AS coord,
     public.ST_MakeLine(ARRAY[
         public.laplace_mantissa_pack(a.root_id,1,1,0),
         public.laplace_mantissa_pack(b.root_id,2,1,0)]) AS trajectory,
     source.root_id AS source_id,
-    public.laplace_hash128_blake3(convert_to('physicality-admission/test-unit','UTF8')) AS unit_id
+    public.blake3_send(public.laplace_text_id('physicality-admission/test-unit')) AS unit_id
 FROM physicality_readback_fixture.atoms p CROSS JOIN physicality_readback_fixture.atoms a CROSS JOIN physicality_readback_fixture.atoms b
 CROSS JOIN physicality_readback_fixture.atoms source
 WHERE p.ord=3 AND a.ord=1 AND b.ord=2 AND source.ord=4;
@@ -122,21 +122,21 @@ SELECT public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from
        n.anchor_id,s.entity_id AS ab_id,s.coord,
        public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(n.anchor_id,1,1,0),
                                public.laplace_mantissa_pack(s.entity_id,2,1,0)]) AS trajectory,
-       s.source_id,public.laplace_hash128_blake3(convert_to('physicality-readback/opaque-unit/v1','UTF8')) AS unit_id
+       s.source_id,public.blake3_send(public.laplace_text_id('physicality-readback/opaque-unit/v1')) AS unit_id
 FROM physicality_readback_fixture.source s CROSS JOIN LATERAL
-    (SELECT public.laplace_hash128_blake3(convert_to('physicality-readback/opaque-anchor/v1','UTF8')) AS anchor_id) n;
+    (SELECT public.blake3_send(public.laplace_text_id('physicality-readback/opaque-anchor/v1')) AS anchor_id) n;
 INSERT INTO laplace.entities(id,tier,type_id)
 VALUES ((SELECT entity_id FROM physicality_readback_fixture.unavailable_source),4,
         laplace.entity_type_id('Document'))
 ON CONFLICT DO NOTHING;
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,radius_origin,n_constituents,alignment_residual,source_dim,observed_at)
-SELECT public.laplace_hash128_blake3(u.entity_id || u.unit_id),u.entity_id,9,u.coord,
+SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(u.entity_id), public.blake3_from_bytea(u.unit_id)])),u.entity_id,9,u.coord,
        public.laplace_hilbert_encode(u.coord),u.trajectory,3,2,float8send(0.5),4,
        '2024-01-01T00:00:00Z'::timestamptz
 FROM physicality_readback_fixture.unavailable_source u;
 CREATE TABLE physicality_readback_fixture.unavailable_warm AS
 SELECT * FROM structural.physicality_descriptor_read(
-    ARRAY(SELECT public.laplace_hash128_blake3(u.entity_id || u.unit_id)
+    ARRAY(SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(u.entity_id), public.blake3_from_bytea(u.unit_id)]))
           FROM physicality_readback_fixture.unavailable_source u),268435456,2048,10000000);
 -- A legacy Content-placement fallback body for the same anchor entity.
 CREATE TABLE physicality_readback_fixture.legacy_frames AS

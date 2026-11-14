@@ -1,17 +1,17 @@
 BEGIN;
 DO $$
 DECLARE
-    type_t   bytea := public.laplace_hash128_blake3('Type');
-    src      bytea := public.laplace_hash128_blake3('test/s10/source');
-    rel_type  bytea := public.laplace_hash128_blake3('test/s10/reltype');
-    subj     bytea := public.laplace_hash128_blake3('test/s10/subject');
-    o_conf   bytea := public.laplace_hash128_blake3('test/s10/obj_confirm');
-    o_ref    bytea := public.laplace_hash128_blake3('test/s10/obj_refute');
-    o_draw   bytea := public.laplace_hash128_blake3('test/s10/obj_draw');
-    o_trust  bytea := public.laplace_hash128_blake3('test/s10/obj_trusted');
-    o_crank  bytea := public.laplace_hash128_blake3('test/s10/obj_crank');
-    o_games  bytea := public.laplace_hash128_blake3('test/s10/obj_manygames');
-    o_one    bytea := public.laplace_hash128_blake3('test/s10/obj_onegame');
+    type_t   bytea := public.blake3_send(public.laplace_text_id('Type'));
+    src      bytea := public.blake3_send(public.laplace_text_id('test/s10/source'));
+    rel_type  bytea := public.blake3_send(public.laplace_text_id('test/s10/reltype'));
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/s10/subject'));
+    o_conf   bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_confirm'));
+    o_ref    bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_refute'));
+    o_draw   bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_draw'));
+    o_trust  bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_trusted'));
+    o_crank  bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_crank'));
+    o_games  bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_manygames'));
+    o_one    bytea := public.blake3_send(public.laplace_text_id('test/s10/obj_onegame'));
     phi_trust bigint := 30000000000;
     phi_crank bigint := 350000000000;
     s_conf   bigint := 900000000;
@@ -39,13 +39,13 @@ BEGIN
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (public.laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1, s_conf,     phi_trust),
-        (public.laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1, s_ref,      phi_trust),
-        (public.laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1, s_draw,     phi_trust),
-        (public.laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1, s_conf,     phi_trust),
-        (public.laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1, s_conf,     phi_crank),
-        (public.laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8, s_conf * 8, phi_trust),
-        (public.laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1, s_conf,     phi_trust);
+        (public.blake3_send(public.laplace_text_id('a/confirm')), subj, rel_type, o_conf,  src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (public.blake3_send(public.laplace_text_id('a/refute')),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1, s_ref,      phi_trust),
+        (public.blake3_send(public.laplace_text_id('a/draw')),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1, s_draw,     phi_trust),
+        (public.blake3_send(public.laplace_text_id('a/trusted')), subj, rel_type, o_trust, src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (public.blake3_send(public.laplace_text_id('a/crank')),   subj, rel_type, o_crank, src, NULL, 2, now(), 1, s_conf,     phi_crank),
+        (public.blake3_send(public.laplace_text_id('a/many')),    subj, rel_type, o_games, src, NULL, 2, now(), 8, s_conf * 8, phi_trust),
+        (public.blake3_send(public.laplace_text_id('a/one')),     subj, rel_type, o_one,   src, NULL, 2, now(), 1, s_conf,     phi_trust);
 
     SELECT count(*) INTO n_prov FROM laplace.attestations WHERE type_id = rel_type;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;

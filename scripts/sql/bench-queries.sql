@@ -14,7 +14,7 @@ SELECT count(*) FROM laplace.attestations;
 SELECT count(*) FROM laplace.entities;
 
 -- name: word_id_lookup
-SELECT laplace.word_id('water');
+SELECT public.blake3_send(public.laplace_text_id('water'));
 
 -- name: consensus_scan_recent
 SELECT count(*) FROM laplace.consensus WHERE witness_count > 1;

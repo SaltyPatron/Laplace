@@ -29,18 +29,18 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH path AS (
         SELECT ARRAY[
-                   laplace.word_id('model-circuit'),
-                   laplace.word_id(btrim(p_plane))
+                   public.blake3_send(public.laplace_text_id('model-circuit')),
+                   public.blake3_send(public.laplace_text_id(btrim(p_plane)))
                ]::bytea[]
              || CASE WHEN p_layer IS NULL THEN ARRAY[]::bytea[]
                      ELSE ARRAY[
-                         laplace.word_id('layer'),
-                         laplace.word_id(p_layer::text)
+                         public.blake3_send(public.laplace_text_id('layer')),
+                         public.blake3_send(public.laplace_text_id(p_layer::text))
                      ]::bytea[] END
              || CASE WHEN p_head IS NULL THEN ARRAY[]::bytea[]
                      ELSE ARRAY[
-                         laplace.word_id('head'),
-                         laplace.word_id(p_head::text)
+                         public.blake3_send(public.laplace_text_id('head')),
+                         public.blake3_send(public.laplace_text_id(p_head::text))
                      ]::bytea[] END AS ids
     )
     SELECT CASE
@@ -72,16 +72,16 @@ BEGIN ATOMIC
     WITH path AS (
         SELECT ARRAY[
                    p_source,
-                   laplace.word_id('model-circuit'),
-                   laplace.word_id(btrim(p_plane))
+                   public.blake3_send(public.laplace_text_id('model-circuit')),
+                   public.blake3_send(public.laplace_text_id(btrim(p_plane)))
                ]::bytea[]
              || CASE WHEN p_layer >= 0 THEN ARRAY[
-                         laplace.word_id('layer'),
-                         laplace.word_id(p_layer::text)
+                         public.blake3_send(public.laplace_text_id('layer')),
+                         public.blake3_send(public.laplace_text_id(p_layer::text))
                      ]::bytea[] ELSE ARRAY[]::bytea[] END
              || CASE WHEN p_head >= 0 THEN ARRAY[
-                         laplace.word_id('head'),
-                         laplace.word_id(p_head::text)
+                         public.blake3_send(public.laplace_text_id('head')),
+                         public.blake3_send(public.laplace_text_id(p_head::text))
                      ]::bytea[] ELSE ARRAY[]::bytea[] END AS ids
     )
     SELECT CASE

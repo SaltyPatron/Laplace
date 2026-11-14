@@ -12,7 +12,7 @@ BEGIN ATOMIC
     -- fabricate a number the substrate never adjudicated.
     WITH raw AS MATERIALIZED (
         SELECT gs.successor_id, gs.seen
-        FROM structural.geometry_successors(laplace.word_id(p_word), p_limit, 8) gs
+        FROM structural.geometry_successors(public.blake3_send(public.laplace_text_id(p_word)), p_limit, 8) gs
         ORDER BY gs.seen DESC
         LIMIT p_limit
     ), numbered AS MATERIALIZED (

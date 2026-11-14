@@ -68,16 +68,6 @@ public static partial class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>laplace.atom_census()</c> — Tier-0 entity count against the admitted atom window.</summary>
-    public static async Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
-        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("laplace.atom_census"),
-            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
-            ct: ct, label: "atom_census", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? null : rows[0];
-    }
-
     /// <summary><c>ops.source_tier_census(source)</c> — entities by tier under one source.</summary>
     public static Task<IReadOnlyList<(short Tier, long Entities)>> SourceTierCensusAsync(
         NpgsqlDataSource dataSource, byte[] sourceId, CancellationToken ct,
@@ -136,13 +126,6 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "consensus_count", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? 0L : rows[0];
     }
-
-    /// <summary><c>laplace.compositional_tier_distribution()</c></summary>
-    public static Task<IReadOnlyList<(short Tier, long N)>> CompositionalTierDistributionAsync(
-        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("laplace.compositional_tier_distribution"),
-            static r => (r.GetInt16(0), r.GetInt64(1)),
-            ct: ct, label: "compositional_tier_distribution", onError: onError);
 
     /// <summary><c>ops.consensus_tier_distribution()</c></summary>
     public static Task<IReadOnlyList<(short Tier, long Relations)>> ConsensusTierDistributionAsync(
@@ -356,7 +339,7 @@ public static partial class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// <c>laplace.word_id('the')</c> as a T0 perfcache liveness probe. No error
+    /// <c>public.blake3_send(public.laplace_text_id('the'))</c> as a T0 perfcache liveness probe. No error
     /// translation: the caller catches the specific ObjectNotInPrerequisiteState
     /// PostgresException to mean "not loaded yet", which is not a failure at this layer.
     /// </summary>

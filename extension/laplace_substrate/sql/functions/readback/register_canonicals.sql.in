@@ -8,7 +8,7 @@ BEGIN ATOMIC
         WHERE n IS NOT NULL AND btrim(n) <> ''
     ), inserted AS (
         INSERT INTO laplace.canonical_names (id, name)
-        SELECT realize.canonical_id(name), name
+        SELECT public.blake3_send(public.laplace_text_id(name)), name
         FROM requested
         ORDER BY name
         ON CONFLICT (id) DO NOTHING

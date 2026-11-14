@@ -10,7 +10,7 @@ BEGIN
     -- Resolve an external concept identifier to its content-addressed anchor
     -- entity, so callers can link things by ILI / WordNet synset key / frame
     -- name. Every shape is keyed off the SAME content hash the ingest
-    -- decomposers used (laplace.word_id = laplace_content_root_id), so the anchor id is
+    -- decomposers used (public.laplace_text_id, the Native text identity), so the anchor id is
     -- reconstructed, never resolved by rendered surface:
     --   * ILI id       'i68021'       -> the synset entity IS that hash
     --                  'ili:i68021'   -> CILI's prefixed name of the same ILI
@@ -35,7 +35,7 @@ BEGIN
         RETURN NULL;
     END IF;
     IF v_ref ~ '^ili:i[0-9]+$' THEN
-        RETURN laplace.word_id(substr(v_ref, 5));
+        RETURN public.blake3_send(public.laplace_text_id(substr(v_ref, 5)));
     END IF;
     IF v_ref ~ '^(pwn30:)?[0-9]{8}-[nvasr]$' THEN
         v_key := regexp_replace(v_ref, '^pwn30:', '');
@@ -45,7 +45,7 @@ BEGIN
         -- standing claim wins; the id breaks the tie so the answer is stable.
         SELECT c.subject_id INTO v_anchor
         FROM laplace.consensus c
-        WHERE c.object_id = laplace.word_id(v_key)
+        WHERE c.object_id = public.blake3_send(public.laplace_text_id(v_key))
           AND c.type_id = laplace.relation_type_id('HAS_SYNSET_KEY')
           -- Standing claim only: a fully-refuted HAS_SYNSET_KEY is not
           -- a mapping (Copilot #918). Non-positive eff_mu is no mapping.
@@ -68,6 +68,6 @@ BEGIN
         RAISE EXCEPTION 'concept_ref: % is not a CILI identifier (ili:i followed by digits)', v_ref
             USING ERRCODE = 'invalid_parameter_value';
     END IF;
-    RETURN laplace.word_id(v_ref);
+    RETURN public.blake3_send(public.laplace_text_id(v_ref));
 END;
 $fn$;

@@ -2,12 +2,12 @@
 \set ECHO none
 BEGIN;
 CREATE TEMP TABLE carrier_input ON COMMIT DROP AS
-SELECT i, public.laplace_hash128_blake3(convert_to('carrier-test/parent/' || i,'UTF8')) AS parent,
-    public.laplace_hash128_blake3(convert_to('carrier-test/child/' || i,'UTF8')) AS child,
-    public.laplace_hash128_blake3(convert_to('carrier-test/second/' || i,'UTF8')) AS second
+SELECT i, public.blake3_send(public.laplace_text_id('carrier-test/parent/' || i)) AS parent,
+    public.blake3_send(public.laplace_text_id('carrier-test/child/' || i)) AS child,
+    public.blake3_send(public.laplace_text_id('carrier-test/second/' || i)) AS second
 FROM generate_series(1,100) i;
 ALTER TABLE carrier_input ADD COLUMN physicality bytea;
-UPDATE carrier_input SET physicality = public.laplace_hash128_blake3(parent || decode('0100','hex'));
+UPDATE carrier_input SET physicality = public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(parent), public.laplace_cp_id(1)]));
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
 SELECT physicality,parent,CASE WHEN i=98 THEN 2 ELSE 1 END,
     public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),
@@ -84,7 +84,7 @@ BEGIN
     EXCEPTION WHEN invalid_parameter_value THEN failures := failures+1; END;
     IF failures<>6 THEN RAISE EXCEPTION 'malformed selected identity batches were accepted: %',failures; END IF;
     -- A corrupt stored entity link must never be attributed to the requested parent.
-    UPDATE laplace.physicalities SET entity_id=public.laplace_hash128_blake3(convert_to('carrier-test/wrong-owner','UTF8'))
+    UPDATE laplace.physicalities SET entity_id=public.blake3_send(public.laplace_text_id('carrier-test/wrong-owner'))
     WHERE id=placement;
     BEGIN
         PERFORM * FROM structural.content_carrier_vertices(ARRAY[entity],ARRAY[placement]);

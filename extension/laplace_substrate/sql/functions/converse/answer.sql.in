@@ -14,12 +14,12 @@ BEGIN ATOMIC
         SELECT row_number() OVER (ORDER BY ord) AS i, word
         FROM converse.prompt_words(p_prompt)
     ), spans AS MATERIALIZED (
-        SELECT a.i AS first_i, a.i AS last_i, laplace.word_id(a.word) AS id FROM w a
+        SELECT a.i AS first_i, a.i AS last_i, public.blake3_send(public.laplace_text_id(a.word)) AS id FROM w a
         UNION ALL
-        SELECT a.i, b.i, laplace.word_id(a.word || ' ' || b.word)
+        SELECT a.i, b.i, public.blake3_send(public.laplace_text_id(a.word || ' ' || b.word))
         FROM w a JOIN w b ON b.i = a.i + 1
         UNION ALL
-        SELECT a.i, c.i, laplace.word_id(a.word || ' ' || b.word || ' ' || c.word)
+        SELECT a.i, c.i, public.blake3_send(public.laplace_text_id(a.word || ' ' || b.word || ' ' || c.word))
         FROM w a JOIN w b ON b.i = a.i + 1 JOIN w c ON c.i = a.i + 2
     ), content AS MATERIALIZED (
         SELECT converse.content_terms(array_agg(s.id)) AS ids FROM spans s

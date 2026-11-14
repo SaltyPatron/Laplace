@@ -480,7 +480,7 @@ pg_laplace_recall_intent(PG_FUNCTION_ARGS)
                         errhint("SELECT shape FROM converse.query_shapes()")));
     if (PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("recall_intent: p_topic must not be NULL"),
-                        errhint("resolve it first: converse.resolve_ref('<word or id hex>')")));
+                        errhint("resolve it first: public.laplace_resolve_ref('<word or id hex>')")));
 
     intent = trim_dup(text_to_cstring(PG_GETARG_TEXT_PP(0)));
     if (!route_intent_known(intent))

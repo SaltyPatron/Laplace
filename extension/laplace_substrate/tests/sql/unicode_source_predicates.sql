@@ -2,11 +2,11 @@
 BEGIN;
 DO $source_predicates$
 DECLARE
-    separator bytea := public.laplace_hash128_blake3('test/source-predicates/separator');
-    legacy bytea := public.laplace_hash128_blake3('test/source-predicates/retired-predicate');
-    source bytea := public.laplace_hash128_blake3('test/source-predicates/source');
+    separator bytea := public.blake3_send(public.laplace_text_id('test/source-predicates/separator'));
+    legacy bytea := public.blake3_send(public.laplace_text_id('test/source-predicates/retired-predicate'));
+    source bytea := public.blake3_send(public.laplace_text_id('test/source-predicates/source'));
     category bytea := laplace.property_value_id('General_Category','Space_Separator');
-    letter bytea := laplace.word_id('A');
+    letter bytea := public.blake3_send(public.laplace_text_id('A'));
     actual int[];
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id)
@@ -16,9 +16,9 @@ BEGIN
         (id,subject_id,type_id,object_id,source_id,outcome,last_observed_at,
          observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES
-        (public.laplace_hash128_blake3('test/source-predicates/gc'),separator,
+        (public.blake3_send(public.laplace_text_id('test/source-predicates/gc')),separator,
          laplace.relation_type_id('gc'),category,source,2,now(),1,1000000000,30000000000),
-        (public.laplace_hash128_blake3('test/source-predicates/old'),legacy,
+        (public.blake3_send(public.laplace_text_id('test/source-predicates/old')),legacy,
          laplace.relation_type_id('HAS_CHARACTER_PROPERTY'),category,source,2,now(),1,1000000000,30000000000);
     IF NOT separator=ANY(generation.separator_ids())
        OR legacy=ANY(generation.separator_ids()) THEN

@@ -12,12 +12,12 @@ CREATE OR REPLACE FUNCTION converse.operation_frame_routes()
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
 BEGIN ATOMIC
     VALUES
-      (laplace.word_id('People'),
-       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'request'::text),
-      (laplace.word_id('Entity'),
-       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'request'::text),
-      (laplace.word_id('Representing'),
-       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text),
-      (laplace.word_id('Existence'),
-       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text);
+      (public.blake3_send(public.laplace_text_id('People')),
+       public.blake3_send(public.laplace_text_id('operation/what_is/v1')), 'what_is'::text, 'request'::text),
+      (public.blake3_send(public.laplace_text_id('Entity')),
+       public.blake3_send(public.laplace_text_id('operation/what_is/v1')), 'what_is'::text, 'request'::text),
+      (public.blake3_send(public.laplace_text_id('Representing')),
+       public.blake3_send(public.laplace_text_id('operation/what_is/v1')), 'what_is'::text, 'binder'::text),
+      (public.blake3_send(public.laplace_text_id('Existence')),
+       public.blake3_send(public.laplace_text_id('operation/what_is/v1')), 'what_is'::text, 'binder'::text);
 END;

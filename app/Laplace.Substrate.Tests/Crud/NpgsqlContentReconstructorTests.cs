@@ -105,7 +105,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         await using var connection = await _pg.DataSource.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT laplace.content_id(@bytes) = @id,
+            SELECT public.blake3_send(public.laplace_text_id(@bytes)) = @id,
                    realize.render_bytes_batch(ARRAY[@id, NULL::bytea, @id])
                      IS NOT DISTINCT FROM ARRAY[@bytes, NULL::bytea, @bytes],
                    realize.render_bytes(@id, NULL) IS NOT DISTINCT FROM @bytes,

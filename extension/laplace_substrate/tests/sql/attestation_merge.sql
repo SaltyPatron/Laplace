@@ -2,15 +2,15 @@ BEGIN;
 
 DO $$
 DECLARE
-    src      bytea := public.laplace_hash128_blake3('test/merge/source');
+    src      bytea := public.blake3_send(public.laplace_text_id('test/merge/source'));
     rel_hot  bytea := laplace.relation_type_id('IS_A');
-    rel_dyn  bytea := public.laplace_hash128_blake3('test/merge/rel_dyn');
-    subj     bytea := public.laplace_hash128_blake3('test/merge/subject');
-    o1       bytea := public.laplace_hash128_blake3('test/merge/obj1');
-    o2       bytea := public.laplace_hash128_blake3('test/merge/obj2');
-    a1       bytea := public.laplace_hash128_blake3('test/merge/att1');
-    a2       bytea := public.laplace_hash128_blake3('test/merge/att2');
-    ghost    bytea := public.laplace_hash128_blake3('test/merge/never-written');
+    rel_dyn  bytea := public.blake3_send(public.laplace_text_id('test/merge/rel_dyn'));
+    subj     bytea := public.blake3_send(public.laplace_text_id('test/merge/subject'));
+    o1       bytea := public.blake3_send(public.laplace_text_id('test/merge/obj1'));
+    o2       bytea := public.blake3_send(public.laplace_text_id('test/merge/obj2'));
+    a1       bytea := public.blake3_send(public.laplace_text_id('test/merge/att1'));
+    a2       bytea := public.blake3_send(public.laplace_text_id('test/merge/att2'));
+    ghost    bytea := public.blake3_send(public.laplace_text_id('test/merge/never-written'));
     phi1     bigint := 30000000000;
     phi2     bigint := 350000000000;
     t1       timestamptz := '2026-01-01 00:00:00+00';

@@ -7,7 +7,7 @@
 -- against the table (NpgsqlConsensusCell.cs, whose own header records the gap and
 -- calls itself the one sanctioned reader "until that lands"). This is that landing.
 --
--- Keyed by primary id through laplace.consensus_id(), never a three-column triple scan: the
+-- Keyed by primary id through public.laplace_compose(), never a three-column triple scan: the
 -- id IS blake3(subject || type || object), so the lookup is one index probe on the
 -- PK and the partition keys come along in the same expression.
 CREATE OR REPLACE FUNCTION consensus.cell(
@@ -19,7 +19,7 @@ BEGIN ATOMIC
     -- leaf and the primary key (id, type_id, subject_id) resolves the cell there.
     SELECT c.rating, c.rd, c.witness_count
     FROM laplace.consensus c
-    WHERE c.id = laplace.consensus_id(p_subject, p_type, p_object)
+    WHERE c.id = public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object]::public.blake3[], NULL)))
       AND c.type_id = p_type
       AND c.subject_id = p_subject;
 END;
@@ -46,7 +46,7 @@ BEGIN ATOMIC
     FROM unnest(p_subjects) WITH ORDINALITY AS s(sid, ord)
     JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
     LEFT JOIN laplace.consensus c
-      ON c.id = laplace.consensus_id(s.sid, p_type, o.oid)
+      ON c.id = public.blake3_send(public.laplace_compose(array_remove(ARRAY[s.sid, p_type, o.oid]::public.blake3[], NULL)))
     ORDER BY s.ord;
 END;
 

@@ -22,7 +22,7 @@ BEGIN ATOMIC
     )
     SELECT CASE
         WHEN p_key IS NULL THEN NULL::text
-        WHEN p_lang IS NULL OR p_lang = laplace.word_id('eng') THEN
+        WHEN p_lang IS NULL OR p_lang = public.blake3_send(public.laplace_text_id('eng')) THEN
             CASE p_key
                 WHEN 'parts'      THEN initcap(v.t) || ' has parts such as ' || v.l || '.'
                 WHEN 'kinds'      THEN 'Kinds of ' || v.t || ' include ' || v.l || '.'
@@ -37,7 +37,7 @@ BEGIN ATOMIC
                 WHEN 'band'       THEN v.x || ': ' || v.l || '.'
                 ELSE NULL::text
             END
-        WHEN p_lang = laplace.word_id('bul') THEN
+        WHEN p_lang = public.blake3_send(public.laplace_text_id('bul')) THEN
             CASE p_key
                 WHEN 'parts'      THEN initcap(v.t) || ' има части като ' || v.l || '.'
                 WHEN 'kinds'      THEN 'Видове ' || v.t || ' включват ' || v.l || '.'

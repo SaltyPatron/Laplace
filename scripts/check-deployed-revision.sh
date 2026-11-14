@@ -124,7 +124,7 @@ else
     # database composes for the same text.
     served="$(psql -d "${PGDATABASE:-laplace}" -Atqc \
       "SELECT laplace.vocabulary_ready() AND EXISTS (SELECT 1 FROM laplace.vocabulary('upos') v
-         WHERE v.label = 'NOUN' AND v.id = laplace.content_id('NOUN'))" 2>&1 || true)"
+         WHERE v.label = 'NOUN' AND v.id = public.blake3_send(public.laplace_text_id('NOUN')))" 2>&1 || true)"
     if [[ "$served" != "t" ]]; then
       echo "::error::PostgreSQL does not serve the vocabulary perfcache ($served)" >&2
       failed=1

@@ -73,7 +73,7 @@ RETURNS TABLE(rung          text,
 LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT l.rung, l.value, l.collides, l.order_bearing
-    FROM ops.metric_ladder(laplace.word_id(p_a), laplace.word_id(p_b)) l;
+    FROM ops.metric_ladder(public.blake3_send(public.laplace_text_id(p_a)), public.blake3_send(public.laplace_text_id(p_b))) l;
 END;
 
 COMMENT ON FUNCTION ops.metric_ladder_words(text, text) IS

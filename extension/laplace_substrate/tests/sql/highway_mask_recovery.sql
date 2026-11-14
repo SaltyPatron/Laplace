@@ -127,7 +127,7 @@ DROP TABLE highway_recovery_pairs;
 BEGIN;
 CREATE TEMP TABLE highway_refresh_fixture(name text PRIMARY KEY,id bytea);
 INSERT INTO highway_refresh_fixture
-SELECT name,public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/'||name,'UTF8'))
+SELECT name,public.blake3_send(public.laplace_text_id('test/native-highway-refresh/'||name))
 FROM unnest(ARRAY['a','b','isolated','untouched','dynamic','unknown','type']) name;
 INSERT INTO highway_refresh_fixture VALUES ('zero',decode(repeat('00',16),'hex'));
 CREATE TEMP TABLE highway_refresh_interpretations AS
@@ -140,7 +140,7 @@ FROM highway_refresh_interpretations
 ORDER BY entity_id,tier,type_id;
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-SELECT laplace.consensus_id(s,r,o),s,r,o,
+SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, r, o]::public.blake3[], NULL))),s,r,o,
        1500000000000,350000000000,60000000,1,now()
 FROM (
     SELECT a.id s,laplace.relation_type_id('IS_A') r,b.id o
@@ -235,8 +235,8 @@ DELETE FROM laplace.consensus WHERE subject_id IN (SELECT id FROM highway_refres
 -- must roll back too. The mask belongs to the canonical entity, not a tier.
 ALTER TABLE laplace.entities ADD CONSTRAINT highway_refresh_preserve
 CHECK(id<>GREATEST(
-    public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/a','UTF8')),
-    public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/b','UTF8')))
+    public.blake3_send(public.laplace_text_id('test/native-highway-refresh/a')),
+    public.blake3_send(public.laplace_text_id('test/native-highway-refresh/b')))
     OR highway_mask IS NOT NULL) NOT VALID;
 CREATE TEMP TABLE highway_before_clear AS
 SELECT e.id,e.tier,e.highway_mask FROM laplace.entities e JOIN highway_refresh_fixture f USING(id);
@@ -286,7 +286,7 @@ BEGIN
 END $$;
 
 CREATE TEMP TABLE highway_refresh_pages AS
-SELECT public.laplace_hash128_blake3(convert_to('test/native-highway-page/'||n,'UTF8')) AS id,
+SELECT public.blake3_send(public.laplace_text_id('test/native-highway-page/'||n)) AS id,
        CASE WHEN n%2=0 THEN laplace.relation_type_id('IS_A')
             ELSE (SELECT id FROM highway_refresh_fixture WHERE name='dynamic') END AS type_id
 FROM generate_series(1,8305) n;
@@ -294,12 +294,12 @@ INSERT INTO laplace.entities(id,tier,type_id)
 SELECT p.id,2,f.id FROM highway_refresh_pages p,highway_refresh_fixture f WHERE f.name='type';
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-SELECT laplace.consensus_id(p.id,p.type_id,f.id),p.id,p.type_id,f.id,
+SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[p.id, p.type_id, f.id]::public.blake3[], NULL))),p.id,p.type_id,f.id,
     1500000000000,350000000000,60000000,1,now()
 FROM highway_refresh_pages p,highway_refresh_fixture f WHERE f.name='untouched';
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-SELECT laplace.consensus_id(f.id,laplace.relation_type_id('IS_A'),laplace.relation_type_id('HAS_PART')),
+SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[f.id, laplace.relation_type_id('IS_A'), laplace.relation_type_id('HAS_PART')]::public.blake3[], NULL))),
     f.id,laplace.relation_type_id('IS_A'),laplace.relation_type_id('HAS_PART'),
     1500000000000,350000000000,60000000,1,now()
 FROM highway_refresh_fixture f WHERE f.name='dynamic';

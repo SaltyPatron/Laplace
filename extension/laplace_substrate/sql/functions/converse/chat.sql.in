@@ -448,10 +448,10 @@ BEGIN
         PERFORM generation.session_record_prompt(p_session, p_prompt, resolved);
     END IF;
     IF NULLIF(btrim(COALESCE(p_prompt, '')), '') IS NOT NULL THEN
-        PERFORM converse.witness_precedes_chain(p_prompt, laplace.source_id('UserPrompt'));
+        PERFORM converse.witness_precedes_chain(p_prompt, public.blake3_send(public.laplace_text_id('substrate/source/UserPrompt/v1')));
     END IF;
     IF NULLIF(btrim(COALESCE(out, '')), '') IS NOT NULL THEN
-        PERFORM converse.witness_precedes_chain(out, laplace.source_id('Response'));
+        PERFORM converse.witness_precedes_chain(out, public.blake3_send(public.laplace_text_id('substrate/source/Response/v1')));
     END IF;
 
     RETURN btrim(out);

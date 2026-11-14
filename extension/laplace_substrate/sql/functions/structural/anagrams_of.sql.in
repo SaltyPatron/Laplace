@@ -6,7 +6,7 @@ BEGIN ATOMIC
         SELECT DISTINCT w2.id AS entity_id
         FROM laplace.v_word_points w1
         JOIN laplace.v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
-        WHERE w1.id = laplace.word_id(p_word)
+        WHERE w1.id = public.blake3_send(public.laplace_text_id(p_word))
           AND w2.type_id = laplace.entity_type_id('Word')
           AND w2.id <> w1.id
     ), numbered AS MATERIALIZED (

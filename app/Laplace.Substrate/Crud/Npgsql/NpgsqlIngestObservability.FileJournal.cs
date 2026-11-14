@@ -101,6 +101,7 @@ public sealed partial class NpgsqlIngestObservability
             {
                 cmd.Add(new NpgsqlParameter { Value = Guid.NewGuid(), NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Add(new NpgsqlParameter { Value = sourceName });
+                cmd.Add(new NpgsqlParameter { Value = SubstrateCanonicalIds.Source(sourceName).ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 cmd.Add(new NpgsqlParameter { Value = status });
                 cmd.Add(new NpgsqlParameter { Value = _evidencePersisted });
                 cmd.Add(new NpgsqlParameter { Value = error });
@@ -116,13 +117,12 @@ public sealed partial class NpgsqlIngestObservability
     private void InsertSkipped(string sourceName, byte[]? sourceId, int layerOrder)
     {
         Execute(
-            sourceId is null ? "journal.run_skip_named" : "journal.run_skip_identified",
+            "journal.run_skip_identified",
             cmd =>
             {
                 cmd.Add(new NpgsqlParameter { Value = Guid.NewGuid(), NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Add(new NpgsqlParameter { Value = sourceName });
-                if (sourceId is not null)
-                    cmd.Add(new NpgsqlParameter { Value = sourceId, NpgsqlDbType = NpgsqlDbType.Bytea });
+                cmd.Add(new NpgsqlParameter { Value = sourceId ?? SubstrateCanonicalIds.Source(sourceName).ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 cmd.Add(new NpgsqlParameter { Value = layerOrder });
                 cmd.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });

@@ -56,18 +56,18 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("band", bandMask);
             }, ct: ct, label: "laplace_translations", onError: onError);
 
-    /// <summary><c>converse.resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
+    /// <summary><c>public.laplace_resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
     public static async Task<byte[]?> ResolveRefAsync(
         NpgsqlDataSource dataSource,string reference,CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError=null)
         => (await ResolveRefWithLabelAsync(dataSource,reference,ct,onError).ConfigureAwait(false))?.Id;
 
-    /// <summary><c>laplace.word_id(surface)</c> — surface spelling → word entity id.</summary>
+    /// <summary><c>public.blake3_send(public.laplace_text_id(surface))</c> — surface spelling → word entity id.</summary>
     public static Task<byte[]?> WordIdAsync(
         NpgsqlDataSource dataSource, string surface, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource,
-            SqlCatalog.Get("laplace.word_id"),
+            SqlCatalog.Get("substrate.text_id"),
             p => p.AddWithValue("w", surface),
             ct: ct, label: "word_id", onError: onError);
 
@@ -160,7 +160,7 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct TranslationRow(
         string Translation, string Language, decimal EffMu, long Witnesses);
 
-    /// <summary><c>converse.translations(converse.resolve_ref(term), limit)</c>.</summary>
+    /// <summary><c>converse.translations(public.laplace_resolve_ref(term), limit)</c>.</summary>
     public static Task<IReadOnlyList<TranslationRow>> TranslationsAsync(
         NpgsqlDataSource dataSource, string term, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>

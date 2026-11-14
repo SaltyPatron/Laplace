@@ -97,7 +97,7 @@ public sealed partial class NativeSqlCatalogPreparationTests : IAsyncLifetime
               a.observation_count,a.sum_score_fp1e9,a.opponent_rd_fp1e9
             FROM laplace.attestations a JOIN executor_case t ON t.subject=a.subject_id;
             INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-            SELECT laplace.consensus_id(subject,relation,NULL),subject,relation,NULL,
+            SELECT public.blake3_send(public.laplace_compose(ARRAY[subject, relation]::public.blake3[])),subject,relation,NULL,
               1700000000000,50000000000,60000000,7000,now() FROM executor_case;
             """, connection, transaction)) await seed.ExecuteNonQueryAsync();
 

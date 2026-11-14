@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION realize.vertex_atom(p_flags bigint) RETURNS integer
-    LANGUAGE sql LAPLACE_IMMUTABLE
-BEGIN ATOMIC
-    SELECT public.laplace_vertex_atom(p_flags);
-END;

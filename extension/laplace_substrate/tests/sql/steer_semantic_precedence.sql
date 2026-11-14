@@ -6,25 +6,25 @@ BEGIN;
 
 DO $$
 DECLARE
-    type_t       bytea := public.laplace_hash128_blake3(convert_to('Type', 'UTF8'));
+    type_t       bytea := public.blake3_send(public.laplace_text_id('Type'));
     type_word    bytea := laplace.entity_type_id('Word');
     type_sent    bytea := laplace.entity_type_id('Sentence');
-    src          bytea := public.laplace_hash128_blake3(convert_to('test/steer/source', 'UTF8'));
-    ctx          bytea := public.laplace_hash128_blake3(convert_to('test/steer/context', 'UTF8'));
-    noise        bytea := public.laplace_hash128_blake3(convert_to('test/steer/noise', 'UTF8'));
-    semantic     bytea := laplace.word_id('ββ');
-    frontier     bytea := public.laplace_hash128_blake3(convert_to('test/steer/frontier', 'UTF8'));
-    unrelated    bytea := public.laplace_hash128_blake3(convert_to('test/steer/unrelated', 'UTF8'));
-    sent_noise   bytea := public.laplace_hash128_blake3(convert_to('test/steer/sentence-noise', 'UTF8'));
-    sent_sem     bytea := public.laplace_hash128_blake3(convert_to('test/steer/sentence-semantic', 'UTF8'));
+    src          bytea := public.blake3_send(public.laplace_text_id('test/steer/source'));
+    ctx          bytea := public.blake3_send(public.laplace_text_id('test/steer/context'));
+    noise        bytea := public.blake3_send(public.laplace_text_id('test/steer/noise'));
+    semantic     bytea := public.blake3_send(public.laplace_text_id('ββ'));
+    frontier     bytea := public.blake3_send(public.laplace_text_id('test/steer/frontier'));
+    unrelated    bytea := public.blake3_send(public.laplace_text_id('test/steer/unrelated'));
+    sent_noise   bytea := public.blake3_send(public.laplace_text_id('test/steer/sentence-noise'));
+    sent_sem     bytea := public.blake3_send(public.laplace_text_id('test/steer/sentence-semantic'));
     rel          bytea := laplace.relation_type_id('IS_A');
     t2flag       bigint := (2::bigint << 1);
     picked       bytea;
     picked_stride integer;
-    gap          bytea := laplace.word_id(' ');
+    gap          bytea := public.blake3_send(public.laplace_text_id(' '));
     scoped_weight bigint;
     scoped_steps bytea[];
-    next_root bytea := public.laplace_hash128_blake3('test/steer/next-observation');
+    next_root bytea := public.blake3_send(public.laplace_text_id('test/steer/next-observation'));
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id)
     VALUES
@@ -47,8 +47,7 @@ BEGIN
             (id, entity_id, type, coord, hilbert_index, trajectory,
              n_constituents, observed_at)
         VALUES
-            (public.laplace_hash128_blake3(
-                 convert_to('test/steer/noise-observation/' || i::text, 'UTF8')),
+            (public.blake3_send(public.laplace_text_id('test/steer/noise-observation/' || i::text)),
              sent_noise, 1,
              public.ST_SetSRID(public.ST_MakePoint(i, 1, 1, 1), 0),
              decode('00000000000000000000000000000000', 'hex'),
@@ -62,7 +61,7 @@ BEGIN
         (id, entity_id, type, coord, hilbert_index, trajectory,
          n_constituents, observed_at)
     VALUES
-        (public.laplace_hash128_blake3(convert_to('test/steer/semantic-observation', 'UTF8')),
+        (public.blake3_send(public.laplace_text_id('test/steer/semantic-observation')),
          sent_sem, 1,
          public.ST_SetSRID(public.ST_MakePoint(100, 1, 1, 1), 0),
          decode('00000000000000000000000000000000', 'hex'),
@@ -76,12 +75,12 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
     VALUES
-        (public.laplace_hash128_blake3(convert_to('test/steer/content-identity', 'UTF8')),
+        (public.blake3_send(public.laplace_text_id('test/steer/content-identity')),
          semantic, 1, public.ST_SetSRID(public.ST_MakePoint(101, 1, 1, 1), 0),
          decode('00000000000000000000000000000000', 'hex'),
          public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(laplace.word_id('β'), 1, 1, 0),
-             public.laplace_mantissa_pack(laplace.word_id('β'), 2, 1, 0)]),
+             public.laplace_mantissa_pack(public.blake3_send(public.laplace_text_id('β')), 1, 1, 0),
+             public.laplace_mantissa_pack(public.blake3_send(public.laplace_text_id('β')), 2, 1, 0)]),
          2, now());
     IF realize.render_text(semantic) IS DISTINCT FROM 'ββ' THEN
         RAISE EXCEPTION 'FAIL: semantic fixture is not realizable canonical content';
@@ -92,7 +91,7 @@ BEGIN
         (id, subject_id, type_id, object_id, rating, rd,
          volatility, witness_count, last_observed_at)
     VALUES
-        (laplace.consensus_id(frontier, rel, semantic),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, rel, semantic]::public.blake3[], NULL))),
          frontier, rel, semantic,
          2000000000000, 30000000000, 60000000, 5, now());
 
@@ -157,7 +156,7 @@ BEGIN
     DELETE FROM laplace.consensus WHERE subject_id = frontier AND type_id = rel;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(semantic,rel,frontier),semantic,rel,frontier,
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[semantic, rel, frontier]::public.blake3[], NULL))),semantic,rel,frontier,
             2000000000000,30000000000,60000000,5,now());
     SELECT g.entity INTO picked
     FROM generation.forward_walk_continuations(
@@ -169,7 +168,7 @@ BEGIN
     DELETE FROM laplace.consensus WHERE subject_id = semantic AND type_id = rel;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(frontier,rel,semantic),frontier,rel,semantic,
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, rel, semantic]::public.blake3[], NULL))),frontier,rel,semantic,
             2000000000000,30000000000,60000000,5,now());
 
     -- Stronger evidence for another operation cannot override the requested
@@ -178,9 +177,9 @@ BEGIN
         (id, subject_id, type_id, object_id, rating, rd,
          volatility, witness_count, last_observed_at)
     VALUES
-        (laplace.consensus_id(frontier, rel, noise), frontier, rel, noise,
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, rel, noise]::public.blake3[], NULL))), frontier, rel, noise,
          2500000000000, 30000000000, 60000000, 5, now()),
-        (laplace.consensus_id(frontier, laplace.relation_type_id('HAS_PART'), semantic),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, laplace.relation_type_id('HAS_PART'), semantic]::public.blake3[], NULL))),
          frontier, laplace.relation_type_id('HAS_PART'), semantic,
          1800000000000, 30000000000, 60000000, 5, now());
     SELECT g.entity, g.stride_used INTO picked, picked_stride
@@ -197,7 +196,7 @@ BEGIN
     -- A frame endpoint is internal unless EVOKES_FRAME is the requested result.
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('EVOKES_FRAME'),semantic),
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, laplace.relation_type_id('EVOKES_FRAME'), semantic]::public.blake3[], NULL))),
         frontier,laplace.relation_type_id('EVOKES_FRAME'),semantic,
         2000000000000,30000000000,60000000,5,now());
     SELECT g.entity INTO picked
@@ -248,7 +247,7 @@ BEGIN
     -- conservative standing. Admission must precede the one-slot fanout bound.
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('EVOKES_FRAME'),gap),
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, laplace.relation_type_id('EVOKES_FRAME'), gap]::public.blake3[], NULL))),
         frontier,laplace.relation_type_id('EVOKES_FRAME'),gap,
         1600000000000,350000000000,60000000,5,now());
     SELECT g.entity INTO picked
@@ -268,7 +267,7 @@ BEGIN
     END IF;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('HAS_PART'),unrelated),
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, laplace.relation_type_id('HAS_PART'), unrelated]::public.blake3[], NULL))),
         frontier,laplace.relation_type_id('HAS_PART'),unrelated,
         2000000000000,30000000000,60000000,5,now());
     SELECT g.entity INTO picked
@@ -287,7 +286,7 @@ BEGIN
         (id, subject_id, type_id, object_id, rating, rd,
          volatility, witness_count, last_observed_at)
     VALUES
-        (laplace.consensus_id(semantic, laplace.relation_type_id('IS_ANTONYM_OF'), frontier),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[semantic, laplace.relation_type_id('IS_ANTONYM_OF'), frontier]::public.blake3[], NULL))),
          semantic, laplace.relation_type_id('IS_ANTONYM_OF'), frontier,
          1800000000000, 30000000000, 60000000, 5, now());
     SELECT g.entity INTO picked
@@ -334,7 +333,7 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
     VALUES
-        (public.laplace_hash128_blake3('test/steer/suffix-long'),sent_noise,1,
+        (public.blake3_send(public.laplace_text_id('test/steer/suffix-long')),sent_noise,1,
          public.ST_MakePoint(101,1,1,1),decode(repeat('00',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(ctx,1,1,t2flag),
@@ -342,7 +341,7 @@ BEGIN
              public.laplace_mantissa_pack(ctx,3,1,t2flag),
              public.laplace_mantissa_pack(gap,4,1,0),
              public.laplace_mantissa_pack(noise,5,1,t2flag)]),5,now()),
-        (public.laplace_hash128_blake3('test/steer/suffix-short'),sent_sem,1,
+        (public.blake3_send(public.laplace_text_id('test/steer/suffix-short')),sent_sem,1,
          public.ST_MakePoint(102,1,1,1),decode(repeat('00',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(ctx,1,1,t2flag),
@@ -374,7 +373,7 @@ BEGIN
     -- earlier synthetic corpus rows deliberately model separate observations.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.laplace_hash128_blake3(sent_sem||decode('0100','hex')),sent_sem,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_sem), public.laplace_cp_id(1)])),sent_sem,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(ctx,1,1,t2flag),
                                 public.laplace_mantissa_pack(gap,2,1,0),
@@ -400,9 +399,9 @@ BEGIN
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES
-        (public.laplace_hash128_blake3('test/steer/scoped-witness'),
+        (public.blake3_send(public.laplace_text_id('test/steer/scoped-witness')),
          unrelated,rel,semantic,src,sent_sem,1,now(),1,1000000000,350000000000),
-        (public.laplace_hash128_blake3('test/steer/scoped-witness-2'),
+        (public.blake3_send(public.laplace_text_id('test/steer/scoped-witness-2')),
          unrelated,rel,ctx,src,sent_sem,1,now(),1,1000000000,350000000000);
     SELECT g.entity,g.stride_used INTO picked,picked_stride
     FROM generation.forward_walk_continuations(
@@ -423,14 +422,14 @@ BEGIN
     -- An explicit graph result can instead establish a new observation scope.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.laplace_hash128_blake3(next_root||decode('0100','hex')),next_root,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(next_root), public.laplace_cp_id(1)])),next_root,1,
         public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(semantic,1,1,t2flag),
                                 public.laplace_mantissa_pack(noise,2,1,t2flag)]),2);
     INSERT INTO laplace.attestations
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
-    VALUES (public.laplace_hash128_blake3('test/steer/selected-witness'),
+    VALUES (public.blake3_send(public.laplace_text_id('test/steer/selected-witness')),
         semantic,rel,noise,src,next_root,1,now(),1,1000000000,350000000000);
     SELECT array_agg(g.entity ORDER BY g.step) INTO scoped_steps
     FROM generation.forward_walk_continuations(
@@ -478,7 +477,7 @@ BEGIN
     -- edge of their own. Repetition lives in one canonical ordered manifest.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.laplace_hash128_blake3(sent_noise||decode('0100','hex')),sent_noise,1,
+    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_noise), public.laplace_cp_id(1)])),sent_noise,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY(
             SELECT public.laplace_mantissa_pack(
@@ -494,7 +493,7 @@ BEGIN
     END IF;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(frontier,rel,noise),frontier,rel,noise,
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[frontier, rel, noise]::public.blake3[], NULL))),frontier,rel,noise,
         1000000000000,30000000000,60000000,5,now());
     SELECT g.entity INTO picked
     FROM generation.forward_walk_continuations(

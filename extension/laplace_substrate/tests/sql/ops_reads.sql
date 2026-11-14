@@ -10,7 +10,7 @@ SELECT count(*) = 1 AS pulse_one_row FROM ops.substrate_pulse();
 SELECT count(*) = 1 AS modality_one_row FROM ops.modality_counts();
 
 SELECT count(*) >= 0 AS roster_runs
-FROM ops.source_roster(public.laplace_hash128_blake3('test/ops/source'), 3);
+FROM ops.source_roster(public.blake3_send(public.laplace_text_id('test/ops/source')), 3);
 
 -- The shared relation-law bootstrap must not consume a source's bounded roster.
 -- Both rows carry the same source; only the source-distinctive content row survives.
@@ -18,29 +18,29 @@ INSERT INTO laplace.attestations (
     id, subject_id, type_id, object_id, source_id, context_id, outcome,
     last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9, qualifier_mask)
 VALUES
-    (public.laplace_hash128_blake3('test/ops/roster/bootstrap'),
+    (public.blake3_send(public.laplace_text_id('test/ops/roster/bootstrap')),
      laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('IS_A'), laplace.relation_type_id('RELATED_TO'),
-     public.laplace_hash128_blake3('test/ops/source'), NULL, 2,
+     public.blake3_send(public.laplace_text_id('test/ops/source')), NULL, 2,
      statement_timestamp(), 1, 1000000000, 350000000000, NULL),
-    (public.laplace_hash128_blake3('test/ops/roster/content'),
-     laplace.word_id('roster-content'), laplace.relation_type_id('HAS_NAME'), laplace.word_id('roster-label'),
-     public.laplace_hash128_blake3('test/ops/source'), NULL, 2,
+    (public.blake3_send(public.laplace_text_id('test/ops/roster/content')),
+     public.blake3_send(public.laplace_text_id('roster-content')), laplace.relation_type_id('HAS_NAME'), public.blake3_send(public.laplace_text_id('roster-label')),
+     public.blake3_send(public.laplace_text_id('test/ops/source')), NULL, 2,
      statement_timestamp(), 1, 1000000000, 350000000000, NULL);
 
 SELECT count(*) = 1 AS roster_excludes_bootstrap,
-       bool_and(subject_id = laplace.word_id('roster-content')) AS roster_returns_content
-FROM ops.source_roster(public.laplace_hash128_blake3('test/ops/source'), 3);
+       bool_and(subject_id = public.blake3_send(public.laplace_text_id('roster-content'))) AS roster_returns_content
+FROM ops.source_roster(public.blake3_send(public.laplace_text_id('test/ops/source')), 3);
 
 -- surface_sample admits the requested source×tier before ranking. A much heavier
 -- tier-3 subject cannot consume a tier-2 result slot, and zero is an exact bound.
 INSERT INTO laplace.entities (id, tier, type_id)
 VALUES
-    (laplace.word_id('sample-tier2-high'), 2, public.laplace_hash128_blake3('Type'),
-     public.laplace_hash128_blake3('test/ops/source')),
-    (laplace.word_id('sample-tier2-low'), 2, public.laplace_hash128_blake3('Type'),
-     public.laplace_hash128_blake3('test/ops/source')),
-    (laplace.word_id('sample-tier3-heavy'), 3, public.laplace_hash128_blake3('Type'),
-     public.laplace_hash128_blake3('test/ops/source'))
+    (public.blake3_send(public.laplace_text_id('sample-tier2-high')), 2, public.blake3_send(public.laplace_text_id('Type')),
+     public.blake3_send(public.laplace_text_id('test/ops/source'))),
+    (public.blake3_send(public.laplace_text_id('sample-tier2-low')), 2, public.blake3_send(public.laplace_text_id('Type')),
+     public.blake3_send(public.laplace_text_id('test/ops/source'))),
+    (public.blake3_send(public.laplace_text_id('sample-tier3-heavy')), 3, public.blake3_send(public.laplace_text_id('Type')),
+     public.blake3_send(public.laplace_text_id('test/ops/source')))
 ON CONFLICT DO NOTHING;
 
 INSERT INTO laplace.attestations (
@@ -48,25 +48,25 @@ INSERT INTO laplace.attestations (
     last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9,
     qualifier_mask)
 VALUES
-    (public.laplace_hash128_blake3('test/ops/sample/tier2-high'),
-     laplace.word_id('sample-tier2-high'), laplace.relation_type_id('HAS_NAME'),
-     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+    (public.blake3_send(public.laplace_text_id('test/ops/sample/tier2-high')),
+     public.blake3_send(public.laplace_text_id('sample-tier2-high')), laplace.relation_type_id('HAS_NAME'),
+     public.blake3_send(public.laplace_text_id('roster-label')), public.blake3_send(public.laplace_text_id('test/ops/source')),
      NULL, 2, statement_timestamp(), 5, 5000000000, 350000000000, NULL),
-    (public.laplace_hash128_blake3('test/ops/sample/tier2-low'),
-     laplace.word_id('sample-tier2-low'), laplace.relation_type_id('HAS_NAME'),
-     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+    (public.blake3_send(public.laplace_text_id('test/ops/sample/tier2-low')),
+     public.blake3_send(public.laplace_text_id('sample-tier2-low')), laplace.relation_type_id('HAS_NAME'),
+     public.blake3_send(public.laplace_text_id('roster-label')), public.blake3_send(public.laplace_text_id('test/ops/source')),
      NULL, 2, statement_timestamp(), 2, 2000000000, 350000000000, NULL),
-    (public.laplace_hash128_blake3('test/ops/sample/tier3-heavy'),
-     laplace.word_id('sample-tier3-heavy'), laplace.relation_type_id('HAS_NAME'),
-     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+    (public.blake3_send(public.laplace_text_id('test/ops/sample/tier3-heavy')),
+     public.blake3_send(public.laplace_text_id('sample-tier3-heavy')), laplace.relation_type_id('HAS_NAME'),
+     public.blake3_send(public.laplace_text_id('roster-label')), public.blake3_send(public.laplace_text_id('test/ops/source')),
      NULL, 2, statement_timestamp(), 100, 100000000000, 350000000000, NULL);
 
 SELECT count(*) = 1 AS surface_sample_exact_bound,
-       bool_and(entity_id = laplace.word_id('sample-tier2-high')) AS surface_sample_filters_before_limit
-FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::smallint, 1);
+       bool_and(entity_id = public.blake3_send(public.laplace_text_id('sample-tier2-high'))) AS surface_sample_filters_before_limit
+FROM ops.surface_sample(public.blake3_send(public.laplace_text_id('test/ops/source')), 2::smallint, 1);
 
 SELECT count(*) = 0 AS surface_sample_zero_is_empty
-FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::smallint, 0);
+FROM ops.surface_sample(public.blake3_send(public.laplace_text_id('test/ops/source')), 2::smallint, 0);
 
 -- top_relations merges exact per-relation heads. Raw eff_mu alone would choose
 -- HAS_LANGUAGE below; salience-weighted edge rank must choose IS_A.
@@ -74,15 +74,15 @@ INSERT INTO laplace.consensus (
     id, subject_id, type_id, object_id, rating, rd, volatility,
     witness_count, last_observed_at)
 VALUES
-    (public.laplace_hash128_blake3('test/ops/top/is-a'),
-     public.laplace_hash128_blake3('test/ops/top/is-a/subject'),
+    (public.blake3_send(public.laplace_text_id('test/ops/top/is-a')),
+     public.blake3_send(public.laplace_text_id('test/ops/top/is-a/subject')),
      laplace.relation_type_id('IS_A'),
-     public.laplace_hash128_blake3('test/ops/top/is-a/object'),
+     public.blake3_send(public.laplace_text_id('test/ops/top/is-a/object')),
      2000000000000000000, 1, 1, 2, statement_timestamp()),
-    (public.laplace_hash128_blake3('test/ops/top/language'),
-     public.laplace_hash128_blake3('test/ops/top/language/subject'),
+    (public.blake3_send(public.laplace_text_id('test/ops/top/language')),
+     public.blake3_send(public.laplace_text_id('test/ops/top/language/subject')),
      laplace.relation_type_id('HAS_LANGUAGE'),
-     public.laplace_hash128_blake3('test/ops/top/language/object'),
+     public.blake3_send(public.laplace_text_id('test/ops/top/language/object')),
      9000000000000000000, 1, 1, 9, statement_timestamp());
 
 SELECT count(*) = 1 AS top_relations_exact_bound,
@@ -114,26 +114,26 @@ SELECT pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure
 -- to one by inspection/operations helpers.
 SELECT count(*) = 0 AS consensus_out_zero_is_empty
 FROM ops.consensus_out_labeled(
-    public.laplace_hash128_blake3('test/ops/top/is-a/subject'), 0);
+    public.blake3_send(public.laplace_text_id('test/ops/top/is-a/subject')), 0);
 SELECT count(*) = 0 AS attestation_response_zero_is_empty
 FROM ops.attestation_response(
-    public.laplace_hash128_blake3('test/ops/top/is-a/subject'),
+    public.blake3_send(public.laplace_text_id('test/ops/top/is-a/subject')),
     laplace.relation_type_id('IS_A'), NULL, NULL, 0);
 SELECT count(*) = 0 AS evidence_receipt_zero_is_empty
-FROM ops.evidence_receipt(laplace.word_id('roster-content'), 0);
+FROM ops.evidence_receipt(public.blake3_send(public.laplace_text_id('roster-content')), 0);
 SELECT count(*) = 0 AS index_usage_zero_is_empty
 FROM ops.index_usage_detail(NULL, 0);
 
 DO $$
 DECLARE
-    s1 bytea := public.laplace_hash128_blake3('test/evidence-response/s1');
-    s2 bytea := public.laplace_hash128_blake3('test/evidence-response/s2');
-    a bytea := public.laplace_hash128_blake3('test/evidence-response/a');
-    b bytea := public.laplace_hash128_blake3('test/evidence-response/b');
-    src1 bytea := public.laplace_hash128_blake3('test/evidence-response/source1');
-    src2 bytea := public.laplace_hash128_blake3('test/evidence-response/source2');
-    ctx1 bytea := public.laplace_hash128_blake3('test/evidence-response/context1');
-    ctx2 bytea := public.laplace_hash128_blake3('test/evidence-response/context2');
+    s1 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/s1'));
+    s2 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/s2'));
+    a bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/a'));
+    b bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/b'));
+    src1 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/source1'));
+    src2 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/source2'));
+    ctx1 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/context1'));
+    ctx2 bytea := public.blake3_send(public.laplace_text_id('test/evidence-response/context2'));
     rel bytea := laplace.relation_type_id('IS_A');
     rows_seen bigint;
     sources_seen bigint;
@@ -141,14 +141,14 @@ DECLARE
 BEGIN
     INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(s1,rel,a),s1,rel,a,1700000000000,50000000000,60000000,5000000000,now()),
-        (laplace.consensus_id(s1,rel,b),s1,rel,b,2000000000000,50000000000,60000000,1,now()),
-        (laplace.consensus_id(s2,rel,a),s2,rel,a,1500000000000,50000000000,60000000,1,now()),
-        (laplace.consensus_id(s2,rel,b),s2,rel,b,9000000000000,50000000000,60000000,1,now()),
-        (laplace.consensus_id(s1,rel,NULL),s1,rel,NULL,1700000000000,50000000000,60000000,5000000000,now());
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[s1, rel, a]::public.blake3[], NULL))),s1,rel,a,1700000000000,50000000000,60000000,5000000000,now()),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[s1, rel, b]::public.blake3[], NULL))),s1,rel,b,2000000000000,50000000000,60000000,1,now()),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[s2, rel, a]::public.blake3[], NULL))),s2,rel,a,1500000000000,50000000000,60000000,1,now()),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[s2, rel, b]::public.blake3[], NULL))),s2,rel,b,9000000000000,50000000000,60000000,1,now()),
+        (public.blake3_send(public.laplace_compose(ARRAY[s1, rel]::public.blake3[])),s1,rel,NULL,1700000000000,50000000000,60000000,5000000000,now());
     INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
         outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
-    SELECT public.laplace_hash128_blake3(convert_to('test/evidence-response/witness/'||v.i,'UTF8')),
+    SELECT public.blake3_send(public.laplace_text_id('test/evidence-response/witness/'||v.i)),
         v.s,rel,v.o,v.source,v.context,1,now(),1,1000000000,350000000000
     FROM (VALUES (1,s1,a,src1,ctx1),(2,s1,a,src1,ctx2),(3,s1,a,src2,ctx1),
                  (4,s1,b,src2,ctx2),(5,s2,a,src1,ctx1),
@@ -207,7 +207,7 @@ BEGIN
         (b,'substrate/test/receipt-b/v1');
     INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
         outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
-    VALUES (public.laplace_hash128_blake3('test/evidence-response/inbound'),
+    VALUES (public.blake3_send(public.laplace_text_id('test/evidence-response/inbound')),
         b,rel,s1,src2,ctx1,1,now(),100,100000000000,350000000000);
     SELECT count(*),sum(witness_count) INTO rows_seen,sources_seen
     FROM ops.evidence_receipt(s1,25);
@@ -224,30 +224,30 @@ END $$;
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self
-FROM structural.mesh_position(laplace.word_id('x'));
+FROM structural.mesh_position(public.blake3_send(public.laplace_text_id('x')));
 
 -- taxonomy_tree roots at the id itself when no synset exists
 SELECT count(*) >= 1 AS tax_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS tax_one_self
-FROM taxonomy.tree(laplace.word_id('x'));
+FROM taxonomy.tree(public.blake3_send(public.laplace_text_id('x')));
 
 SELECT count(*) = 1 AS mesh_zero_branches_keeps_self
-FROM structural.mesh_position(laplace.word_id('x'), 0, 0);
+FROM structural.mesh_position(public.blake3_send(public.laplace_text_id('x')), 0, 0);
 
 SELECT count(*) = 1 AS taxonomy_zero_branches_keeps_self
-FROM taxonomy.tree(laplace.word_id('x'), 0, 0);
+FROM taxonomy.tree(public.blake3_send(public.laplace_text_id('x')), 0, 0);
 
 SELECT count(*) = 0 AS containers_zero_hops_is_empty
-FROM structural.containers_of(laplace.word_id('x'), 0, 10);
+FROM structural.containers_of(public.blake3_send(public.laplace_text_id('x')), 0, 10);
 SELECT count(*) = 0 AS containers_zero_limit_is_empty
-FROM structural.containers_of(laplace.word_id('x'), 1, 0);
+FROM structural.containers_of(public.blake3_send(public.laplace_text_id('x')), 1, 0);
 
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
 
 SELECT count(*) = 1 AS record_one_row,
        bool_and(confirmed = 0 AND contested = 0 AND refuted = 0 AND thin = 0)
          AS record_zero_on_empty
-FROM ops.entity_record(laplace.word_id('x'));
+FROM ops.entity_record(public.blake3_send(public.laplace_text_id('x')));
 
 -- the display-mu overload: fp1e9 -> display, one definition
 SELECT consensus.eff_mu_display(1500000000000::bigint) = 1500.000 AS fp_display_scales;
@@ -258,13 +258,13 @@ INSERT INTO laplace.attestations (
     id, subject_id, type_id, object_id, source_id, context_id, outcome,
     last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9, qualifier_mask)
 VALUES
-    (public.laplace_hash128_blake3('test/ops/bootstrap/law'),
-     laplace.relation_type_id('IS_A'), laplace.relation_type_id('HAS_NAME'), laplace.word_id('is-a'),
-     public.laplace_hash128_blake3('test/ops/source'), NULL, 2,
+    (public.blake3_send(public.laplace_text_id('test/ops/bootstrap/law')),
+     laplace.relation_type_id('IS_A'), laplace.relation_type_id('HAS_NAME'), public.blake3_send(public.laplace_text_id('is-a')),
+     public.blake3_send(public.laplace_text_id('test/ops/source')), NULL, 2,
      statement_timestamp(), 1, 1000000000, 350000000000, NULL);
-SELECT ops.source_bootstrap_present(public.laplace_hash128_blake3('test/ops/source'),
+SELECT ops.source_bootstrap_present(public.blake3_send(public.laplace_text_id('test/ops/source')),
                                 laplace.relation_type_id('HAS_NAME')) AS bootstrap_present,
-       NOT ops.source_bootstrap_present(public.laplace_hash128_blake3('test/ops/source-unwitnessed'),
+       NOT ops.source_bootstrap_present(public.blake3_send(public.laplace_text_id('test/ops/source-unwitnessed')),
                                     laplace.relation_type_id('HAS_NAME')) AS absent_on_unwitnessed;
 
 -- generation_probe: both lanes over the seed set, one row per (lane, seed) —
@@ -321,7 +321,7 @@ DECLARE
     observed_coord public.geometry;
     content_id bytea;
     projection_id bytea;
-    missing_id bytea := laplace.word_id('ingest-integrity-regression-missing');
+    missing_id bytea := public.blake3_send(public.laplace_text_id('ingest-integrity-regression-missing'));
     orphan_id bytea;
     orphan_count_before bigint;
     entities_before bigint;
@@ -334,11 +334,11 @@ BEGIN
     FROM converse.text_root_placements(ARRAY[chr(57344)]) p;
     INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
-            laplace.source_id('IntegrityRegressionTest'))
+            public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')))
     ON CONFLICT DO NOTHING;
-    content_id := public.laplace_hash128_blake3(existing_id || decode('0100', 'hex'));
-    projection_id := public.laplace_hash128_blake3(existing_id || decode('0300', 'hex'));
-    orphan_id := public.laplace_hash128_blake3(missing_id || decode('0300', 'hex'));
+    content_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(1)]));
+    projection_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(3)]));
+    orphan_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(missing_id), public.laplace_cp_id(3)]));
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index, observed_at)
     VALUES (content_id, existing_id, 1, observed_coord,
             public.laplace_hilbert_encode(observed_coord), '2026-01-01 00:00:00+00')
@@ -381,7 +381,7 @@ BEGIN
 
     INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (missing_id, 2, laplace.entity_type_id('Word'),
-            laplace.source_id('IntegrityRegressionTest'));
+            public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')));
     IF EXISTS (SELECT 1 FROM ops.ingest_integrity_gate() WHERE physicality_id = orphan_id)
        OR ops.orphan_physicality_count() <> orphan_count_before THEN
         RAISE EXCEPTION 'resolved entity reference remained an orphan';

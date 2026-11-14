@@ -393,7 +393,7 @@ word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 			rc = SPI_execute_plan(
 				ensure_lexical_plan(
 					&batch_word_id_plan,
-					"SELECT laplace.word_id(u.s) FROM unnest($1::text[]) "
+					"SELECT public.blake3_send(public.laplace_text_id(u.s)) FROM unnest($1::text[]) "
 					"WITH ORDINALITY AS u(s, ord) ORDER BY u.ord",
 					1, at, "word_case_variants_batch"),
 				av, NULL, true, 0);

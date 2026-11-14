@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import re
 import signal
 import sys
 import threading
@@ -134,27 +133,10 @@ def collect_forward_diagnostics(api: str, probes: list[dict]) -> dict:
     try:
         for probe in selected:
             seed_proof = {"id": probe.get("id"), "prompt": probe["prompt"]}
-            try:
-                # These are the exact installed owners called by forward_text.
-                # Native bigint extraction, including its sign, stays native.
-                hashed = read("public.laplace_hash128_blake3", {
-                    "data": "\\x" + probe["prompt"].encode("utf-8").hex()})
-                digest = hashed[0]["laplace_hash128_blake3"] if len(hashed) == 1 else None
-                if not isinstance(digest, str) or not re.fullmatch(r"\\x[0-9a-fA-F]{32}", digest):
-                    raise ValueError("native prompt hash has an invalid result shape")
-                seeded = read("hash128_lo", {"p_id": digest})
-                seed = seeded[0]["hash128_lo"] if len(seeded) == 1 else None
-                if type(seed) is not int or not -(1 << 63) <= seed < (1 << 63):
-                    raise ValueError("native prompt seed is not a signed bigint")
-                seed_proof.update(prompt_hash=digest, seed=seed)
-            except DiagnosticDeadline:
-                raise
-            except (LaplaceApiError, KeyError, IndexError, TypeError, ValueError) as error:
-                report["executions"].append({**seed_proof, "status": "unavailable", "error": str(error)})
-                continue
             for name, hops, fanout in (("normal", 2, 8), ("wider", 8, 32)):
+                # No seed: forward_program derives the text wrapper's prompt seed natively.
                 args = {"p_prompt": probe["prompt"], "p_steps": 128, "p_max_stride": 5,
-                        "p_spread": 0.6, "p_top_k": 10, "p_seed": seed,
+                        "p_spread": 0.6, "p_top_k": 10, "p_seed": None,
                         "p_hops": hops, "p_fanout": fanout,
                         "p_prior_frontier": None, "p_output_relation_types": None}
                 item = {**seed_proof, "configuration": name, "operation": "generation.forward_program",

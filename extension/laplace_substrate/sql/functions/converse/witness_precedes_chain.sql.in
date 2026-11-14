@@ -36,7 +36,7 @@ BEGIN ATOMIC
         CROSS JOIN rel r
         CROSS JOIN LATERAL (
             SELECT p.s, p.o, count(*)::bigint AS g,
-                   laplace.consensus_id(p.s, r.precedes, p.o) AS cid
+                   public.blake3_send(public.laplace_compose(array_remove(ARRAY[p.s, r.precedes, p.o]::public.blake3[], NULL))) AS cid
             FROM (SELECT t.ids[i] AS s, t.ids[i + 1] AS o
                   FROM generate_series(1, t.n - 1) i) p
             GROUP BY p.s, p.o

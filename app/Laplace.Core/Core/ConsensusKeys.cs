@@ -3,7 +3,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// The single client-side implementation of the substrate's consensus edge id.
 /// Native Merkle composition of the strand's actual vertices, matching SQL
-/// laplace.consensus_id and the native fold writer. A missing object contributes
+/// public.laplace_compose and the native fold writer. A missing object contributes
 /// no vertex; it must not mint an invented zero-filled constituent.
 /// </summary>
 public static class ConsensusKeys

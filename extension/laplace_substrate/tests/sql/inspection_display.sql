@@ -3,15 +3,15 @@
 BEGIN;
 DO $inspection$
 DECLARE
-    subject bytea := laplace.word_id('L');
-    peer bytea := laplace.word_id('a');
+    subject bytea := public.blake3_send(public.laplace_text_id('L'));
+    peer bytea := public.blake3_send(public.laplace_text_id('a'));
     opaque_type bytea := decode('2fd6a1e32aa77b3583a46ca38763050b','hex');
     registered_type bytea := laplace.relation_type_id('IS_A');
     opaque_label text;
 BEGIN
     INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,
         rating,rd,volatility,witness_count,last_observed_at)
-    SELECT laplace.consensus_id(subject,t,o),subject,t,o,
+    SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[subject, t, o]::public.blake3[], NULL))),subject,t,o,
         2176851004240,139542473703,60009621,8,now()
     FROM (VALUES (opaque_type,peer),(registered_type,peer),(opaque_type,NULL::bytea)) v(t,o);
 

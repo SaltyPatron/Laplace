@@ -32,14 +32,14 @@ WHERE n.nspname = 'laplace'
 
 SELECT count(*) AS physicality_type_entities FROM entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/CONTENT/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/BUILDING_BLOCK/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/PROJECTION/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/PROJECTION_OUTPUT/v1'))
 );
 
 SELECT relation_type_id('IS_A')
-       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
+       = public.blake3_send(public.laplace_text_id('IS_A')) AS relation_type_path_law;
 
 SELECT consensus.relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
 

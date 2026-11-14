@@ -14,7 +14,7 @@
 -- person documenting it. One implementation, named, installed, callable through
 -- `op` — so the next measurement quotes a function instead of a paragraph of SQL.
 --
--- Text in, because the caller has surfaces and laplace.word_id() is the resolution the
+-- Text in, because the caller has surfaces and public.laplace_text_id() is the resolution the
 -- elector itself performs. Ids that resolve to nothing come back with zeroes
 -- rather than vanishing: an unattested surface is a real answer, and dropping
 -- the row would be the EXISTS-collapses-NULL defect in another costume.
@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
 BEGIN ATOMIC
 
     WITH t AS MATERIALIZED (
-        SELECT s.ord, s.surface, laplace.word_id(s.surface) AS id
+        SELECT s.ord, s.surface, public.blake3_send(public.laplace_text_id(s.surface)) AS id
         FROM unnest(p_surfaces) WITH ORDINALITY AS s(surface, ord)
     ),
     ids AS MATERIALIZED (

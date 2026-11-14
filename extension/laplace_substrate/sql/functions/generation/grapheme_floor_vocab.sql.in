@@ -40,7 +40,7 @@ BEGIN ATOMIC
     )
     SELECT n.entity_id, r.s, n.cnt
     FROM named n JOIN rendered r ON r.id = n.entity_id
-    WHERE char_length(r.s) = 1 AND NOT realize.is_all_whitespace(r.s)
+    WHERE char_length(r.s) = 1 AND NOT public.laplace_text_is(r.s, 'White_Space', 'Yes')
     ORDER BY n.cnt DESC, n.entity_id
     LIMIT GREATEST(p_size, 0)
 ;

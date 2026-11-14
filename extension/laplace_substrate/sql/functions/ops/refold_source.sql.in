@@ -25,7 +25,7 @@ DECLARE
     refold_total   bigint := 0;
     t0             timestamptz := clock_timestamp();
 BEGIN
-    src := laplace.source_id(p_source_name);
+    src := public.blake3_send(public.laplace_text_id('substrate/source/' || p_source_name || '/v1'));
     IF src IS NULL THEN
         RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
     END IF;
@@ -49,7 +49,7 @@ BEGIN
 
     -- Operational relation types (the writer's admission receipts) are never
     -- rating observations and are not refolded.
-    operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
+    operational_types := ARRAY[public.blake3_send(public.laplace_text_id('substrate/type/HasFileMetadata/v1'))];
 
     SELECT array_agg(DISTINCT a.type_id) INTO rels
     FROM laplace.attestations a

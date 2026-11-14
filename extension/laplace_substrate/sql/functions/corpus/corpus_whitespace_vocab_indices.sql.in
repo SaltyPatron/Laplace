@@ -99,5 +99,5 @@ BEGIN ATOMIC
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
     LEFT JOIN rendered r ON r.id = v.id
-    WHERE COALESCE(cat.is_sep, realize.is_all_whitespace(r.s));
+    WHERE COALESCE(cat.is_sep, public.laplace_text_is(r.s, 'White_Space', 'Yes'));
 END;

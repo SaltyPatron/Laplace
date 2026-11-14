@@ -18,7 +18,7 @@
 -- then joined that to consensus.type_id. A highway mask records which bands an
 -- entity has EDGES IN; it is not a statement about which band a type BELONGS
 -- TO. That is consensus.relation_highway_bit(type_id), from the manifest. Measured: the
--- CTE matched 0 rows for laplace.word_id('dog') against band 3 while dog carries 9
+-- CTE matched 0 rows for public.blake3_send(public.laplace_text_id('dog')) against band 3 while dog carries 9
 -- HAS_SENSE (bit 112) and 8 IS_SYNONYM_OF (bit 153), both band 3. Zero rows in,
 -- NULL out, no error — on every call this function had ever served. It was also
 -- a full scan of 4.34M laplace.entities with a set-returning function evaluated per row,
@@ -28,7 +28,7 @@
 -- FIX 2 (2026-08-04) — the mean is now projected back onto the sphere.
 -- SUM(coord*w)/SUM(w) is the arithmetic mean of unit vectors, which is NOT a
 -- unit vector: it lies strictly inside S³, and at the exact origin for an
--- antipodal pair. Measured immediately after FIX 1 landed, laplace.word_id('dog') band 3:
+-- antipodal pair. Measured immediately after FIX 1 landed, public.blake3_send(public.laplace_text_id('dog')) band 3:
 --
 --     cx -0.00488  cy 0.03184  cz -0.22988  cm 0.15099   ||c|| = 0.27691
 --
