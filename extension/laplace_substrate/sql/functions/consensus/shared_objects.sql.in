@@ -1,25 +1,26 @@
+-- The objects several of the given subjects point at, by how many of them do and
+-- by their summed standing. The edges are the subjects' outbound claims through
+-- the shared edge reader (Native claims, the legacy cells only where none exist),
+-- so a relation's surface forms and inverse aliases read as their canonical type.
 CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    -- consensus.eff_mu_display, not the scale-and-round open-coded. Its own header says
-    -- "same rounding, same scale, one definition file -- never re-derived inline",
-    -- and this was the inline re-derivation: if the fold's fp1e9 scale or the
-    -- display precision ever moves, one copy moves and the other silently reports
-    -- a different number for the same edges.
-    SELECT c.object_id,
-           count(DISTINCT c.subject_id)::int,
-           -- ::bigint because sum() over bigint returns numeric and the display
-           -- overloads take bigint. The sum of integers IS an integer, so the cast
-           -- is lossless; it is the type, not the value, being restated.
-           consensus.eff_mu_display(sum(consensus.eff_mu(c.rating, c.rd))::bigint)
-    FROM laplace.v_consensus_unrefuted c
-    WHERE c.subject_id = ANY (p_subjects)
-      AND c.object_id IS NOT NULL
-      AND (p_type IS NULL OR c.type_id = p_type)
-    GROUP BY c.object_id
-    ORDER BY count(DISTINCT c.subject_id) DESC,
-             sum(consensus.eff_mu(c.rating, c.rd)) DESC
+    -- consensus.eff_mu_display, not the scale-and-round open-coded: one definition
+    -- of the display scale. ::bigint because sum() over bigint returns numeric and
+    -- the display overloads take bigint; the sum of integers is an integer.
+    SELECT e.neighbour_id,
+           count(DISTINCT e.subject_id)::int,
+           consensus.eff_mu_display(sum(consensus.eff_mu(e.rating, e.rd))::bigint)
+    FROM consensus.edges_raw_batch(
+             p_subjects, 'out',
+             CASE WHEN p_type IS NULL THEN NULL ELSE ARRAY[p_type] END,
+             NULL, false, 'eff_mu') e
+    WHERE e.neighbour_id IS NOT NULL
+    GROUP BY e.neighbour_id
+    ORDER BY count(DISTINCT e.subject_id) DESC,
+             sum(consensus.eff_mu(e.rating, e.rd)) DESC,
+             e.neighbour_id
     LIMIT p_limit;
 END;
