@@ -37,13 +37,6 @@ WHERE surface IN ('capital','france','Paris','paris','France','the','of','is','b
 ORDER BY freq_rank;
 
 \echo ''
-\echo '=== PRECEDES: what FOLLOWS each word (consensus collocates) ==='
-SELECT 'capital' AS seed, * FROM structural.collocates('capital', 25);
-SELECT 'france' AS seed, * FROM structural.collocates('france', 25);
-SELECT 'Paris' AS seed, * FROM structural.collocates('Paris', 25);
-SELECT 'paris' AS seed, * FROM structural.collocates('paris', 25);
-
-\echo ''
 \echo '=== PRECEDES: what PRECEDES each word (consensus in-edges) ==='
 SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS precedes,
        (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l) AS word,

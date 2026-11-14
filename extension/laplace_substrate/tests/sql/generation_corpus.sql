@@ -628,7 +628,7 @@ BEGIN
     IF actual IS DISTINCT FROM ARRAY['λ'] THEN
         RAISE EXCEPTION 'FAIL: selected semantic result lost its witnessed surface: %',actual;
     END IF;
-    IF (ARRAY(SELECT lp_l.content FROM unnest((ARRAY[laplace.word_id(' '))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[laplace.word_id(' '))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
+    IF (ARRAY(SELECT lp_l.content FROM unnest((ARRAY[public.blake3_send(public.laplace_text_id(' ')))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[public.blake3_send(public.laplace_text_id(' ')))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
         IS DISTINCT FROM ARRAY[' ','.','λ'] THEN
         RAISE EXCEPTION 'FAIL: final realization changed exact content';
     END IF;
