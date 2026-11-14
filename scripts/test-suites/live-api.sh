@@ -53,7 +53,7 @@ run_live_api() {
 
   code_completion=$(api_curl -X POST "$base/v1/code/completions" \
     -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-    --data '{"model":"laplace-code-001","prompt":"main","code_language":"python","max_tokens":256,"window":8,"temperature":0.2,"top_k":32,"max_attempts":6}')
+    --data '{"model":"laplace-code-001","prompt":"main","code_language":"python","max_attempts":6}')
   if ! python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["object"]=="code.completion"; assert d["model"]=="laplace-code-001"; assert d["verified"] is True; assert isinstance(d["code"],str) and d["code"].strip(); assert d["candidate_id"]; a=d["attempts"]; assert a and a[-1]["verified"] is True' <<<"$code_completion"; then
     echo "::error::live code player did not close generation -> AST admission -> toolchain witness -> fold" >&2
     printf '%s\n' "$code_completion" >&2
@@ -62,7 +62,7 @@ run_live_api() {
 
   code_chat=$(api_curl -X POST "$base/v1/chat/completions" \
     -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-    --data '{"model":"laplace-code-001","messages":[{"role":"user","content":"main"}],"code_language":"python","max_tokens":256,"window":8,"temperature":0.2,"top_k":32,"max_attempts":6}')
+    --data '{"model":"laplace-code-001","messages":[{"role":"user","content":"main"}],"code_language":"python","max_attempts":6}')
   if ! python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["object"]=="chat.completion"; assert d["model"]=="laplace-code-001"; c=d["choices"][0]["message"]["content"]; assert isinstance(c,str) and c.strip()' <<<"$code_chat"; then
     echo "::error::laplace-code-001 did not own the OpenAI chat route" >&2
     printf '%s\n' "$code_chat" >&2

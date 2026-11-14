@@ -1,9 +1,3 @@
-SQL_QUERY("evidence.by_subjects_and_type", "bytea[],bytea",
-    "SELECT a.subject_id, a.object_id\nFROM laplace.attestations a\nWHERE a.subject_id = ANY($1)\n  AND a.type_id = $2")
-
-SQL_QUERY("evidence.by_subjects_and_types", "bytea[],bytea[]",
-    "SELECT a.subject_id, a.type_id, a.object_id, a.context_id, a.qualifier_mask\nFROM laplace.attestations a\nWHERE a.subject_id = ANY($1)\n  AND a.type_id = ANY($2)")
-
 SQL_QUERY("ops.multi_source_entity_count", "",
     "SELECT ops.multi_source_entity_count()")
 
@@ -21,9 +15,6 @@ SQL_QUERY("readiness.perfcache_probe", "",
 
 SQL_QUERY("realize.label_or_hex", "bytea",
     "SELECT COALESCE(\n    NULLIF((SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l), ''),\n    (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l));")
-
-SQL_QUERY("evidence.first_subject", "bytea,bytea",
-    "SELECT subject_id FROM laplace.attestations\nWHERE object_id = $1 AND type_id = $2\nLIMIT 1")
 
 SQL_QUERY("realize.render_text_batch", "bytea[]",
     "SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest(($1)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)")
@@ -77,9 +68,6 @@ SQL_QUERY("content.participant_file", "bytea,text",
     "SELECT public.blake3_send(parts.v[1]), public.blake3_send(parts.v[2]), public.blake3_send(holder.entity), "
     "       public.laplace_text(parts.v[2]) "
     "FROM parts, holder")
-
-SQL_QUERY("generation.forward_code", "text,int4,int4,float8,int4,bytea[]",
-    "SELECT g.step, g.entity, g.stride_used\nFROM generation.forward_text(\n    $1, $2, $3, $4, $5, NULL::bigint, 4, 16, $6::bytea[]) g\nORDER BY g.step")
 
 SQL_QUERY("generation.relation_plane", "text,text,int4,bytea[]",
     "SELECT subject_id, object_id, w FROM generation.relation_plane($1, $2, $3, $4)")
@@ -186,9 +174,6 @@ SQL_QUERY("realize.register_canonicals", "text[]",
 
 SQL_QUERY("attestations.present_ids", "bytea,bytea[]",
     "SELECT a.id\nFROM laplace.attestations a\nWHERE a.type_id = $1\n  AND a.id = ANY($2::bytea[])")
-
-SQL_QUERY("consensus.cell", "bytea,bytea,bytea",
-    "SELECT rating, rd, witness_count FROM consensus.cell($1, $2, $3)")
 
 SQL_QUERY("consensus.by_ids", "bytea[],bytea",
     "SELECT id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)")
@@ -635,3 +620,16 @@ SQL_QUERY("account.preview_invitation", "bytea,uuid",
 
 SQL_QUERY("chess.transition_standings", "bytea[]",
     "SELECT public.blake3_send(s.claim), public.laplace_confidence(s.rating, s.deviation, 2), s.deviation, s.matches\nFROM public.laplace_standings(ARRAY(SELECT public.blake3_from_bytea(id) FROM unnest($1::bytea[]) AS u(id))) AS s")
+
+/* The Native standing of the claim a statement states (Laplace-Engine recipes/statement.recipe): the claim is
+ * [subject, relation, object], or [subject, relation] with no object, each part the text it is; its ID is the
+ * composition of the parts' text IDs, as the Engine composes it. No row: the claim has no standing yet. */
+SQL_QUERY("feedback.claim_standing", "text,text,text",
+    "SELECT public.blake3_send(s.claim), s.rating, s.deviation, s.matches, public.laplace_confidence(s.rating, s.deviation, 2)\n"
+    "FROM public.laplace_standings(ARRAY[public.laplace_compose(ARRAY[public.laplace_text_id($1), public.laplace_text_id($2)]"
+    " || CASE WHEN $3 = '' THEN ARRAY[]::public.blake3[] ELSE ARRAY[public.laplace_text_id($3)] END)]) AS s")
+
+/* The entity a text is (public.laplace_text_id, the Engine's composition) and that entity realized from the
+ * database alone (public.laplace_text): what db-roundtrip reads back. Text NULL: the database holds no such entity. */
+SQL_QUERY("content.native_text", "text",
+    "SELECT public.blake3_send(t.id), public.laplace_text(t.id) FROM (SELECT public.laplace_text_id($1) AS id) AS t")

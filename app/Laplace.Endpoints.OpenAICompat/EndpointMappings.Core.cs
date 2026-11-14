@@ -56,7 +56,7 @@ internal static class CoreEndpoints
                 ExplainabilityReports: new CapabilityStatus("live", Backend: "public.laplace_pull + ops.attestations_out", Billing: "explain.trace"),
                 Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
                 Models: new CapabilityStatus("live"),
-                Feedback: new CapabilityStatus("live", Backend: "laplace.attestations (confirm/refute) + consensus fold"),
+                Feedback: new CapabilityStatus("live", Backend: "laplace witness: the caller's statement at UserPromptContent, its standing folded by the Engine"),
                 RecipeCompile: new CapabilityStatus("live", Backend: "laplace.recipe validation + RecipeDescriptor", Billing: "recipe.compile"),
                 SynthesisExport: new CapabilityStatus("live", Backend: "foundry CLI export (writes GGUF; never loaded on chat path)", Billing: "synthesis"),
                 Op: new CapabilityStatus("live", Backend: "ops.api catalog allow-list; named function call; no SQL text"));

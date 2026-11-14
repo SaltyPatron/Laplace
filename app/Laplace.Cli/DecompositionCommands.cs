@@ -33,41 +33,49 @@ namespace Laplace.Cli;
 
 internal static class DecompositionCommands
 {
+    /// <summary>
+    /// The round trip from the database alone: the file is recorded by the Engine as what the operator gives
+    /// (<c>laplace witness --as OPERATOR --class UserPromptContent</c>, read as text), and the text is read back
+    /// from the database by the extension, the entity <c>laplace_text_id</c> names realized by
+    /// <c>laplace_text</c>, and compared byte for byte. With <paramref name="readOnly"/> nothing is recorded:
+    /// the read is of what the database already holds.
+    /// </summary>
     public static async Task<int> DbRoundtripAsync(string path, bool readOnly = false)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
             return Fail($"usage: laplace-mono db-roundtrip <file>  (not found: {path})");
-        CodepointPerfcache.Load(ResolveBlob());
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         byte[] original = File.ReadAllBytes(path);
-        Hash128 docId;
+        string text;
+        try { text = new UTF8Encoding(false, true).GetString(original); }
+        catch (DecoderFallbackException) { return Fail("db-roundtrip reads a text: the file is not UTF-8."); }
+        if (text.Length == 0 || text.Contains('\0'))
+            return Fail("db-roundtrip reads a text: the file is empty or holds NUL.");
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         if (readOnly)
-        {
-            docId = ContentTierSpine.ResolveRoot(original)
-                ?? throw new InvalidDataException("Input has no decomposable text content root.");
-            Console.WriteLine($"expected : {original.Length,10:N0} bytes → document {Hex(docId)} (read-only; nothing recorded)");
-        }
+            Console.WriteLine($"expected : {original.Length,10:N0} bytes (read-only; nothing recorded)");
         else
         {
-            var inner = new NpgsqlSubstrateWriter(ds);
-            await using var accumulator = new ConsensusAccumulatingWriter(inner, ds,
-                logger: CliRuntime.LoggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
             var swR = Stopwatch.StartNew();
-            await ContentRoundtrip.BootstrapAsync(accumulator);
-            docId = await ContentRoundtrip.RecordAsync(accumulator, original);
+            var recorded = await new RuntimeWitnessRecorder(ConnString).RecordAsync(
+                new NativeRuntimeWitness(Environment.UserName, "UserPromptContent"), "roundtrip.txt", original);
             swR.Stop();
-            Console.WriteLine($"recorded : {original.Length,10:N0} bytes → document {Hex(docId)}  in {swR.Elapsed.TotalSeconds:F1}s");
-            Console.WriteLine($"consensus: {accumulator.CellsFolded,10:N0} relations from {accumulator.ObservationsAccumulated:N0} bigram matches (folded inline at apply)");
+            Console.WriteLine($"recorded : {original.Length,10:N0} bytes as {Environment.UserName}'s (witness {recorded.WitnessId ?? "not reported"})  in {swR.Elapsed.TotalSeconds:F1}s");
         }
 
         var swX = Stopwatch.StartNew();
-        byte[] rebuilt = await ContentRoundtrip.ReconstructAsync(ds, docId);
+        var (id, read) = await NpgsqlNativeText.ReadAsync(ds, text);
         swX.Stop();
+        if (read is null)
+        {
+            Console.WriteLine($"text {Hex(id)}: the database holds no such entity.");
+            return 1;
+        }
+        byte[] rebuilt = Encoding.UTF8.GetBytes(read);
 
         string hIn = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
         string hOut = Convert.ToHexString(SHA256.HashData(rebuilt)).ToLowerInvariant();
         bool match = hIn == hOut;
-        Console.WriteLine($"rebuilt  : {rebuilt.Length,10:N0} bytes read back FROM the database in {swX.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"rebuilt  : {rebuilt.Length,10:N0} bytes of text {Hex(id)} read back FROM the database in {swX.Elapsed.TotalSeconds:F1}s");
         Console.WriteLine($"sha256 in  : {hIn}");
         Console.WriteLine($"sha256 out : {hOut}");
         Console.WriteLine(match

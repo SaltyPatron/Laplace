@@ -7,48 +7,6 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static partial class NpgsqlSubstrateReads
 {
 
-    /// <summary><c>ops.attestation_response_type(...)</c> — typed attestation frontier.</summary>
-    public static Task<IReadOnlyList<(string ObjectHex, double CombinedEffMu, int SourceCount)>> AttestationResponseTypeAsync(
-        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, int topK, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.response_type"),
-            static r => (
-                r.IsDBNull(0) ? "" : r.GetString(0),
-                r.IsDBNull(1) ? 0d : r.GetDouble(1),
-                r.IsDBNull(2) ? 0 : r.GetInt32(2)),
-            p =>
-            {
-                p.AddWithValue("subject", subjectId);
-                p.AddWithValue("rel", relationTypeId);
-                p.AddWithValue("k", topK);
-            }, ct: ct, label: "attestation_response_type", onError: onError);
-
-    /// <summary><c>ops.attestation_unary_response_type(...)</c></summary>
-    public static Task<IReadOnlyList<(double CombinedEffMu, int SourceCount)>> AttestationUnaryResponseTypeAsync(
-        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.unary_response_type"),
-            static r => (
-                r.IsDBNull(0) ? 0d : r.GetDouble(0),
-                r.IsDBNull(1) ? 0 : r.GetInt32(1)),
-            p =>
-            {
-                p.AddWithValue("subject", subjectId);
-                p.AddWithValue("rel", relationTypeId);
-            }, ct: ct, label: "attestation_unary_response_type", onError: onError);
-
-    /// <summary><c>ops.entity_attestations(subject)</c>.</summary>
-    public static Task<IReadOnlyList<(string TypeHex, string ObjectHex, long EffMuRaw)>> EntityAttestationsAsync(
-        NpgsqlDataSource dataSource, byte[] subjectId, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("ops.entity_attestations"),
-            static r => (
-                r.IsDBNull(0) ? "" : r.GetString(0),
-                r.IsDBNull(1) ? "" : r.GetString(1),
-                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
-            p => p.AddWithValue("subject", subjectId),
-            ct: ct, label: "laplace_entity_attestations", onError: onError);
-
     /// <summary><c>ops.entity_evidence_count(id)</c> — attestation rows whose subject is id.</summary>
     public static Task<long?> EvidenceCountAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
@@ -190,51 +148,4 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "evidence_for_target", onError: onError);
 
-    /// <summary>First attestation subject for (object_id, type_id).</summary>
-    public static Task<byte[]?> FirstAttestationSubjectAsync(
-        NpgsqlDataSource dataSource, byte[] objectId, byte[] typeId, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource, SqlCatalog.Get("evidence.first_subject"),
-            p =>
-            {
-                p.Add("obj", NpgsqlDbType.Bytea).Value = objectId;
-                p.Add("type", NpgsqlDbType.Bytea).Value = typeId;
-            }, ct: ct, label: "attestation_subject", onError: onError);
-
-    public readonly record struct AttestationEdgeRow(
-        byte[] SubjectId, byte[] ObjectId);
-
-    /// <summary>Attestation (subject, object) for subjects + one type.</summary>
-    public static Task<IReadOnlyList<AttestationEdgeRow>> AttestationsBySubjectsAndTypeAsync(
-        NpgsqlDataSource dataSource, byte[][] subjectIds, byte[] typeId, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.by_subjects_and_type"),
-            static r => new AttestationEdgeRow((byte[])r[0], (byte[])r[1]),
-            p =>
-            {
-                var subjects = p.AddWithValue("subjects", subjectIds);
-                subjects.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                p.Add("type", NpgsqlDbType.Bytea).Value = typeId;
-            }, ct: ct, label: "attestations_by_subjects_type", onError: onError);
-
-    public readonly record struct AttestationQuadRow(
-        byte[] SubjectId, byte[] TypeId, byte[]? ObjectId, byte[]? ContextId, byte[]? QualifierMask = null);
-
-    /// <summary>Attestation quads for subjects filtered by type set.</summary>
-    public static Task<IReadOnlyList<AttestationQuadRow>> AttestationsBySubjectsAndTypesAsync(
-        NpgsqlDataSource dataSource, byte[][] subjectIds, byte[][] typeIds, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.by_subjects_and_types"),
-            static r => new AttestationQuadRow(
-                (byte[])r[0], (byte[])r[1],
-                r.IsDBNull(2) ? null : (byte[])r[2],
-                r.IsDBNull(3) ? null : (byte[])r[3],
-                r.IsDBNull(4) ? null : (byte[])r[4]),
-            p =>
-            {
-                var subjects = p.AddWithValue("subjects", subjectIds);
-                subjects.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                var types = p.AddWithValue("types", typeIds);
-                types.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-            }, ct: ct, label: "attestations_by_subjects_types", onError: onError);
 }

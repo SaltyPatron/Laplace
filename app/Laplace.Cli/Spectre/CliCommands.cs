@@ -138,7 +138,7 @@ internal sealed class ChatCommand : ForwardCommand<TailSettings>
         => QueryCommands.ChatAsync(Raw(ctx));
 }
 
-[Description("OODA feedback: confirm/refute a token sequence (PRECEDES) or one consensus triple (subject RELATION object).")]
+[Description("Feedback: confirm or refute one claim, subject relation [[object]], stated by the operator as a runtime witness (Engine laplace witness).")]
 internal sealed class AttestCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)

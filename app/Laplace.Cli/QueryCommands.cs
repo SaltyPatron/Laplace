@@ -227,93 +227,33 @@ internal static class QueryCommands
 
 
 
+    /// <summary>
+    /// The operator confirms or refutes one claim, [subject, relation, object] or [subject, relation]: the operator
+    /// account is a runtime witness at UserPromptContent and the verdict its statement, recorded by the Engine
+    /// (FeedbackStatements, the lane /v1/feedback and MCP feedback share).
+    /// </summary>
     public static async Task<int> AttestAsync(string[] args)
     {
-        const string usage = "usage: laplace-mono attest <confirm|refute> <tok1> [tok2...]\n"
-            + "       laplace attest <confirm|refute> <subject> <RELATION_TYPE> <object>";
-        if (args.Length < 2)
+        const string usage = "usage: laplace-mono attest <confirm|refute> <subject> <relation> [object]";
+        if (args.Length is < 3 or > 4)
             return Fail(usage);
-
         string mode = args[0].ToLowerInvariant();
         bool confirm = mode == "confirm";
         if (!confirm && mode != "refute")
             return Fail(usage);
-
-        string[] tokens = args[1..];
+        string subject = args[1], relation = args[2], obj = args.Length == 4 ? args[3] : "";
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-
-        CodepointPerfcache.LoadDefault();
-
-        // Triple mode: exactly <subject> <RELATION_TYPE> <object> where the middle token
-        // resolves to a relation type. Anything else is the PRECEDES-chain form. Both
-        // deposit through FeedbackContent.
-        if (tokens.Length == 3 && FeedbackContent.TryResolveRelation(tokens[1], out var rel))
-            return await AttestTripleAsync(ds, tokens[0], rel, tokens[2], confirm);
-
-        var resolved = await FeedbackContent.ResolveTokensAsync(ds, tokens);
-        var ids = new List<Hash128>(tokens.Length);
-        foreach (var t in resolved)
-        {
-            if (t.Id is null)
-            {
-                Console.WriteLine($"  warn: '{t.Token}' is empty — skipping");
-                continue;
-            }
-            if (!t.Present)
-            {
-                Console.WriteLine($"  warn: '{t.Token}' has no substrate entity — skipping");
-                continue;
-            }
-            ids.Add(t.Id.Value);
-        }
-
-        if (ids.Count < 2)
-        {
-            Console.WriteLine($"  attest: need ≥2 resolved tokens for a PRECEDES pair (got {ids.Count})");
-            return ids.Count == 0 ? 1 : 0;
-        }
-
-        var result = await FeedbackContent.ApplyAsync(ds, FeedbackContent.BuildPrecedesChain(ids, confirm));
-        Console.WriteLine($"  applied: {result.AttestationsInserted} attestation(s) inserted");
-        Console.WriteLine($"  consensus: {result.ConsensusUpdated} relation(s) updated "
-            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} {ids.Count - 1} PRECEDES pair(s))");
-        return 0;
-    }
-
-    private static async Task<int> AttestTripleAsync(
-        NpgsqlDataSource ds, string subject, RelationTypeRegistry.RelationTypeResolution rel,
-        string obj, bool confirm)
-    {
-        var resolved = await FeedbackContent.ResolveTokensAsync(ds, [subject, obj]);
-        foreach (var t in resolved)
-        {
-            if (t.Usable) continue;
-            Console.WriteLine(t.Id is null
-                ? $"  warn: '{t.Token}' is empty"
-                : $"  warn: '{t.Token}' has no substrate entity");
-            return 1;
-        }
-
-        Hash128 subjectId = resolved[0].Id!.Value;
-        Hash128 objectId = resolved[1].Id!.Value;
-
-        var before = await FeedbackContent.ConsensusStateAsync(ds, subjectId, rel.Id, objectId);
-        Console.WriteLine(before is null
-            ? $"  target: {subject} {rel.Canonical} {obj} — NEW claim (no consensus row yet)"
-            : $"  target: {subject} {rel.Canonical} {obj} — existing row "
-                + $"(rating {before.Rating}, rd {before.Rd}, witnesses {before.WitnessCount})");
-
-        var result = await FeedbackContent.ApplyAsync(
-            ds, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm));
-        Console.WriteLine($"  applied: {result.AttestationsInserted} attestation(s) inserted");
-
-        var after = await FeedbackContent.ConsensusStateAsync(ds, subjectId, rel.Id, objectId);
-        Console.WriteLine($"  consensus: {result.ConsensusUpdated} relation(s) updated "
-            + $"({(confirm ? "↑ confirmed" : "↓ refuted")} 1 {rel.Canonical} triple)");
-        if (after is not null)
-            Console.WriteLine($"  now: rating {after.Rating}, rd {after.Rd}, witnesses {after.WitnessCount}"
-                + (before is null ? "" : $" (Δrating {after.Rating - before.Rating:+#;-#;0}, Δwitnesses {after.WitnessCount - before.WitnessCount:+#;-#;0})"));
+        var result = await FeedbackStatements.StateAsync(RuntimeWitnessRecorder.Installed(), ds,
+            Environment.UserName, subject, relation, obj, confirm);
+        string claim = obj.Length == 0 ? $"[{subject}, {relation}]" : $"[{subject}, {relation}, {obj}]";
+        Console.WriteLine($"  {(confirm ? "confirmed" : "refuted")} {claim} as {Environment.UserName} (witness {result.WitnessId ?? "not reported"})");
+        Console.WriteLine(result.Before is null
+            ? "  before: no standing"
+            : $"  before: rating {result.Before.Rating:F1}, deviation {result.Before.Deviation:F1}, {result.Before.Matches} games");
+        Console.WriteLine(result.After is null
+            ? "  after:  no standing"
+            : $"  after:  rating {result.After.Rating:F1}, deviation {result.After.Deviation:F1}, {result.After.Matches} games");
         return 0;
     }
 

@@ -214,9 +214,6 @@ SQL_QUERY("laplace.score_pair", "float8,float8",
 SQL_QUERY("structural.entities_at_depth_count", "int2",
     "SELECT count(*)::bigint FROM public.entity e WHERE e.tier=$1")
 
-SQL_QUERY("ops.entity_attestations", "bytea",
-    "SELECT encode(type_id, 'hex'), encode(object_id, 'hex'), eff_mu_raw\nFROM ops.entity_attestations($1, 0)")
-
 SQL_QUERY("taxonomy.ancestry", "bytea,bytea",
     "SELECT encode(ancestor_id, 'hex'), depth\nFROM taxonomy.ancestry($1, $2, 4)")
 

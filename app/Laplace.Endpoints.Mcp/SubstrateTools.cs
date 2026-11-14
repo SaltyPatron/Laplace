@@ -41,6 +41,8 @@ internal sealed partial class SubstrateTools : IMcpTools
         _ownsDataSources = true;
         _turns = new Lazy<ConversationTurns>(() =>
             new ConversationTurns(LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, connectionString)));
+        _witnesses = new Lazy<RuntimeWitnessRecorder>(() =>
+            new RuntimeWitnessRecorder(LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, connectionString)));
     }
 
     public SubstrateTools(NpgsqlDataSource db, NpgsqlDataSource dbReadOnly)
@@ -49,11 +51,11 @@ internal sealed partial class SubstrateTools : IMcpTools
         _dbReadOnly = dbReadOnly;
         _ownsDataSources = false;
         _turns = new Lazy<ConversationTurns>(ConversationTurns.Installed);
+        _witnesses = new Lazy<RuntimeWitnessRecorder>(RuntimeWitnessRecorder.Installed);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_plainWriter is IAsyncDisposable writer) await writer.DisposeAsync();
         if (_ownsDataSources)
         {
             await _dbReadOnly.DisposeAsync();
@@ -112,18 +114,16 @@ internal sealed partial class SubstrateTools : IMcpTools
             () => Schema(("prompt", "string", "the message", true),
                          ("session", "string", "session key for continuity ([A-Za-z0-9._@-]{1,128}); default, this server process's session", false)),
             (s, a) => s.ChatTurn(a)),
-        new("witness", "Deposit a fact as witnessed content (the write lane).",
-            "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
-            () => Schema(("text", "string", "the fact/note to witness (plain prose)", true),
-                         ("origin", "string", "provenance tag, default 'agent/note'", false)),
+        new("witness", "Record a note as content this agent gives (the write lane).",
+            "Record a note as content: the text is a file the Engine records as what the runtime witness mcp-local gives at UserPromptContent (laplace witness), an observation outranked by every curated source, the same content wherever its text stands. Returns the witness trunk and the file trunk. The same note given again adds nothing.",
+            () => Schema(("text", "string", "the note, as it is", true)),
             (s, a) => s.WitnessFact(a)),
-        new("feedback", "Confirm or refute a claim (Glicko win/loss on an edge).",
-            "Confirm or refute a claim (the Gödel-engine feedback lane, same implementation as the CLI attest). Terms resolve at the SURFACE/word layer — use bubble first when the claim lives on a synset/hub (same text renders at three layers; feedback lands where you aim it). Triple mode: subject + relation (canonical, e.g. IS_A, RELATED_TO) + object — a confirm is a Glicko win for the edge, a refute is a loss that can drive it signed-negative until walks drop it. Chain mode: tokens (comma-separated, 2+) attest PRECEDES pairs. Folds immediately; returns consensus before/after so you can watch the rating move.",
+        new("feedback", "Confirm or refute one claim (a statement this agent witnesses).",
+            "Confirm or refute one claim, [subject, relation, object] or [subject, relation]: each part is the text it is, the relation this agent's own word for it. The verdict is a statement of the runtime witness mcp-local at UserPromptContent (laplace witness), confirm 1 and refute 0, folded into the claim's standing in the database; the same verdict stated again moves nothing. Returns the claim, the witness and the claim's Native standing before and after.",
             () => Schema(("verdict", "string", "'confirm' or 'refute'", true),
-                         ("subject", "string", "triple mode: subject term", false),
-                         ("relation", "string", "triple mode: canonical relation type", false),
-                         ("object", "string", "triple mode: object term", false),
-                         ("tokens", "string", "chain mode: comma-separated tokens (2+)", false)),
+                         ("subject", "string", "the claim's subject, as text", true),
+                         ("relation", "string", "the relation, the word as you would write it", true),
+                         ("object", "string", "the claim's object, as text; omit for a claim of two parts", false)),
             (s, a) => s.Feedback(a)),
         new("walk", "Beam-walk the consensus graph from a prompt or entity.",
             "Best-first walk over rated claims from a prompt (public.laplace_pull), each chain costed by its claims' consensus confidence. Pass relation_type to constrain the walk to one relation: a Native relation word, or IS_A (WordNet's hypernym); other legacy relation names walk unconstrained. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
@@ -306,14 +306,8 @@ internal sealed partial class SubstrateTools : IMcpTools
     private const string McpTenant = "mcp-local";
     private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
     private readonly Lazy<ConversationTurns> _turns;
-
-    //   _plainWriter — the untenanted agent-note lane (WitnessFact), which rides the
-    //                  shared UserPrompt/Response sources because a standalone note
-    //                  has no session or tenant to scope.
-    private readonly object _writerSync = new();
-    private ISubstrateWriter? _plainWriter;
-    private bool _plainBootstrapped;
-    private bool _plainWriterBroken;
+    // What this agent states (notes and feedback) is the runtime witness mcp-local's, recorded by the Engine.
+    private readonly Lazy<RuntimeWitnessRecorder> _witnesses;
 
     /// <summary>
     /// A tool session key resolves through the canonical mint — the same id law the
