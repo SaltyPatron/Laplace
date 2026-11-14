@@ -7,6 +7,36 @@ CREATE OR REPLACE FUNCTION consensus.relation_metadata(p_ids bytea[])
 RETURNS TABLE(surface_id bytea,canonical_id bytea,canonical text,inverse boolean,qualifier_bit smallint)
 AS 'MODULE_PATHNAME','pg_relation_metadata' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
+-- Display labels for relation-type ids, aligned with the input positions. A
+-- type the registry declares (a canonical id, or a source's own word that is a
+-- forward alias of it) reads as its canonical type, as declared (IS_A), the label
+-- claim_facts gives it; any other id is its own Native realization. The relation-type ids the readers
+-- carry are registry identities that no content records, so labelling them by
+-- laplace_labels alone yields their hex.
+CREATE OR REPLACE FUNCTION consensus.relation_labels(p_ids bytea[])
+RETURNS TABLE(n bigint, label text)
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH input AS MATERIALIZED (
+        SELECT u.id, u.n FROM unnest(p_ids) WITH ORDINALITY u(id, n)
+    ), registry AS MATERIALIZED (
+        SELECT DISTINCT ON (m.surface_id) m.surface_id, m.canonical
+        FROM consensus.relation_metadata(p_ids) m
+        WHERE NOT m.inverse AND m.qualifier_bit < 0
+        ORDER BY m.surface_id, m.canonical
+    ), native AS MATERIALIZED (
+        SELECT DISTINCT ON (l.entity) l.entity, l.content
+        FROM public.laplace_labels(ARRAY(SELECT DISTINCT public.blake3_from_bytea(i.id)
+                                         FROM input i WHERE i.id IS NOT NULL)) l
+        ORDER BY l.entity
+    )
+    SELECT i.n, coalesce(r.canonical, nl.content)
+    FROM input i
+    LEFT JOIN registry r ON r.surface_id = i.id
+    LEFT JOIN native nl ON nl.entity = public.blake3_from_bytea(i.id)
+    ORDER BY i.n;
+END;
+
 CREATE OR REPLACE FUNCTION consensus.relation_surfaces(p_ids bytea[])
 RETURNS TABLE(surface_id bytea,canonical_id bytea,canonical text,inverse boolean,qualifier_bit smallint)
 AS 'MODULE_PATHNAME','pg_relation_surfaces' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

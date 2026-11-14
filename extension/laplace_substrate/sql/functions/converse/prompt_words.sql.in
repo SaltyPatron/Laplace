@@ -14,11 +14,16 @@ BEGIN ATOMIC
     SELECT * FROM converse.prompt_tree(p_text, true);
 END;
 
+-- The prompt's words: the decomposer's segments in source order, whitespace
+-- excluded. Whitespace is content of the prompt but a boundary between its
+-- words, never a word; punctuation segments stay words. ord is the segment's
+-- position in the text.
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT s.i::int, s.segment, public.blake3_send(s.id)
     FROM public.laplace_segments(p_text) s
+    WHERE NOT coalesce(public.laplace_text_is(s.segment, 'White_Space', 'Yes'), false)
     ORDER BY s.i;
 END;

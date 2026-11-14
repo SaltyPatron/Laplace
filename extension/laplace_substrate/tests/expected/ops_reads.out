@@ -47,14 +47,11 @@ FROM ops.source_roster(public.blake3_send(public.laplace_text_id('test/ops/sourc
 
 -- surface_sample admits the requested source×tier before ranking. A much heavier
 -- tier-3 subject cannot consume a tier-2 result slot, and zero is an exact bound.
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+INSERT INTO laplace.entities (id, tier, type_id)
 VALUES
-    (public.blake3_send(public.laplace_text_id('sample-tier2-high')), 2, public.blake3_send(public.laplace_text_id('Type')),
-     public.blake3_send(public.laplace_text_id('test/ops/source'))),
-    (public.blake3_send(public.laplace_text_id('sample-tier2-low')), 2, public.blake3_send(public.laplace_text_id('Type')),
-     public.blake3_send(public.laplace_text_id('test/ops/source'))),
-    (public.blake3_send(public.laplace_text_id('sample-tier3-heavy')), 3, public.blake3_send(public.laplace_text_id('Type')),
-     public.blake3_send(public.laplace_text_id('test/ops/source')))
+    (public.blake3_send(public.laplace_text_id('sample-tier2-high')), 2, public.blake3_send(public.laplace_text_id('Type'))),
+    (public.blake3_send(public.laplace_text_id('sample-tier2-low')), 2, public.blake3_send(public.laplace_text_id('Type'))),
+    (public.blake3_send(public.laplace_text_id('sample-tier3-heavy')), 3, public.blake3_send(public.laplace_text_id('Type')))
 ON CONFLICT DO NOTHING;
 INSERT INTO laplace.attestations (
     id, subject_id, type_id, object_id, source_id, context_id, outcome,
@@ -247,34 +244,91 @@ BEGIN
         RAISE EXCEPTION 'FAIL: scalar and batch attestation responses disagree';
     END IF;
     RAISE NOTICE 'evidence response: exact source counts, scoped support, pooled prior and scalar/batch parity';
-
-    -- The profile receipt consumes the same native witness reader with subject
-    -- roles only. Source labels are final display; repeated contexts still count
-    -- as observations, and an incoming assertion must not reverse its meaning.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-    VALUES (rel,2,laplace.entity_type_id('RelationType'),src1)
-    ON CONFLICT DO NOTHING;
-    INSERT INTO laplace.canonical_names(id,name) VALUES
-        (src1,'substrate/source/receipt-source1/v1'),
-        (src2,'substrate/source/receipt-source2/v1'),
-        (a,'substrate/test/receipt-a/v1'),
-        (b,'substrate/test/receipt-b/v1');
-    INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
-        outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
-    VALUES (public.blake3_send(public.laplace_text_id('test/evidence-response/inbound')),
-        b,rel,s1,src2,ctx1,1,now(),100,100000000000,350000000000);
-    SELECT count(*),sum(witness_count) INTO rows_seen,sources_seen
-    FROM ops.evidence_receipt(s1,25);
-    IF rows_seen<>2 OR sources_seen<>4 THEN
-        RAISE EXCEPTION 'FAIL: profile receipt lost observations or admitted inbound/unary claims';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM ops.evidence_receipt(s1,25)
-        WHERE object_id=a AND witness_count=3
-          AND source_labels='receipt-source1, receipt-source2') THEN
-        RAISE EXCEPTION 'FAIL: profile receipt lost distinct source labels or context multiplicity';
-    END IF;
 END $$;
 NOTICE:  evidence response: exact source counts, scoped support, pooled prior and scalar/batch parity
+-- The profile receipt reads Native claims (ops.claim_facts over
+-- public.laplace_claims_each) and their witness series, never the legacy cells
+-- above. Its witnesses are the source trunks that attest: a source observing a
+-- claim twice is one witness with two observations, labels are the trunks' own
+-- final display, and an incoming claim must not reverse its meaning.
+CREATE FUNCTION pg_temp.receipt_claim(parts public.blake3[]) RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE id public.blake3 := public.laplace_compose(parts);
+        point public.geometry;
+        mask bit(64) := public.laplace_mask_slot('kind','claim');
+BEGIN
+    SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(
+        public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))
+    INTO point FROM unnest(parts) p;
+    INSERT INTO public.entity(id,tier,coord,hilbert,mask)
+    VALUES(id,1,point,public.laplace_hilbert4(point),mask);
+    INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
+    VALUES(id,1,public.laplace_hilbert4(point),public.laplace_path(parts),mask);
+    INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
+    VALUES(id,1500,50,0.06,1);
+    RETURN id;
+END $$;
+CREATE FUNCTION pg_temp.receipt_source(parts public.blake3[], metadata bigint[]) RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE id public.blake3:=public.laplace_compose(parts); point public.geometry;
+        path public.geometry:=public.laplace_path(parts); vertex public.geometry; altitude smallint;
+        mask bit(64):=public.laplace_mask_slot('kind','file');
+BEGIN
+ SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,
+   public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))),
+   (max(coalesce(e.tier,0))+1)::smallint INTO point,altitude
+ FROM unnest(parts) p LEFT JOIN public.entity e ON e.id=p;
+ FOR i IN 1..cardinality(metadata) LOOP
+  vertex:=public.ST_PointN(path,i);
+  path:=public.ST_SetPoint(path,i-1,public.ST_MakePoint(public.ST_X(vertex),public.ST_Y(vertex),
+    public.ST_Z(vertex),public.ST_M(vertex)+metadata[i]));
+ END LOOP;
+ INSERT INTO public.entity(id,tier,coord,hilbert,mask)
+ VALUES(id,altitude,point,public.laplace_hilbert4(point),mask);
+ INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
+ VALUES(id,altitude,public.laplace_hilbert4(point),path,mask);
+ INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+ VALUES(md5('receipt-witness-'||id::text)::public.blake3,id,NULL,1,1,1.0,NULL,0.75);
+ RETURN id;
+END $$;
+DO $$
+DECLARE s public.blake3:=public.laplace_cp_id(ascii('σ'));
+        r public.blake3:=public.laplace_cp_id(ascii('ρ'));
+        a public.blake3:=public.laplace_cp_id(ascii('α'));
+        b public.blake3:=public.laplace_cp_id(ascii('β'));
+        ctx public.blake3:=public.laplace_cp_id(ascii('κ'));
+        sa public.blake3; sb public.blake3; bs public.blake3;
+        src1 public.blake3; src2 public.blake3;
+        rows_seen bigint; witnesses_seen bigint;
+BEGIN
+    sa:=pg_temp.receipt_claim(ARRAY[s,r,a]);
+    sb:=pg_temp.receipt_claim(ARRAY[s,r,b]);
+    bs:=pg_temp.receipt_claim(ARRAY[b,r,s]); -- inbound to s
+    -- Source Ω observes [s r a] in two contexts; source Ψ observes [s r a],
+    -- [s r b] and the inbound [b r s].
+    src1:=pg_temp.receipt_source(ARRAY[public.laplace_cp_id(ascii('Ω')),sa,ctx,sa],
+        ARRAY[0,2147483648,0,2147483648]::bigint[]);
+    src2:=pg_temp.receipt_source(ARRAY[public.laplace_cp_id(ascii('Ψ')),sa,sb,bs],
+        ARRAY[0,2147483648,2147483648,2147483648]::bigint[]);
+    SELECT count(*),sum(witness_count) INTO rows_seen,witnesses_seen
+    FROM ops.evidence_receipt(public.blake3_send(s),25);
+    IF rows_seen<>2 OR witnesses_seen<>3 THEN
+        RAISE EXCEPTION 'FAIL: profile receipt counted observations as witnesses or admitted an inbound claim (% rows, % witnesses)',
+            rows_seen,witnesses_seen;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.evidence_receipt(public.blake3_send(s),25)
+        WHERE object_id=public.blake3_send(a) AND type_id=public.blake3_send(r) AND witness_count=2
+          AND source_labels=(SELECT string_agg(l,', ' ORDER BY t)
+                             FROM (VALUES (src1,'Ω'),(src2,'Ψ')) v(t,l))) THEN
+        RAISE EXCEPTION 'FAIL: profile receipt lost distinct source labels';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.evidence_series_receipt(public.blake3_send(s),25,false)
+        WHERE claim_id=public.blake3_send(sa) AND source_id=public.blake3_send(src1) AND games=2) THEN
+        RAISE EXCEPTION 'FAIL: a source observing a claim in two contexts lost an observation';
+    END IF;
+    RAISE NOTICE 'profile receipt: Native claims, distinct witnesses, labels and observation multiplicity';
+END $$;
+NOTICE:  profile receipt: Native claims, distinct witnesses, labels and observation multiplicity
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self
@@ -449,9 +503,8 @@ BEGIN
            public.ST_MakePoint(p.coord[1], p.coord[2], p.coord[3], p.coord[4])
     INTO STRICT existing_id, existing_tier, observed_coord
     FROM (SELECT lp_u.n::int AS ord,public.blake3_send(public.laplace_text_id(lp_u.t)) AS root_id,public.laplace_tier(lp_u.t) AS tier,ARRAY[public.ST_X(lp_g.c),public.ST_Y(lp_g.c),public.ST_Z(lp_g.c),public.ST_M(lp_g.c)] AS coord,public.laplace_text_hilbert(lp_u.t) AS hilbert_index,public.laplace_distance4d(lp_g.c,public.ST_MakePoint(0,0,0,0)) AS radius_origin FROM unnest((ARRAY[chr(57344)])::text[]) WITH ORDINALITY lp_u(t,n) CROSS JOIN LATERAL (SELECT public.laplace_text_coord(lp_u.t) AS c) lp_g) p;
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
-            public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')))
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'))
     ON CONFLICT DO NOTHING;
     content_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(1)]));
     projection_id := public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(existing_id), public.laplace_cp_id(3)]));
@@ -496,9 +549,8 @@ BEGIN
         RAISE EXCEPTION 'actual missing reference or its observation-time scope was lost';
     END IF;
 
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (missing_id, 2, laplace.entity_type_id('Word'),
-            public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')));
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (missing_id, 2, laplace.entity_type_id('Word'));
     IF EXISTS (SELECT 1 FROM ops.ingest_integrity_gate() WHERE physicality_id = orphan_id)
        OR ops.orphan_physicality_count() <> orphan_count_before THEN
         RAISE EXCEPTION 'resolved entity reference remained an orphan';

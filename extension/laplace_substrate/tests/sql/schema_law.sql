@@ -30,6 +30,8 @@ WHERE n.nspname = 'laplace'
     convert_from(decode('6b696e645f6964', 'hex'), 'UTF8'),
     convert_from(decode('656e746974795f6b696e64', 'hex'), 'UTF8'));
 
+-- The extension seeds no vocabulary rows (e77befdd4): physicality types are not
+-- entities the install mints.
 SELECT count(*) AS physicality_type_entities FROM entities
 WHERE id IN (
     public.blake3_send(public.laplace_text_id('substrate/physicality_type/CONTENT/v1')),
