@@ -2,8 +2,8 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
--- All fixture observations, including their type interpretations, share one
--- transaction so later identity-law checks see the original substrate.
+-- All fixture rows share one transaction so later identity-law checks see the
+-- original substrate.
 BEGIN;
 
 CREATE TEMP TABLE test_fixtures AS
@@ -12,7 +12,7 @@ SELECT
 FROM generate_series(0, 7) b;
 
 INSERT INTO laplace.entities (id, tier, type_id)
-SELECT id, 0::smallint, (SELECT id FROM test_fixtures LIMIT 1), NULL
+SELECT id, 0::smallint, (SELECT id FROM test_fixtures LIMIT 1)
 FROM test_fixtures
 WHERE id IN (
     SELECT id FROM test_fixtures LIMIT 4
@@ -57,20 +57,9 @@ SELECT
         SELECT id FROM test_fixtures LIMIT 4
     )::bytea[]), 'hex') AS idempotent;
 
--- The keyed native path groups mixed tiers and executes one session-cached,
--- literal-tier plan per run.  It must preserve the caller's original bitmap
--- positions without the historical per-call temp table/index/ANALYZE path.
-DO $facet_fixture$
-DECLARE
-    ids bytea[];
-    kind bytea;
-BEGIN
-    SELECT array_agg(id ORDER BY id) INTO ids
-    FROM (SELECT id FROM test_fixtures ORDER BY id LIMIT 2) q;
-    SELECT id INTO STRICT kind FROM test_fixtures ORDER BY id LIMIT 1;
-END
-$facet_fixture$;
-
+-- The two-array call shape: tier is altitude, not identity, so presence is the
+-- id-only probe whatever tier the caller names (a tier-0 row asked for at tier 2
+-- is present). It must preserve the caller's original bitmap positions.
 WITH keyed AS (
     SELECT array_agg(id ORDER BY ord)::bytea[] AS ids,
            array_agg(tier ORDER BY ord)::smallint[] AS tiers

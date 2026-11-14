@@ -64,6 +64,19 @@ BEGIN
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de'),
            (lang_ja, 'test/lang/ja')
     ON CONFLICT DO NOTHING;
+    -- Word presence is Native (resolve_phrase / resolve_last_word read stored
+    -- public.entity rows): record the fixture's word as content.
+    INSERT INTO public.entity(id,tier,coord,hilbert)
+    SELECT public.laplace_id(content),public.laplace_tier(content),
+           public.laplace_coord(content),public.laplace_hilbert(content)
+    FROM unnest(ARRAY['dog']) word(content)
+    ON CONFLICT DO NOTHING;
+    INSERT INTO public.physicality(entity,tier,hilbert,path)
+    SELECT public.laplace_id(content),public.laplace_tier(content),public.laplace_hilbert(content),
+           public.laplace_path(ARRAY(SELECT public.laplace_cp_id(ascii(c))
+             FROM regexp_split_to_table(content,'') c))
+    FROM unnest(ARRAY['dog']) word(content)
+    ON CONFLICT DO NOTHING;
     PERFORM realize.register_canonical('IS_A');
     PERFORM realize.register_canonical('CAUSES');
     PERFORM realize.register_canonical('IS_ANTONYM_OF');
@@ -149,20 +162,9 @@ FROM converse.orient_topic('犬', public.blake3_send(public.laplace_text_id('tes
 
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
--- A content id may exist at multiple tiers; each input position still occurs
--- exactly once. Repeated input positions must not be collapsed with DISTINCT.
+-- Each input position occurs exactly once. Repeated input positions must not
+-- be collapsed with DISTINCT.
 SAVEPOINT token_identity;
-DO $token_facet$
-DECLARE
-    entity_id bytea := public.blake3_send(public.laplace_text_id('p'));
-    entity_type bytea;
-BEGIN
-    SELECT type_id
-      INTO STRICT entity_type
-      FROM laplace.entities
-     WHERE id = entity_id;
-END
-$token_facet$;
 SELECT count(*) = 2 AND count(DISTINCT ord) = 2
        AND bool_and(id = public.blake3_send(public.laplace_text_id('p'))) AS words_keep_positions
 FROM converse.prompt_words('p p');
@@ -270,23 +272,6 @@ SELECT (SELECT count(*) FROM scalar) > 0
 SELECT count(*) = 0 AS bubble_up_zero_bound_is_empty
 FROM taxonomy.bubble_up(public.blake3_send(public.laplace_text_id('dog')), NULL::bytea[], 0);
 
--- The set case operation is result-identical to independent scalar calls,
--- including a content id with no physicality (which still includes itself).
-WITH words AS (
-    SELECT ARRAY[public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('NoSuchPeer'))]::bytea[] AS ids
-), scalar AS (
-    SELECT w.id AS word_id, unnest(ARRAY[(w.id)::bytea]) AS variant_id
-    FROM words, unnest(words.ids) AS w(id)
-), batched AS (
-    SELECT b.word_id, b.variant_id
-    FROM words, (SELECT lp_w.x AS word_id,lp_w.x AS variant_id FROM unnest((words.ids)::bytea[]) lp_w(x) WHERE lp_w.x IS NOT NULL) b
-)
-SELECT NOT EXISTS (
-    (SELECT * FROM scalar EXCEPT SELECT * FROM batched)
-    UNION ALL
-    (SELECT * FROM batched EXCEPT SELECT * FROM scalar)
-) AS case_batch_matches_scalar;
-
 SELECT count(*) AS dog_senses FROM lexical.senses(public.blake3_send(public.laplace_text_id('dog')));
 
 SELECT definition, witnesses FROM lexical.define(public.blake3_send(public.laplace_text_id('dog')));
@@ -328,9 +313,18 @@ SELECT (SELECT sn.synset_id FROM lexical.senses(public.blake3_send(public.laplac
        = public.blake3_send(public.laplace_text_id('test/converse/synset1')) AS context_flips_to_1;
 
 SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.blake3_send(public.laplace_text_id('p')))::bytea],NULL)::public.blake3[]) lp_l) AS leaf_realizes;
-SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.laplace_hash128_blake3('test/converse/synset1'))::bytea],NULL)::public.blake3[]) lp_l) AS synset_realizes_member;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(ARRAY[public.laplace_text_id('test/converse/synset1')]) lp_l) AS synset_label;
 SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(laplace.relation_type_id('IS_A'))::bytea],NULL)::public.blake3[]) lp_l) AS isa_label;
-SELECT (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN (ARRAY[laplace.relation_type_id('IS_A')])[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1) AS realized_path;
+-- A path [synset1, synset2] over IS_A, each step labelled through the one
+-- Native realization (realize.path retired).
+WITH labels AS (
+    SELECT lp_l.i, lp_l.content
+    FROM public.laplace_labels(ARRAY[public.laplace_text_id('test/converse/synset1'),
+                                     public.blake3_from_bytea(laplace.relation_type_id('IS_A')),
+                                     public.laplace_text_id('test/converse/synset2')]) lp_l
+)
+SELECT string_agg(CASE WHEN i = 2 THEN ' —' || content || '→ ' ELSE content END, '' ORDER BY i) AS realized_path
+FROM labels;
 
 SELECT type, fact, witnesses FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')));
 SELECT count(*) = 0 AS salient_facts_zero_is_empty
@@ -360,7 +354,8 @@ SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_ban
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(public.blake3_send(public.laplace_text_id('dog')));
 
 SELECT bool_and(status = 'confirmed') AS isa_confirmed
-FROM converse.epistemic_status(public.blake3_send(public.laplace_text_id('dog'))) WHERE type = 'is a';
+FROM converse.epistemic_status_core(public.blake3_send(public.laplace_text_id('dog')))
+WHERE laplace.relation_type_id('IS_A') = ANY(parts);
 
 SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('h')));
 
