@@ -44,11 +44,11 @@ CREATE OR REPLACE FUNCTION consensus.edges(
 BEGIN ATOMIC
 
     WITH ranked AS MATERIALIZED (
-        SELECT e.direction AS dir,e.type_id,e.neighbour_id AS nid,
+        SELECT e.direction AS dir,COALESCE(e.relation_id,e.type_id) AS type_id,e.neighbour_id AS nid,
                e.rating,e.rd,e.witness_count,e.ord
         FROM consensus.edges_raw(p_subject,p_direction,p_types,p_limit,p_refuted,'edge_rank')
              WITH ORDINALITY
-             AS e(direction,type_id,neighbour_id,rating,rd,volatility,witness_count,ord)
+             AS e(direction,type_id,neighbour_id,rating,rd,volatility,witness_count,relation_id,ord)
     ),
     ids AS MATERIALIZED (
         SELECT array_agg(DISTINCT id ORDER BY id) AS a
@@ -59,9 +59,7 @@ BEGIN ATOMIC
             unnest(ids.a), unnest(ARRAY(SELECT lp_l.content FROM unnest((ids.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
           ) i(id,txt)
     ), rel AS MATERIALIZED (
-        SELECT t.type_id,
-               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''),
-                        l.txt) AS relation
+        SELECT t.type_id, l.txt AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
         JOIN labels l ON l.id=t.type_id
     ),
