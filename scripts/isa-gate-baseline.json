@@ -15,8 +15,6 @@
     "g1_weight_literalism": {},
     "g3_c_vocabulary_literalism": {},
     "g3_csharp_vocabulary_literalism": {
-      "app/Laplace.Chess/Service/OpeningClassifier.cs::HAS_FEATURE": 2,
-      "app/Laplace.Chess/Service/OpeningClassifier.cs::IS_EXAMPLE_OF": 1,
       "app/Laplace.Cli/EvalCommands.cs::IS_SYNONYM_OF": 1,
       "app/Laplace.Cli/EvalCommands.cs::SIMILAR_TO": 1,
       "app/Laplace.Cli/IngestCommands.Runner.cs::APPEARS_IN": 1,
@@ -98,11 +96,7 @@
       "app/Laplace.Substrate/Abstractions/SourceVocabularyBootstrap.cs::HAS_VERSION": 1
     },
     "g3_sql_vocabulary_literalism": {
-      "extension/laplace_substrate/sql/functions/converse/epistemic_status.sql.in::HAS_LANGUAGE": 1,
-      "extension/laplace_substrate/sql/functions/converse/epistemic_status.sql.in::HAS_SENSE": 1,
-      "extension/laplace_substrate/sql/functions/converse/epistemic_status.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/converse/forward_pass.sql.in::IS_SENSE_OF": 2,
-      "extension/laplace_substrate/sql/functions/converse/witness_precedes_chain.sql.in::PRECEDES": 1,
       "extension/laplace_substrate/sql/functions/converse/word_language.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/corpus/corpus_whitespace_vocab_indices.sql.in::GC": 1,
       "extension/laplace_substrate/sql/functions/generation/entity_highway_masks.sql.in::IS_A": 1,
@@ -145,7 +139,6 @@
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::X_NEED": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::X_REACT": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::X_WANT": 1,
-      "extension/laplace_substrate/sql/functions/recall/recall_walk_response.sql.in::COMPLETES_TO": 1,
       "extension/laplace_substrate/sql/functions/relation/relation_in_family.sql.in::IS_A": 1,
       "extension/laplace_substrate/sql/functions/structural/mesh_position.sql.in::CORRESPONDS_TO": 1,
       "extension/laplace_substrate/sql/functions/structural/mesh_position.sql.in::EVOKES_FRAME": 1,
