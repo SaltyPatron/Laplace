@@ -170,7 +170,7 @@ answer AS (
     CROSS JOIN asked a
     WHERE p_source IS NULL
        OR p.source = p_source
-       OR p.source_id = @extschema@.source_id(p_source)
+       OR p.source_id = public.blake3_send(public.laplace_text_id('substrate/source/' || p_source || '/v1'))
        OR p.norm ILIKE a.norm
        OR (
             length(a.norm) >= 3
@@ -184,10 +184,10 @@ SELECT * FROM answer
 UNION ALL
 -- A named query always returns one row, so an unknown name reads as known = false.
 SELECT p_source,
-       @extschema@.source_id(p_source),
+       public.blake3_send(public.laplace_text_id('substrate/source/' || p_source || '/v1')),
        false,
        EXISTS (SELECT 1 FROM @extschema@.entities e
-               WHERE e.id = @extschema@.source_id(p_source)),
+               WHERE e.id = public.blake3_send(public.laplace_text_id('substrate/source/' || p_source || '/v1'))),
        0::bigint,
        false,
        NULL::text,
