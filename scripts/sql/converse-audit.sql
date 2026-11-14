@@ -25,13 +25,16 @@ SELECT public.laplace_codepoint(public.blake3_from_bytea(public.blake3_send(publ
        CASE WHEN public.laplace_codepoint(public.blake3_from_bytea(public.blake3_send(public.laplace_text_id('A')))) = 65
             THEN 'PASS' ELSE 'FAIL — laplace_substrate.perfcache_path unset/stale' END AS verdict;
 
-\echo '-- 0c. render_text C offload round-trips codepoint, word, and batch --'
-SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('A'))::bytea],NULL)::public.blake3[]) lp_l)                                  AS r_codepoint,
-       (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('cat'))::bytea],NULL)::public.blake3[]) lp_l)                                AS r_word,
-       ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ARRAY[word_id('cat'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[word_id('cat'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)   AS r_batch,
-       CASE WHEN (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('cat'))::bytea],NULL)::public.blake3[]) lp_l) = 'cat'
-                 AND ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ARRAY[word_id('cat'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[word_id('cat'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) = ARRAY['cat','dog']
-            THEN 'PASS' ELSE 'FAIL — C reconstruction broken' END AS verdict;
+\echo '-- 0c. Native labels reconstruct a codepoint, a word, and a batch in order --'
+SELECT (SELECT l.content FROM public.laplace_labels(ARRAY[public.laplace_text_id('A')]) l)   AS r_codepoint,
+       (SELECT l.content FROM public.laplace_labels(ARRAY[public.laplace_text_id('cat')]) l) AS r_word,
+       b.labels                                                                             AS r_batch,
+       CASE WHEN (SELECT l.content FROM public.laplace_labels(ARRAY[public.laplace_text_id('cat')]) l) = 'cat'
+                 AND b.labels = ARRAY['cat','dog']
+            THEN 'PASS' ELSE 'FAIL — C reconstruction broken' END AS verdict
+FROM (SELECT ARRAY(SELECT l.content FROM unnest(ARRAY[public.laplace_text_id('cat'), public.laplace_text_id('dog')]) WITH ORDINALITY u(x, n)
+                   LEFT JOIN public.laplace_labels(ARRAY[public.laplace_text_id('cat'), public.laplace_text_id('dog')]) l ON l.entity = u.x
+                   ORDER BY u.n) AS labels) b;
 
 \echo '-- 0d. geom SIMD offload (relatedness/reason structural plane) --'
 SELECT round(public.laplace_angular_distance_4d(
