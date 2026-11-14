@@ -1,168 +1,196 @@
 BEGIN;
 
-DO $$
-DECLARE
-    rel_meta bytea := laplace.entity_type_id('RelationType');
-    type_t   bytea := public.blake3_send(public.laplace_text_id('Type'));
-    type_lang bytea := public.blake3_send(public.laplace_text_id('Language'));
-    src      bytea := public.blake3_send(public.laplace_text_id('test/converse/source'));
-    w_dog    bytea := public.blake3_send(public.laplace_text_id('dog'));
-    w_p      bytea := public.blake3_send(public.laplace_text_id('p'));
-    w_h      bytea := public.blake3_send(public.laplace_text_id('h'));
-    w_c      bytea := public.blake3_send(public.laplace_text_id('c'));
-    w_ja     bytea := public.blake3_send(public.laplace_text_id('犬'));
-    w_request bytea := public.blake3_send(public.laplace_text_id('compilerrequest'));
-    w_binder  bytea := public.blake3_send(public.laplace_text_id('compilerbinder'));
-    frame_people bytea := public.blake3_send(public.laplace_text_id('People'));
-    frame_existence bytea := public.blake3_send(public.laplace_text_id('Existence'));
-    sense1   bytea := public.blake3_send(public.laplace_text_id('test/converse/sense1'));
-    synset1  bytea := public.blake3_send(public.laplace_text_id('test/converse/synset1'));
-    sense_b  bytea := public.blake3_send(public.laplace_text_id('test/converse/sense_b'));
-    synset_b bytea := public.blake3_send(public.laplace_text_id('test/converse/synset_b'));
-    synset2  bytea := public.blake3_send(public.laplace_text_id('test/converse/synset2'));
-    syn_bad  bytea := public.blake3_send(public.laplace_text_id('test/converse/synset_bad'));
-    sense_ja bytea := public.blake3_send(public.laplace_text_id('test/converse/sense_ja'));
-    syn_ja   bytea := public.blake3_send(public.laplace_text_id('test/converse/synset_ja'));
-    gloss1   bytea := public.blake3_send(public.laplace_text_id('G'));
-    lang_en  bytea := public.blake3_send(public.laplace_text_id('test/converse/lang_en'));
-    lang_de  bytea := public.blake3_send(public.laplace_text_id('test/converse/lang_de'));
-    lang_ja  bytea := public.blake3_send(public.laplace_text_id('test/converse/lang_ja'));
-    k_sense  bytea := laplace.relation_type_id('HAS_SENSE');
-    k_senseof bytea := laplace.relation_type_id('IS_SENSE_OF');
-    k_def    bytea := laplace.relation_type_id('HAS_DEFINITION');
-    k_syn    bytea := laplace.relation_type_id('IS_SYNONYM_OF');
-    k_member bytea := laplace.relation_type_id('IS_TRANSLATION_OF');
-    k_lang   bytea := laplace.relation_type_id('HAS_LANGUAGE');
-    k_isa    bytea := laplace.relation_type_id('IS_A');
-    k_causes bytea := laplace.relation_type_id('CAUSES');
-    k_anto   bytea := laplace.relation_type_id('IS_ANTONYM_OF');
-    k_evokes bytea := laplace.relation_type_id('EVOKES_FRAME');
-    neutral  bigint := 1500000000000;
-    sharp_rd bigint := 30000000000;
+-- The fixture is what an ingest records on the Native substrate: content as
+-- entity + physicality, sources as trunks [source tuple, file] whose records
+-- say claims, the trunk the witness, and consensus folded from that
+-- containment by laplace_attest_series. A lexical sense is the tuple
+-- [lemma, language, identifier] (WN-LMF's Sense), the language the text its
+-- lexicon writes (en, de, ja: ISO 639-1, which laplace.language_codes reads);
+-- relations are the sources' own words, read through the registry's aliases
+-- (hypernym IS_A, lexical sense HAS_SENSE, definition of the synset
+-- HAS_DEFINITION, antonym, causes, synonym, lexical unit EVOKES_FRAME).
+CREATE FUNCTION pg_temp.text_node(content text) RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE seg record; n integer := 0;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id)
-    VALUES (src, 0, type_t),
-           (k_sense, 0, rel_meta), (k_senseof, 0, rel_meta), (k_def, 0, rel_meta),
-           (k_syn, 0, rel_meta), (k_member, 0, rel_meta), (k_lang, 0, rel_meta),
-           (k_isa, 0, rel_meta),
-           (k_causes, 0, rel_meta), (k_anto, 0, rel_meta),
-           (k_evokes, 0, rel_meta),
-           (w_dog, 2, type_t), (w_p, 0, type_t), (w_h, 0, type_t),
-           (w_c, 0, type_t), (w_ja, 0, type_t),
-           (w_request, 2, type_t), (w_binder, 2, type_t),
-           (frame_people, 2, type_t), (frame_existence, 2, type_t),
-           (sense1, 0, type_t), (synset1, 0, type_t),
-           (sense_b, 0, type_t), (synset_b, 0, type_t),
-           (sense_ja, 0, type_t), (syn_ja, 0, type_t),
-           (synset2, 0, type_t), (syn_bad, 0, type_t),
-           (gloss1, 0, type_t),
-           (lang_en, 0, type_lang), (lang_de, 0, type_lang),
-           (lang_ja, 0, type_lang)
-    ON CONFLICT DO NOTHING;
-
-    INSERT INTO laplace.canonical_names (id, name)
-    VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de'),
-           (lang_ja, 'test/lang/ja')
-    ON CONFLICT DO NOTHING;
-    PERFORM realize.register_canonical('IS_A');
-    PERFORM realize.register_canonical('CAUSES');
-    PERFORM realize.register_canonical('IS_ANTONYM_OF');
-    PERFORM realize.register_canonical('HAS_DEFINITION');
-    PERFORM realize.register_canonical('IS_SYNONYM_OF');
-    PERFORM realize.register_canonical('IS_TRANSLATION_OF');
-    PERFORM realize.register_canonical('HAS_LANGUAGE');
-
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                           rating, rd, volatility, witness_count, last_observed_at)
-    VALUES
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_sense, sense1]::public.blake3[], NULL))),  w_dog,  k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[sense1, k_senseof, synset1]::public.blake3[], NULL))), sense1, k_senseof, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_sense, synset1]::public.blake3[], NULL))), w_dog, k_sense, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_sense, sense_b]::public.blake3[], NULL))), w_dog,  k_sense,   sense_b, neutral + 250000000000, sharp_rd, 60000000, 4, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[sense_b, k_senseof, synset_b]::public.blake3[], NULL))), sense_b, k_senseof, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_sense, synset_b]::public.blake3[], NULL))), w_dog, k_sense, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_def, gloss1]::public.blake3[], NULL))),  synset1, k_def,    gloss1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_member, w_dog]::public.blake3[], NULL))),   synset1, k_member, w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_member, w_p]::public.blake3[], NULL))),     synset1, k_member, w_p,     neutral +  90000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_member, w_h]::public.blake3[], NULL))),     synset1, k_member, w_h,     neutral +  80000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_syn, synset1]::public.blake3[], NULL))), w_dog,  k_syn,     synset1, neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_p, k_syn, synset1]::public.blake3[], NULL))), w_p,    k_syn,     synset1, neutral +  90000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_h, k_syn, synset1]::public.blake3[], NULL))), w_h,    k_syn,     synset1, neutral +  80000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_isa, synset2]::public.blake3[], NULL))), synset1, k_isa,    synset2, neutral + 120000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset2, k_member, w_c]::public.blake3[], NULL))),     synset2, k_member, w_c,     neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset2, k_isa, syn_bad]::public.blake3[], NULL))), synset2, k_isa,    syn_bad, neutral - 300000000000, sharp_rd, 60000000, 3, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_causes, w_h]::public.blake3[], NULL))),     w_dog,  k_causes,  w_h,     neutral + 110000000000, sharp_rd, 60000000, 1, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_h, k_causes, synset1]::public.blake3[], NULL))), w_h,    k_causes,  synset1, neutral + 200000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[synset1, k_anto, w_h]::public.blake3[], NULL))),     synset1, k_anto,   w_h,     neutral +  95000000000, sharp_rd, 60000000, 1, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_dog, k_lang, lang_en]::public.blake3[], NULL))),     w_dog,  k_lang, lang_en,    neutral + 300000000000, sharp_rd, 60000000, 9, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_p, k_lang, lang_en]::public.blake3[], NULL))),     w_p,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_c, k_lang, lang_en]::public.blake3[], NULL))),     w_c,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_h, k_lang, lang_de]::public.blake3[], NULL))),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                           rating, rd, volatility, witness_count, last_observed_at)
-    VALUES
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_request, k_evokes, frame_people]::public.blake3[], NULL))),
-       w_request, k_evokes, frame_people,
-       neutral + 200000000000, sharp_rd, 60000000, 2, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_binder, k_evokes, frame_existence]::public.blake3[], NULL))),
-       w_binder, k_evokes, frame_existence,
-       neutral + 200000000000, sharp_rd, 60000000, 2, now());
-    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
-                           rating, rd, volatility, witness_count, last_observed_at)
-    VALUES
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_ja, k_sense, sense_ja]::public.blake3[], NULL))),    w_ja,     k_sense,   sense_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[sense_ja, k_senseof, syn_ja]::public.blake3[], NULL))), sense_ja, k_senseof, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_ja, k_sense, syn_ja]::public.blake3[], NULL))), w_ja, k_sense, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[w_ja, k_lang, lang_ja]::public.blake3[], NULL))),      w_ja,     k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
-      (public.blake3_send(public.laplace_compose(array_remove(ARRAY[sense_ja, k_lang, lang_ja]::public.blake3[], NULL))),  sense_ja, k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now());
-
-    -- Provenance-language fixture: English wins the exact sum-score argmax.
-    -- These are witness rows, not HAS_LANGUAGE assertions.
-    INSERT INTO laplace.attestations (
-        id, subject_id, type_id, object_id, source_id, context_id,
-        outcome, last_observed_at, observation_count, sum_score_fp1e9,
-        opponent_rd_fp1e9)
-    VALUES
-      (public.blake3_send(public.laplace_text_id('test/converse/attested-language/en')),
-       w_dog, k_sense, sense1, src, lang_en, 2, now(), 2, 2000000000, sharp_rd),
-      (public.blake3_send(public.laplace_text_id('test/converse/attested-language/de')),
-       w_dog, k_sense, sense1, src, lang_de, 2, now(), 1, 1000000000, sharp_rd);
+    FOR seg IN SELECT s.segment FROM public.laplace_segments(content) s ORDER BY s.i LOOP
+        n := n + 1;
+        IF public.laplace_tier(seg.segment) > 0 THEN
+            IF cardinality(public.laplace_parts(seg.segment)) <> char_length(seg.segment) THEN
+                RAISE EXCEPTION 'fixture word % is not a flat codepoint run', seg.segment;
+            END IF;
+            INSERT INTO public.entity(id,tier,coord,hilbert)
+            VALUES (public.laplace_id(seg.segment), public.laplace_tier(seg.segment),
+                    public.laplace_coord(seg.segment), public.laplace_hilbert(seg.segment))
+            ON CONFLICT DO NOTHING;
+            INSERT INTO public.physicality(entity,tier,hilbert,path)
+            VALUES (public.laplace_id(seg.segment), public.laplace_tier(seg.segment),
+                    public.laplace_hilbert(seg.segment),
+                    public.laplace_path(public.laplace_parts(seg.segment)))
+            ON CONFLICT DO NOTHING;
+        END IF;
+    END LOOP;
+    IF n > 1 THEN
+        IF public.laplace_compose(ARRAY(SELECT s.id FROM public.laplace_segments(content) s ORDER BY s.i))
+           IS DISTINCT FROM public.laplace_id(content) THEN
+            RAISE EXCEPTION 'fixture text % is not one composition of its words', content;
+        END IF;
+        INSERT INTO public.entity(id,tier,coord,hilbert)
+        VALUES (public.laplace_id(content), public.laplace_tier(content),
+                public.laplace_coord(content), public.laplace_hilbert(content))
+        ON CONFLICT DO NOTHING;
+        INSERT INTO public.physicality(entity,tier,hilbert,path)
+        VALUES (public.laplace_id(content), public.laplace_tier(content), public.laplace_hilbert(content),
+                public.laplace_path(ARRAY(SELECT s.id FROM public.laplace_segments(content) s ORDER BY s.i)))
+        ON CONFLICT DO NOTHING;
+    END IF;
+    RETURN public.laplace_id(content);
 END $$;
+CREATE FUNCTION pg_temp.node(parts public.blake3[], kind text, metadata bigint[] DEFAULT NULL)
+RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE id public.blake3 := public.laplace_compose(parts); point public.geometry; altitude smallint;
+        h bigint; path public.geometry := public.laplace_path(parts); vertex public.geometry;
+BEGIN
+    SELECT public.ST_GeomFromEWKB(public.laplace_centroid4d_ewkb(coalesce(e.coord,
+               public.ST_GeomFromEWKB(public.laplace_cp_coord_ewkb(public.laplace_codepoint(p)))))),
+           (max(coalesce(e.tier,0))+1)::smallint INTO point,altitude
+    FROM unnest(parts) p LEFT JOIN public.entity e ON e.id=p;
+    h := public.laplace_hilbert4(point) # '-9223372036854775808'::bigint;
+    IF metadata IS NOT NULL THEN
+        IF cardinality(metadata) <> public.ST_NPoints(path) THEN
+            RAISE EXCEPTION 'fixture metadata does not match the path''s runs';
+        END IF;
+        FOR i IN 1..cardinality(metadata) LOOP
+            vertex := public.ST_PointN(path,i);
+            path := public.ST_SetPoint(path,i-1,public.ST_MakePoint(public.ST_X(vertex),public.ST_Y(vertex),
+                      public.ST_Z(vertex),public.ST_M(vertex)+metadata[i]));
+        END LOOP;
+    END IF;
+    INSERT INTO public.entity(id,tier,coord,hilbert,mask)
+    VALUES (id,altitude,point,h,public.laplace_mask_slot('kind',kind)) ON CONFLICT DO NOTHING;
+    INSERT INTO public.physicality(entity,tier,hilbert,path,mask)
+    VALUES (id,altitude,h,path,public.laplace_mask_slot('kind',kind)) ON CONFLICT DO NOTHING;
+    RETURN id;
+END $$;
+-- [subject, predicate, object]: the predicate is the source's word.
+CREATE FUNCTION pg_temp.claim(s text, predicate text, o text) RETURNS public.blake3
+LANGUAGE sql AS $$
+    SELECT pg_temp.node(ARRAY[pg_temp.text_node(s),pg_temp.text_node(predicate),pg_temp.text_node(o)],'claim');
+$$;
+-- [lemma, language, identifier]: a lexical sense.
+CREATE FUNCTION pg_temp.sense(lemma text, language text, identifier text) RETURNS public.blake3
+LANGUAGE sql AS $$
+    SELECT pg_temp.node(ARRAY[pg_temp.text_node(lemma),pg_temp.text_node(language),pg_temp.text_node(identifier)],'tuple');
+$$;
+-- [lemma, lexical sense, [lemma, language, identifier]]: the entry has that sense.
+CREATE FUNCTION pg_temp.has_sense(lemma text, language text, identifier text) RETURNS public.blake3
+LANGUAGE sql AS $$
+    SELECT pg_temp.node(ARRAY[pg_temp.text_node(lemma),pg_temp.text_node('lexical sense'),
+                              pg_temp.sense(lemma,language,identifier)],'claim');
+$$;
+CREATE TEMP TABLE converse_claims(claim public.blake3);
+-- A source trunk [[source, name], [[file, name], record]] whose one record says
+-- each claim times[i] times, refuted where refuted[i]. The trunk is the witness.
+CREATE FUNCTION pg_temp.source(name text, claims public.blake3[], times integer[], refuted boolean[])
+RETURNS public.blake3
+LANGUAGE plpgsql AS $$
+DECLARE parts public.blake3[] := '{}'; metadata bigint[] := '{}'; name_id public.blake3 := pg_temp.text_node(name);
+        rec public.blake3; file_id public.blake3; trunk public.blake3;
+BEGIN
+    FOR i IN 1..cardinality(claims) LOOP
+        parts := parts || array_fill(claims[i], ARRAY[times[i]]);
+        -- said by its record (LP_SAID_RECORD << 30); a refutation is outcome loss (2 << 33)
+        metadata := metadata || (2147483648 + CASE WHEN refuted[i] THEN 17179869184 ELSE 0 END)::bigint;
+    END LOOP;
+    rec := pg_temp.node(parts || name_id, 'record', metadata || 0::bigint);
+    file_id := pg_temp.node(ARRAY[pg_temp.node(ARRAY[pg_temp.text_node('file'),name_id],'tuple'),rec],
+                            'file',ARRAY[4294967296,5368709120]::bigint[]);
+    trunk := pg_temp.node(ARRAY[pg_temp.node(ARRAY[pg_temp.text_node('source'),name_id],'tuple'),file_id],
+                          'file',ARRAY[4294967296,5368709120]::bigint[]);
+    -- A trunk is a known witness once it publishes attestations.
+    INSERT INTO public.attestation(claim,witness,lineage,games,tokens,score,"position",trust)
+    VALUES (md5('converse-witness-'||trunk::text)::public.blake3,trunk,NULL,1,1,1.0,NULL,0.85);
+    INSERT INTO converse_claims SELECT DISTINCT c FROM unnest(claims) c;
+    RETURN trunk;
+END $$;
+
+DO $$
+BEGIN
+    PERFORM pg_temp.text_node(w) FROM unnest(ARRAY['dog','h','p','c','犬','G',
+        'compilerrequest','compilerbinder','People','Existence']) w;
+    -- The English wordnet: senses (dog has two, the hot-dog sense the more
+    -- used), both synsets' definitions, the canine synset's hypernym, the animal
+    -- synset's refuted hypernym, and an antonym.
+    PERFORM pg_temp.source('wordnet',
+        ARRAY[pg_temp.has_sense('dog','en','canine'), pg_temp.has_sense('dog','en','hotdog'),
+              pg_temp.has_sense('p','en','canine'), pg_temp.has_sense('c','en','animal'),
+              pg_temp.claim('canine','definition of the synset','G'),
+              pg_temp.claim('hotdog','definition of the synset','F'),
+              pg_temp.claim('canine','hypernym','animal'),
+              pg_temp.claim('animal','hypernym','mineral'),
+              pg_temp.claim('canine','antonym','h')],
+        ARRAY[1,3,1,1,1,1,1,1,1], ARRAY[false,false,false,false,false,false,false,true,false]);
+    -- Another lexicon of the same concepts in German and Japanese; it states the
+    -- canine definition too, so that definition has two witnesses.
+    PERFORM pg_temp.source('omw',
+        ARRAY[pg_temp.has_sense('h','de','canine'), pg_temp.has_sense('犬','ja','shiba'),
+              pg_temp.claim('canine','definition of the synset','G')],
+        ARRAY[1,1,1], ARRAY[false,false,false]);
+    -- The concept hierarchy is shared: twelve more wordnets built on it each
+    -- state canine IS_A animal, so that claim stands confirmed.
+    PERFORM pg_temp.source('lex' || chr(96 + g),
+        ARRAY[pg_temp.claim('canine','hypernym','animal')], ARRAY[1], ARRAY[false])
+    FROM generate_series(1, 12) g;
+    -- A commonsense source: causation and synonymy.
+    PERFORM pg_temp.source('commons',
+        ARRAY[pg_temp.claim('dog','causes','h'), pg_temp.claim('h','causes','canine'),
+              pg_temp.claim('dog','synonym','canine'), pg_temp.claim('p','synonym','canine'),
+              pg_temp.claim('h','synonym','canine')],
+        ARRAY[1,1,1,1,1], ARRAY[false,false,false,false,false]);
+    -- FrameNet's lexical units, [frame, lexical unit, word]: the words that evoke
+    -- the routed frames.
+    PERFORM pg_temp.source('framenet',
+        ARRAY[pg_temp.claim('People','lexical unit','compilerrequest'),
+              pg_temp.claim('Existence','lexical unit','compilerbinder')],
+        ARRAY[1,1], ARRAY[false,false]);
+END $$;
+-- The ingest's stage schema, where the series fold takes its pending table.
+CREATE SCHEMA IF NOT EXISTS stage;
+CREATE UNLOGGED TABLE stage.converse_pending
+    (claim public.blake3, witness public.blake3, lineage public.blake3, games bigint,
+     score double precision, trust double precision);
+-- Each witness's series for each claim, as the trunks' containment states it
+-- (games, mean score, declared trust), staged and folded into consensus.
+INSERT INTO stage.converse_pending
+SELECT a.claim, a.trunk, NULL, a.games::bigint, a.score / a.games, a.trust
+FROM public.laplace_attested(ARRAY(SELECT DISTINCT claim FROM converse_claims)) a
+WHERE a.witness;
+SELECT public.laplace_attest_series('stage.converse_pending') AS claims_folded;
 
 -- The operator's primary language is a prior, not a gate.  With no English
 -- candidate for a Japanese prompt, ORIENT_TOPIC uses the prompt-language pass
 -- for this turn and records that it widened.  The profile value itself remains
 -- English in the receipt.
 SELECT o.rank = 1 AS elected,
-       o.primary_language = public.blake3_send(public.laplace_text_id('test/converse/lang_en')) AS primary_stays_en,
-       o.prompt_language = public.blake3_send(public.laplace_text_id('test/converse/lang_ja')) AS observed_ja,
-       o.effective_language = public.blake3_send(public.laplace_text_id('test/converse/lang_ja')) AS toggled_for_turn,
+       o.primary_language = public.blake3_send(public.laplace_text_id('en')) AS primary_stays_en,
+       o.prompt_language = public.blake3_send(public.laplace_text_id('ja')) AS observed_ja,
+       o.effective_language = public.blake3_send(public.laplace_text_id('ja')) AS toggled_for_turn,
        o.candidate_language IS NULL AS identity_stays_neutral,
        o.widened
-FROM converse.orient_topic('犬', public.blake3_send(public.laplace_text_id('test/converse/lang_en'))) o
+FROM converse.orient_topic('犬', public.blake3_send(public.laplace_text_id('en'))) o
 WHERE o.rank = 1;
 
 SELECT bool_and(NOT o.widened)
-       AND bool_and(o.effective_language = public.blake3_send(public.laplace_text_id('test/converse/lang_ja')))
+       AND bool_and(o.effective_language = public.blake3_send(public.laplace_text_id('ja')))
        AS matching_primary_does_not_widen
-FROM converse.orient_topic('犬', public.blake3_send(public.laplace_text_id('test/converse/lang_ja'))) o;
+FROM converse.orient_topic('犬', public.blake3_send(public.laplace_text_id('ja'))) o;
 
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
--- A content id may exist at multiple tiers; each input position still occurs
--- exactly once. Repeated input positions must not be collapsed with DISTINCT.
+-- Each input position occurs exactly once. Repeated input positions must not
+-- be collapsed with DISTINCT.
 SAVEPOINT token_identity;
-DO $token_facet$
-DECLARE
-    entity_id bytea := public.blake3_send(public.laplace_text_id('p'));
-    entity_type bytea;
-BEGIN
-    SELECT type_id
-      INTO STRICT entity_type
-      FROM laplace.entities
-     WHERE id = entity_id;
-END
-$token_facet$;
 SELECT count(*) = 2 AND count(DISTINCT ord) = 2
        AND bool_and(id = public.blake3_send(public.laplace_text_id('p'))) AS words_keep_positions
 FROM converse.prompt_words('p p');
@@ -187,11 +215,11 @@ SELECT c.shape = 'what_is' AS compiled_what_is,
        c.operand_ids = ARRAY[public.blake3_send(public.laplace_text_id('dog'))]::bytea[] AS dog_is_operand
 FROM converse.compile_prompt(
     'compilerrequest compilerbinder dog',
-    public.blake3_send(public.laplace_text_id('test/converse/lang_en'))) c;
+    public.blake3_send(public.laplace_text_id('en'))) c;
 
 SELECT count(*) = 0 AS compiler_abstains_without_route
 FROM converse.compile_prompt(
-    'dog', public.blake3_send(public.laplace_text_id('test/converse/lang_en')));
+    'dog', public.blake3_send(public.laplace_text_id('en')));
 
 SELECT public.blake3_send(public.laplace_text_id('dog')) = ANY(lexical.lexical_peers(public.blake3_send(public.laplace_text_id('dog')))) AS peer_includes_self;
 
@@ -243,7 +271,7 @@ SELECT NOT EXISTS (
     (SELECT * FROM scalar EXCEPT ALL SELECT * FROM projected)
     UNION ALL
     (SELECT * FROM projected EXCEPT ALL SELECT * FROM scalar)
-) AND (SELECT lang = public.blake3_send(public.laplace_text_id('test/converse/lang_en'))
+) AND (SELECT lang = public.blake3_send(public.laplace_text_id('en'))
        FROM scalar WHERE ord = 1) AS attested_language_batch_matches_scalar;
 
 SELECT count(*) = 0 AS attested_language_empty_batch_is_empty
@@ -269,23 +297,6 @@ SELECT (SELECT count(*) FROM scalar) > 0
 
 SELECT count(*) = 0 AS bubble_up_zero_bound_is_empty
 FROM taxonomy.bubble_up(public.blake3_send(public.laplace_text_id('dog')), NULL::bytea[], 0);
-
--- The set case operation is result-identical to independent scalar calls,
--- including a content id with no physicality (which still includes itself).
-WITH words AS (
-    SELECT ARRAY[public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('NoSuchPeer'))]::bytea[] AS ids
-), scalar AS (
-    SELECT w.id AS word_id, unnest(ARRAY[(w.id)::bytea]) AS variant_id
-    FROM words, unnest(words.ids) AS w(id)
-), batched AS (
-    SELECT b.word_id, b.variant_id
-    FROM words, (SELECT lp_w.x AS word_id,lp_w.x AS variant_id FROM unnest((words.ids)::bytea[]) lp_w(x) WHERE lp_w.x IS NOT NULL) b
-)
-SELECT NOT EXISTS (
-    (SELECT * FROM scalar EXCEPT SELECT * FROM batched)
-    UNION ALL
-    (SELECT * FROM batched EXCEPT SELECT * FROM scalar)
-) AS case_batch_matches_scalar;
 
 SELECT count(*) AS dog_senses FROM lexical.senses(public.blake3_send(public.laplace_text_id('dog')));
 
@@ -317,26 +328,41 @@ END $$;
 
 SELECT word FROM converse.prompt_state('what is a Dog') ORDER BY ord;
 
+-- Objects shared by several subjects' claims: dog, p and h are each a synonym
+-- of the canine synset. (The old shared object was a HAS_LANGUAGE cell, which
+-- has no Native claim: a sense's language is a part of its tuple.)
 SELECT support,
-       object_id = public.blake3_send(public.laplace_text_id('test/converse/lang_en')) AS is_lang_en
+       object_id = public.blake3_send(public.laplace_text_id('canine')) AS is_canine
 FROM consensus.shared_objects(ARRAY[public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('p'))])
 LIMIT 1;
 
 SELECT (SELECT sn.synset_id FROM lexical.senses(public.blake3_send(public.laplace_text_id('dog'))) sn LIMIT 1)
-       = public.blake3_send(public.laplace_text_id('test/converse/synset_b')) AS plain_top_is_b;
+       = public.blake3_send(public.laplace_text_id('hotdog')) AS plain_top_is_b;
 SELECT (SELECT sn.synset_id FROM lexical.senses(public.blake3_send(public.laplace_text_id('dog')), ARRAY[public.blake3_send(public.laplace_text_id('h'))]) sn LIMIT 1)
-       = public.blake3_send(public.laplace_text_id('test/converse/synset1')) AS context_flips_to_1;
+       = public.blake3_send(public.laplace_text_id('canine')) AS context_flips_to_1;
 
 SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.blake3_send(public.laplace_text_id('p')))::bytea],NULL)::public.blake3[]) lp_l) AS leaf_realizes;
-SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.laplace_hash128_blake3('test/converse/synset1'))::bytea],NULL)::public.blake3[]) lp_l) AS synset_realizes_member;
-SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(laplace.relation_type_id('IS_A'))::bytea],NULL)::public.blake3[]) lp_l) AS isa_label;
-SELECT (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN (ARRAY[laplace.relation_type_id('IS_A')])[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1) AS realized_path;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(ARRAY[public.laplace_text_id('canine')]) lp_l) AS synset_label;
+-- A relation is the source's own word; the registry reads it as its canonical type.
+SELECT lp_l.content AS isa_label, m.canonical AS isa_canonical
+FROM public.laplace_labels(ARRAY[public.laplace_text_id('hypernym')]) lp_l
+JOIN consensus.relation_metadata(ARRAY[public.blake3_send(lp_l.entity)]) m ON true;
+-- The claim [canine, hypernym, animal] realized part by part through the one
+-- Native realization (realize.path retired).
+WITH labels AS (
+    SELECT lp_l.i, lp_l.content
+    FROM public.laplace_labels(ARRAY[public.laplace_text_id('canine'),
+                                     public.laplace_text_id('hypernym'),
+                                     public.laplace_text_id('animal')]) lp_l
+)
+SELECT string_agg(CASE WHEN i = 2 THEN ' —' || content || '→ ' ELSE content END, '' ORDER BY i) AS realized_path
+FROM labels;
 
 SELECT type, fact, witnesses FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')));
 SELECT count(*) = 0 AS salient_facts_zero_is_empty
 FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')), NULL, 0);
 SELECT reply FROM converse.recall_intent('related', public.blake3_send(public.laplace_text_id('dog')), NULL, 'IS_ANTONYM_OF');
-SELECT fact FROM consensus.related_in(public.blake3_send(public.laplace_text_id('test/converse/synset1')), laplace.relation_type_id('CAUSES'));
+SELECT fact FROM consensus.related_in(public.blake3_send(public.laplace_text_id('canine')), laplace.relation_type_id('CAUSES'));
 
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('c')));
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('h')), public.blake3_send(public.laplace_text_id('c')));
@@ -359,8 +385,11 @@ SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_ban
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(public.blake3_send(public.laplace_text_id('dog')));
 
-SELECT bool_and(status = 'confirmed') AS isa_confirmed
-FROM converse.epistemic_status(public.blake3_send(public.laplace_text_id('dog'))) WHERE type = 'is a';
+-- The IS_A strands held by the canine synset, by their parts' declared relation.
+SELECT bool_and(s.status = 'confirmed') AS isa_confirmed
+FROM converse.epistemic_status(public.blake3_send(public.laplace_text_id('canine'))) s
+JOIN converse.epistemic_status_core(public.blake3_send(public.laplace_text_id('canine'))) c USING (strand)
+WHERE EXISTS (SELECT 1 FROM consensus.relation_metadata(c.parts) m WHERE m.canonical = 'IS_A');
 
 SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('h')));
 

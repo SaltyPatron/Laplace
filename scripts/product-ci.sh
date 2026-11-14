@@ -48,6 +48,7 @@ run_ci_contract_checks() {
     scripts/ingest-source.sh \
     scripts/check-deployed-revision.sh \
     scripts/publish-applications.sh \
+    tests/substrate-regress.sh \
     deploy/linux/deploy.sh
   ci_contract_check python3 -m py_compile \
     scripts/ci-impact-plan.py \
@@ -60,6 +61,9 @@ run_ci_contract_checks() {
   # A BEGIN ATOMIC body binds its callees at CREATE: the install and upgrade manifests must
   # define every callee first, or a fresh CREATE EXTENSION fails (42883 on staging).
   ci_contract_check python3 scripts/check-sql-manifest-dependencies.py
+  # The ISA literalism gates are shrink-only: a new literal or dead function fails, and a cleaned one must leave the
+  # baseline. Nothing ran them, so violations accrued unseen.
+  ci_contract_check python3 scripts/isa-gate-check.py
   ci_contract_check python3 scripts/test-sql-manifest-dependencies.py
   ci_contract_check python3 scripts/test-ci-workspace.py
   ci_contract_check python3 scripts/test-runtime-installation.py

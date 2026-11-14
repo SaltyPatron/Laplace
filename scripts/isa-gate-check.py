@@ -151,7 +151,10 @@ CEILINGS = {
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
     # 152 -> 88: the legacy laplace.* chess read family (sql/functions/chess/) is
     # deleted; its 64 relation-name literals are gone rather than allowlisted.
-    "g3_sql_vocabulary_literalism": 88,
+    # 88 -> 62 (2026-11-14): the Native retirement left epistemic_status and recall_walk_response spelling
+    # none of HAS_LANGUAGE, HAS_SENSE, IS_SENSE_OF, COMPLETES_TO, and dead witness_precedes_chain (PRECEDES) is
+    # deleted; the ceiling is the baseline that remains.
+    "g3_sql_vocabulary_literalism": 62,
     "g3_c_vocabulary_literalism": 0,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -175,7 +178,9 @@ CEILINGS = {
     # 389 -> 301: ConceptNet, Atomic, Tatoeba, Wiktionary, SemLink, and the shared
     # triple and bridge writers no longer spell manifest names. The file token is
     # the predicate.
-    "g3_csharp_vocabulary_literalism": 147,
+    # 147 -> 99 (2026-11-14): OpeningClassifier no longer spells HAS_FEATURE or IS_EXAMPLE_OF; the ceiling is
+    # the baseline that remains.
+    "g3_csharp_vocabulary_literalism": 99,
     "g8_band_literalism": 0,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

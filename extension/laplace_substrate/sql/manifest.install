@@ -87,6 +87,7 @@ functions/readback/canonical_names.sql.in
 functions/readback/register_canonical.sql.in
 functions/identity/relation_type_id.sql.in
 functions/identity/entity_type_id.sql.in
+functions/identity/physicality_id.sql.in
 generated/relation_set_ids.sql.in
 generated/relation_family_ids.sql.in
 functions/readback/register_canonicals.sql.in
@@ -157,7 +158,6 @@ functions/converse/recall_intent.sql.in
 functions/converse/query_shapes.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
-functions/converse/witness_precedes_chain.sql.in
 functions/converse/non_kin_assoc_types.sql.in
 functions/converse/converse_facts.sql.in
 functions/converse/converse_about.sql.in
@@ -232,7 +232,6 @@ functions/generation/walk_text.sql.in
 functions/converse/answer.sql.in
 functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
-functions/consensus/entity_exists.sql.in
 functions/inspect/consensus_out_labeled.sql.in
 views/v_attestation_readable.sql.in
 inference/synonyms.sql.in
@@ -281,8 +280,6 @@ functions/recall/recall_is_a_yes_reply.sql.in
 functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
-functions/highway/laplace_highway_match.sql.in
-functions/highway/laplace_highway_band_mask.sql.in
 functions/highway/consensus_band_edges.sql.in
 functions/ops/ingest_runs.sql.in
 functions/ops/substrate_pulse.sql.in
@@ -317,7 +314,6 @@ functions/highway/entities_has_highway.sql.in
 views/v_entities_highway.sql.in
 views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
-functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in

@@ -1,0 +1,5 @@
+-- A typed physicality's id, from the native physicality law: the identity the
+-- typed trajectory readers compute and probe for (entity, type).
+CREATE OR REPLACE FUNCTION laplace.physicality_id(p_entity bytea, p_type smallint) RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_physicality_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
