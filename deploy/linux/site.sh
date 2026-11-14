@@ -878,6 +878,9 @@ phase_serve() {
 # band-health contract runs inside a transaction it rolls back.
 phase_checks() {
   say "checks against the deployed $LAPLACE_DBNAME${LAPLACE_APP_DBNAME:+ and $LAPLACE_APP_DBNAME}"
+  # The substrate's regression suite, against the extensions this delivery installed, in a scratch database that
+  # takes $LAPLACE_DBNAME's extension settings.
+  PG_CONFIG="$LAPLACE_PG_PREFIX/bin/pg_config" LAPLACE_REGRESS_DB="laplace_regress_substrate_${GITHUB_RUN_ID:-$$}"     bash "$ROOT/tests/substrate-regress.sh" "$LAPLACE_DBNAME" || fail "laplace_substrate regression suite failed"
   local results="${RUNNER_TEMP:-$SITE_WORK}/authority-results"
   LAPLACE_TEST_APP_DB="${LAPLACE_APP_DB:-$LAPLACE_DB}" dotnet_app test     "$ROOT/app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" -c Release --nologo     -p:LAPLACE_BUILD_ROOT="$SITE_BUILD/authority" -p:OpenApiGenerateDocuments=false     --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests|FullyQualifiedName~PlatformOwner|FullyQualifiedName~BrowserDataProtectionTests'     --logger 'trx;LogFileName=authority.trx' --results-directory "$results" || fail "platform authority checks failed"
   python3 - "$results/authority.trx" <<'PY2'
