@@ -111,7 +111,7 @@ public sealed record ForwardTraceStep(
     [property: JsonPropertyName("event")] string Event,
     [property: JsonPropertyName("routing_round")] int RoutingRound);
 
-// One step of a consensus.walk_branches trace with sampled evidence, returned by
+// One step of a public.laplace_pull trace with sampled evidence, returned by
 // ExplainTraceAsync. Forward-pass receipts are ForwardTraceStep.
 public sealed record ExplainTraceStep(
     int Depth,

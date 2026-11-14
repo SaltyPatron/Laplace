@@ -44,10 +44,10 @@ WHERE n.nspname = 'laplace'
 
 SELECT count(*) AS physicality_type_entities FROM entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/CONTENT/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/BUILDING_BLOCK/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/PROJECTION/v1')),
+    public.blake3_send(public.laplace_text_id('substrate/physicality_type/PROJECTION_OUTPUT/v1'))
 );
  physicality_type_entities 
 ---------------------------
@@ -55,7 +55,7 @@ WHERE id IN (
 (1 row)
 
 SELECT relation_type_id('IS_A')
-       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
+       = public.blake3_send(public.laplace_text_id('IS_A')) AS relation_type_path_law;
  relation_type_path_law 
 ------------------------
  t
@@ -136,12 +136,6 @@ WHERE n.nspname = 'laplace' AND c.relname = 'codepoint_render';
 
 -- Rule #6 shared read surfaces (GH #463): one join, one anchor, senses, readable
 -- attestations. Presence is the law; emptiness of the live DB is not a failure.
-SELECT to_regclass('laplace.v_word_points') IS NOT NULL AS has_v_word_points;
- has_v_word_points 
--------------------
- t
-(1 row)
-
 SELECT to_regclass('laplace.v_word_senses') IS NOT NULL AS has_v_word_senses;
  has_v_word_senses 
 -------------------
@@ -154,10 +148,5 @@ SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attest
  t
 (1 row)
 
-SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
- has_word_anchor 
------------------
- t
-(1 row)
 
 -- Stable terminal marker keeps the final pg_regress result separator anchored.

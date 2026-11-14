@@ -4,7 +4,7 @@ using Laplace.Engine.Core;
 namespace Laplace.Engine.Core.Tests;
 
 /// <summary>
-/// ConsensusKeys.EdgeId is byte-identical to SQL laplace.consensus_id (BLAKE3 over
+/// ConsensusKeys.EdgeId is byte-identical to SQL public.laplace_compose (BLAKE3 over
 /// the actual strand vertices). Three-vertex vectors retain their known server
 /// bytes; an absent object is not an invented zero-filled third vertex.
 /// </summary>

@@ -11,7 +11,7 @@ SET search_path = laplace, public;
 
 \echo ====== 1. entity types: forbidden (WordNet_Sense_Key), text rows (Document), records (Source_Record) ======
 SELECT t.name AS type, t.expect,
-       (SELECT count(*) FROM entities e WHERE e.type_id = word_id(t.name)) AS entities
+       (SELECT count(*) FROM entities e WHERE e.type_id = public.blake3_send(public.laplace_text_id(t.name))) AS entities
 FROM (VALUES ('WordNet_Sense_Key', 'must be 0'),
              ('Document',          'only real documents (no recipe rows)'),
              ('Source_Record',     'recipe rows and file content trees'),
@@ -20,7 +20,7 @@ FROM (VALUES ('WordNet_Sense_Key', 'must be 0'),
 
 \echo ====== 2. Document entities by tier (recipe rows were tier >= 2 Documents) ======
 SELECT e.tier, count(*) AS documents
-FROM entities e WHERE e.type_id = word_id('Document')
+FROM entities e WHERE e.type_id = public.blake3_send(public.laplace_text_id('Document'))
 GROUP BY e.tier ORDER BY e.tier;
 
 \echo ====== 3. CORRESPONDS_TO objects by type, per witness ======
@@ -35,8 +35,8 @@ WITH per AS (
 )
 SELECT s.label AS witness, t.label AS object_type, p.claims
 FROM per p
-JOIN realize.display_label_batch((SELECT array_agg(DISTINCT source_id) FROM per)) s ON s.id = p.source_id
-JOIN realize.display_label_batch((SELECT array_agg(DISTINCT type_id) FROM per)) t ON t.id = p.type_id
+JOIN (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(((SELECT array_agg(DISTINCT source_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(((SELECT array_agg(DISTINCT source_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) s ON s.id = p.source_id
+JOIN (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(((SELECT array_agg(DISTINCT type_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(((SELECT array_agg(DISTINCT type_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) t ON t.id = p.type_id
 ORDER BY p.claims DESC LIMIT 60;
 
 \echo ====== 4. sense-key-shaped surfaces recorded as content (CORRESPONDS_TO text objects) ======
@@ -45,10 +45,10 @@ WITH objs AS (
     FROM attestations a
     JOIN entities o ON o.id = a.object_id
     WHERE a.type_id = relation_type_id('CORRESPONDS_TO')
-      AND o.type_id IN (word_id('Sentence'), word_id('Word'), word_id('WordNet_Sense_Key'))
+      AND o.type_id IN (public.blake3_send(public.laplace_text_id('Sentence')), public.blake3_send(public.laplace_text_id('Word')), public.blake3_send(public.laplace_text_id('WordNet_Sense_Key')))
     LIMIT 50000
 ), rendered AS (
-    SELECT r.* FROM realize.display_label_batch((SELECT array_agg(id) FROM objs)) r
+    SELECT r.* FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(((SELECT array_agg(id) FROM objs))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(((SELECT array_agg(id) FROM objs))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) r
 )
 SELECT count(*) FILTER (WHERE label ~ '%[0-9]:[0-9]{2}:[0-9]{2}') AS sense_key_like,
        count(*) AS sampled,
@@ -59,13 +59,13 @@ FROM rendered;
 \echo        (a mismatch is a text entity relabelled by lexicalization or another stage; must be 0)
 WITH sample AS (
     SELECT e.id FROM entities e
-    WHERE e.type_id = word_id('Sentence') AND e.tier BETWEEN 2 AND 3
+    WHERE e.type_id = public.blake3_send(public.laplace_text_id('Sentence')) AND e.tier BETWEEN 2 AND 3
     LIMIT 2000
 ), lab AS (
-    SELECT l.id, l.label FROM realize.display_label_batch((SELECT array_agg(id) FROM sample)) l
+    SELECT l.id, l.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(((SELECT array_agg(id) FROM sample))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(((SELECT array_agg(id) FROM sample))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) l
 ), txt AS (
     SELECT s.id, t.text
-    FROM sample s, LATERAL (SELECT realize.render_batch(ARRAY[s.id]) AS r) q,
+    FROM sample s, LATERAL (SELECT ARRAY(SELECT lp_l.content FROM unnest((ARRAY[s.id])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[s.id])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS r) q,
          LATERAL (SELECT q.r[1] AS text) t
 )
 SELECT count(*) AS sampled,
@@ -81,10 +81,10 @@ FROM ingest_run_journal ORDER BY source_name, started_at DESC;
 \echo ====== 7. Atomic2020 claims by relation (C# decomposer; source id is its name) ======
 WITH per AS (
     SELECT a.type_id, count(*) AS claims
-    FROM attestations a WHERE a.source_id = source_id('Atomic2020Decomposer')
+    FROM attestations a WHERE a.source_id = public.blake3_send(public.laplace_text_id('substrate/source/Atomic2020Decomposer/v1'))
     GROUP BY 1
 )
 SELECT r.label AS relation, p.claims
 FROM per p
-JOIN realize.display_label_batch((SELECT array_agg(type_id) FROM per)) r ON r.id = p.type_id
+JOIN (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(((SELECT array_agg(type_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(((SELECT array_agg(type_id) FROM per))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) r ON r.id = p.type_id
 ORDER BY p.claims DESC;

@@ -17,14 +17,13 @@ static SPIPlanPtr peers_native_one_plan = NULL;
 static SPIPlanPtr peers_legacy_one_plan = NULL;
 static SPIPlanPtr peers_native_batch_plan = NULL;
 static SPIPlanPtr peers_legacy_batch_plan = NULL;
-static SPIPlanPtr peers_widen_plan = NULL;
 
 /*
  * Lexical peers of every input word, one row per input position (NULL inputs
  * yield NULL rows). A word that is itself the subject of a HAS_SENSE-family
- * consensus cell or native sense tuple is its own only peer; every other word
- * is widened to its case variants by one word_case_variants_batch call. One
- * indexed read classifies the whole set; peers are emitted in bytewise order.
+ * consensus cell or native sense tuple is its own only peer, and so is every
+ * other word: case is content, never folded or widened. One indexed read
+ * classifies the whole set; peers are emitted in bytewise order.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_lexical_peers_batch);
 
@@ -212,56 +211,6 @@ pg_laplace_lexical_peers_batch(PG_FUNCTION_ARGS)
 
 				if (!isnull && datum_key16(d, key))
 					(void) hash_search(resolved, key, HASH_ENTER, NULL);
-			}
-		}
-	}
-
-	/* Widen only exact-sense misses, in one native batch. */
-	if (n_words > 0)
-	{
-		Datum *misses = (Datum *) palloc(sizeof(Datum) * n_words);
-		int    n_misses = 0;
-
-		for (int i = 0; i < n_words; i++)
-			if (hash_search(resolved, words[i].key, HASH_FIND, NULL) == NULL)
-				misses[n_misses++] = make_bytea16(words[i].key);
-		if (n_misses > 0)
-		{
-			ArrayType *miss_array = construct_array(misses, n_misses, BYTEAOID,
-											-1, false, TYPALIGN_INT);
-			Oid        at[1] = { BYTEAARRAYOID };
-			Datum      av[1] = { PointerGetDatum(miss_array) };
-
-			rc = SPI_execute_plan(
-				ensure_lexical_plan(
-					&peers_widen_plan,
-					"SELECT word_id, variant_id "
-					"FROM lexical.word_case_variants_batch($1)",
-					1, at, "lexical_peers_batch"),
-				av, NULL, true, 0);
-			if (rc != SPI_OK_SELECT)
-				elog(ERROR, "lexical_peers_batch: case widening failed: %s",
-					 SPI_result_code_string(rc));
-			for (uint64 row = 0; row < SPI_processed; row++)
-			{
-				bool             isnull;
-				char             wkey[16], vkey[16];
-				Datum            wd;
-				Datum            vd;
-				BatchWordLookup *entry;
-
-				wd = SPI_getbinval(SPI_tuptable->vals[row],
-								   SPI_tuptable->tupdesc, 1, &isnull);
-				if (isnull || !datum_key16(wd, wkey))
-					continue;
-				vd = SPI_getbinval(SPI_tuptable->vals[row],
-								   SPI_tuptable->tupdesc, 2, &isnull);
-				if (isnull || !datum_key16(vd, vkey))
-					continue;
-				entry = (BatchWordLookup *) hash_search(lookup, wkey,
-													 HASH_FIND, NULL);
-				if (entry != NULL)
-					batch_word_add_variant(&words[entry->index], vkey);
 			}
 		}
 	}

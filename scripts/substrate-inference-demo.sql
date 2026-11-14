@@ -5,20 +5,20 @@
 -- relation / content ids (the prior pg_temp.relation_type_id used a different
 -- salt than relation_type_id() and silently queried empty bands).
 --
--- Default subject = word_id('hot'). Override with native encode() hex:
+-- Default subject = public.blake3_send(public.laplace_text_id('hot')). Override with native encode() hex:
 --   psql -v subj=36fcbb29fdd839df97da13190a9983c2 -f scripts/substrate-inference-demo.sql
 SET search_path = laplace, public;
 
 \if :{?subj}
 SELECT decode(:'subj', 'hex') AS subject_id \gset
 \else
-SELECT word_id('hot') AS subject_id \gset
+SELECT public.blake3_send(public.laplace_text_id('hot')) AS subject_id \gset
 \endif
 
 \echo '== A. CONTENT ROUND-TRIP (entity -> its own text, no model in the path) =='
 SELECT encode(:'subject_id'::bytea, 'hex') AS subject_hex,
        render_text(:'subject_id'::bytea) AS recovered_surface,
-       realize.realize(:'subject_id'::bytea) AS realized;
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(:'subject_id'::bytea)::bytea],NULL)::public.blake3[]) lp_l) AS realized;
 
 \echo '== B. RANKED-μ: top EMBEDS channels of the subject (sorted index scan) =='
 SELECT left(encode(object_id,'hex'),16) AS channel,

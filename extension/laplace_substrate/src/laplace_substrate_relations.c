@@ -240,29 +240,6 @@ pg_relation_canonical(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(def->canonical));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_hash128_lo);
-
-Datum
-pg_laplace_hash128_lo(PG_FUNCTION_ARGS)
-{
-    bytea         *b;
-    const uint8_t *p;
-    uint64_t       val = 0;
-
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-    b = PG_GETARG_BYTEA_PP(0);
-    if (VARSIZE_ANY_EXHDR(b) < 8)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("hash128_lo: id must be at least 8 bytes (got %zu)",
-                        (size_t) VARSIZE_ANY_EXHDR(b))));
-    p = (const uint8_t *) VARDATA_ANY(b);
-    for (int i = 0; i < 8; i++)
-        val = (val << 8) | (uint64_t) p[i];
-    PG_RETURN_INT64((int64) val);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_qualifier_bit);
 
 Datum

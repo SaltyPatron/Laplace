@@ -30,20 +30,13 @@ set(EXT_EXECUTION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/content_resolve_phrase.c
-    src/declared_paths.c
-    src/constituents_closure.c
-    src/text_root_placements.c
+    src/query_program.c
     src/content_trajectory_read.c
-    src/physicality_descriptor_readback.c
-    src/content_carrier_vertices.c
     src/identity_scan.c
     src/content_membership_read.c
-    src/containers_of.c
-    src/content_text_read.c
     src/display_native.c
     src/attestation_response.c
     src/observation_read.c
-    src/conversation_session.c
     src/recall.c
     src/recall_fast.c
     src/recall_route.c
@@ -58,7 +51,6 @@ set(EXT_EXECUTION_SOURCES
     src/cognition_program.c
     src/cognition_program_fingerprint.c
     src/steer_candidates.c
-    src/explore_web.c
     src/forward_respond.c
     src/forward_respond_terms.c
     src/trajectory_continuations.c
@@ -68,23 +60,15 @@ set(EXT_EXECUTION_SOURCES
     src/trajectory_generate_election.c
     src/trajectory_generate_couple.c
     src/word_adjacency.c
-    src/realize_batch.c
-    src/realize_batch_arms.c
-    src/render_label_batch.c
     src/prompt_coherence.c
     src/prompt_coherence_scan.c
     src/prompt_language.c
-    src/geometry_successors.c
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/entity_mask_write.c
     src/band_leaders.c
-    src/generate_walk.c
-    src/generate_walk_plans.c
-    src/generate_walk_render.c
     src/laplace_substrate_relations.c
     src/lexical_case.c
-    src/lexical_case_batch.c
     src/lexical_case_peers.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
@@ -214,23 +198,14 @@ set(EXT_C_SOURCES
     src/identity_scan.c
     src/content_trajectory_read.c
     src/content_membership_read.c
-    src/content_text_read.c
     src/prompt_coherence.c
     src/prompt_coherence_scan.c
     src/prompt_language.c
     src/consensus_fold_step.c
-    src/generate_walk.c
-    src/generate_walk_plans.c
-    src/generate_walk_render.c
-    src/variant_synth.c
-    src/astar_path.c
     src/graph_taxonomy.c
-    src/graph_taxonomy_relate.c
     src/graph_contrast.c
-    src/graph_cascade.c
     src/foundry_crawl.c
     src/perfcache.c
-    src/grammar_source.c
     src/descent_probe.c
     src/fold_route.c
     src/fold_route_plans.c
@@ -242,18 +217,13 @@ set(EXT_C_SOURCES
     src/band_leaders.c
     src/consensus_scan.c
     src/display_native.c
-    src/geometry_successors.c
     src/highway_mask.c
     src/highway_mask_deposit.c
     src/vocabulary.c
     src/entity_mask_write.c
-    src/model_factor.c
     src/lexical_case.c
-    src/lexical_case_batch.c
     src/lexical_case_peers.c
     src/steered_walk.c
-    src/realize_batch.c
-    src/realize_batch_arms.c
 )
 
 if(WIN32)

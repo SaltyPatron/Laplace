@@ -105,7 +105,7 @@ public static partial class NpgsqlSubstrateReads
         int Depth, string[] PathHex, string[] TypePathHex, string EntityIdHex, string EntityLabel,
         decimal EffMu, decimal PathMu, long Witnesses);
 
-    /// <summary><c>consensus.walk_branches(converse.resolve(prompt), NULL, depth, beam)</c> — the explain trace.</summary>
+    /// <summary><c>public.laplace_pull</c> from the prompt's Native identity — the explain trace.</summary>
     public static Task<IReadOnlyList<WalkBranchStepRow>> ExplainTraceStepsAsync(
         NpgsqlConnection conn, string prompt, int depth, int beam, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -123,7 +123,7 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct WalkBranchRow(
         int Depth, string Path, decimal EffMu, decimal PathMu, long Witnesses);
 
-    /// <summary><c>consensus.walk_branches</c> over converse.resolve(prompt) or a hex entity id.</summary>
+    /// <summary><c>public.laplace_pull</c> from the prompt's Native identity or a hex entity id.</summary>
     public static Task<IReadOnlyList<WalkBranchRow>> WalkBranchesAsync(
         NpgsqlDataSource dataSource, string? prompt, string? entityHex, string? relationType,
         int depth, int breadth, CancellationToken ct,
@@ -183,7 +183,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "band_facts", onError: onError);
 
-    /// <summary><c>consensus.walk_strongest(topic, NULL, depth)</c> — greedy single chain.</summary>
+    /// <summary><c>public.laplace_pull</c>: the cheapest chain at the deepest hop.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> WalkStrongestAsync(
         NpgsqlDataSource dataSource, byte[] topic, int depth, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -196,7 +196,7 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "walk_strongest", onError: onError);
 
     /// <summary>
-    /// <c>consensus.walk_branches</c> gated by a highway band mask and/or named relation type.
+    /// <c>public.laplace_pull</c>, optionally restricted to a named relation's Native middle (bands have no Native analog).
     /// </summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> WalkBranchesBeamAsync(
         NpgsqlDataSource dataSource, byte[] topic, string? relationType, int[]? bands,
@@ -215,7 +215,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "walk_branches", onError: onError);
 
-    /// <summary><c>converse.astar_path(topic, ARRAY[topic2], depth, NULL, directed, geometry)</c>.</summary>
+    /// <summary><c>public.laplace_pull</c> from topic to topic2; directed and geometry have no Native analog.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> AstarPathAsync(
         NpgsqlDataSource dataSource, byte[] topic, byte[] topic2, int depth,
         bool directed, bool useGeometry, CancellationToken ct,
@@ -248,7 +248,7 @@ public static partial class NpgsqlSubstrateReads
                 p.Add(new NpgsqlParameter("seed", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)seed ?? DBNull.Value });
             }, ct: ct, label: "walk_continuations", onError: onError);
 
-    /// <summary><c>generation.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
+    /// <summary>The observation holding the word nearest a sentence in length, as text; a word held by more than k observations is a hub and answers nothing.</summary>
     public static Task<string?> RecallTrajectoryAnswerAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -259,7 +259,7 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("k", k);
             }, ct: ct, label: "recall_trajectories", onError: onError);
 
-    /// <summary>Top <c>consensus.salient_facts(word_id(w), NULL, k)</c> fact by eff_mu.</summary>
+    /// <summary>Top <c>consensus.salient_facts(laplace_text_id(w), NULL, k)</c> fact by eff_mu.</summary>
     public static Task<string?> SalientFactForWordAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>

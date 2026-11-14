@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTIER_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/forward_frontier.sql.in"
 WALK_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in"
 WALK_CONTINUATIONS_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in"
-CHAT_PATH = ROOT / "extension/laplace_substrate/sql/functions/converse/chat.sql.in"
 COGNITION_COMPLETION_PATH = ROOT / "extension/laplace_substrate/tests/sql/cognition_completion.sql"
 OPERATIONAL_MEMORY_PATH = ROOT / "extension/laplace_substrate/tests/sql/operational_memory.sql"
 REGRESS_CMAKE_PATH = ROOT / "extension/laplace_substrate/tests/CMakeLists.txt"
@@ -40,7 +39,7 @@ def main() -> int:
     frontier = strip_sql_comments(FRONTIER_PATH.read_text())
     walk = strip_sql_comments(WALK_PATH.read_text())
     walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
-    chat = strip_sql_comments(CHAT_PATH.read_text())
+
     cognition_completion = COGNITION_COMPLETION_PATH.read_text()
     operational_memory = OPERATIONAL_MEMORY_PATH.read_text()
     regress_cmake = REGRESS_CMAKE_PATH.read_text()
@@ -55,14 +54,12 @@ def main() -> int:
 
     # Exact observation identity precedes cognition. No text heuristic is
     # permitted to replace the canonical prompt tree.
-    assert count(function_slice(walk, "generation.forward_text", "converse.forward_turn"),
+    assert count(function_slice(walk, "generation.forward_text", "generation.walk_text"),
                  "generation.forward_program(") == 1, \
         "forward_text must execute the native cognition program exactly once"
-    observed = function_slice(walk, "converse.forward_turn_observed", "generation.walk_text")
-    assert count(observed, "generation.forward_program(") == 1, \
-        "an observed turn owns its answer and receipts through one native program"
-    assert count(walk, "generation.forward_program(") == 2, \
-        "only forward_text and the observed turn execute the native cognition program"
+    assert count(walk, "generation.forward_program(") == 1, \
+        "only forward_text executes the native cognition program; a conversation turn is the Engine's"
+    assert "FUNCTION converse.forward_turn" not in walk
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
     assert "converse.prompt_operands(" not in walk
@@ -75,7 +72,7 @@ def main() -> int:
 
     # Natural text has no hard-coded completion vocabulary. Its only output is
     # the completed semantic act from the shared program.
-    forward_text = function_slice(walk, "generation.forward_text", "converse.forward_turn")
+    forward_text = function_slice(walk, "generation.forward_text", "generation.walk_text")
     assert "CONTINUATION_OUTPUT" not in forward_text
     assert "NULL::bytea[]" in forward_text
     assert "r.completion" in forward_text
@@ -308,29 +305,11 @@ def main() -> int:
     assert "FUNCTION generation.forward_frontier(" not in walk
     assert "FUNCTION generation.forward_route_trace(" not in walk
 
-    # Natural chat enters the forward program for every open turn (spec 36; read-path.md: no single
-    # operation "is the read architecture by itself"). The joint meeting of the turn's content terms is
-    # COUPLE, the program's second phase, never a separate first answer. The envelope comes from the
-    # governed firmware image, not from literals.
-    natural = re.search(r"IF shape IS NULL THEN(.*?)\n    ELSE\n", chat, re.S)
-    assert natural is not None
-    natural_body = natural.group(1)
-    assert "converse.answer(" not in natural_body, "an open turn must not be answered by one phase before the program"
-    assert "converse.forward_turn(" in natural_body
-    call = re.search(r"FROM converse\.firmware\(\) f,\s*converse\.forward_turn\(\s*"
-                     r"p_prompt,\s*p_session,\s*f\.steps,\s*f\.max_stride,\s*f\.spread,"
-                     r"\s*f\.top_k,\s*NULL::bigint,\s*f\.semantic_hops,\s*f\.fanout\)",
-                     natural_body)
-    assert call is not None, "natural chat must read its envelope from the firmware image"
-    assert count(chat, "converse.forward_turn(") == 1
-    assert "generation.forward_text(" not in chat
-    assert "chat_scaffold" not in natural_body
-
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"obligations=native semantic_act=hash-bound realization=completion-gated "
         f"query_state=persistent candidate_evidence=exact evidence=typed-separate "
-        f"intent=explicit-witnessed-invocation execution=single-native-program route_owner=native chat_steps=firmware"
+        f"intent=explicit-witnessed-invocation execution=single-native-program route_owner=native"
     )
     return 0
 

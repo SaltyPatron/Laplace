@@ -51,7 +51,7 @@ BEGIN ATOMIC
     WITH params AS MATERIALIZED (
         SELECT laplace.relation_band_types(1) AS t_def,
                laplace.relation_band_types(ARRAY[1,2,4,7]) AS t_band,
-               generation.separator_ids() AS t_sep,
+               (public.laplace_separator_ids()::bytea[]) AS t_sep,
                (SELECT array_agg(DISTINCT p.id ORDER BY p.id)
                   FROM converse.prompt_words(p_prompt) p
                  WHERE p.id IS NOT NULL) AS prompt_ids
@@ -118,7 +118,7 @@ BEGIN ATOMIC
         SELECT co.entity_id AS gid
         FROM elected el
         CROSS JOIN params pr
-        CROSS JOIN LATERAL structural.containers_containing_all(pr.prompt_ids) co
+        CROSS JOIN LATERAL (SELECT public.blake3_send(h.entity) AS entity_id FROM public.laplace_holders(ARRAY(SELECT DISTINCT public.blake3_from_bytea(x) FROM unnest(pr.prompt_ids) x WHERE x IS NOT NULL), ARRAY(SELECT DISTINCT public.blake3_from_bytea(x) FROM unnest(pr.prompt_ids) x WHERE x IS NOT NULL), false, -1::smallint, -1::bigint, 2::smallint) h) co
         WHERE el.syn IS NOT NULL
     ),
     gids AS MATERIALIZED (
@@ -141,9 +141,11 @@ BEGIN ATOMIC
     toks AS (
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
-        CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
-             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE u.ctier = 2
+        CROSS JOIN LATERAL (
+            SELECT public.blake3_send(v.id) AS entity_id, v.ord
+            FROM public.laplace_physicalities(ARRAY[public.blake3_from_bytea(g.gid)]) h
+            CROSS JOIN LATERAL unnest(public.laplace_parts(h.path)) WITH ORDINALITY AS v(id, ord)
+        ) u
     ),
     ws AS MATERIALIZED (
         SELECT DISTINCT t.entity_id AS id,
@@ -219,8 +221,8 @@ BEGIN ATOMIC
     ),
     realized AS MATERIALIZED (
         SELECT i.a,
-               realize.resolve_name_batch(i.a, p_lang) AS lbl,
-               realize.render_text_batch(i.a) AS txt
+               ARRAY(SELECT lp_l.content FROM unnest((i.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((i.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS lbl,
+               ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((i.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((i.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

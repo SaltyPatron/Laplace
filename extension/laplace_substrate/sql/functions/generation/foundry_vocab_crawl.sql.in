@@ -7,7 +7,7 @@ BEGIN ATOMIC
 
     WITH seed_ids AS (
         SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-        FROM (SELECT laplace.word_id(s) AS wid FROM unnest(p_seeds) AS s) q
+        FROM (SELECT public.blake3_send(public.laplace_text_id(s)) AS wid FROM unnest(p_seeds) AS s) q
         WHERE wid IS NOT NULL
     ),
 
@@ -37,20 +37,27 @@ BEGIN ATOMIC
 
 
 
-    -- Pillar 5 (2026-07-20): sequence proposals come from geometry_successors --
-    -- the next content constituent in the text projection of every trajectory --
-    -- not from PRECEDES consensus, which merely materialized the same sequence
-    -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
-    -- frequency (seen), not consensus.eff_mu, because there is no rated edge to read.
-    -- This is proposal evidence, not a direct semantic edge: the underlying
-    -- structural path remains point -> containing composition -> constituent.
+    -- Sequence proposals: what follows each seed in every Native observation that
+    -- holds it (laplace_holders + laplace_follows), not PRECEDES consensus, which
+    -- merely restated the sequence the observation already holds. Weight is the
+    -- observed frequency (seen), because there is no rated edge to read. A seed held
+    -- by more than 4096 observations is a hub: reached, not crossed.
     order1 AS (
         SELECT gs.point_id,
                gs.successor_id AS entity_id,
                gs.seen::numeric AS w,
                row_number() OVER (PARTITION BY gs.point_id ORDER BY gs.seen DESC, gs.successor_id) AS rn
         FROM seed_ids si
-        CROSS JOIN LATERAL structural.geometry_successors_batch(si.ids, p_fanout, 8, false) gs
+        CROSS JOIN LATERAL (
+            SELECT si.ids[h.ordinal] AS point_id, public.blake3_send(f.id) AS successor_id, count(*) AS seen
+            FROM (SELECT ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest(si.ids) WITH ORDINALITY AS u(x, n)
+                               ORDER BY n) AS keys) k
+            CROSS JOIN LATERAL public.laplace_holders(k.keys, '{}'::public.blake3[], true, -1::smallint,
+                4096::bigint, 2::smallint) h
+            CROSS JOIN LATERAL unnest(public.laplace_follows(h.path, ARRAY[k.keys[h.ordinal]])) AS f(id)
+            WHERE h.path IS NOT NULL
+            GROUP BY si.ids[h.ordinal], f.id
+        ) gs
         JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.entity_type_id('Word')
     ),
     order1_cut AS (
@@ -146,14 +153,14 @@ BEGIN ATOMIC
     rendered AS (
         SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
         FROM ids_arr a
-        CROSS JOIN LATERAL unnest(a.ids, realize.render_text_batch(a.ids))
+        CROSS JOIN LATERAL unnest(a.ids, ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((a.ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((a.ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
                    WITH ORDINALITY AS u(entity_id, s, ord)
         WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
     ),
     clean AS (
         SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri
         FROM rendered n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT public.laplace_text_is(n.s, 'White_Space', 'Yes')
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
           -- 2026-07-09 (finish-line Phase 2): the old `~ '[[:alpha:]]'` gate made
           -- punctuation and numerals unrepresentable — no synthesized model could emit

@@ -2,7 +2,7 @@ SET search_path = laplace, public;
 
 WITH seed_ids AS (
     SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-    FROM (SELECT word_id(s) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
+    FROM (SELECT public.blake3_send(public.laplace_text_id(s)) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
 ),
 order1 AS (
     SELECT c.object_id AS entity_id, consensus.eff_mu(c.rating, c.rd)::numeric AS w,
@@ -29,10 +29,10 @@ order_closure AS (
     FROM (SELECT entity_id, weight FROM order1_cut UNION ALL SELECT entity_id, weight FROM order2_cut) u
     GROUP BY entity_id
 )
-SELECT 'closure' AS stage, realize.render_text(entity_id, 40) AS surface, weight, rn FROM order_closure
-WHERE realize.render_text(entity_id, 40) IN ('France', 'Paris', 'of', 'capital', 'france')
+SELECT 'closure' AS stage, (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) AS surface, weight, rn FROM order_closure
+WHERE (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('France', 'Paris', 'of', 'capital', 'france')
    OR rn <= 8
 UNION ALL
-SELECT 'order2' AS stage, realize.render_text(entity_id, 40), weight, rn FROM order2
-WHERE realize.render_text(entity_id, 40) IN ('France', 'Paris') OR rn BETWEEN 348 AND 355
+SELECT 'order2' AS stage, (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l), weight, rn FROM order2
+WHERE (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('France', 'Paris') OR rn BETWEEN 348 AND 355
 ORDER BY stage, rn;

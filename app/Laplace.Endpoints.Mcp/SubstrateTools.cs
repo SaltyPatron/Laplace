@@ -41,6 +41,8 @@ internal sealed partial class SubstrateTools : IMcpTools
         _ownsDataSources = true;
         _turns = new Lazy<ConversationTurns>(() =>
             new ConversationTurns(LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, connectionString)));
+        _witnesses = new Lazy<RuntimeWitnessRecorder>(() =>
+            new RuntimeWitnessRecorder(LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, connectionString)));
     }
 
     public SubstrateTools(NpgsqlDataSource db, NpgsqlDataSource dbReadOnly)
@@ -49,11 +51,11 @@ internal sealed partial class SubstrateTools : IMcpTools
         _dbReadOnly = dbReadOnly;
         _ownsDataSources = false;
         _turns = new Lazy<ConversationTurns>(ConversationTurns.Installed);
+        _witnesses = new Lazy<RuntimeWitnessRecorder>(RuntimeWitnessRecorder.Installed);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_plainWriter is IAsyncDisposable writer) await writer.DisposeAsync();
         if (_ownsDataSources)
         {
             await _dbReadOnly.DisposeAsync();
@@ -93,7 +95,7 @@ internal sealed partial class SubstrateTools : IMcpTools
                          ("lang", "string", "target language for translate", false)),
             (s, a) => s.Query(a)),
         new("taxonomy", "The IS_A tree around a topic (up to root, or child kinds).",
-            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. For concept -> surface realizations use taxonomy.bubble_down via `op`; dir='child' here is IS_A sub-kinds. Rows use converse.label_or_hex(a cleaned display name), not realize.render(the actual content) -- see the bubble tool's note on that distinction.",
+            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via public.laplace_pull's cheapest deepest chain over hypernym claims, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. For concept -> surface realizations use taxonomy.bubble_down via `op`; dir='child' here is IS_A sub-kinds. Rows are labeled by public.laplace_labels, the Native substrate's labels.",
             () => Schema(("term", "string", "the topic (omit if entity given)", false),
                          ("entity", "string", "hex entity id to root at", false)),
             (s, a) => s.Taxonomy(a)),
@@ -112,21 +114,19 @@ internal sealed partial class SubstrateTools : IMcpTools
             () => Schema(("prompt", "string", "the message", true),
                          ("session", "string", "session key for continuity ([A-Za-z0-9._@-]{1,128}); default, this server process's session", false)),
             (s, a) => s.ChatTurn(a)),
-        new("witness", "Deposit a fact as witnessed content (the write lane).",
-            "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
-            () => Schema(("text", "string", "the fact/note to witness (plain prose)", true),
-                         ("origin", "string", "provenance tag, default 'agent/note'", false)),
+        new("witness", "Record a note as content this agent gives (the write lane).",
+            "Record a note as content: the text is a file the Engine records as what the runtime witness mcp-local gives at UserPromptContent (laplace witness), an observation outranked by every curated source, the same content wherever its text stands. Returns the witness trunk and the file trunk. The same note given again adds nothing.",
+            () => Schema(("text", "string", "the note, as it is", true)),
             (s, a) => s.WitnessFact(a)),
-        new("feedback", "Confirm or refute a claim (Glicko win/loss on an edge).",
-            "Confirm or refute a claim (the Gödel-engine feedback lane, same implementation as the CLI attest). Terms resolve at the SURFACE/word layer — use bubble first when the claim lives on a synset/hub (same text renders at three layers; feedback lands where you aim it). Triple mode: subject + relation (canonical, e.g. IS_A, RELATED_TO) + object — a confirm is a Glicko win for the edge, a refute is a loss that can drive it signed-negative until walks drop it. Chain mode: tokens (comma-separated, 2+) attest PRECEDES pairs. Folds immediately; returns consensus before/after so you can watch the rating move.",
+        new("feedback", "Confirm or refute one claim (a statement this agent witnesses).",
+            "Confirm or refute one claim, [subject, relation, object] or [subject, relation]: each part is the text it is, the relation this agent's own word for it. The verdict is a statement of the runtime witness mcp-local at UserPromptContent (laplace witness), confirm 1 and refute 0, folded into the claim's standing in the database; the same verdict stated again moves nothing. Returns the claim, the witness and the claim's Native standing before and after.",
             () => Schema(("verdict", "string", "'confirm' or 'refute'", true),
-                         ("subject", "string", "triple mode: subject term", false),
-                         ("relation", "string", "triple mode: canonical relation type", false),
-                         ("object", "string", "triple mode: object term", false),
-                         ("tokens", "string", "chain mode: comma-separated tokens (2+)", false)),
+                         ("subject", "string", "the claim's subject, as text", true),
+                         ("relation", "string", "the relation, the word as you would write it", true),
+                         ("object", "string", "the claim's object, as text; omit for a claim of two parts", false)),
             (s, a) => s.Feedback(a)),
         new("walk", "Beam-walk the consensus graph from a prompt or entity.",
-            "Beam-walk the consensus graph from a prompt (consensus.walk_branches), ranked by relation rank times the signed Glicko expectation of the folded rating/RD state, gated by the highway mask when relation_type narrows it. Pass relation_type whenever you want to constrain the walk to a single relation family. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
+            "Best-first walk over rated claims from a prompt (public.laplace_pull), each chain costed by its claims' consensus confidence. Pass relation_type to constrain the walk to one relation: a Native relation word, or IS_A (WordNet's hypernym); other legacy relation names walk unconstrained. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
             () => Schema(("prompt", "string", "starting content (omit if entity given)", false),
                          ("entity", "string", "hex entity id to start from, e.g. from bubble", false),
                          ("relation_type", "string", "canonical relation name to constrain the walk", false),
@@ -148,7 +148,7 @@ internal sealed partial class SubstrateTools : IMcpTools
             () => Schema(("prompt", "string", "the prompt", true)),
             (s, a) => s.PromptLanguage(a)),
         new("bubble", "Bubble a surface term to its sense/synset frontier.",
-            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id, or downward to surface realizations via `op` (`taxonomy.bubble_down`). Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing content. Note the render/label split: this tool's rows use realize.render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else realize.render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
+            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id, or downward to surface realizations via `op` (`taxonomy.bubble_down`). Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing content. Rows are labeled by public.laplace_labels, the Native substrate's labels.",
             () => Schema(("term", "string", "the surface word or phrase", true),
                          ("k", "integer", "sense frontier width, default 5", false)),
             (s, a) => s.Bubble(a)),
@@ -306,14 +306,8 @@ internal sealed partial class SubstrateTools : IMcpTools
     private const string McpTenant = "mcp-local";
     private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
     private readonly Lazy<ConversationTurns> _turns;
-
-    //   _plainWriter — the untenanted agent-note lane (WitnessFact), which rides the
-    //                  shared UserPrompt/Response sources because a standalone note
-    //                  has no session or tenant to scope.
-    private readonly object _writerSync = new();
-    private ISubstrateWriter? _plainWriter;
-    private bool _plainBootstrapped;
-    private bool _plainWriterBroken;
+    // What this agent states (notes and feedback) is the runtime witness mcp-local's, recorded by the Engine.
+    private readonly Lazy<RuntimeWitnessRecorder> _witnesses;
 
     /// <summary>
     /// A tool session key resolves through the canonical mint — the same id law the

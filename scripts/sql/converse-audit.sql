@@ -21,16 +21,16 @@ SELECT laplace.laplace_substrate_version() AS substrate_lib,
        public.laplace_geom_version()       AS geom_lib;
 
 \echo '-- 0b. T0 perfcache wired (render_text leaves resolve via codepoint_for_id) --'
-SELECT realize.codepoint_for_id(realize.canonical_id('A')) AS cp_of_A,
-       CASE WHEN realize.codepoint_for_id(realize.canonical_id('A')) = 65
+SELECT public.laplace_codepoint(public.blake3_from_bytea(public.blake3_send(public.laplace_text_id('A')))) AS cp_of_A,
+       CASE WHEN public.laplace_codepoint(public.blake3_from_bytea(public.blake3_send(public.laplace_text_id('A')))) = 65
             THEN 'PASS' ELSE 'FAIL — laplace_substrate.perfcache_path unset/stale' END AS verdict;
 
 \echo '-- 0c. render_text C offload round-trips codepoint, word, and batch --'
-SELECT realize.render_text(word_id('A'))                                  AS r_codepoint,
-       realize.render_text(word_id('cat'))                                AS r_word,
-       realize.render_text_batch(ARRAY[word_id('cat'), word_id('dog')])   AS r_batch,
-       CASE WHEN realize.render_text(word_id('cat')) = 'cat'
-                 AND realize.render_text_batch(ARRAY[word_id('cat'),word_id('dog')]) = ARRAY['cat','dog']
+SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('A'))::bytea],NULL)::public.blake3[]) lp_l)                                  AS r_codepoint,
+       (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('cat'))::bytea],NULL)::public.blake3[]) lp_l)                                AS r_word,
+       ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ARRAY[word_id('cat'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[word_id('cat'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)   AS r_batch,
+       CASE WHEN (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(word_id('cat'))::bytea],NULL)::public.blake3[]) lp_l) = 'cat'
+                 AND ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ARRAY[word_id('cat'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[word_id('cat'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) = ARRAY['cat','dog']
             THEN 'PASS' ELSE 'FAIL — C reconstruction broken' END AS verdict;
 
 \echo '-- 0d. geom SIMD offload (relatedness/reason structural plane) --'
@@ -42,15 +42,15 @@ SELECT round(public.laplace_angular_distance_4d(
 \echo '-- 0e. generate_greedy / generate_tree C SRFs (walk/complete intents) --'
 SELECT count(*) AS greedy_steps,
        CASE WHEN count(*) > 0 THEN 'PASS' ELSE 'WARN — no PRECEDES walk from "the"' END AS verdict
-FROM generate_greedy(word_id('the'), NULL, 6);
+FROM generate_greedy(public.blake3_send(public.laplace_text_id('the')), NULL, 6);
 SELECT count(*) AS tree_nodes,
        CASE WHEN count(*) > 0 THEN 'PASS' ELSE 'WARN — generate_tree empty' END AS verdict
-FROM generate_tree(word_id('the'), NULL, 3, 4);
+FROM generate_tree(public.blake3_send(public.laplace_text_id('the')), NULL, 3, 4);
 
 \echo '-- 0f. intent_preflight C batch existence bitmap (ingestion offload) is live --'
-SELECT (intent_preflight(ARRAY[word_id('dog')], ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
+SELECT (intent_preflight(ARRAY[public.blake3_send(public.laplace_text_id('dog'))], ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
            IS NOT NULL AS preflight_live,
-       CASE WHEN (intent_preflight(ARRAY[word_id('dog')], ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
+       CASE WHEN (intent_preflight(ARRAY[public.blake3_send(public.laplace_text_id('dog'))], ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
                  IS NOT NULL THEN 'PASS' ELSE 'FAIL — C preflight returned NULL' END AS verdict;
 
 \echo '-- 0g. glicko2 score offload (eff_mu / ranking on every reply) --'
@@ -122,27 +122,27 @@ ORDER BY verdict, t.prompt;
 
 \echo '-- 4a. converse.synonyms() direction: word is keyed as OBJECT of IS_SYNONYM_OF, not subject --'
 SELECT
-    (SELECT count(*) FROM converse.synonyms(word_id('happy'), 10)) AS via_function,
+    (SELECT count(*) FROM converse.synonyms(public.blake3_send(public.laplace_text_id('happy')), 10)) AS via_function,
     (SELECT count(DISTINCT other.object_id)
        FROM consensus mine
        JOIN consensus other ON other.subject_id = mine.subject_id
                            AND other.type_id = relation_type_id('IS_SYNONYM_OF')
-                           AND other.object_id <> word_id('happy')
-      WHERE mine.object_id = word_id('happy')
+                           AND other.object_id <> public.blake3_send(public.laplace_text_id('happy'))
+      WHERE mine.object_id = public.blake3_send(public.laplace_text_id('happy'))
         AND mine.type_id = relation_type_id('IS_SYNONYM_OF')) AS available_co_members,
-    CASE WHEN (SELECT count(*) FROM converse.synonyms(word_id('happy'),10)) > 0
+    CASE WHEN (SELECT count(*) FROM converse.synonyms(public.blake3_send(public.laplace_text_id('happy')),10)) > 0
          THEN 'PASS' ELSE 'FAIL — converse.synonyms() queries word as subject; data keys it as object' END AS verdict;
 
 \echo '-- 4b. article-leak: "parts of a car" must resolve to car, not the article "a" --'
-SELECT realize.label(converse.resolve_topic('a car', NULL)) AS resolved_topic,
-       CASE WHEN converse.resolve_topic('a car', NULL) = word_id('car')
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(converse.resolve_topic('a car', NULL))::bytea],NULL)::public.blake3[]) lp_l) AS resolved_topic,
+       CASE WHEN converse.resolve_topic('a car', NULL) = public.blake3_send(public.laplace_text_id('car'))
             THEN 'PASS' ELSE 'FAIL — leading article wins leftmost tie-break in resolve_phrase' END AS verdict;
 
 \echo '-- 4c. describe() dedup: no (type,fact) pair should repeat for one topic --'
-SELECT (SELECT count(*) FROM describe(word_id('democracy'), NULL)) AS rows,
-       (SELECT count(DISTINCT (type, fact)) FROM describe(word_id('democracy'), NULL)) AS distinct_rows,
-       CASE WHEN (SELECT count(*) FROM describe(word_id('democracy'),NULL))
-               = (SELECT count(DISTINCT (type,fact)) FROM describe(word_id('democracy'),NULL))
+SELECT (SELECT count(*) FROM describe(public.blake3_send(public.laplace_text_id('democracy')), NULL)) AS rows,
+       (SELECT count(DISTINCT (type, fact)) FROM describe(public.blake3_send(public.laplace_text_id('democracy')), NULL)) AS distinct_rows,
+       CASE WHEN (SELECT count(*) FROM describe(public.blake3_send(public.laplace_text_id('democracy')),NULL))
+               = (SELECT count(DISTINCT (type,fact)) FROM describe(public.blake3_send(public.laplace_text_id('democracy')),NULL))
             THEN 'PASS' ELSE 'WARN — describe() emits duplicate facts' END AS verdict;
 
 \echo ''

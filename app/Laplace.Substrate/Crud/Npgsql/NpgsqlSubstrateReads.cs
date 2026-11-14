@@ -16,18 +16,6 @@ public static partial class NpgsqlSubstrateReads
 {
     internal static int RequestedLimit(int limit) => Math.Max(0, limit);
 
-    /// <summary><c>laplace.is_compositional_type(type_id)</c></summary>
-    public static async Task<bool> IsCompositionalTypeAsync(
-        NpgsqlDataSource dataSource, byte[] typeId, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("laplace.is_compositional_type"),
-            static r => !r.IsDBNull(0) && r.GetBoolean(0),
-            p => p.AddWithValue("type", typeId),
-            ct: ct, label: "is_compositional_type", onError: onError).ConfigureAwait(false);
-        return rows.Count > 0 && rows[0];
-    }
-
     /// <summary><c>ops.top_relations_readable(limit, type)</c></summary>
     public static Task<IReadOnlyList<(string Subject, string Type, string Object, decimal EffMu, long Witnesses)>> TopRelationsReadableAsync(
         NpgsqlDataSource dataSource, int limit, CancellationToken ct,

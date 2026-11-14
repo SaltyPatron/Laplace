@@ -32,7 +32,7 @@ BEGIN
         LIMIT p_limit
     ),
     rendered AS MATERIALIZED (
-        SELECT realize.render_text_batch(array_agg(ranked.member ORDER BY ranked.rn)) AS txt
+        SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((array_agg(ranked.member ORDER BY ranked.rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(ranked.member ORDER BY ranked.rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt
         FROM ranked
     )
     SELECT NULLIF(btrim(r.txt[a.rn]), '') AS synonym,

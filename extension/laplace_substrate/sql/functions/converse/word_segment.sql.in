@@ -1,4 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.word_segment(p_text text)
-    RETURNS TABLE(ord int, word text, id bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_word_segment'
-    LANGUAGE C STABLE;

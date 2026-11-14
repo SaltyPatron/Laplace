@@ -15,10 +15,11 @@ BEGIN READ ONLY;
 SET LOCAL statement_timeout = '15s';
 
 -- Co-occurrence: one witnessed composition contains both exact identities.
-SELECT encode(entity_id, 'hex') AS containing_composition
-FROM structural.containers_containing_all(
-    ARRAY[decode(:'captain','hex'), decode(:'ahab','hex')])
-ORDER BY entity_id;
+SELECT h.entity::text AS containing_composition
+FROM public.laplace_holders(ARRAY[public.blake3_from_bytea(decode(:'captain','hex')),
+    public.blake3_from_bytea(decode(:'ahab','hex'))], ARRAY[public.blake3_from_bytea(decode(:'captain','hex')),
+    public.blake3_from_bytea(decode(:'ahab','hex'))]) h
+ORDER BY h.entity;
 
 -- Ordered adjacency with an attested separator carried explicitly.
 -- Gap 1 permits adjacent endpoints or one separator between endpoints.
@@ -43,8 +44,7 @@ ROLLBACK;
 -- Run separately to inspect the full result; timings depend on the current data.
 -- Exactly two upward composition hops, with no caller top-K ceiling.
 -- These are shortest containment hops, not arbitrary semantic relations.
--- SELECT encode(entity_id,'hex') AS containing_composition, tier,
---        encode(type_id,'hex') AS type, hops
--- FROM structural.containers_of(decode(:'captain','hex'), 2, NULL)
+-- SELECT entity::text AS containing_composition, tier, hops
+-- FROM public.laplace_above(ARRAY[public.blake3_from_bytea(decode(:'captain','hex'))], 2, 2147483647)
 -- WHERE hops = 2
--- ORDER BY entity_id;
+-- ORDER BY entity;

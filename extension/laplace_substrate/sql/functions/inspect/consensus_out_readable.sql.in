@@ -21,7 +21,7 @@ BEGIN ATOMIC
       UNION SELECT object_id FROM numbered WHERE object_id IS NOT NULL
     ), labels AS MATERIALIZED (
       SELECT d.id, d.label
-      FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d
+      FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d
     )
     SELECT t.label, o.label, s.eff_mu, s.witness_count
     FROM numbered s JOIN labels t ON t.id=s.type_id

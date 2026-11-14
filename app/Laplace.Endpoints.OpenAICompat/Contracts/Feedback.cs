@@ -3,33 +3,30 @@ using System.Text.Json.Serialization;
 namespace Laplace.Api.Contracts;
 
 /// <summary>
-/// Confirm/refute testimony on either a token chain (consecutive PRECEDES pairs) or one
-/// explicit (subject, relation, object) triple.
+/// The caller confirms or refutes one claim, [subject, relation, object] or [subject, relation] when the object is
+/// omitted: each part the text it is, the relation the caller's own word for it.
 /// </summary>
 public sealed record FeedbackRequest(
     [property: JsonPropertyName("verdict")] string? Verdict,
-    [property: JsonPropertyName("tokens")] IReadOnlyList<string>? Tokens = null,
     [property: JsonPropertyName("subject")] string? Subject = null,
     [property: JsonPropertyName("relation")] string? Relation = null,
-    [property: JsonPropertyName("object")] string? Object = null,
-    [property: JsonPropertyName("request_id")] string? RequestId = null);
+    [property: JsonPropertyName("object")] string? Object = null);
 
-public sealed record FeedbackTokenStatus(
-    [property: JsonPropertyName("token")] string Token,
-    [property: JsonPropertyName("status")] string Status);
-
-public sealed record FeedbackConsensusState(
-    [property: JsonPropertyName("rating")] long Rating,
-    [property: JsonPropertyName("rd")] long Rd,
-    [property: JsonPropertyName("witness_count")] long WitnessCount);
+/// <summary>A claim's Native standing: rating, deviation, games folded, and its conservative rating at k = 2.</summary>
+public sealed record FeedbackStanding(
+    [property: JsonPropertyName("rating")] double Rating,
+    [property: JsonPropertyName("deviation")] double Deviation,
+    [property: JsonPropertyName("matches")] long Matches,
+    [property: JsonPropertyName("confidence")] double Confidence);
 
 public sealed record FeedbackResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("verdict")] string Verdict,
-    [property: JsonPropertyName("mode")] string Mode,
-    [property: JsonPropertyName("attestations_inserted")] long AttestationsInserted,
-    [property: JsonPropertyName("consensus_updated")] long ConsensusUpdated,
-    [property: JsonPropertyName("tokens")] IReadOnlyList<FeedbackTokenStatus>? Tokens = null,
-    [property: JsonPropertyName("relation")] string? Relation = null,
-    [property: JsonPropertyName("consensus_before")] FeedbackConsensusState? ConsensusBefore = null,
-    [property: JsonPropertyName("consensus_after")] FeedbackConsensusState? ConsensusAfter = null);
+    [property: JsonPropertyName("participant")] string Participant,
+    [property: JsonPropertyName("subject")] string Subject,
+    [property: JsonPropertyName("relation")] string Relation,
+    [property: JsonPropertyName("claim_object")] string ClaimObject,
+    [property: JsonPropertyName("witness_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WitnessId,
+    [property: JsonPropertyName("claim_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClaimId,
+    [property: JsonPropertyName("standing_before")] FeedbackStanding? StandingBefore,
+    [property: JsonPropertyName("standing_after")] FeedbackStanding? StandingAfter);

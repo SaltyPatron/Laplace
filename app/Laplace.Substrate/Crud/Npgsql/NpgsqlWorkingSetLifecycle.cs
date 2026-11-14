@@ -158,7 +158,8 @@ public sealed partial class NpgsqlSubstrateWriter
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = NpgsqlCatalog.Command(conn, null, "write.unicode_layer_completed");
+        await using var cmd = NpgsqlCatalog.Command(conn, null, "write.unicode_layer_completed",
+            SubstrateCanonicalIds.Source("Unicode").ToBytes());
         return await cmd.ExecuteScalarAsync(ct) is true;
     }
 

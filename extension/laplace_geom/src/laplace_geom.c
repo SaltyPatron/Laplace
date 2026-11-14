@@ -128,23 +128,6 @@ pg_laplace_geom_version(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(v));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_hash128_blake3);
-
-Datum
-pg_laplace_hash128_blake3(PG_FUNCTION_ARGS)
-{
-    bytea       *data_arg = PG_GETARG_BYTEA_PP(0);
-    const uint8 *data     = (const uint8 *) VARDATA_ANY(data_arg);
-    Size         data_len = VARSIZE_ANY_EXHDR(data_arg);
-
-    bytea *result = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-    SET_VARSIZE(result, VARHDRSZ + sizeof(hash128_t));
-
-    hash128_blake3(data, (size_t) data_len, (hash128_t *) VARDATA(result));
-
-    PG_RETURN_BYTEA_P(result);
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_distance_4d);
 
 Datum

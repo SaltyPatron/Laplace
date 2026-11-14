@@ -14,7 +14,7 @@ BEGIN ATOMIC
     -- presentation state, not an empty answer and not permission to print the
     -- content hash. label_or_hex is the compatibility-named shared display
     -- projection; it now returns the explicit abstention marker, never hex.
-    WITH topic AS MATERIALIZED (SELECT converse.label_or_hex(p_topic) AS label)
+    WITH topic AS MATERIALIZED (SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_topic)::bytea],NULL)::public.blake3[]) lp_l) AS label)
     SELECT t.label || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     CROSS JOIN topic t

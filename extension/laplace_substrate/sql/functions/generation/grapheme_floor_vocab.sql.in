@@ -9,7 +9,8 @@ BEGIN ATOMIC
 
     WITH t AS (
         SELECT w.trajectory
-        FROM laplace.v_word_points w
+        FROM (SELECT e.id, e.type_id, p.id AS physicality_id, p.trajectory
+              FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1) w
         WHERE w.type_id = laplace.entity_type_id('Word')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id LIMIT p_words
@@ -35,12 +36,12 @@ BEGIN ATOMIC
         SELECT i.id, i.s
         FROM ids,
              LATERAL ROWS FROM (
-                 unnest(ids.a), unnest(realize.render_text_batch(ids.a))
+                 unnest(ids.a), unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((ids.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
              ) AS i(id, s)
     )
     SELECT n.entity_id, r.s, n.cnt
     FROM named n JOIN rendered r ON r.id = n.entity_id
-    WHERE char_length(r.s) = 1 AND NOT realize.is_all_whitespace(r.s)
+    WHERE char_length(r.s) = 1 AND NOT public.laplace_text_is(r.s, 'White_Space', 'Yes')
     ORDER BY n.cnt DESC, n.entity_id
     LIMIT GREATEST(p_size, 0)
 ;

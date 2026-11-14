@@ -92,12 +92,12 @@ BEGIN ATOMIC
         SELECT i.id, i.s
         FROM missing m,
              LATERAL ROWS FROM (
-                 unnest(m.ids), unnest(realize.render_text_batch(m.ids))
+                 unnest(m.ids), unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((m.ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((m.ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
              ) AS i(id, s)
     )
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
     LEFT JOIN rendered r ON r.id = v.id
-    WHERE COALESCE(cat.is_sep, realize.is_all_whitespace(r.s));
+    WHERE COALESCE(cat.is_sep, public.laplace_text_is(r.s, 'White_Space', 'Yes'));
 END;

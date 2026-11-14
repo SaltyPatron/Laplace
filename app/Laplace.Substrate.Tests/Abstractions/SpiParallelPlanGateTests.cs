@@ -27,7 +27,6 @@ public sealed class SpiParallelPlanGateTests
             "fold_route_evidence.c",
             "fold_route_plans.c",
             "fold_route_states.c",
-            "conversation_session.c",
             "consensus_bulk_write.c",
         };
 

@@ -45,7 +45,7 @@ fixture(match,typ,expr) AS (VALUES
   ('lang','bytea','converse.prompt_language_top(''what is a wolf'')'),
   ('context','bytea','converse.prompt_language_top(''what is a wolf'')'),
   ('source','bytea','(SELECT source_id FROM ops.source_status() WHERE source=''WordNetDecomposer'')'),
-  (NULL,'bytea','laplace.word_id(''wolf'')'),
+  (NULL,'bytea','public.blake3_send(public.laplace_text_id(''wolf''))'),
   ('name','text','''IS_A'''),
   ('prompt','text','''what is a wolf'''),
   ('phrase','text','''what is a wolf'''),
@@ -53,9 +53,9 @@ fixture(match,typ,expr) AS (VALUES
   (NULL,'integer','8'), (NULL,'smallint','2::smallint'), (NULL,'bigint','1500000000000'),
   (NULL,'double precision','1.0'), (NULL,'numeric','1.0'), (NULL,'boolean','false'),
   ('type','bytea[]','ARRAY[laplace.relation_type_id(''IS_A'')]'),
-  (NULL,'bytea[]','ARRAY[laplace.word_id(''hot''), laplace.word_id(''dog'')]'),
+  (NULL,'bytea[]','ARRAY[public.blake3_send(public.laplace_text_id(''hot'')), public.blake3_send(public.laplace_text_id(''dog''))]'),
   (NULL,'text[]','ARRAY[''wolf'']'), (NULL,'integer[]','ARRAY[1]'),
-  (NULL,'geometry','(SELECT trajectory FROM laplace.v_word_points WHERE trajectory IS NOT NULL LIMIT 1)'),
+  (NULL,'geometry','(SELECT path FROM public.physicality LIMIT 1)'),
   (NULL,'timestamp with time zone','now()'), (NULL,'jsonb','''{}''::jsonb'))
 SELECT DISTINCT ON (f.fq) f.fq||'|'||f.proretset::text||'|'||
        COALESCE((SELECT string_agg(COALESCE(x.expr,'<<unfixtured>>'), ', ' ORDER BY x.ord)

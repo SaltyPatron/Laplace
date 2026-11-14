@@ -149,7 +149,7 @@ done
 if printf '%s\n' "${LADDER[@]}" | grep -qx wordnet || [[ "$(layer_done 2)" == "t" ]]; then
   section "CONTENT CHECK (seed = content + attestations, not attestations alone)"
   wn_content=$("${PSQL[@]}" -t -A -c \
-    "SELECT ops.content_count(laplace.source_id('WordNetDecomposer'));" | tr -d '[:space:]')
+    "SELECT ops.content_count(public.blake3_send(public.laplace_text_id('substrate/source/WordNetDecomposer/v1')));" | tr -d '[:space:]')
   echo "WordNet CONTENT physicalities = ${wn_content:-0}"
   if [[ "${wn_content:-0}" -gt 0 ]]; then
     pass "WordNet emits CONTENT physicalities (${wn_content}) — content path live"

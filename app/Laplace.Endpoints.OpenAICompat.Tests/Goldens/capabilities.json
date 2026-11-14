@@ -13,7 +13,7 @@
     },
     "embeddings": {
       "status": "live",
-      "backend": "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)",
+      "backend": "public.laplace_entities (form) + ops.consensus_out_readable (meaning)",
       "billing": "embeddings"
     },
     "audit_reports": {
@@ -23,12 +23,12 @@
     },
     "visualizations": {
       "status": "live",
-      "backend": "consensus.top_relations + ops.entity_physicalities",
+      "backend": "consensus.top_relations + public.laplace_entities",
       "billing": "visualization.deep_export"
     },
     "explainability_reports": {
       "status": "live",
-      "backend": "consensus.walk_branches + ops.attestations_out",
+      "backend": "public.laplace_pull + ops.attestations_out",
       "billing": "explain.trace"
     },
     "billing": {
@@ -40,7 +40,7 @@
     },
     "feedback": {
       "status": "live",
-      "backend": "laplace.attestations (confirm/refute) + consensus fold"
+      "backend": "laplace witness: the caller's statement at UserPromptContent, its standing folded by the Engine"
     },
     "recipe_compile": {
       "status": "live",

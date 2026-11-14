@@ -12,18 +12,18 @@ BEGIN;
 
 DO $$
 DECLARE
-    src       bytea := public.laplace_hash128_blake3('test/order/source');
-    type_t    bytea := public.laplace_hash128_blake3('Type');
-    type_word bytea := public.laplace_hash128_blake3('Word');
-    type_sent bytea := public.laplace_hash128_blake3('Sentence');
-    type_doc  bytea := public.laplace_hash128_blake3('Document');
-    w_a       bytea := public.laplace_hash128_blake3('test/order/word-a');
-    w_gap     bytea := public.laplace_hash128_blake3('test/order/word-gap');
-    w_b       bytea := public.laplace_hash128_blake3('test/order/word-b');
-    w_rep     bytea := public.laplace_hash128_blake3('test/order/word-rep');
-    sent      bytea := public.laplace_hash128_blake3('test/order/sentence');
-    sent_rep  bytea := public.laplace_hash128_blake3('test/order/sentence-rep');
-    doc       bytea := public.laplace_hash128_blake3('test/order/document');
+    src       bytea := public.blake3_send(public.laplace_text_id('test/order/source'));
+    type_t    bytea := public.blake3_send(public.laplace_text_id('Type'));
+    type_word bytea := public.blake3_send(public.laplace_text_id('Word'));
+    type_sent bytea := public.blake3_send(public.laplace_text_id('Sentence'));
+    type_doc  bytea := public.blake3_send(public.laplace_text_id('Document'));
+    w_a       bytea := public.blake3_send(public.laplace_text_id('test/order/word-a'));
+    w_gap     bytea := public.blake3_send(public.laplace_text_id('test/order/word-gap'));
+    w_b       bytea := public.blake3_send(public.laplace_text_id('test/order/word-b'));
+    w_rep     bytea := public.blake3_send(public.laplace_text_id('test/order/word-rep'));
+    sent      bytea := public.blake3_send(public.laplace_text_id('test/order/sentence'));
+    sent_rep  bytea := public.blake3_send(public.laplace_text_id('test/order/sentence-rep'));
+    doc       bytea := public.blake3_send(public.laplace_text_id('test/order/document'));
     t2flag    bigint := (2::bigint << 1);
     t3flag    bigint := (3::bigint << 1);
     vocab     bytea[];
@@ -41,7 +41,7 @@ BEGIN
     -- vocabulary below, so (a -> b) is NOT an adjacency that occurred.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (public.laplace_hash128_blake3('test/order/phys-sentence'), sent, 1,
+    VALUES (public.blake3_send(public.laplace_text_id('test/order/phys-sentence')), sent, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -53,7 +53,7 @@ BEGIN
     -- sent_rep = rep, rep — a legitimately repeated token.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (public.laplace_hash128_blake3('test/order/phys-sentence-rep'), sent_rep, 1,
+    VALUES (public.blake3_send(public.laplace_text_id('test/order/phys-sentence-rep')), sent_rep, 1,
             public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -64,7 +64,7 @@ BEGIN
     -- doc = sent, sent_rep — two consecutive sentences, for sentence_order.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (public.laplace_hash128_blake3('test/order/phys-document'), doc, 1,
+    VALUES (public.blake3_send(public.laplace_text_id('test/order/phys-document')), doc, 1,
             public.ST_SetSRID(public.ST_MakePoint(3,3,3,3), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -102,16 +102,6 @@ BEGIN
     WHERE subject_id = w_rep AND object_id = w_rep;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: word_order dropped a legitimately repeated token: % row(s)', n;
-    END IF;
-
-    -- sentence_order reads document trajectories and must find the sentence pair. This
-    -- also pins the type_id role predicate: the document is selected by
-    -- realize.canonical_id('Document'), so a regression to a tier test shows up as zero rows.
-    SELECT count(*) INTO n
-    FROM generation.sentence_order(1000, 1)
-    WHERE subject_id = sent AND object_id = sent_rep;
-    IF n <> 1 THEN
-        RAISE EXCEPTION 'FAIL: sentence_order did not pair the document constituents: %', n;
     END IF;
 
     RAISE NOTICE 'order planes: no fabricated adjacency, repeats kept, roles by type';

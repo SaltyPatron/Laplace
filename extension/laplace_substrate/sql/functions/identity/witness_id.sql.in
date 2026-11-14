@@ -1,5 +1,0 @@
--- A source generation is the witness of its observations; its id is the content
--- composition of its self-description [authority, release] (SourceWitness in C#).
-CREATE OR REPLACE FUNCTION laplace.witness_id(p_authority text, p_release text) RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_witness_id'
-    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

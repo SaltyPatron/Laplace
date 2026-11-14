@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
                   last_observed_at timestamptz)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    SELECT laplace.consensus_id(f.subject_id, f.type_id, f.object_id),
+    SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[f.subject_id, f.type_id, f.object_id]::public.blake3[], NULL))),
            f.subject_id, f.type_id, f.object_id,
            (f.acc).rating, (f.acc).rd, (f.acc).volatility,
            (f.acc).witness_count, f.last_ts

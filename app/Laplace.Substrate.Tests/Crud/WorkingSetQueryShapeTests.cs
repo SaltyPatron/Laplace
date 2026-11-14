@@ -21,8 +21,7 @@ public sealed class WorkingSetQueryShapeTests
         {
             "sql/probes/entities_present_ordinals.sql.in",
             "sql/probes/physicalities_present_ordinals.sql.in",
-            "sql/probes/attestations_present_ordinals.sql.in",
-            "sql/functions/converse/label.sql.in"
+            "sql/probes/attestations_present_ordinals.sql.in"
         })
         {
             string sql = File.ReadAllText(Path.Combine(

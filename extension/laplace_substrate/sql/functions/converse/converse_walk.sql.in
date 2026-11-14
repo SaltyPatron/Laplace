@@ -43,7 +43,7 @@ BEGIN ATOMIC
                    GREATEST(COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)),
                                      0.5::double precision), 0),
                    false
-            FROM structural.containers_of(el.topic_word, 1, p_corpus_limit) co
+            FROM (SELECT public.blake3_send(a.entity) AS entity_id, a.tier FROM public.laplace_above(ARRAY[public.blake3_from_bytea(el.topic_word)], 1, COALESCE(p_corpus_limit, 2147483647)::bigint) a) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
             GROUP BY co.entity_id
@@ -54,8 +54,11 @@ BEGIN ATOMIC
     toks AS (
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
-        CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
-             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+        CROSS JOIN LATERAL (
+            SELECT public.blake3_send(v.id) AS entity_id, v.ord
+            FROM public.laplace_physicalities(ARRAY[public.blake3_from_bytea(g.gid)]) h
+            CROSS JOIN LATERAL unnest(public.laplace_parts(h.path)) WITH ORDINALITY AS v(id, ord)
+        ) u
     ),
     kept AS MATERIALIZED (
         SELECT q.* FROM (
@@ -126,7 +129,7 @@ BEGIN ATOMIC
         CROSS JOIN LATERAL unnest(e.ids) AS u(id)
     ),
     realized AS MATERIALIZED (
-        SELECT i.a, realize.render_text_batch(i.a) AS txt
+        SELECT i.a, ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((i.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((i.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

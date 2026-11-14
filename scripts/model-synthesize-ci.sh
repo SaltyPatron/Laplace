@@ -138,7 +138,7 @@ if [[ "${LAPLACE_MODEL_PROOF_CODE_CORPORA:-1}" == 1 ]]; then
 
   for source_name in TinyCodesDecomposer StackDecomposer; do
     evidence="$(psql -X -w -v ON_ERROR_STOP=1 -tAc \
-      "SELECT ops.evidence_count(NULL, laplace.source_id('$source_name'))")"
+      "SELECT ops.evidence_count(NULL, public.blake3_send(public.laplace_text_id('substrate/source/$source_name/v1')))")"
     [ "${evidence:-0}" -gt 0 ] || die "$source_name has no retained evidence after ingest"
     log "  $source_name: $evidence evidence row(s)"
   done
@@ -146,7 +146,7 @@ if [[ "${LAPLACE_MODEL_PROOF_CODE_CORPORA:-1}" == 1 ]]; then
   ast_rows="$(psql -X -w -v ON_ERROR_STOP=1 -tAc "
     SELECT count(*)
     FROM laplace.attestations a
-    WHERE a.source_id IN (laplace.source_id('TinyCodesDecomposer'), laplace.source_id('StackDecomposer'))
+    WHERE a.source_id IN (public.blake3_send(public.laplace_text_id('substrate/source/TinyCodesDecomposer/v1')), public.blake3_send(public.laplace_text_id('substrate/source/StackDecomposer/v1')))
       AND a.type_id IN (
         laplace.relation_type_id('DEFINES'),
         laplace.relation_type_id('CALLS'),

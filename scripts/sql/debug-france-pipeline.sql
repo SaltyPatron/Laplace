@@ -2,7 +2,7 @@ SET search_path = laplace, public;
 
 WITH seed_ids AS (
     SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-    FROM (SELECT word_id(s) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
+    FROM (SELECT public.blake3_send(public.laplace_text_id(s)) AS wid FROM unnest(ARRAY['capital']) AS s) q WHERE wid IS NOT NULL
 ),
 rel_types AS (
     SELECT array_agg(relation_type_id(n)) AS ids FROM unnest(ARRAY[
@@ -55,7 +55,7 @@ picked AS (
     UNION ALL SELECT entity_id, weight, 1 AS pri FROM crawled WHERE rn <= 750
     UNION ALL SELECT entity_id, weight, 0 AS pri FROM scaffold WHERE rn <= 375
 ),
-france_id AS (SELECT word_id('France') AS id),
+france_id AS (SELECT public.blake3_send(public.laplace_text_id('France')) AS id),
 picked_f AS (SELECT * FROM picked p, france_id f WHERE p.entity_id = f.id),
 uniq AS (
     SELECT DISTINCT ON (entity_id) entity_id, weight, pri FROM picked ORDER BY entity_id, pri DESC, weight DESC
@@ -69,13 +69,13 @@ ids_arr AS (
 rendered AS (
     SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
     FROM ids_arr a
-    CROSS JOIN LATERAL unnest(a.ids, realize.render_text_batch(a.ids, 8)) WITH ORDINALITY AS u(entity_id, s, ord)
+    CROSS JOIN LATERAL unnest(a.ids, ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((a.ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((a.ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY AS u(entity_id, s, ord)
     WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
 ),
 rendered_f AS (SELECT * FROM rendered r, france_id f WHERE r.entity_id = f.id),
 clean AS (
     SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri FROM rendered n
-    WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
+    WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT public.laplace_text_is(n.s, 'White_Space', 'Yes')
       AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
       AND n.s ~ '[[:alpha:]]' AND n.s !~ '^i[0-9]+$'
     ORDER BY n.s, n.pri DESC, n.weight DESC

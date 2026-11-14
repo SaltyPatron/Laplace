@@ -44,7 +44,7 @@ BEGIN ATOMIC
         ) v
     ),
     lbl AS (
-        SELECT realize.batch(i.a, NULL) AS l FROM ids i
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((i.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((i.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l FROM ids i
     )
     SELECT k.id,
            COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), 'Unrealized entity'),

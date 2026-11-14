@@ -14,10 +14,10 @@ SELECT to_regclass('laplace.entity_interpretations') IS NULL AS interpretations_
 
 DO $$
 DECLARE
-    a bytea := public.laplace_hash128_blake3('test/entity-identity/a');
-    b bytea := public.laplace_hash128_blake3('test/entity-identity/b');
-    ta bytea := public.laplace_hash128_blake3('test/entity-identity/type-a');
-    tb bytea := public.laplace_hash128_blake3('test/entity-identity/type-b');
+    a bytea := public.blake3_send(public.laplace_text_id('test/entity-identity/a'));
+    b bytea := public.blake3_send(public.laplace_text_id('test/entity-identity/b'));
+    ta bytea := public.blake3_send(public.laplace_text_id('test/entity-identity/type-a'));
+    tb bytea := public.blake3_send(public.laplace_text_id('test/entity-identity/type-b'));
 BEGIN
     -- Entities are source-independent content: one insert per content id, the
     -- row itself carrying its tier/type projection. Sources witness through
@@ -27,16 +27,16 @@ BEGIN
 END $$;
 
 WITH ids AS (
-    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
-           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+    SELECT public.blake3_send(public.laplace_text_id('test/entity-identity/a')) AS a,
+           public.blake3_send(public.laplace_text_id('test/entity-identity/b')) AS b
 )
 SELECT count(*) = 2 AS one_row_per_content_id
 FROM laplace.entities e, ids
 WHERE e.id IN (ids.a, ids.b);
 
 WITH ids AS (
-    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
-           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+    SELECT public.blake3_send(public.laplace_text_id('test/entity-identity/a')) AS a,
+           public.blake3_send(public.laplace_text_id('test/entity-identity/b')) AS b
 )
 SELECT (SELECT tier FROM laplace.entities WHERE id = ids.a) = 3
        AND (SELECT tier FROM laplace.entities WHERE id = ids.b) = 1

@@ -203,18 +203,17 @@ public sealed partial class NpgsqlIngestObservability : IIngestObservability
         _lastProgressUtc = DateTime.MinValue;
         _lastHeartbeatUtc = DateTime.MinValue;
         ReconcileOrphanedRuns();
-        // A caller that has the witness id records that id. source_id(name) is the
-        // canonical substrate/source/<name>/v1 envelope, which is a different entity
-        // from the [authority, release] witness attestations are filed under.
+        // A caller that has the witness id records that id; otherwise the source is the id of
+        // its canonical key (SubstrateCanonicalIds.Source), a different entity from the
+        // [authority, release] witness attestations are filed under.
         bool journaled = Execute(
-            unidentified ? "journal.run_start_unidentified"
-                : sourceId is null ? "journal.run_start_named" : "journal.run_start_identified",
+            unidentified ? "journal.run_start_unidentified" : "journal.run_start_identified",
             cmd =>
             {
                 cmd.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Add(new NpgsqlParameter { Value = sourceName });
-                if (sourceId is not null)
-                    cmd.Add(new NpgsqlParameter { Value = sourceId, NpgsqlDbType = NpgsqlDbType.Bytea });
+                if (!unidentified)
+                    cmd.Add(new NpgsqlParameter { Value = sourceId ?? SubstrateCanonicalIds.Source(sourceName).ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 cmd.Add(new NpgsqlParameter { Value = layerOrder });
                 cmd.Add(new NpgsqlParameter { Value = (long)(inventory?.FileCount ?? 0) });
                 cmd.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });

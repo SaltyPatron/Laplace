@@ -1,7 +1,0 @@
--- A raw BLAKE3-128 digest of bytes, for receipts and test fixtures. It is never
--- an entity's ID: identity is Laplace-Native's (public.laplace_text_id,
--- public.laplace_compose); only a single codepoint's digest coincides with it.
-CREATE OR REPLACE FUNCTION laplace_hash128_blake3(data bytea)
-    RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_hash128_blake3'
-    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

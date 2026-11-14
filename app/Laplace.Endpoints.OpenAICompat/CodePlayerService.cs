@@ -1,25 +1,29 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Ingestion;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed class CodePlayerService(SubstrateClient substrate)
+/// <summary>
+/// The code player: the one forward program answers the prompt as a turn of the player's session (Engine
+/// <c>laplace turn</c>, through <see cref="ConversationTurns"/>), the candidate is checked by its modality's
+/// toolchain, and both are recorded by the Engine as what runtime witnesses state at AppDerived (an application's
+/// evidence from its own operation): the candidate as code, read by its grammar's recipe under the witness
+/// CodePlayer, and the toolchain's verdict as its statement [candidate, compiles] scored 1 or 0 under the witness the
+/// tool is. A rejected candidate stays in the session, so the next attempt reads it as discourse. Nothing here
+/// composes an identity or writes a row.
+/// </summary>
+internal sealed class CodePlayerService
 {
-    private static readonly Hash128 CodePlayerSource = SubstrateCanonicalIds.Source("CodePlayer");
-    private static readonly Hash128 ToolchainSource = SubstrateCanonicalIds.Source("ToolchainWitness");
-    private static readonly Hash128 CodePlayerTrustClass = TrustClassRegistry.Id("AppDerived");
-    private static readonly Hash128 ToolchainTrustClass = TrustClassRegistry.Id("StandardsDerived");
-    private static readonly Hash128 DefinesRelation = RelationTypeRegistry.RelationTypeId("DEFINES");
-    private static readonly IComparer<Hash128> Hash128Bytewise =
-        Comparer<Hash128>.Create(static (left, right) => left.CompareToBytewise(right));
-    private static readonly double CodePlayerTrust = SourceTrust.AppDerived;
-    private static readonly double ToolchainTrust = SourceTrust.StandardsDerived;
+    private const string CodePlayer = "CodePlayer";
+    private const string TrustClass = "AppDerived";
+    private const string Verdict = "compiles";
     private const int DefaultAttempts = 4;
     private const int MaxAttempts = 8;
     private const int MaxCandidateBytes = 2 * 1024 * 1024;
+    private readonly Lazy<ConversationTurns> _turns = new(ConversationTurns.Installed);
+    private readonly Lazy<RuntimeWitnessRecorder> _witnesses = new(RuntimeWitnessRecorder.Installed);
 
     internal sealed record AttemptReceipt(int Attempt, string CandidateId, bool Verified,
         string Tool, bool ToolAvailable, bool TimedOut, int ExitCode, string Stdout, string Stderr);
@@ -50,102 +54,52 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
         return modality.Length > 0 && GrammarDecomposer.LookupById(modality) != IntPtr.Zero;
     }
 
-    public async Task<Result> GenerateAsync(string prompt, string modality, int steps, int maxStride,
-        double spread, int topK, int? maxAttempts, CancellationToken ct)
+    public async Task<Result> GenerateAsync(string prompt, string modality, int? maxAttempts, CancellationToken ct)
     {
         if (!TryNormalizeModality(modality, out modality))
             return new Result(modality, "", null, false, "unsupported_code_language", []);
 
         int attempts = Math.Clamp(maxAttempts ?? DefaultAttempts, 1, MaxAttempts);
-        var feedback = new List<byte[]>(attempts);
         var receipts = new List<AttemptReceipt>(attempts);
         string lastCode = "";
-        Hash128? lastRoot = null;
-
-        await using var writer = new ConsensusAccumulatingWriter(
-            new NpgsqlSubstrateWriter(substrate.DataSource), substrate.DataSource);
-
-        var codePlayerBootstrap = new BootstrapIntentBuilder(
-            CodePlayerSource, "CodePlayer", CodePlayerTrustClass).Build();
-        var toolchainBootstrap = new BootstrapIntentBuilder(
-            ToolchainSource, "ToolchainWitness", ToolchainTrustClass).Build();
-        await writer.ApplyManyAsync([codePlayerBootstrap, toolchainBootstrap], ct).ConfigureAwait(false);
+        string? lastId = null;
+        string session = $"code-{Guid.NewGuid():N}";
 
         for (int attempt = 1; attempt <= attempts; attempt++)
         {
-            var candidate = await NpgsqlSubstrateReads.ForwardCodeAsync(
-                substrate.DataSource, prompt, steps, maxStride, spread, topK,
-                feedback, ct).ConfigureAwait(false);
+            var turn = await _turns.Value.TurnAsync(CodePlayer, session, prompt, ct: ct).ConfigureAwait(false);
+            string candidate = turn.Response;
             if (string.IsNullOrWhiteSpace(candidate))
-                return new Result(modality, lastCode, lastRoot?.ToString(), false,
+                return new Result(modality, lastCode, lastId, false,
                     receipts.Count == 0 ? "code_forward_unresolved" : "code_generation_exhausted", receipts);
 
             lastCode = candidate;
+            lastId = turn.ResponseId;
             byte[] utf8 = Encoding.UTF8.GetBytes(candidate);
             if (utf8.Length > MaxCandidateBytes)
-                return new Result(modality, candidate, null, false, "candidate_too_large", receipts);
+                return new Result(modality, candidate, lastId, false, "candidate_too_large", receipts);
 
-            // The native Tree-sitter parse yields syntax diagnostics for the toolchain
-            // check; grammar admission below parses again under the same recipe to
-            // compose and persist the candidate.
+            // The Tree-sitter parse yields the syntax diagnostics the toolchain check reports.
             using var syntaxAst = GrammarDecomposer.Parse(utf8, modality);
             GrammarAstDiagnostics syntax = GrammarSourceFileSupport.RequireNativeSourceAst(syntaxAst);
-
-            var record = new GrammarComposeRecord(Utf8: utf8, Modality: modality, RequireSourceAst: true);
-            var handler = new GrammarComposeHandler(CodePlayerSource, CodePlayerTrust, reader: null);
-            using var unit = handler.CreateDeferredUnit(record);
-            using var candidateBuilder = new SubstrateChangeBuilder(
-                CodePlayerSource, $"code-player/{modality}/{attempt}/{Guid.NewGuid():N}")
-                .DeclareSourcePrior(CodePlayerSource, CodePlayerTrust);
-
-            Hash128 root = unit.DrainInto(candidateBuilder, CodePlayerTrust, null);
-            if (root == default)
-                return new Result(modality, candidate, null, false, "candidate_not_composed", receipts);
-            handler.WalkWitness(record, root, candidateBuilder, unit);
-            lastRoot = root;
-
-            SubstrateChange candidateChange = candidateBuilder.Build();
-            Hash128[] definitionIds = candidateChange.Attestations
-                .Where(a => a.TypeId == DefinesRelation && a.ContextId == root)
-                .Select(a => a.SubjectId)
-                .Distinct()
-                .OrderBy(id => id, Hash128Bytewise)
-                .ToArray();
-            await writer.ApplyAsync(candidateChange, ct).ConfigureAwait(false);
-
             var tool = await CodeToolchain.VerifyAsync(candidate, modality, syntax, ct).ConfigureAwait(false);
-            using var witnessBuilder = new SubstrateChangeBuilder(
-                ToolchainSource, $"toolchain-witness/{modality}/{attempt}/{Guid.NewGuid():N}")
-                .DeclareSourcePrior(ToolchainSource, ToolchainTrust);
-            Hash128 resultRoot = ContentEmitter.Emit(witnessBuilder, tool.CanonicalJson, ToolchainSource)
-                ?? throw new InvalidOperationException("Toolchain receipt did not compose into substrate content.");
-            Hash128 toolRoot = ContentEmitter.Emit(
-                witnessBuilder, $"toolchain/{tool.Tool}/{modality}", ToolchainSource) ?? resultRoot;
 
-            void WitnessOutcome(Hash128 subject) =>
-                witnessBuilder.AddAttestation(NativeAttestation.Categorical(
-                    subject, "HAS_RESULT", resultRoot, ToolchainSource, toolRoot,
-                    ToolchainTrust, confirm: tool.Verified));
+            if (CodeToolchain.CandidateFileName(candidate, modality) is { } file)
+                await _witnesses.Value.RecordAsync(new NativeRuntimeWitness(CodePlayer, TrustClass), file, utf8, ct)
+                    .ConfigureAwait(false);
+            if (tool.ToolAvailable)
+                await _witnesses.Value.StateAsync(new NativeRuntimeWitness(tool.Tool, TrustClass),
+                    [new WitnessStatement(candidate, Verdict, "", tool.Verified ? 1.0 : 0.0)], ct).ConfigureAwait(false);
 
-            WitnessOutcome(root);
-            foreach (Hash128 definitionId in definitionIds)
-                WitnessOutcome(definitionId);
-
-            await writer.ApplyAsync(witnessBuilder.Build(), ct).ConfigureAwait(false);
-
-            receipts.Add(new AttemptReceipt(attempt, root.ToString(), tool.Verified, tool.Tool,
+            receipts.Add(new AttemptReceipt(attempt, lastId ?? "", tool.Verified, tool.Tool,
                 tool.ToolAvailable, tool.TimedOut, tool.ExitCode, tool.Stdout, tool.Stderr));
 
             if (!tool.ToolAvailable)
-                return new Result(modality, candidate, root.ToString(), false, "toolchain_unavailable", receipts);
+                return new Result(modality, candidate, lastId, false, "toolchain_unavailable", receipts);
             if (tool.Verified)
-                return new Result(modality, candidate, root.ToString(), true, null, receipts);
-
-            feedback.Clear();
-            feedback.Add(root.ToBytes());
+                return new Result(modality, candidate, lastId, true, null, receipts);
         }
 
-        return new Result(modality, lastCode, lastRoot?.ToString(), false,
-            "toolchain_rejected_all_candidates", receipts);
+        return new Result(modality, lastCode, lastId, false, "toolchain_rejected_all_candidates", receipts);
     }
 }

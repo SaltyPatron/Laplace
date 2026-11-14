@@ -26,7 +26,7 @@
 -- deletion and its refold together, so re-running an interrupted eviction
 -- ends in the state one run would. No SET clause: a procedure carrying one
 -- cannot COMMIT; references are schema-qualified.
--- Invoke with: CALL ops.evict_source(laplace.source_id('ChessAnalysis'));
+-- Invoke with: CALL ops.evict_source(public.blake3_send(public.laplace_text_id('substrate/source/ChessAnalysis/v1')));
 
 CREATE OR REPLACE PROCEDURE ops.evict_source(
     p_source       bytea,
@@ -94,7 +94,7 @@ BEGIN
     END IF;
     -- Operational relation types (the writer's admission receipts) carry no
     -- rating observations and are retracted separately below.
-    operational_types := ARRAY[realize.canonical_id('substrate/type/HasFileMetadata/v1')];
+    operational_types := ARRAY[public.blake3_send(public.laplace_text_id('substrate/type/HasFileMetadata/v1'))];
 
     SELECT COALESCE(array_agg(candidate ORDER BY ordinal), ARRAY[]::bytea[]) INTO rels
     FROM unnest(rels) WITH ORDINALITY AS selected(candidate, ordinal)

@@ -127,24 +127,26 @@ public static class NpgsqlIngestOps
             static row => new GinMaintenance(row.GetString(0), row.IsDBNull(1) ? null : row.GetInt64(1)),
             timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
 
+    // A source named by its registry name is the id of its canonical key (SubstrateCanonicalIds.Source),
+    // composed here once; the catalog statements take the id.
     public static Task<long> EvidenceCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
-        ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_source_name"), p => p.AddWithValue("s", sourceKey), ct, "evidence_count_source_name");
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_source"),
+            p => p.Add("s", NpgsqlDbType.Bytea).Value = SubstrateCanonicalIds.Source(sourceKey).ToBytes(),
+            ct, "evidence_count_source_name");
 
     public static Task<long> ContentCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
-        ScalarLongAsync(conn, SqlCatalog.Get("ingest.content_count_for_source_name"), p => p.AddWithValue("s", sourceKey), ct, "content_count_source_name");
+        ScalarLongAsync(conn, SqlCatalog.Get("ingest.content_count_for_source"),
+            p => p.Add("s", NpgsqlDbType.Bytea).Value = SubstrateCanonicalIds.Source(sourceKey).ToBytes(),
+            ct, "content_count_source_name");
 
     public static Task<long> EvidenceCountForRelationAsync(
         NpgsqlConnection conn, string relationType, string? sourceKey = null,
         CancellationToken ct = default) =>
         sourceKey is null
             ? ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_relation"), p => p.AddWithValue("rel", relationType), ct, "evidence_count_relation")
-            : ScalarLongAsync(conn, SqlCatalog.Get("ingest.evidence_count_for_relation_source"), p =>
-                {
-                    p.AddWithValue("rel", relationType);
-                    p.AddWithValue("src", sourceKey);
-                }, ct, "evidence_count_relation_source");
+            : EvidenceCountForRelationAndSourceIdAsync(conn, relationType, SubstrateCanonicalIds.Source(sourceKey).ToBytes(), ct);
 
     public static Task<long> EvidenceCountForRelationAndSourceIdAsync(
         NpgsqlConnection conn, string relationType, byte[] sourceId,
@@ -178,7 +180,7 @@ public static class NpgsqlIngestOps
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, SqlCatalog.Get("ingest.source_bootstrap_present"),
             p =>
             {
-                p.AddWithValue("src", sourceKey);
+                p.Add("src", NpgsqlDbType.Bytea).Value = SubstrateCanonicalIds.Source(sourceKey).ToBytes();
                 p.AddWithValue("rel", lawRelation);
             }, timeoutSeconds: 0, ct: ct, label: "source_bootstrap_present").ConfigureAwait(false);
         return v is bool b && b;

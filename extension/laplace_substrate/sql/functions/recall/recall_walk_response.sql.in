@@ -1,17 +1,17 @@
 -- doc 15 Phase 3C / doc 22 Phase E: 'complete' mode (has a type filter,
--- COMPLETES_TO) routes through walk_branches -- the enriched native beam
+-- COMPLETES_TO) routes through public.laplace_pull -- the enriched native beam
 -- engine (Glicko-complete edge weight, highway-mask gating capability,
 -- S3/hilbert/trajectory-ordinal geometry terms). Plain 'walk' mode (NO
--- type filter) stays on walk_strongest, unchanged from before this pass.
+-- type filter) stays on public.laplace_pull, unchanged from before this pass.
 --
 -- Why the split: consensus is LIST-partitioned by relation type (hot
--- relations further HASH x8). walk_branches' per-level batch query has no
+-- relations further HASH x8). public.laplace_pull' per-level batch query has no
 -- type predicate to prune on when p_type is NULL, so an unrestricted call
 -- forces an Append scan across every relation-type partition (~200+ leaves)
 -- -- measured live via EXPLAIN ANALYZE, and caught in regress turning a
 -- sub-second converse.sql assertion into 24s. 'complete' mode's COMPLETES_TO
--- filter keeps walk_branches on the fast, partition-pruned path; plain
--- 'walk' has no filter to give it, so it stays on consensus.walk_strongest(proven
+-- filter keeps public.laplace_pull on the fast, partition-pruned path; plain
+-- 'walk' has no filter to give it, so it stays on public.laplace_pull(proven
 -- fast for the genuinely-unrestricted case via the original baseline) until
 -- a bounded default relation set or a type-agnostic index makes the
 -- unfiltered case safe for the beam engine too.
@@ -30,7 +30,17 @@ CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode t
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH complete_branches AS (
-        SELECT * FROM consensus.walk_branches(p_topic, laplace.relation_type_id('COMPLETES_TO'), 8, 5)
+        SELECT * FROM (SELECT w.hops AS depth,
+                ARRAY(SELECT public.blake3_send(u.x) FROM unnest(w.chain) WITH ORDINALITY u(x,n) ORDER BY u.n) AS path,
+                ARRAY(SELECT public.blake3_send((public.laplace_parts(pp.path))[2])
+                      FROM unnest(w.claims) WITH ORDINALITY u(c,n)
+                      JOIN public.laplace_paths(w.claims) pp ON pp.entity=u.c ORDER BY u.n) AS types,
+                public.blake3_send(w.id) AS entity_id,
+                (w.rating-2*w.deviation)::numeric AS eff_mu,
+                exp(-w.cost)::numeric AS path_mu,
+                0::bigint AS witnesses
+         FROM public.laplace_pull(ARRAY[public.blake3_from_bytea(p_topic)],NULL,8,5::bigint,4096::bigint,NULL::public.blake3[]) w
+         WHERE w.hops>=1) wb
         WHERE p_mode = 'complete'
     ),
     complete_winner AS (
@@ -47,9 +57,9 @@ BEGIN ATOMIC
                COALESCE(array_agg(type_id ORDER BY i),'{}'::bytea[]) AS types
         FROM complete_steps
     ), complete_labels AS MATERIALIZED (
-        SELECT realize.batch(entities, converse.word_language(p_topic)) AS realized,
-               realize.label_batch(entities) AS fallback,
-               lexical.type_label_batch(types) AS types
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((entities)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((entities)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS realized,
+               ARRAY(SELECT lp_l.content FROM unnest((entities)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((entities)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS fallback,
+               ARRAY(SELECT lp_l.content FROM unnest((types)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((types)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS types
         FROM complete_ids
     ),
     complete_reply AS (

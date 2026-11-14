@@ -34,12 +34,12 @@ $parts = foreach ($kv in $layers.GetEnumerator()) {
         @"
 SELECT 'STAT_document=' || EXISTS(
   SELECT 1 FROM laplace.physicalities p
-  WHERE p.source_id = laplace.source_id('$src')
+  WHERE p.source_id = public.blake3_send(public.laplace_text_id('substrate/source/$src/v1'))
   LIMIT 1)::text
 "@
     } else {
         @"
-SELECT 'STAT_$key=' || ops.layer_completed(laplace.source_id('$src'), $layer)::text
+SELECT 'STAT_$key=' || ops.layer_completed(public.blake3_send(public.laplace_text_id('substrate/source/$src/v1')), $layer)::text
 "@
     }
 }

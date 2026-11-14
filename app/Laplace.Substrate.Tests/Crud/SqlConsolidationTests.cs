@@ -146,19 +146,10 @@ public class SqlConsolidationTests
         Assert.True(n >= 2, $"expected >=2 consensus edges after inline fold, got {n}");
     }
 
-    // ---- conflict resolution: collocates + table_present_ordinals smoke ----------------
+    // ---- table_present_ordinals smoke (structural.collocates retired onto the Native substrate) ----
     [Fact]
-    public async Task Collocates_And_TablePresentOrdinals_AreCallableWithExpectedShape()
+    public async Task TablePresentOrdinals_IsCallableWithExpectedShape()
     {
-        // collocates now reads FROM v_consensus_unrefuted; proven body-equal to the inline
-        // NOT consensus.refuted(...) form by the SQL parity harness — assert it is callable/typed.
-        await using (var cmd = _pg.DataSource.CreateCommand(
-            "SELECT next_word, mu, witnesses FROM structural.collocates('a', 3)"))
-        await using (var rd = await cmd.ExecuteReaderAsync())
-        {
-            Assert.Equal(3, rd.FieldCount);
-        }
-
         // table_present_ordinals dispatches over the three base tables via UNION ALL helpers.
         var idx = await ScalarAsync(
             "SELECT count(*) FROM laplace.table_present_ordinals('entities', ARRAY[]::bytea[])");

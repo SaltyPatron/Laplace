@@ -112,7 +112,15 @@ SQL_QUERY("browse.names", "bytea[]",
     "WHERE object_id = ANY($1) AND type_id = ANY("
     "consensus.relation_family_ids('HAS_NAME'))")
 SQL_QUERY("entity.facets", "bytea[]",
-    "SELECT entity_id,tier,type_id FROM ops.entity_facets_batch($1)")
+    "WITH ids AS MATERIALIZED (\n"
+    " SELECT DISTINCT u.id,public.blake3_from_bytea(u.id) AS key FROM unnest($1::bytea[]) u(id) WHERE u.id IS NOT NULL\n"
+    "), native AS MATERIALIZED (\n"
+    " SELECT e.id,e.tier FROM public.laplace_entities(ARRAY(SELECT key FROM ids)) e\n"
+    ")\n"
+    "SELECT i.id,coalesce(e.tier,0)::smallint,NULL::bytea\n"
+    "FROM ids i LEFT JOIN native e ON e.id=i.key\n"
+    "WHERE e.tier IS NOT NULL OR public.laplace_codepoint(i.key)>=0\n"
+    "ORDER BY i.id")
 
 SQL_QUERY("consensus.out_labeled", "bytea,int4",
     "SELECT c.type_label,c.object_label,encode(c.object_id,'hex'),c.eff_mu,c.witnesses "
@@ -122,7 +130,7 @@ SQL_QUERY("consensus.in_labeled", "bytea,int4",
     "ORDER BY consensus.edge_rank(c.type_id,consensus.eff_mu(c.rating,c.rd)) DESC,c.type_id,c.subject_id) AS ord "
     "FROM consensus.consensus_in($1,$2) c), ids AS ("
     "SELECT type_id AS id FROM edges UNION SELECT subject_id FROM edges), labels AS MATERIALIZED ("
-    "SELECT d.id,d.label FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "SELECT d.id,d.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d) "
     "SELECT encode(e.subject_id,'hex'),coalesce(t.label,'Value'),s.label,consensus.eff_mu_display(e.rating,e.rd),e.witness_count "
     "FROM edges e LEFT JOIN labels t ON t.id=e.type_id JOIN labels s ON s.id=e.subject_id ORDER BY e.ord")
 SQL_QUERY("inspection.consensus_out", "bytea",
@@ -130,8 +138,9 @@ SQL_QUERY("inspection.consensus_out", "bytea",
     "consensus.edge_rank(c.type_id,consensus.eff_mu(c.rating,c.rd)) DESC,c.type_id,c.object_id) AS ord "
     "FROM consensus.consensus_out($1) c), ids AS ("
     "SELECT type_id AS id FROM edges UNION SELECT object_id FROM edges WHERE object_id IS NOT NULL), "
-    "labels AS MATERIALIZED (SELECT d.id,d.label FROM realize.display_label_batch("
-    "ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "labels AS MATERIALIZED (SELECT d.id,d.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(("
+    "ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(("
+    "ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d) "
     "SELECT coalesce(t.label,'Value'),p.label,e.rating,e.rd,e.volatility,e.witness_count "
     "FROM edges e LEFT JOIN labels t ON t.id=e.type_id LEFT JOIN labels p ON p.id=e.object_id ORDER BY e.ord")
 SQL_QUERY("inspection.attestations_out", "bytea",
@@ -140,7 +149,7 @@ SQL_QUERY("inspection.attestations_out", "bytea",
     "a.type_id,a.object_id,a.source_id,a.context_id) AS ord FROM ops.attestations_out($1) a), ids AS ("
     "SELECT type_id AS id FROM edges UNION SELECT object_id FROM edges WHERE object_id IS NOT NULL "
     "UNION SELECT source_id FROM edges), labels AS MATERIALIZED ("
-    "SELECT d.id,d.label FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "SELECT d.id,d.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d) "
     "SELECT t.label,p.label,s.label,e.context_id,e.outcome,e.observation_count "
     "FROM edges e JOIN labels t ON t.id=e.type_id LEFT JOIN labels p ON p.id=e.object_id "
     "JOIN labels s ON s.id=e.source_id ORDER BY e.ord")
@@ -149,8 +158,9 @@ SQL_QUERY("inspection.consensus_in", "bytea",
     "consensus.edge_rank(c.type_id,consensus.eff_mu(c.rating,c.rd)) DESC,c.type_id,c.subject_id) AS ord "
     "FROM consensus.consensus_in($1) c), ids AS ("
     "SELECT type_id AS id FROM edges UNION SELECT subject_id FROM edges WHERE subject_id IS NOT NULL), "
-    "labels AS MATERIALIZED (SELECT d.id,d.label FROM realize.display_label_batch("
-    "ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "labels AS MATERIALIZED (SELECT d.id,d.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(("
+    "ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(("
+    "ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d) "
     "SELECT coalesce(t.label,'Value'),p.label,e.rating,e.rd,e.volatility,e.witness_count "
     "FROM edges e LEFT JOIN labels t ON t.id=e.type_id LEFT JOIN labels p ON p.id=e.subject_id ORDER BY e.ord")
 SQL_QUERY("inspection.attestations_in", "bytea",
@@ -159,7 +169,7 @@ SQL_QUERY("inspection.attestations_in", "bytea",
     "a.type_id,a.subject_id,a.source_id,a.context_id) AS ord FROM ops.attestations_in($1) a), ids AS ("
     "SELECT type_id AS id FROM edges UNION SELECT subject_id FROM edges WHERE subject_id IS NOT NULL "
     "UNION SELECT source_id FROM edges), labels AS MATERIALIZED ("
-    "SELECT d.id,d.label FROM realize.display_label_batch(ARRAY(SELECT id FROM ids ORDER BY id)) d) "
+    "SELECT d.id,d.label FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY(SELECT id FROM ids ORDER BY id))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d) "
     "SELECT t.label,p.label,s.label,e.context_id,e.outcome,e.observation_count "
     "FROM edges e JOIN labels t ON t.id=e.type_id LEFT JOIN labels p ON p.id=e.subject_id "
     "JOIN labels s ON s.id=e.source_id ORDER BY e.ord")
@@ -169,9 +179,6 @@ SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
     "AS s(subject_id,type_id,source_id,context_id) ON a.subject_id=s.subject_id "
     "AND a.type_id=s.type_id AND a.source_id=s.source_id "
     "AND a.context_id IS NOT DISTINCT FROM s.context_id WHERE a.type_id=ANY($2)")
-SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
-    "SELECT parent_id,n_constituents,ordinal,child_id,run_length,flags "
-    "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
 SQL_QUERY("entities.mask_targets", "bytea[]",
     "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
 SQL_QUERY("entities.complete_highway_masks", "bytea[]",
@@ -206,14 +213,13 @@ SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
     "rating, rd, eff_mu, witness_count, candidate_name_count, candidate_truncated, matched_entity_count "
     "FROM consensus.browse_named_entities($1,$2,$3,$4,$5)")
 SQL_QUERY("display.labels", "bytea[]",
-    "SELECT encode(d.id, 'hex'), d.label, d.tier FROM realize.display_label_batch($1) d")
-SQL_QUERY("containers.bound_surfaces", "bytea,bytea",
-    "SELECT subject_id FROM laplace.consensus WHERE object_id=$1 AND type_id=$2")
+    "SELECT encode(d.id, 'hex'), d.label, d.tier FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) d")
 SQL_QUERY("containers.page", "bytea,int4,int4",
-    "SELECT entity_id, tier, type_id, hops FROM structural.containers_of($1,$2,$3)")
+    "SELECT public.blake3_send(a.entity),a.tier,NULL::bytea,a.hops\n"
+    "FROM public.laplace_above(ARRAY[public.blake3_from_bytea($1)],$2,$3::bigint) a")
 SQL_QUERY("types.labels", "bytea[]",
-    "SELECT lexical.type_label_batch($1)")
-SQL_QUERY("generation.separators", "", "SELECT generation.separator_ids()")
+    "SELECT ARRAY(SELECT lp_l.content FROM unnest(($1)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)")
+SQL_QUERY("generation.separators", "", "SELECT (public.laplace_separator_ids()::bytea[])")
 SQL_QUERY("generation.adjacency_manifests", "bytea[],int4",
     "SELECT entity_id,public.ST_AsBinary(trajectory) FROM laplace.physicalities "
     "WHERE type=1 AND trajectory IS NOT NULL "
@@ -245,13 +251,6 @@ SQL_QUERY("query.lexicon_relations", "bytea[],text[]",
     "LEFT JOIN public.laplace_physicalities(ARRAY(SELECT key FROM ids)) e ON e.entity=i.key ORDER BY i.id")
 /* Selected roots keep their identity while the first-constituent frontier
  * descends. No reverse probe from a common scalar through the corpus. */
-SQL_QUERY("content.first_children", "bytea[],bytea[]",
-    "WITH frontier AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::bytea[]) f(root,node)), "
-    "children AS MATERIALIZED (SELECT p.entity_id AS id,(public.laplace_trajectory_constituent_ids(p.trajectory))[1] AS child "
-    "FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL AND p.entity_id=ANY($2::bytea[]) "
-    "UNION SELECT public.blake3_send(c.entity),public.blake3_send(c.child) FROM "
-    "public.laplace_constituents(ARRAY(SELECT DISTINCT public.blake3_from_bytea(node) FROM frontier)) c WHERE c.ordinal=1) "
-    "SELECT f.root,c.child FROM frontier f JOIN children c ON c.id=f.node WHERE c.child IS NOT NULL")
 SQL_QUERY("leaders.native_named", "int4[],int4",
     "WITH leaders AS MATERIALIZED (SELECT * FROM ops.claim_leaders($1,$2) WITH ORDINALITY)\nSELECT b.band,b.name,encode(n.claim_id,'hex'),n.parts,n.confidence,n.witnesses,n.trajectory\nFROM converse.relation_band_catalog() b LEFT JOIN leaders n ON n.band=b.band\nWHERE b.band=ANY($1) ORDER BY b.band,n.ordinality")
 
@@ -280,40 +279,20 @@ SQL_QUERY("conversation.couple_topics", "bytea,bytea",
     "WITH input AS MATERIALIZED (\n SELECT decode(encode($1::bytea,'hex'),'hex')::bytea AS x,decode(encode($2::bytea,'hex'),'hex')::bytea AS y\n), roots AS MATERIALIZED (\n SELECT 1 AS side,public.blake3_from_bytea(x) AS id FROM input\n UNION ALL SELECT 2,public.blake3_from_bytea(y) FROM input\n), candidates AS MATERIALIZED (\n SELECT side,id FROM roots\n UNION SELECT r.side,c.entity FROM roots r\n CROSS JOIN LATERAL public.laplace_containers(ARRAY[r.id],ARRAY[public.laplace_bank_bit('kind','tuple')]) c\n), pairs AS MATERIALIZED (\n SELECT x.id AS x,y.id AS y,p.entity,c.rating-2*c.deviation AS standing\n FROM candidates x JOIN public.physicality p ON p.path @> ARRAY[x.id]\n JOIN public.consensus c ON c.claim=p.entity\n JOIN candidates y ON y.side=2\n   AND ((public.laplace_path_starts(p.path,x.id) AND public.laplace_path_ends(p.path,y.id))\n     OR (public.laplace_path_ends(p.path,x.id) AND public.laplace_path_starts(p.path,y.id)))\n WHERE x.side=1 AND public.laplace_path_length(p.path)=3 AND x.id<>y.id\n ORDER BY standing DESC,p.entity,x.id,y.id LIMIT 1\n)\nSELECT coalesce((SELECT public.blake3_send(x) FROM pairs),input.x),\n       coalesce((SELECT public.blake3_send(y) FROM pairs),input.y),\n       (SELECT ops.claim_label(x) FROM pairs),\n       (SELECT ops.claim_label(y) FROM pairs)\nFROM input\n")
 
 SQL_QUERY("conversation.resolve_refs_with_labels", "bytea[],text[]",
-    "SELECT ordinal,id,label,present FROM ops.resolve_refs($1,$2)")
+    "SELECT ordinal,id,label,present FROM public.laplace_resolve_refs($1,$2)")
 
 SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
-    "SELECT t.step,encode(t.entity,'hex'),converse.label_or_hex(t.entity),t.stride_used,"
+    "SELECT t.step,encode(t.entity,'hex'),(SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(t.entity)::bytea],NULL)::public.blake3[]) lp_l),t.stride_used,"
     "encode(t.root_id,'hex'),t.candidate_count,t.ordered_context_count,t.proposal_channel_count,"
     "t.exact_channel_count,t.sequence_occurrences,t.covered_occurrences,t.relation_families,"
     "t.opposed_occurrences,CASE WHEN t.support_anchor IS NULL THEN NULL ELSE encode(t.support_anchor,'hex') END,"
-    "CASE WHEN t.support_anchor IS NULL THEN NULL ELSE converse.label_or_hex(t.support_anchor) END,"
+    "CASE WHEN t.support_anchor IS NULL THEN NULL ELSE (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(t.support_anchor)::bytea],NULL)::public.blake3[]) lp_l) END,"
     "CASE WHEN t.support_relation IS NULL THEN NULL ELSE encode(t.support_relation,'hex') END,"
-    "CASE WHEN t.support_relation IS NULL THEN NULL ELSE converse.label_or_hex(t.support_relation) END,"
+    "CASE WHEN t.support_relation IS NULL THEN NULL ELSE (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(t.support_relation)::bytea],NULL)::public.blake3[]) lp_l) END,"
     "t.support_outbound,t.support_rating,t.support_rd,t.support_witnesses,t.support_sources,t.support_contexts,"
     "t.declared_result,t.event,t.routing_round FROM generation.forward_trace("
     "$1,$2,$3,$4,$5,NULL::bigint,$6,$7,NULL::bytea[],NULL::bytea[]) t "
     "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
-SQL_QUERY("conversation.manifest", "bytea,bytea",
-    "SELECT public.ST_AsBinary(p.trajectory,'NDR'),p.type,public.ST_X(p.coord),public.ST_Y(p.coord),"
-    "public.ST_Z(p.coord),public.ST_M(p.coord),p.hilbert_index,p.n_constituents,"
-    "p.alignment_residual,p.source_dim,p.observed_at FROM laplace.physicalities p "
-    "WHERE p.id IN ($1,$2)")
-SQL_QUERY("conversation.lock", "bytea",
-    "SELECT id FROM laplace.entities WHERE id=$1 FOR UPDATE")
-SQL_QUERY("conversation.coordinates", "bytea[]",
-    "SELECT DISTINCT ON (t.ordinal) t.ordinal,e.tier,public.ST_X(p.coord),"
-    "public.ST_Y(p.coord),public.ST_Z(p.coord),public.ST_M(p.coord) "
-    "FROM unnest($1::bytea[]) WITH ORDINALITY t(id,ordinal) "
-    "JOIN laplace.entities e ON e.id=t.id "
-    "JOIN laplace.physicalities p ON p.entity_id=t.id AND p.type=1 ORDER BY t.ordinal,p.id")
-SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8,float8,bytea,int4,timestamptz",
-    "INSERT INTO laplace.physicalities "
-    "(id,entity_id,type,trajectory,coord,hilbert_index,n_constituents,observed_at) "
-    "VALUES ($1,$2,3,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
-    "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
-    "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
-    "alignment_residual=NULL,source_dim=NULL,observed_at=EXCLUDED.observed_at")
 /* Retained for already mapped versioned execution modules during live upgrade. */
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
@@ -342,8 +321,3 @@ SQL_QUERY("native.observation_bindings", "bytea[],bytea[],bytea[],int4",
     "WITH held AS MATERIALIZED (SELECT h.entity,public.laplace_parts(h.path) ids FROM public.laplace_holders(ARRAY(SELECT DISTINCT public.blake3_from_bytea(id) FROM unnest($1::bytea[]) u(id)),'{}',false,-1::smallint,-1::bigint,1::smallint) h WHERE public.laplace_path_length(h.path)=3), cells AS MATERIALIZED (SELECT * FROM held WHERE (($4&1)<>0 AND public.blake3_send(ids[1])=ANY($1) OR ($4&2)<>0 AND public.blake3_send(ids[3])=ANY($1)) AND ($3 IS NULL OR public.blake3_send(ids[2])=ANY($3))) "
     "SELECT public.blake3_send(a.claim),public.blake3_send(c.ids[1]),public.blake3_send(c.ids[2]),public.blake3_send(c.ids[3]),public.blake3_send(a.source),public.blake3_send(a.context),a.outcome,a.occurrences,NULL::bytea,a.score,a.tokens,a.ordinal,a.trust,public.blake3_send(a.dependence_root),a.calculation,a.position "
     "FROM public.laplace_testimony(ARRAY(SELECT DISTINCT entity FROM cells),CASE WHEN $2 IS NULL THEN NULL::public.blake3[] ELSE ARRAY(SELECT public.blake3_from_bytea(id) FROM unnest($2::bytea[]) u(id)) END) a JOIN cells c ON c.entity=a.claim")
-SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
-    "SELECT encode(object_id,'hex'),combined_eff_mu,source_count "
-    "FROM ops.attestation_response_type($1,$2,NULL,NULL,$3)")
-SQL_QUERY("evidence.unary_response_type", "bytea,bytea",
-    "SELECT combined_eff_mu,source_count FROM ops.attestation_unary_response_type($1,$2,NULL,NULL)")

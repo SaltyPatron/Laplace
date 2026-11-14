@@ -7,8 +7,8 @@ CREATE FUNCTION pg_temp.native_refold(bytea,bytea[],bytea[]) RETURNS bigint
 AS :'execution_library', 'pg_laplace_consensus_refold_evidence_type'
 LANGUAGE C VOLATILE SET plan_cache_mode=force_custom_plan;
 CREATE TEMP TABLE fold_targets AS
-SELECT i, public.laplace_hash128_blake3(convert_to('test/sql-batch/subject/'||i,'UTF8')) s,
-       CASE WHEN i%3=0 THEN NULL::bytea ELSE public.laplace_hash128_blake3(convert_to('test/sql-batch/object/'||i,'UTF8')) END o
+SELECT i, public.blake3_send(public.laplace_text_id('test/sql-batch/subject/'||i)) s,
+       CASE WHEN i%3=0 THEN NULL::bytea ELSE public.blake3_send(public.laplace_text_id('test/sql-batch/object/'||i)) END o
 FROM generate_series(1,512) i;
 CREATE TEMP TABLE fold_input AS
 SELECT laplace.relation_type_id('IS_A') t,array_agg(s ORDER BY i) s,array_agg(o ORDER BY i) o
@@ -16,8 +16,8 @@ FROM fold_targets;
 INSERT INTO laplace.attestations
     (id,subject_id,type_id,object_id,source_id,outcome,last_observed_at,
      observation_count,sum_score_fp1e9,opponent_rating_fp1e9,opponent_rd_fp1e9)
-SELECT public.laplace_hash128_blake3(convert_to('test/sql-batch/evidence/'||f.i||'/'||g,'UTF8')),
-       f.s, b.t,f.o,public.laplace_hash128_blake3(convert_to('test/sql-batch/source/'||g,'UTF8')),
+SELECT public.blake3_send(public.laplace_text_id('test/sql-batch/evidence/'||f.i||'/'||g)),
+       f.s, b.t,f.o,public.blake3_send(public.laplace_text_id('test/sql-batch/source/'||g)),
        (g%3)::smallint,'2026-01-01'::timestamptz + g*interval '1 second',
        g, g*500000000::bigint,
        CASE WHEN g=1 THEN 0 ELSE 1500000000000::bigint + g*10000000000::bigint END,

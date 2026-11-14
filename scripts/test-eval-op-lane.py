@@ -64,10 +64,6 @@ class EvalOperationLaneTests(unittest.TestCase):
     @staticmethod
     def diagnostic_op(rows):
         def read(_api, name, args, **limits):
-            if name == "public.laplace_hash128_blake3":
-                return [{"laplace_hash128_blake3": "\\x" + "89" * 16}]
-            if name == "hash128_lo":
-                return [{"hash128_lo": -123}]
             return rows
         return read
 
@@ -77,15 +73,14 @@ class EvalOperationLaneTests(unittest.TestCase):
         probes = [{"id": "failure", "class": "forward", "prompt": "What is a glacier?"}]
         with patch.object(module, "op_rows", side_effect=self.diagnostic_op(rows)) as read:
             report = module.collect_forward_diagnostics("http://laplace", probes)
-        self.assertEqual(4, read.call_count)
-        self.assertEqual({"data": "\\x" + probes[0]["prompt"].encode().hex()}, read.call_args_list[0].args[2])
+        self.assertEqual(2, read.call_count)
         self.assertEqual(["normal", "wider"], [row["configuration"] for row in report["executions"]])
         for item, bounds in zip(report["executions"], [(2, 8), (8, 32)]):
             self.assertEqual("retained", item["status"])
             self.assertEqual(rows, item["rows"])
             self.assertEqual(rows[-1], item["terminal"])
             args = item["arguments"]
-            self.assertEqual((128, 5, 0.6, 10, -123), tuple(args[key] for key in
+            self.assertEqual((128, 5, 0.6, 10, None), tuple(args[key] for key in
                 ("p_steps", "p_max_stride", "p_spread", "p_top_k", "p_seed")))
             self.assertEqual(bounds, (args["p_hops"], args["p_fanout"]))
             self.assertIsNone(args["p_prior_frontier"])
@@ -130,7 +125,7 @@ class EvalOperationLaneTests(unittest.TestCase):
         probes = [{"id":str(i),"class":"forward","prompt":str(i)} for i in range(6)]
         with patch.object(module, "op_rows", side_effect=self.diagnostic_op(self.diagnostic_rows())) as read:
             report = module.collect_forward_diagnostics("http://laplace", probes + probes)
-        self.assertEqual(16, read.call_count)
+        self.assertEqual(8, read.call_count)
         self.assertEqual(2, len(report["omitted"]))
         with patch.object(module, "DIAGNOSTIC_MAX_BYTES", 1), patch.object(
                 module, "op_rows", side_effect=self.diagnostic_op(self.diagnostic_rows())):

@@ -2,30 +2,24 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Laplace.Api.Contracts;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
-using Npgsql;
+using Laplace.Ingestion;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Deposits target-machine analysis as a versioned calculation. The calculation's identity
-/// is its analyzer/toolchain, artifact, target, and execution-count manifest; the result is
-/// its own content-addressed witness.
+/// Records a target-machine analysis as what the runtime witness MachineCostAnalyzer measured, at AppDerived (an
+/// application's evidence from its own operation: measured cost): one JSON file holding the calculation, its
+/// analyzer, artifact, target and execution count, and its result, read by the Engine's json recipe under the
+/// witness's trunk (laplace witness). The calculation is that file's trunk; the same calculation of the same
+/// artifact on the same target records nothing again. Nothing here composes an identity or writes a row.
 /// </summary>
-internal sealed class MachineCostWitnessService(SubstrateClient substrate)
+internal sealed class MachineCostWitnessService
 {
     private const string AnalyzerName = "MachineCostAnalyzer";
+    private const string TrustClass = "AppDerived";
     private const string CalculationSchema = "laplace.machine-cost-calculation/v1";
-    private const string ArtifactSchema = "laplace.machine-artifact-descriptor/v1";
-    private const string TargetSchema = "laplace.machine-target/v1";
     private const string WitnessSchema = "laplace.machine-cost-witness/v1";
-
-    private static readonly Hash128 Source = SubstrateCanonicalIds.Source(AnalyzerName);
-    private static readonly Hash128 TrustClass = TrustClassRegistry.Id("AppDerived");
-    private static readonly double Trust = SourceTrust.AppDerived;
-
+    private readonly Lazy<RuntimeWitnessRecorder> _recorder = new(RuntimeWitnessRecorder.Installed);
     private static readonly JsonSerializerOptions CanonicalJson = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -33,20 +27,6 @@ internal sealed class MachineCostWitnessService(SubstrateClient substrate)
     };
 
     internal sealed record Deposit(string CalculationId, string WitnessId);
-
-    private sealed record ArtifactDescriptor(
-        string Schema,
-        string Sha256,
-        long Bytes,
-        string ObjectFormat);
-
-    private sealed record MachineTarget(
-        string Schema,
-        string TargetTriple,
-        string Cpu,
-        double ClockHz,
-        string ObjdumpVersion,
-        string McaVersion);
 
     private sealed record CalculationManifest(
         string Schema,
@@ -94,108 +74,63 @@ internal sealed class MachineCostWitnessService(SubstrateClient substrate)
     {
         ArgumentNullException.ThrowIfNull(receipt);
 
+        var calculation = new CalculationManifest(
+            CalculationSchema,
+            AnalyzerName,
+            "1",
+            receipt.ArtifactSha256,
+            receipt.Symbol,
+            receipt.ObjectFormat,
+            receipt.TargetTriple,
+            receipt.Cpu,
+            receipt.ClockHz,
+            receipt.Iterations,
+            receipt.Scope,
+            receipt.ControlFlowWeighted,
+            receipt.ObjdumpVersion,
+            receipt.McaVersion);
+
+        var witness = new CostWitness(
+            WitnessSchema,
+            receipt.ArtifactSha256,
+            receipt.Symbol,
+            receipt.ObjectFormat,
+            receipt.TargetTriple,
+            receipt.Cpu,
+            receipt.ClockHz,
+            receipt.Iterations,
+            receipt.StaticInstructionCount,
+            receipt.ScheduledInstructionInstances,
+            receipt.TotalCycles,
+            receipt.TotalUops,
+            receipt.DispatchWidth,
+            receipt.UopsPerCycle,
+            receipt.Ipc,
+            receipt.BlockRThroughputCycles,
+            receipt.CalculatedSeconds,
+            receipt.CalculatedNanoseconds,
+            receipt.Scope,
+            receipt.ControlFlowWeighted,
+            receipt.ResourcePressure,
+            receipt.ObjdumpVersion,
+            receipt.McaVersion,
+            receipt.Assumptions);
+
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(new { calculation, result = witness }, CanonicalJson);
         try
         {
-            await using var writer = new ConsensusAccumulatingWriter(
-                new NpgsqlSubstrateWriter(substrate.DataSource), substrate.DataSource);
-
-            SubstrateChange bootstrap = new BootstrapIntentBuilder(
-                Source, AnalyzerName, TrustClass).Build();
-            await writer.ApplyAsync(bootstrap, ct).ConfigureAwait(false);
-
-            var artifact = new ArtifactDescriptor(
-                ArtifactSchema,
-                receipt.ArtifactSha256,
-                receipt.ArtifactBytes,
-                receipt.ObjectFormat);
-
-            var target = new MachineTarget(
-                TargetSchema,
-                receipt.TargetTriple,
-                receipt.Cpu,
-                receipt.ClockHz,
-                receipt.ObjdumpVersion,
-                receipt.McaVersion);
-
-            var calculation = new CalculationManifest(
-                CalculationSchema,
-                AnalyzerName,
-                "1",
-                receipt.ArtifactSha256,
-                receipt.Symbol,
-                receipt.ObjectFormat,
-                receipt.TargetTriple,
-                receipt.Cpu,
-                receipt.ClockHz,
-                receipt.Iterations,
-                receipt.Scope,
-                receipt.ControlFlowWeighted,
-                receipt.ObjdumpVersion,
-                receipt.McaVersion);
-
-            var witness = new CostWitness(
-                WitnessSchema,
-                receipt.ArtifactSha256,
-                receipt.Symbol,
-                receipt.ObjectFormat,
-                receipt.TargetTriple,
-                receipt.Cpu,
-                receipt.ClockHz,
-                receipt.Iterations,
-                receipt.StaticInstructionCount,
-                receipt.ScheduledInstructionInstances,
-                receipt.TotalCycles,
-                receipt.TotalUops,
-                receipt.DispatchWidth,
-                receipt.UopsPerCycle,
-                receipt.Ipc,
-                receipt.BlockRThroughputCycles,
-                receipt.CalculatedSeconds,
-                receipt.CalculatedNanoseconds,
-                receipt.Scope,
-                receipt.ControlFlowWeighted,
-                receipt.ResourcePressure,
-                receipt.ObjdumpVersion,
-                receipt.McaVersion,
-                receipt.Assumptions);
-
-            byte[] artifactJson = JsonSerializer.SerializeToUtf8Bytes(artifact, CanonicalJson);
-            byte[] targetJson = JsonSerializer.SerializeToUtf8Bytes(target, CanonicalJson);
-            byte[] calculationJson = JsonSerializer.SerializeToUtf8Bytes(calculation, CanonicalJson);
-            byte[] witnessJson = JsonSerializer.SerializeToUtf8Bytes(witness, CanonicalJson);
-
-            using var change = new SubstrateChangeBuilder(
-                Source,
-                $"machine-cost/{receipt.ArtifactSha256}/{Guid.NewGuid():N}")
-                .DeclareSourcePrior(Source, Trust);
-
-            Hash128 artifactRoot = ContentEmitter.Emit(change, artifactJson, Source)
-                ?? throw new InvalidOperationException("Machine artifact descriptor did not compose into substrate content.");
-            Hash128 targetRoot = ContentEmitter.Emit(change, targetJson, Source)
-                ?? throw new InvalidOperationException("Machine target descriptor did not compose into substrate content.");
-            Hash128 calculationRoot = ContentEmitter.Emit(change, calculationJson, Source)
-                ?? throw new InvalidOperationException("Machine cost calculation manifest did not compose into substrate content.");
-            Hash128 witnessRoot = ContentEmitter.Emit(change, witnessJson, Source)
-                ?? throw new InvalidOperationException("Machine cost witness did not compose into substrate content.");
-
-            change.AddAttestation(NativeAttestation.Categorical(
-                calculationRoot, "HAS_INPUT", artifactRoot,
-                Source, (Hash128?)null, Trust, confirm: true));
-            change.AddAttestation(NativeAttestation.Categorical(
-                calculationRoot, "HAS_INPUT", targetRoot,
-                Source, (Hash128?)null, Trust, confirm: true));
-            change.AddAttestation(NativeAttestation.Categorical(
-                calculationRoot, "HAS_RESULT", witnessRoot,
-                Source, (Hash128?)null, Trust, confirm: true));
-
-            await writer.ApplyAsync(change.Build(), ct).ConfigureAwait(false);
-            return new Deposit(calculationRoot.ToString(), witnessRoot.ToString());
+            var recorded = await _recorder.Value.RecordAsync(
+                new NativeRuntimeWitness(AnalyzerName, TrustClass), "machine-cost.json", json, ct).ConfigureAwait(false);
+            if (recorded.WitnessId is null)
+                throw new SubstrateUnavailableException(
+                    "Machine-cost calculation succeeded, but the Engine reported no witness trunk for its record.",
+                    new InvalidOperationException(recorded.Path));
+            return new Deposit(recorded.FileId ?? recorded.WitnessId, recorded.WitnessId);
         }
-        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        catch (InvalidOperationException ex)
         {
             throw new SubstrateUnavailableException(
-                "Machine-cost calculation succeeded, but its calculated testimony could not be persisted.",
-                ex);
+                "Machine-cost calculation succeeded, but the Engine did not record it.", ex);
         }
     }
 }

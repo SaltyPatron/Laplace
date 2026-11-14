@@ -38,14 +38,13 @@ BEGIN
     INSERT INTO laplace.attestations
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
-    VALUES(public.laplace_hash128_blake3(
-        p_subject || p_type || p_object || p_source || COALESCE(p_context, ''::bytea)),
+    VALUES(public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object, p_source, p_context]::public.blake3[], NULL))),
         p_subject,p_type,p_object,p_source,p_context,2,now(),5,5000000000,30000000000)
     ON CONFLICT (id, type_id, subject_id) DO UPDATE
        SET outcome=2,observation_count=5,sum_score_fp1e9=5000000000;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES(laplace.consensus_id(p_subject,p_type,p_object),p_subject,p_type,p_object,
+    VALUES(public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object]::public.blake3[], NULL))),p_subject,p_type,p_object,
         2000000000000,30000000000,60000000,5,now())
     ON CONFLICT (id,type_id,subject_id) DO UPDATE
        SET rating=2000000000000,rd=30000000000,witness_count=5;
@@ -63,7 +62,7 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES(public.laplace_hash128_blake3(v_id || decode('0800','hex')),
+    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(v_id), public.laplace_cp_id(8)])),
         v_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
         public.laplace_trajectory_build(p_flat),cardinality(p_flat))
     ON CONFLICT (id) DO NOTHING;
@@ -73,8 +72,7 @@ $projection$;
 
 CREATE FUNCTION pg_temp.shape_ref(p_ordinal int)
 RETURNS bytea LANGUAGE sql IMMUTABLE AS $ref$
-    SELECT public.laplace_hash128_blake3(convert_to(
-        'ud/token-ref/' || upper(encode(convert_to(p_ordinal::text,'UTF8'),'hex')) || '/v1','UTF8'));
+    SELECT public.blake3_send(public.laplace_text_id('ud/token-ref/' || upper(encode(convert_to(p_ordinal::text,'UTF8'),'hex')) || '/v1'));
 $ref$;
 
 -- Authored UD annotations are serialized, never inferred by this fixture.
@@ -85,24 +83,24 @@ CREATE FUNCTION pg_temp.shape_parse(
 RETURNS bytea LANGUAGE plpgsql AS $parse$
 DECLARE
     v_root bytea := pg_temp.shape_surface(p_text,p_source);
-    v_flat bytea[] := ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1'),v_root,p_language];
-    v_none bytea := public.laplace_hash128_blake3('ud/parse/none/v1');
+    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1')),v_root,p_language];
+    v_none bytea := public.blake3_send(public.laplace_text_id('ud/parse/none/v1'));
     v_form bytea;
     v_parse bytea;
 BEGIN
     FOR i IN 1..cardinality(p_forms) LOOP
         v_form := pg_temp.shape_surface(p_forms[i],p_source);
         v_flat := v_flat || ARRAY[pg_temp.shape_ref(i),v_form,v_form,
-            public.laplace_hash128_blake3('test/task-shapes/upos'),v_none];
+            public.blake3_send(public.laplace_text_id('test/task-shapes/upos')),v_none];
         IF i=1 THEN v_flat := v_flat || p_first_features; END IF;
         v_flat := v_flat || ARRAY[
-            public.laplace_hash128_blake3('ud/parse/features-end/v1'),
-            CASE WHEN p_heads[i]=0 THEN public.laplace_hash128_blake3('ud/parse/root/v1')
+            public.blake3_send(public.laplace_text_id('ud/parse/features-end/v1')),
+            CASE WHEN p_heads[i]=0 THEN public.blake3_send(public.laplace_text_id('ud/parse/root/v1'))
                  ELSE pg_temp.shape_ref(p_heads[i]) END,p_dependencies[i],
-            public.laplace_hash128_blake3('ud/parse/enhanced-end/v1'),
-            public.laplace_hash128_blake3('ud/parse/misc-end/v1')];
+            public.blake3_send(public.laplace_text_id('ud/parse/enhanced-end/v1')),
+            public.blake3_send(public.laplace_text_id('ud/parse/misc-end/v1'))];
     END LOOP;
-    v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('ud/parse/tokens-end/v1')];
+    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/tokens-end/v1'))];
     INSERT INTO laplace.entities(id,tier,type_id)
     SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker')
       FROM unnest(v_flat) value
@@ -118,9 +116,8 @@ CREATE FUNCTION pg_temp.declare_shape(
     p_exemplar bytea,p_predicate bytea,p_ordinals int[],p_types bytea[],p_source bytea,p_context bytea)
 RETURNS bytea LANGUAGE plpgsql AS $shape$
 DECLARE
-    v_slot_schema bytea := public.laplace_hash128_blake3('laplace/task-shape/token-slot/v1');
-    v_flat bytea[] := ARRAY[public.laplace_hash128_blake3(
-        'laplace/task-shape/relation-read/token-slots/v1'),p_exemplar,p_predicate];
+    v_slot_schema bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v1'));
+    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/relation-read/token-slots/v1')),p_exemplar,p_predicate];
     v_slots bytea[] := ARRAY[]::bytea[];
     v_slot bytea;
     v_shape bytea;
@@ -133,7 +130,7 @@ BEGIN
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
-    v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v1')];
+    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v1'))];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
     PERFORM pg_temp.shape_cell(p_exemplar,laplace.relation_type_id('IS_EXAMPLE_OF'),v_shape,p_source,p_context);
     PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('CALLS'),p_predicate,p_source,p_context);
@@ -150,9 +147,8 @@ CREATE FUNCTION pg_temp.declare_shape_v2(
     p_source bytea,p_context bytea)
 RETURNS bytea LANGUAGE plpgsql AS $shape_v2$
 DECLARE
-    v_slot_schema bytea := public.laplace_hash128_blake3('laplace/task-shape/token-slot/v2');
-    v_flat bytea[] := ARRAY[public.laplace_hash128_blake3(
-        'laplace/task-shape/relation-read/token-slots/v2'),p_exemplar,p_predicate];
+    v_slot_schema bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v2'));
+    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/relation-read/token-slots/v2')),p_exemplar,p_predicate];
     v_slots bytea[] := ARRAY[]::bytea[];
     v_slot bytea;
     v_shape bytea;
@@ -165,7 +161,7 @@ BEGIN
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
-    v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v2')];
+    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v2'))];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
     PERFORM pg_temp.shape_cell(p_exemplar,laplace.relation_type_id('IS_EXAMPLE_OF'),v_shape,p_source,p_context);
     PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('CALLS'),p_predicate,p_source,p_context);
@@ -205,22 +201,22 @@ $reject$;
 SAVEPOINT binding_modes;
 DO $binding_modes$
 DECLARE
-    v_source bytea := public.laplace_hash128_blake3('test/task-shapes/v2/source');
-    v_context bytea := public.laplace_hash128_blake3('test/task-shapes/v2/source-file');
-    v_language bytea := public.laplace_hash128_blake3('test/task-shapes/v2/language');
-    v_answer bytea := public.laplace_hash128_blake3('test/task-shapes/v2/original-answer');
-    v_changed bytea := public.laplace_hash128_blake3('test/task-shapes/v2/changed-answer');
-    v_answer_a bytea := public.laplace_hash128_blake3('test/task-shapes/v2/lemma-answer-a');
-    v_answer_b bytea := public.laplace_hash128_blake3('test/task-shapes/v2/lemma-answer-b');
+    v_source bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/source'));
+    v_context bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/source-file'));
+    v_language bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/language'));
+    v_answer bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/original-answer'));
+    v_changed bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/changed-answer'));
+    v_answer_a bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/lemma-answer-a'));
+    v_answer_b bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/v2/lemma-answer-b'));
     v_word bytea := laplace.entity_type_id('Word');
     v_predicate bytea := laplace.relation_type_id('CAUSES');
     v_lemma bytea := laplace.relation_type_id('IS_LEMMA_OF');
     v_example_of bytea := laplace.relation_type_id('IS_EXAMPLE_OF');
     v_has_parse bytea := laplace.relation_type_id('HAS_PARSE');
-    v_semantic bytea := public.laplace_hash128_blake3('laplace/task-shape/binding/witnessed-semantic/v1');
-    v_form bytea := public.laplace_hash128_blake3('laplace/task-shape/binding/current-form/v1');
-    v_deps bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/v2/root-role'),
-        public.laplace_hash128_blake3('test/task-shapes/v2/input-role')];
+    v_semantic bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/binding/witnessed-semantic/v1'));
+    v_form bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/binding/current-form/v1'));
+    v_deps bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/v2/root-role')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/v2/input-role'))];
     v_prompt text := 'ζξ žđþ';
     v_root bytea;
     v_original bytea;
@@ -259,13 +255,12 @@ BEGIN
     PERFORM pg_temp.shape_cell(v_alternative_a,v_predicate,v_answer_a,v_source,v_context);
     PERFORM pg_temp.shape_cell(v_alternative_b,v_predicate,v_answer_b,v_source,v_context);
     FOR i IN 1..11 LOOP
-        PERFORM pg_temp.shape_projection(ARRAY[v_original,public.laplace_hash128_blake3(
-            convert_to('test/task-shapes/v2/non-ud/' || i::text,'UTF8'))],'CodeConcept',v_source);
+        PERFORM pg_temp.shape_projection(ARRAY[v_original,public.blake3_send(public.laplace_text_id('test/task-shapes/v2/non-ud/' || i::text))],'CodeConcept',v_source);
     END LOOP;
     IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
          AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY[v_original]
          AND NOT public.laplace_trajectory_constituent_ids(p.trajectory) @>
-             ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1')]) < 11 THEN
+             ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]) < 11 THEN
         RAISE EXCEPTION 'FAIL: non-UD membership noise did not exceed the eight-row envelope';
     END IF;
 
@@ -291,8 +286,10 @@ BEGIN
     -- The declaration contains only the exemplar, predicate, slot and mode;
     -- neither the novel Word nor any possible result is an encoded operand.
     FOREACH v_carrier IN ARRAY ARRAY[v_exemplar,v_v1,v_v2_semantic,v_v2_form] LOOP
-        IF EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_carrier,8::smallint) p
-                    WHERE p.entity_id=ANY(ARRAY[v_original,v_answer,v_changed,v_answer_a,v_answer_b])) THEN
+        IF EXISTS (SELECT 1 FROM laplace.physicalities ph
+                    CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(ph.trajectory)) p(entity_id)
+                    WHERE ph.entity_id=v_carrier AND ph.type=8
+                      AND p.entity_id=ANY(ARRAY[v_original,v_answer,v_changed,v_answer_a,v_answer_b])) THEN
             RAISE EXCEPTION 'FAIL: binding-mode declaration pre-encoded a novel input or answer';
         END IF;
     END LOOP;
@@ -348,14 +345,14 @@ BEGIN
     -- eligible canonical UD parses must still exhaust an eight-row budget.
     FOR i IN 1..8 LOOP
         PERFORM pg_temp.shape_parse('ζξ őűȝ',ARRAY['ζξ','őűȝ'],ARRAY[0,1],v_deps,
-            public.laplace_hash128_blake3(convert_to('test/task-shapes/v2/other-language/' || i::text,'UTF8')),
+            public.blake3_send(public.laplace_text_id('test/task-shapes/v2/other-language/' || i::text)),
             v_source,v_context);
     END LOOP;
     IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
          AND public.laplace_trajectory_constituent_ids(p.trajectory) &&
-             ARRAY[laplace.word_id('ζξ'),v_original]
+             ARRAY[public.blake3_send(public.laplace_text_id('ζξ')),v_original]
          AND public.laplace_trajectory_constituent_ids(p.trajectory) @>
-             ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1')]) <> 9 THEN
+             ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]) <> 9 THEN
         RAISE EXCEPTION 'FAIL: eligible UD overflow fixture must contain exactly nine matching parses';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
@@ -370,16 +367,16 @@ RELEASE SAVEPOINT binding_modes;
 
 DO $novel_request$
 DECLARE
-    v_source bytea := public.laplace_hash128_blake3('test/task-shapes/source');
-    v_context bytea := public.laplace_hash128_blake3('test/task-shapes/source-file');
-    v_other_context bytea := public.laplace_hash128_blake3('test/task-shapes/other-file');
-    v_other_source bytea := public.laplace_hash128_blake3('test/task-shapes/other-source');
-    v_language bytea := public.laplace_hash128_blake3('test/task-shapes/language');
-    v_input bytea := public.laplace_hash128_blake3('test/task-shapes/new-semantic-input');
-    v_answer bytea := public.laplace_hash128_blake3('test/task-shapes/answer');
-    v_changed bytea := public.laplace_hash128_blake3('test/task-shapes/changed-answer');
-    v_other_answer bytea := public.laplace_hash128_blake3('test/task-shapes/other-predicate-answer');
-    v_other_input bytea := public.laplace_hash128_blake3('test/task-shapes/other-meaning');
+    v_source bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/source'));
+    v_context bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/source-file'));
+    v_other_context bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/other-file'));
+    v_other_source bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/other-source'));
+    v_language bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/language'));
+    v_input bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/new-semantic-input'));
+    v_answer bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/answer'));
+    v_changed bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/changed-answer'));
+    v_other_answer bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/other-predicate-answer'));
+    v_other_input bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/other-meaning'));
     v_concept bytea := laplace.entity_type_id('CodeConcept');
     v_predicate bytea := laplace.relation_type_id('CAUSES');
     v_other_predicate bytea := laplace.relation_type_id('HAS_DEFINITION');
@@ -387,8 +384,8 @@ DECLARE
     v_inputs bytea := laplace.relation_type_id('HAS_INPUT');
     v_example_of bytea := laplace.relation_type_id('IS_EXAMPLE_OF');
     v_has_parse bytea := laplace.relation_type_id('HAS_PARSE');
-    v_deps bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/root-role'),
-        public.laplace_hash128_blake3('test/task-shapes/input-role')];
+    v_deps bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/root-role')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/input-role'))];
     v_prompt text := 'ζαλκ ñébulo';
     v_exemplar bytea;
     v_current bytea;
@@ -415,11 +412,12 @@ BEGIN
     PERFORM pg_temp.shape_reject('available result without task shape',v_prompt);
     v_shape := pg_temp.declare_shape(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_concept],v_source,v_context);
     v_slot := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[
-        public.laplace_hash128_blake3('laplace/task-shape/token-slot/v1'),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
+        public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v1')),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
     IF EXISTS (SELECT 1 FROM laplace.attestations
                 WHERE subject_id=v_root AND type_id IN (v_calls,v_inputs,v_has_parse))
-       OR EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_exemplar,8::smallint) p
-                   WHERE p.entity_id=v_input) THEN
+       OR EXISTS (SELECT 1 FROM laplace.physicalities ph
+                   CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(ph.trajectory)) p(entity_id)
+                   WHERE ph.entity_id=v_exemplar AND ph.type=8 AND p.entity_id=v_input) THEN
         RAISE EXCEPTION 'FAIL: novel input/request was pre-bound by the fixture';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt);
@@ -492,8 +490,8 @@ BEGIN
      WHERE subject_id=v_root AND type_id=v_has_parse AND object_id=v_current;
     v_alternative := pg_temp.shape_parse(v_prompt,ARRAY['ζαλκ','ñébulo'],ARRAY[0,1],
         v_deps,v_language,v_source,v_context,ARRAY[
-            public.laplace_hash128_blake3('test/task-shapes/polarity-feature'),
-            public.laplace_hash128_blake3('test/task-shapes/negative-value')]);
+            public.blake3_send(public.laplace_text_id('test/task-shapes/polarity-feature')),
+            public.blake3_send(public.laplace_text_id('test/task-shapes/negative-value'))]);
     PERFORM pg_temp.shape_reject('changed polarity annotation',v_prompt);
     DELETE FROM laplace.attestations WHERE type_id=v_has_parse AND object_id=v_alternative;
     v_alternative := pg_temp.shape_parse(v_prompt,ARRAY['ζαλκ','ñébulo'],ARRAY[2,0],
@@ -536,18 +534,18 @@ $novel_request$;
 
 DO $separate_slots$
 DECLARE
-    v_source bytea := public.laplace_hash128_blake3('test/task-shapes/pair-source');
-    v_context bytea := public.laplace_hash128_blake3('test/task-shapes/pair-context');
-    v_language bytea := public.laplace_hash128_blake3('test/task-shapes/pair-language');
-    v_inputs bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/input-a'),
-        public.laplace_hash128_blake3('test/task-shapes/input-b')];
-    v_answers bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/answer-a'),
-        public.laplace_hash128_blake3('test/task-shapes/answer-b')];
+    v_source bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/pair-source'));
+    v_context bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/pair-context'));
+    v_language bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/pair-language'));
+    v_inputs bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/input-a')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/input-b'))];
+    v_answers bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/answer-a')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/answer-b'))];
     v_concept bytea := laplace.entity_type_id('CodeConcept');
     v_predicate bytea := laplace.relation_type_id('CAUSES');
-    v_deps bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/pair-root'),
-        public.laplace_hash128_blake3('test/task-shapes/pair-first-role'),
-        public.laplace_hash128_blake3('test/task-shapes/pair-second-role')];
+    v_deps bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/pair-root')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/pair-first-role')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/pair-second-role'))];
     v_prompt text := 'ψόλκ bíreno dúreno';
     v_exemplar bytea;
     v_surface bytea;
@@ -580,14 +578,14 @@ $separate_slots$;
 
 DO $language_surfaces$
 DECLARE
-    v_source bytea := public.laplace_hash128_blake3('test/task-shapes/languages-source');
-    v_context bytea := public.laplace_hash128_blake3('test/task-shapes/languages-context');
-    v_input bytea := public.laplace_hash128_blake3('test/task-shapes/shared-concept');
-    v_answer bytea := public.laplace_hash128_blake3('test/task-shapes/shared-result');
+    v_source bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/languages-source'));
+    v_context bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/languages-context'));
+    v_input bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/shared-concept'));
+    v_answer bytea := public.blake3_send(public.laplace_text_id('test/task-shapes/shared-result'));
     v_concept bytea := laplace.entity_type_id('CodeConcept');
     v_predicate bytea := laplace.relation_type_id('CAUSES');
-    v_deps bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/languages-root'),
-        public.laplace_hash128_blake3('test/task-shapes/languages-input')];
+    v_deps bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/languages-root')),
+        public.blake3_send(public.laplace_text_id('test/task-shapes/languages-input'))];
     v_exemplar bytea;
     v_surface bytea;
     v_language bytea;
@@ -600,7 +598,7 @@ BEGIN
     SELECT value,2,v_concept FROM unnest(ARRAY[v_source,v_context,v_input,v_answer]) value;
     PERFORM pg_temp.shape_cell(v_input,v_predicate,v_answer,v_source,v_context);
     FOR i IN 1..2 LOOP
-        v_language := public.laplace_hash128_blake3(convert_to('test/task-shapes/language-' || i,'UTF8'));
+        v_language := public.blake3_send(public.laplace_text_id('test/task-shapes/language-' || i));
         v_cue := CASE i WHEN 1 THEN 'χέλκ' ELSE '觅' END;
         v_word := CASE i WHEN 1 THEN 'eau' ELSE '水' END;
         v_example_word := CASE i WHEN 1 THEN 'brume' ELSE '火' END;

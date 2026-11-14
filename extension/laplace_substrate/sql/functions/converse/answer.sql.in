@@ -1,5 +1,4 @@
--- Installed after generation/walk_text: its BEGIN ATOMIC body binds realize.forward_text_batch
--- when the function is created.
+-- The selected candidate is realized by the Native labels (public.laplace_labels).
 -- converse.answer(prompt, lang): an open turn's answer is the joint meeting of its
 -- content terms (converse.respond), realized in the asked language. One term asks
 -- what the term is; several ask what answers all of them.
@@ -14,12 +13,12 @@ BEGIN ATOMIC
         SELECT row_number() OVER (ORDER BY ord) AS i, word
         FROM converse.prompt_words(p_prompt)
     ), spans AS MATERIALIZED (
-        SELECT a.i AS first_i, a.i AS last_i, laplace.word_id(a.word) AS id FROM w a
+        SELECT a.i AS first_i, a.i AS last_i, public.blake3_send(public.laplace_text_id(a.word)) AS id FROM w a
         UNION ALL
-        SELECT a.i, b.i, laplace.word_id(a.word || ' ' || b.word)
+        SELECT a.i, b.i, public.blake3_send(public.laplace_text_id(a.word || ' ' || b.word))
         FROM w a JOIN w b ON b.i = a.i + 1
         UNION ALL
-        SELECT a.i, c.i, laplace.word_id(a.word || ' ' || b.word || ' ' || c.word)
+        SELECT a.i, c.i, public.blake3_send(public.laplace_text_id(a.word || ' ' || b.word || ' ' || c.word))
         FROM w a JOIN w b ON b.i = a.i + 1 JOIN w c ON c.i = a.i + 2
     ), content AS MATERIALIZED (
         SELECT converse.content_terms(array_agg(s.id)) AS ids FROM spans s
@@ -42,8 +41,6 @@ BEGIN ATOMIC
         WHERE cardinality(t.ids) > 0
         LIMIT 1
     )
-    SELECT (realize.forward_text_batch(
-                ARRAY[m.candidate],
-                COALESCE(p_lang, converse.prompt_language_top(p_prompt))))[1]
+    SELECT (ARRAY(SELECT lp_l.content FROM unnest((ARRAY[m.candidate])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[m.candidate])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))[1]
     FROM met m;
 END;

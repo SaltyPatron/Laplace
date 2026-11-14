@@ -105,9 +105,11 @@ public sealed class ConversationProvenanceGateTests
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
         var chat = StripComments(ExtractMethod(text, "private (string, bool) ChatTurn"));
         Assert.Contains("_turns.Value.TurnAsync(McpTenant", chat);
-        // Notes use the plain sources on their own writer and latch.
-        Assert.Contains("UserPromptContent.BuildBootstrapChange", text);
-        Assert.Contains("_plainWriterBroken", text);
+        // Notes and feedback are what the runtime witness mcp-local states, recorded by the Engine.
+        Assert.Contains("_witnesses.Value.RecordAsync(new NativeRuntimeWitness(McpTenant", text);
+        Assert.Contains("FeedbackStatements.StateAsync(_witnesses.Value, _db, McpTenant", text);
+        Assert.DoesNotContain("ConsensusAccumulatingWriter", text);
+        Assert.DoesNotContain("FeedbackContent", text);
     }
 
     /// <summary>Drops // line comments so a pin tests the call sites, not the prose.</summary>

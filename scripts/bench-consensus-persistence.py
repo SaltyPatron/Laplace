@@ -59,10 +59,10 @@ def main():
                          decode(md5('bench/o/'||n),'hex') o,
                          laplace.relation_type_id('IS_A') t
                   FROM generate_series(1,%s) n)
-                SELECT t, array_agg(s ORDER BY laplace.consensus_id(s,t,o)) ss,
-                    array_agg(o ORDER BY laplace.consensus_id(s,t,o)) oo,
+                SELECT t, array_agg(s ORDER BY public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL)))) ss,
+                    array_agg(o ORDER BY public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL)))) oo,
                     array_agg(30000000000::bigint + CASE WHEN %s THEN n ELSE 0 END
-                        ORDER BY laplace.consensus_id(s,t,o)) phis,
+                        ORDER BY public.blake3_send(public.laplace_compose(array_remove(ARRAY[s, t, o]::public.blake3[], NULL)))) phis,
                     array_agg(1::bigint) games,array_agg(900000000::bigint) sums,
                     array_agg('2026-01-01'::timestamptz) ts
                 FROM inputs GROUP BY t""", (args.rows,args.distinct_inputs))

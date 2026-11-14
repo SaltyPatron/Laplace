@@ -209,7 +209,7 @@ spi_realize(Datum id, Datum lang)
     if (lang == (Datum) 0)
         nulls[1] = 'n';
     rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT realize.realize($1, $2)", 2, argtypes),
+        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 2, argtypes),
         args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -233,7 +233,7 @@ spi_realize_batch(Datum ids_arr, Datum lang)
     if (lang == (Datum) 0)
         nulls[1] = 'n';
     rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT realize.batch($1, $2)", 2, argtypes),
+        spi_common_ensure_plan(&plan, "SELECT ARRAY(SELECT lp_l.content FROM unnest(($1)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)", 2, argtypes),
         args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -253,7 +253,7 @@ spi_label(Datum id)
     int   rc;
 
     rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT realize.label($1)", 1, argtypes),
+        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
         args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -270,7 +270,7 @@ spi_type_label(Datum type_id)
     int   rc;
 
     rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT lexical.type_label($1)", 1, argtypes),
+        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
         args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -312,7 +312,7 @@ spi_render_text(Datum id)
     int   rc;
 
     rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT realize.render_text($1)", 1, argtypes),
+        spi_common_ensure_plan(&plan, "SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
         args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;

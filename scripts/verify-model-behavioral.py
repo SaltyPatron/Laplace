@@ -67,9 +67,9 @@ def psql_rows(db, sql):
 # search_path (purpose_schemas.sql.in, #862/#957), so the bare `render(...)` this used to
 # call has not resolved since that migration -- another reason this harness could not run.
 EXPECTED_SQL = """
-SELECT lower(realize.render(c.object_id))
+SELECT lower((SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(c.object_id)::bytea],NULL)::public.blake3[]) lp_l))
 FROM laplace.v_consensus_unrefuted c
-WHERE c.subject_id = laplace.word_id(%(word)s)
+WHERE c.subject_id = public.blake3_send(public.laplace_text_id(%(word)s))
   AND c.object_id IS NOT NULL
 ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
 LIMIT %(limit)d;

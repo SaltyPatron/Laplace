@@ -30,18 +30,6 @@ public sealed class ForwardRealizationContractTests
     }
 
     [Fact]
-    public void ForwardText_RealizesAfterSelectionAndNeverAcceptsANullToken()
-    {
-        string sql = ReadForwardSql();
-
-        Assert.Contains("CREATE OR REPLACE FUNCTION realize.forward_text_batch(", sql);
-        Assert.Contains("realize.render_text_batch(down_surfaces)", sql);
-        Assert.Contains("realize.forward_text_batch(\n                   entities, converse.prompt_language_top(p_prompt))", sql);
-        Assert.Contains("selected entity % has no truthful text surface", sql);
-        Assert.DoesNotContain("SELECT realize.batch(entities) AS entities", sql);
-    }
-
-    [Fact]
     public void BubbleDown_DefaultElectionIsDeterministicAndExplorationUsesUncertainty()
     {
         string sql = ReadForwardSql();

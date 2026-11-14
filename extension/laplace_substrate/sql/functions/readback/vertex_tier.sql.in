@@ -1,5 +1,0 @@
-CREATE OR REPLACE FUNCTION realize.vertex_tier(p_flags bigint) RETURNS smallint
-    LANGUAGE sql LAPLACE_IMMUTABLE
-BEGIN ATOMIC
-    SELECT public.laplace_vertex_tier(p_flags);
-END;

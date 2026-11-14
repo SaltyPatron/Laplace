@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT s.ord, s.word, s.id
-    FROM converse.word_segment_resolved(p_text) s
-    ORDER BY s.ord;
+    SELECT s.i::int, s.segment, public.blake3_send(s.id)
+    FROM public.laplace_segments(p_text) s
+    ORDER BY s.i;
 END;

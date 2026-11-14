@@ -909,7 +909,7 @@ check_t0_perfcache_runtime() {
   local -a proof_headers=(-H 'Content-Type: application/json')
 
   word_id="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
-    "SELECT encode(laplace.word_id('the'),'hex');")" || {
+    "SELECT encode(public.blake3_send(public.laplace_text_id('the')),'hex');")" || {
     echo "::error::installed PostgreSQL runtime cannot execute the T0 perfcache-backed word_id operation" >&2
     return 1
   }

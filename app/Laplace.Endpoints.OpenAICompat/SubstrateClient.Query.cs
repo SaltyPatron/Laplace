@@ -110,14 +110,13 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Beam search over consensus. The band selection is the intent mask walk_branches
-    /// gates its scan on, so bands narrow the scan itself rather than filter its output.
+    /// Best-first search over rated claims (public.laplace_pull), optionally restricted to a
+    /// relation's Native middle. Highway bands have no Native walk analog.
     /// </summary>
     private async Task<IReadOnlyList<QueryRow>> BeamAsync(
         byte[] topic, string? relationType, int[]? bands, QueryDials dials, CancellationToken ct)
     {
-        // Without a band or relation type, walk_branches would scan every relation-type
-        // partition; the read takes the greedy strongest chain instead.
+        // Without a band or relation type the read takes the strongest chain instead.
         var haveLens = !string.IsNullOrWhiteSpace(relationType) || (bands is { Length: > 0 });
         if (!haveLens)
         {

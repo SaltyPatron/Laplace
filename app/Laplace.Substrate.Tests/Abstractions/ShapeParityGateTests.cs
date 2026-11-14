@@ -23,9 +23,6 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///     prose. Both the shape list AND the three requirement clauses are derived from the
 ///     catalog's boolean columns and checked against it.</item>
 /// </list>
-///
-/// <para><c>converse/chat.sql.in</c> branches on shape name literals and is gated as a
-/// subset, like kSingleArgIntents.</para>
 /// </summary>
 public sealed class ShapeParityGateTests
 {
@@ -33,8 +30,6 @@ public sealed class ShapeParityGateTests
         "extension/laplace_substrate/sql/functions/converse/query_shapes.sql.in";
     private const string RecallRoutePath = "extension/laplace_substrate/src/recall_route.c";
     private const string RecallPath = "extension/laplace_substrate/src/recall.c";
-    private const string ChatPath =
-        "extension/laplace_substrate/sql/functions/converse/chat.sql.in";
     private const string McpToolsPath = "app/Laplace.Endpoints.Mcp/SubstrateTools.cs";
 
     /// <summary>
@@ -73,10 +68,6 @@ public sealed class ShapeParityGateTests
     private static readonly Regex McpAcceptsLang = new(
         @"(?<shapes>[a-z_/]+) accepts lang", RegexOptions.Compiled);
 
-    /// <summary>Shape-name literals in <c>converse.chat()</c>'s branch conditions.</summary>
-    private static readonly Regex ChatShapeLiteral = new(
-        @"\bshape\s+(?:NOT\s+)?IN\s*\((?<list>[^)]*)\)|\bshape\s*=\s*'(?<one>[a-z_]+)'",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static string Read(string relative)
     {
@@ -206,32 +197,5 @@ public sealed class ShapeParityGateTests
         var m = Regex.Match(Read(RecallPath), @"#define\s+ROUTE_DEFAULT_INTENT\s+""(?<name>[a-z_]+)""");
         Assert.True(m.Success, $"ROUTE_DEFAULT_INTENT is no longer declared in {RecallPath}.");
         Assert.Contains(m.Groups["name"].Value, Catalog().Select(s => s.Name));
-    }
-
-    /// <summary>
-    /// <c>converse.chat()</c> branches only on catalog shapes. Subset: chat special-cases some
-    /// shapes and delegates the rest to <c>recall_intent</c>.
-    /// </summary>
-    [Fact]
-    public void ShapeParity_ChatBranchesOnCatalogShapesOnly()
-    {
-        var catalog = Catalog().Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
-        var chat = RenderBeforeSelectGateTests.StripSqlComments(Read(ChatPath));
-
-        var literals = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (Match m in ChatShapeLiteral.Matches(chat))
-        {
-            if (m.Groups["one"].Success) literals.Add(m.Groups["one"].Value);
-            foreach (Match q in Regex.Matches(m.Groups["list"].Value, @"'(?<name>[a-z_]+)'"))
-                literals.Add(q.Groups["name"].Value);
-        }
-
-        Assert.True(literals.Count > 0,
-            $"no shape literals found in {ChatPath} — converse.chat() stopped branching on shape "
-            + "names, or the parse broke. Either way this fact is measuring nothing.");
-        var unknown = literals.Where(s => !catalog.Contains(s)).ToList();
-        Assert.True(unknown.Count == 0,
-            "converse.chat() branches on shape names converse.query_shapes() does not publish:\n  "
-            + string.Join("\n  ", unknown));
     }
 }

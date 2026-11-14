@@ -138,6 +138,11 @@ internal static partial class CodeToolchain
             Trim(stdout), Trim(stderr));
     }
 
+    /// <summary>The file name a candidate of this modality is checked under, and recorded under: the name its
+    /// toolchain and its Engine recipe both read it by. Null when no verifier is governed for the modality.</summary>
+    internal static string? CandidateFileName(string source, string modality)
+        => modality == "json" ? "candidate.json" : ResolveInvocation(source, modality)?.FileName;
+
     private static Invocation? ResolveInvocation(string source, string modality) => modality switch
     {
         "python" => new("python3", "candidate.py", ["-I", "-m", "py_compile", "candidate.py"]),

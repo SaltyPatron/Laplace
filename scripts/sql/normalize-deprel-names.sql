@@ -56,4 +56,4 @@ FROM g;
 
 \echo '=== spot check: a named syntactic head resolves now ==='
 SELECT (SELECT name FROM canonical_names WHERE id = relation_type_id('DEP_NSUBJ')) AS dep_nsubj_name,
-       realize.render(relation_type_id('DEP_NSUBJ')) AS dep_nsubj_render;
+       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(relation_type_id('DEP_NSUBJ'))::bytea],NULL)::public.blake3[]) lp_l) AS dep_nsubj_render;

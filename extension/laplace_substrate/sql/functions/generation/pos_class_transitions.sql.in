@@ -22,7 +22,7 @@ BEGIN ATOMIC
         ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
     ),
     missing AS (
-        SELECT vv.id, unnest(lexical.word_case_variants(vv.id)) AS fid
+        SELECT vv.id, unnest(ARRAY[(vv.id)::bytea]) AS fid
         FROM v vv
         WHERE NOT EXISTS (SELECT 1 FROM direct d WHERE d.wid = vv.id)
     ),

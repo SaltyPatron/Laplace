@@ -180,7 +180,7 @@ pg_laplace_standing_volatility(PG_FUNCTION_ARGS)
 /* The walk law: a cell's Glicko-2 expected score against a certain neutral
  * reference, RD pulling an uncertain cell toward 0.5 through g(phi). The SQL
  * walk weights read the same body the native traversals call (spi_common.h
- * laplace_edge_strength, astar_path.c, foundry_crawl.c), so a walk in SQL and a
+ * laplace_edge_strength, foundry_crawl.c), so a walk in SQL and a
  * walk in C weigh one edge alike. Ranking (consensus.eff_mu) is a separate,
  * conservative reading; a thin, unrefuted claim stays walkable. */
 PG_FUNCTION_INFO_V1(pg_laplace_edge_strength);

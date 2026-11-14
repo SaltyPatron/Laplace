@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
     LANGUAGE sql STABLE
 BEGIN ATOMIC
 WITH w AS MATERIALIZED (
-    SELECT laplace.word_id(p_term) AS id
+    SELECT public.blake3_send(public.laplace_text_id(p_term)) AS id
 ),
 cand AS MATERIALIZED (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
@@ -94,7 +94,7 @@ lang AS MATERIALIZED (
 facets AS MATERIALIZED (
     SELECT f.entity_id, f.type_id
     FROM capped_ids ci
-    CROSS JOIN LATERAL ops.entity_facets_batch(ci.arr) f
+    CROSS JOIN LATERAL (SELECT public.blake3_send(e.id) AS entity_id, NULL::bytea AS type_id FROM public.laplace_entities(ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest(ci.arr) x WHERE x IS NOT NULL)) e) f
 ),
 rows AS MATERIALIZED (
     SELECT c.rk, c.synset_id, COALESCE(e.type_id, f.type_id) AS type_id,
@@ -114,7 +114,7 @@ ids AS MATERIALIZED (
           UNION ALL SELECT r.rk * 4 - 1, r.via_id   FROM rows r
           UNION ALL SELECT r.rk * 4,     r.lang_id  FROM rows r) z
 ),
-lbl AS MATERIALIZED (SELECT realize.batch(arr, NULL) AS l FROM ids)
+lbl AS MATERIALIZED (SELECT ARRAY(SELECT lp_l.content FROM unnest((arr)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((arr)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l FROM ids)
 SELECT lbl.l[r.rk * 4 - 3],
        lbl.l[r.rk * 4 - 2],
        lbl.l[r.rk * 4 - 1],

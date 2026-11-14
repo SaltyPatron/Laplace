@@ -28,7 +28,7 @@ SELECT EXISTS(
 
   SELECT 1 FROM laplace.physicalities p
 
-  WHERE p.source_id = laplace.source_id('$Src')
+  WHERE p.source_id = public.blake3_send(public.laplace_text_id('substrate/source/$Src/v1'))
 
   LIMIT 1)
 
@@ -38,7 +38,7 @@ SELECT EXISTS(
 
     $q = @"
 
-SELECT ops.layer_completed(laplace.source_id('$Src'), $Layer)
+SELECT ops.layer_completed(public.blake3_send(public.laplace_text_id('substrate/source/$Src/v1')), $Layer)
 
 "@
 

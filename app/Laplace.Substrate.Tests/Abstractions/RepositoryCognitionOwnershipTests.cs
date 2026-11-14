@@ -9,7 +9,6 @@ public sealed class RepositoryCognitionOwnershipTests
     {
         var repoRoot = FindRepoRoot();
         var cmakePath = Path.Combine(repoRoot, "extension", "laplace_substrate", "CMakeLists.txt");
-        var scaffoldPath = Path.Combine(repoRoot, "extension", "laplace_substrate", "sql", "functions", "converse", "chat_scaffold.sql.in");
 
         Assert.False(File.Exists(Path.Combine(repoRoot, "scripts", "build-refactor-engine.sh")),
             "Laplace/main must not clone/build another repository as its cognition implementation.");
@@ -23,10 +22,6 @@ public sealed class RepositoryCognitionOwnershipTests
         Assert.DoesNotContain("refactor_cognition", cmake, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("liblaplace_engine", cmake, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("LAPLACE_REFACTOR_ENGINE_PREFIX", cmake, StringComparison.Ordinal);
-
-        var scaffold = File.ReadAllText(scaffoldPath);
-        Assert.DoesNotContain("converse.refactor_cognition", scaffold, StringComparison.Ordinal);
-        Assert.DoesNotContain("pg_laplace_refactor_cognition", scaffold, StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot()

@@ -10,7 +10,7 @@
 BEGIN;
 SET LOCAL statement_timeout = '30s';
 SELECT tier, count(*) AS nodes FROM converse.prompt_tree(:'prompt') GROUP BY tier ORDER BY tier;
-SELECT step, event, converse.label_or_hex(entity) AS entity,
+SELECT step, event, (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(entity)::bytea],NULL)::public.blake3[]) lp_l) AS entity,
        candidate_count, exact_channel_count, routing_round,
        required_obligations, satisfied_obligations, remaining_required,
        completion, disposition, encode(semantic_act_id,'hex') AS semantic_act,

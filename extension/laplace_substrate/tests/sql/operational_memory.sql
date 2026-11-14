@@ -23,14 +23,13 @@ BEGIN
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES
-        (public.laplace_hash128_blake3(
-             p_subject || p_type || p_object || p_source || COALESCE(p_context, ''::bytea)),
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object, p_source, p_context]::public.blake3[], NULL))),
          p_subject,p_type,p_object,p_source,p_context,2,
          now(),5,5000000000,30000000000);
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(p_subject,p_type,p_object),p_subject,p_type,p_object,
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[p_subject, p_type, p_object]::public.blake3[], NULL))),p_subject,p_type,p_object,
          2000000000000,30000000000,60000000,5,now())
     ON CONFLICT (id,type_id,subject_id) DO NOTHING;
     -- Direct fixture writes must maintain the same mask contract as the writer.
@@ -83,15 +82,15 @@ $absent$;
 DO $operational_memory$
 DECLARE
     prompt text := 'zarquiv seedoperandx';
-    cue_id bytea := laplace.word_id('zarquiv');
-    operand_id bytea := laplace.word_id('seedoperandx');
-    answer_id bytea := public.laplace_hash128_blake3('test/operational-memory/answer');
-    changed_answer bytea := public.laplace_hash128_blake3('test/operational-memory/changed-answer');
-    definition_id bytea := public.laplace_hash128_blake3('test/operational-memory/definition');
-    source_id bytea := public.laplace_hash128_blake3('test/operational-memory/source');
-    other_source bytea := public.laplace_hash128_blake3('test/operational-memory/other-source');
-    context_id bytea := public.laplace_hash128_blake3('test/operational-memory/lesson');
-    other_context bytea := public.laplace_hash128_blake3('test/operational-memory/other-lesson');
+    cue_id bytea := public.blake3_send(public.laplace_text_id('zarquiv'));
+    operand_id bytea := public.blake3_send(public.laplace_text_id('seedoperandx'));
+    answer_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/answer'));
+    changed_answer bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/changed-answer'));
+    definition_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/definition'));
+    source_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/source'));
+    other_source bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/other-source'));
+    context_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/lesson'));
+    other_context bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/other-lesson'));
     causes_id bytea := laplace.relation_type_id('CAUSES');
     defines_id bytea := laplace.relation_type_id('HAS_DEFINITION');
     names_id bytea := laplace.relation_type_id('HAS_NAME');
@@ -213,7 +212,7 @@ BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
-        (laplace.consensus_id(prompt_root,calls_id,causes_id),prompt_root,calls_id,causes_id,
+        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[prompt_root, calls_id, causes_id]::public.blake3[], NULL))),prompt_root,calls_id,causes_id,
          2000000000000,30000000000,60000000,5,now());
     DELETE FROM laplace.attestations
      WHERE subject_id=prompt_root AND type_id=input_id AND object_id=operand_id;
@@ -246,12 +245,12 @@ $operational_memory$;
 DO $separate_input_obligations$
 DECLARE
     prompt text := 'seedinputalpha seedinputbeta';
-    first_input bytea := laplace.word_id('seedinputalpha');
-    second_input bytea := laplace.word_id('seedinputbeta');
-    first_answer bytea := public.laplace_hash128_blake3('test/operational-memory/pair-first');
-    second_answer bytea := public.laplace_hash128_blake3('test/operational-memory/pair-second');
-    source_id bytea := public.laplace_hash128_blake3('test/operational-memory/pair-source');
-    context_id bytea := public.laplace_hash128_blake3('test/operational-memory/pair-context');
+    first_input bytea := public.blake3_send(public.laplace_text_id('seedinputalpha'));
+    second_input bytea := public.blake3_send(public.laplace_text_id('seedinputbeta'));
+    first_answer bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/pair-first'));
+    second_answer bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/pair-second'));
+    source_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/pair-source'));
+    context_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/pair-context'));
     causes_id bytea := laplace.relation_type_id('CAUSES');
     calls_id bytea := laplace.relation_type_id('CALLS');
     input_id bytea := laplace.relation_type_id('HAS_INPUT');
@@ -300,11 +299,11 @@ $separate_input_obligations$;
 DO $admitted_operation_relation$
 DECLARE
     prompt text := 'λ seedoperanddynamic';
-    operand_id bytea := laplace.word_id('seedoperanddynamic');
-    answer_id bytea := public.laplace_hash128_blake3('test/operational-memory/dynamic-answer');
-    source_id bytea := public.laplace_hash128_blake3('test/operational-memory/dynamic-source');
-    context_id bytea := public.laplace_hash128_blake3('test/operational-memory/dynamic-context');
-    operation_id bytea := public.laplace_hash128_blake3('test/operational-memory/dynamic-operation');
+    operand_id bytea := public.blake3_send(public.laplace_text_id('seedoperanddynamic'));
+    answer_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/dynamic-answer'));
+    source_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/dynamic-source'));
+    context_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/dynamic-context'));
+    operation_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/dynamic-operation'));
     calls_id bytea := laplace.relation_type_id('CALLS');
     input_id bytea := laplace.relation_type_id('HAS_INPUT');
     prompt_root bytea;
@@ -333,16 +332,16 @@ DO $multilingual_semantic_input$
 DECLARE
     first_prompt text := 'eau';
     second_prompt text := '水';
-    first_surface bytea := laplace.word_id(first_prompt);
-    second_surface bytea := laplace.word_id(second_prompt);
-    semantic_input bytea := public.laplace_hash128_blake3('test/operational-memory/shared-semantic-input');
-    alternate_input bytea := public.laplace_hash128_blake3('test/operational-memory/alternate-semantic-input');
-    answer_id bytea := public.laplace_hash128_blake3('test/operational-memory/shared-semantic-answer');
-    alternate_answer bytea := public.laplace_hash128_blake3('test/operational-memory/alternate-semantic-answer');
-    source_id bytea := public.laplace_hash128_blake3('test/operational-memory/multilingual-source');
-    alternate_source bytea := public.laplace_hash128_blake3('test/operational-memory/alternate-semantic-source');
-    first_context bytea := public.laplace_hash128_blake3('test/operational-memory/first-language-context');
-    second_context bytea := public.laplace_hash128_blake3('test/operational-memory/second-language-context');
+    first_surface bytea := public.blake3_send(public.laplace_text_id(first_prompt));
+    second_surface bytea := public.blake3_send(public.laplace_text_id(second_prompt));
+    semantic_input bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/shared-semantic-input'));
+    alternate_input bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/alternate-semantic-input'));
+    answer_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/shared-semantic-answer'));
+    alternate_answer bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/alternate-semantic-answer'));
+    source_id bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/multilingual-source'));
+    alternate_source bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/alternate-semantic-source'));
+    first_context bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/first-language-context'));
+    second_context bytea := public.blake3_send(public.laplace_text_id('test/operational-memory/second-language-context'));
     calls_id bytea := laplace.relation_type_id('CALLS');
     input_id bytea := laplace.relation_type_id('HAS_INPUT');
     senses_id bytea := laplace.relation_type_id('HAS_SENSE');
@@ -444,25 +443,25 @@ DECLARE
     prompt text := 'structcue surfaceplural';
     reordered text := 'surfaceplural structcue';
     wrapped text := '"structcue surfaceplural"';
-    cue bytea := laplace.word_id('structcue');
-    surface bytea := laplace.word_id('surfaceplural');
-    lemma bytea := laplace.word_id('structurallemma');
-    answer bytea := public.laplace_hash128_blake3('test/structure/answer');
-    source bytea := public.laplace_hash128_blake3('test/structure/source');
-    scope bytea := public.laplace_hash128_blake3('test/structure/active-context');
-    occurrence bytea := public.laplace_hash128_blake3('test/structure/parse-occurrence');
-    lang bytea := public.laplace_hash128_blake3('test/structure/language');
-    schema bytea := public.laplace_hash128_blake3('ud/parse/schema/v1');
-    none_id bytea := public.laplace_hash128_blake3('ud/parse/none/v1');
-    root_marker bytea := public.laplace_hash128_blake3('ud/parse/root/v1');
-    features_end bytea := public.laplace_hash128_blake3('ud/parse/features-end/v1');
-    enhanced_end bytea := public.laplace_hash128_blake3('ud/parse/enhanced-end/v1');
-    misc_end bytea := public.laplace_hash128_blake3('ud/parse/misc-end/v1');
-    tokens_end bytea := public.laplace_hash128_blake3('ud/parse/tokens-end/v1');
-    ref_one bytea := public.laplace_hash128_blake3('ud/token-ref/31/v1');
-    ref_two bytea := public.laplace_hash128_blake3('ud/token-ref/32/v1');
-    pos_id bytea := public.laplace_hash128_blake3('test/structure/pos');
-    dep_id bytea := public.laplace_hash128_blake3('test/structure/dependency');
+    cue bytea := public.blake3_send(public.laplace_text_id('structcue'));
+    surface bytea := public.blake3_send(public.laplace_text_id('surfaceplural'));
+    lemma bytea := public.blake3_send(public.laplace_text_id('structurallemma'));
+    answer bytea := public.blake3_send(public.laplace_text_id('test/structure/answer'));
+    source bytea := public.blake3_send(public.laplace_text_id('test/structure/source'));
+    scope bytea := public.blake3_send(public.laplace_text_id('test/structure/active-context'));
+    occurrence bytea := public.blake3_send(public.laplace_text_id('test/structure/parse-occurrence'));
+    lang bytea := public.blake3_send(public.laplace_text_id('test/structure/language'));
+    schema bytea := public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'));
+    none_id bytea := public.blake3_send(public.laplace_text_id('ud/parse/none/v1'));
+    root_marker bytea := public.blake3_send(public.laplace_text_id('ud/parse/root/v1'));
+    features_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/features-end/v1'));
+    enhanced_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/enhanced-end/v1'));
+    misc_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/misc-end/v1'));
+    tokens_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/tokens-end/v1'));
+    ref_one bytea := public.blake3_send(public.laplace_text_id('ud/token-ref/31/v1'));
+    ref_two bytea := public.blake3_send(public.laplace_text_id('ud/token-ref/32/v1'));
+    pos_id bytea := public.blake3_send(public.laplace_text_id('test/structure/pos'));
+    dep_id bytea := public.blake3_send(public.laplace_text_id('test/structure/dependency'));
     calls bytea := laplace.relation_type_id('CALLS');
     inputs bytea := laplace.relation_type_id('HAS_INPUT');
     result_relation bytea := laplace.relation_type_id('CAUSES');
@@ -501,7 +500,7 @@ BEGIN
     VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'));
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
-    VALUES(public.laplace_hash128_blake3(parse_id || decode('0800','hex')),
+    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(parse_id), public.laplace_cp_id(8)])),
         parse_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,
         decode(repeat('00',16),'hex'),public.laplace_trajectory_build(manifest),
         cardinality(manifest),now());
@@ -515,8 +514,7 @@ BEGIN
     -- Its declared predicate supplies the result projection; higher-ranked
     -- unrelated cells cannot hide that result in an unmasked fanout window.
     FOR i IN 1..3 LOOP
-        metadata := public.laplace_hash128_blake3(convert_to(
-            'test/structure/metadata/' || i::text,'UTF8'));
+        metadata := public.blake3_send(public.laplace_text_id('test/structure/metadata/' || i::text));
         INSERT INTO laplace.entities(id,tier,type_id)
         VALUES(metadata,2,laplace.entity_type_id('CodeConcept'));
         PERFORM pg_temp.operation_cell(lemma,laplace.relation_type_id('RELATED_TO'),metadata,source,scope);

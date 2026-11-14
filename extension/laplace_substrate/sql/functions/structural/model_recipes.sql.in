@@ -28,7 +28,7 @@ BEGIN ATOMIC
         -- Callers consume complete recipe JSON, so render the elected content
         -- without a preview depth ceiling. The arrays stay position-aligned.
         SELECT recipe_ids,
-               realize.render_text_batch(content_ids) AS recipe_jsons
+               ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((content_ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((content_ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS recipe_jsons
         FROM selected
         WHERE content_ids IS NOT NULL
     )

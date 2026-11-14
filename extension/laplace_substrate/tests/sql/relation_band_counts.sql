@@ -2,9 +2,9 @@
 BEGIN;
 DO $counts$
 DECLARE
-    a bytea := public.laplace_hash128_blake3('test/band-counts/a');
-    b bytea := public.laplace_hash128_blake3('test/band-counts/b');
-    c bytea := public.laplace_hash128_blake3('test/band-counts/c');
+    a bytea := public.blake3_send(public.laplace_text_id('test/band-counts/a'));
+    b bytea := public.blake3_send(public.laplace_text_id('test/band-counts/b'));
+    c bytea := public.blake3_send(public.laplace_text_id('test/band-counts/c'));
     isa bytea := laplace.relation_type_id('IS_A');
     part bytea := laplace.relation_type_id('HAS_PART');
     before_tax bigint;
@@ -15,9 +15,9 @@ BEGIN
     -- Stored rows include refuted and unary cells. No ANALYZE can see these
     -- uncommitted changes; MCV estimates cannot satisfy the count contract.
     INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-    VALUES (laplace.consensus_id(a,isa,b),a,isa,b,1500000000000,30000000000,60000000,1,now()),
-           (laplace.consensus_id(b,isa,c),b,isa,c,0,1,60000000,1,now()),
-           (laplace.consensus_id(c,isa,NULL),c,isa,NULL,1500000000000,30000000000,60000000,1,now());
+    VALUES (public.blake3_send(public.laplace_compose(array_remove(ARRAY[a, isa, b]::public.blake3[], NULL))),a,isa,b,1500000000000,30000000000,60000000,1,now()),
+           (public.blake3_send(public.laplace_compose(array_remove(ARRAY[b, isa, c]::public.blake3[], NULL))),b,isa,c,0,1,60000000,1,now()),
+           (public.blake3_send(public.laplace_compose(ARRAY[c, isa]::public.blake3[])),c,isa,NULL,1500000000000,30000000000,60000000,1,now());
     IF (SELECT consensus_rows FROM converse.relation_bands() WHERE band=2) IS DISTINCT FROM before_tax+3 THEN
         RAISE EXCEPTION 'band count did not include all three inserted consensus rows';
     END IF;
@@ -25,7 +25,7 @@ BEGIN
     IF (SELECT consensus_rows FROM converse.relation_bands() WHERE band=2) IS DISTINCT FROM before_tax+2 THEN
         RAISE EXCEPTION 'band count did not observe the deletion';
     END IF;
-    UPDATE laplace.consensus SET id=laplace.consensus_id(b,part,c),type_id=part
+    UPDATE laplace.consensus SET id=public.blake3_send(public.laplace_compose(array_remove(ARRAY[b, part, c]::public.blake3[], NULL))),type_id=part
     WHERE subject_id=b AND type_id=isa AND object_id=c;
     IF (SELECT consensus_rows FROM converse.relation_bands() WHERE band=2) IS DISTINCT FROM before_tax+1
        OR (SELECT consensus_rows FROM converse.relation_bands() WHERE band=4) IS DISTINCT FROM before_part+1 THEN

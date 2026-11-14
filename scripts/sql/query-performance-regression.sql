@@ -6,7 +6,7 @@ SET LOCAL search_path = laplace, public;
 DO $test$
 #variable_conflict use_variable
 DECLARE
-    id bytea := laplace.word_id('A');
+    id bytea := public.blake3_send(public.laplace_text_id('A'));
     low bytea := decode(repeat('11',16),'hex');
     high bytea := decode(repeat('ee',16),'hex');
     before_tid tid;

@@ -29,18 +29,18 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH path AS (
         SELECT ARRAY[
-                   laplace.word_id('model-circuit'),
-                   laplace.word_id(btrim(p_plane))
+                   public.blake3_send(public.laplace_text_id('model-circuit')),
+                   public.blake3_send(public.laplace_text_id(btrim(p_plane)))
                ]::bytea[]
              || CASE WHEN p_layer IS NULL THEN ARRAY[]::bytea[]
                      ELSE ARRAY[
-                         laplace.word_id('layer'),
-                         laplace.word_id(p_layer::text)
+                         public.blake3_send(public.laplace_text_id('layer')),
+                         public.blake3_send(public.laplace_text_id(p_layer::text))
                      ]::bytea[] END
              || CASE WHEN p_head IS NULL THEN ARRAY[]::bytea[]
                      ELSE ARRAY[
-                         laplace.word_id('head'),
-                         laplace.word_id(p_head::text)
+                         public.blake3_send(public.laplace_text_id('head')),
+                         public.blake3_send(public.laplace_text_id(p_head::text))
                      ]::bytea[] END AS ids
     )
     SELECT CASE
@@ -72,16 +72,16 @@ BEGIN ATOMIC
     WITH path AS (
         SELECT ARRAY[
                    p_source,
-                   laplace.word_id('model-circuit'),
-                   laplace.word_id(btrim(p_plane))
+                   public.blake3_send(public.laplace_text_id('model-circuit')),
+                   public.blake3_send(public.laplace_text_id(btrim(p_plane)))
                ]::bytea[]
              || CASE WHEN p_layer >= 0 THEN ARRAY[
-                         laplace.word_id('layer'),
-                         laplace.word_id(p_layer::text)
+                         public.blake3_send(public.laplace_text_id('layer')),
+                         public.blake3_send(public.laplace_text_id(p_layer::text))
                      ]::bytea[] ELSE ARRAY[]::bytea[] END
              || CASE WHEN p_head >= 0 THEN ARRAY[
-                         laplace.word_id('head'),
-                         laplace.word_id(p_head::text)
+                         public.blake3_send(public.laplace_text_id('head')),
+                         public.blake3_send(public.laplace_text_id(p_head::text))
                      ]::bytea[] ELSE ARRAY[]::bytea[] END AS ids
     )
     SELECT CASE
@@ -250,53 +250,3 @@ END;
 COMMENT ON FUNCTION generation.adjudicated_row(bytea, integer, text) IS
     'Top-k by adjudicated evidence -- the exact, abstaining counterpart of the '
     'softmax output layer''s maximum-inner-product search over the vocabulary.';
-
-
-CREATE OR REPLACE FUNCTION generation.model_circuit_testimony(
-    p_source bytea,
-    p_plane text,
-    p_layer integer DEFAULT NULL,
-    p_head integer DEFAULT NULL)
-RETURNS TABLE(
-    circuit_id bytea,
-    physicality_id bytea,
-    token bytea,
-    score_fp1e9 bigint,
-    logical_ordinal integer)
-LANGUAGE sql STABLE
-BEGIN ATOMIC
-    WITH circuit AS MATERIALIZED (
-        SELECT generation.circuit_coord(
-            p_source, p_plane, p_layer, p_head) AS id
-    ),
-    forms AS MATERIALIZED (
-        SELECT DISTINCT p.id AS physicality_id
-        FROM circuit c
-        JOIN laplace.physicalities p ON p.entity_id = c.id
-    ),
-    bodies AS MATERIALIZED (
-        SELECT c.id AS circuit_id,
-               f.physicality_id,
-               p.type AS physicality_type,
-               generation.trajectory_bits(public.ST_AsBinary(p.trajectory, 'NDR')) AS trajectory_bits
-        FROM circuit c
-        JOIN forms f ON true
-        JOIN laplace.physicalities p
-          ON p.id = f.physicality_id AND p.entity_id = c.id
-        WHERE p.trajectory IS NOT NULL
-    )
-    SELECT b.circuit_id, b.physicality_id,
-           t.token, t.score_fp1e9,
-           t.logical_ordinal
-    FROM bodies b
-    CROSS JOIN LATERAL
-      generation.model_testimony_decode(
-        b.trajectory_bits) t
-    WHERE b.physicality_type = 3
-      AND b.trajectory_bits IS NOT NULL
-    ORDER BY b.physicality_id, t.logical_ordinal;
-END;
-
-COMMENT ON FUNCTION generation.model_circuit_testimony(
-    bytea, text, integer, integer) IS
-'Source-scoped SQL readback for one decomposed model circuit. Returns the exact ranked canonical-entity trajectory; it does not execute or reconstruct the source checkpoint.';

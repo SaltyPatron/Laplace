@@ -42,17 +42,19 @@ DECLARE
     fixed_ids bytea[];
     distinguishes_fixed_default boolean := false;
 BEGIN
-    FOREACH prompt IN ARRAY ARRAY['a','β','é',U&'e\0301','猫','😀'] LOOP
-        root := laplace.word_id(prompt);
+    -- One-codepoint prompts: a codepoint's Native ID is the BLAKE3 of its UTF-8 bytes,
+    -- which is the digest the prompt seed is the leading 64 bits of (big-endian).
+    FOREACH prompt IN ARRAY ARRAY['a','β','é','猫','😀'] LOOP
+        root := public.blake3_send(public.laplace_text_id(prompt));
         INSERT INTO laplace.consensus
             (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
-        SELECT laplace.consensus_id(root,relation_id,target),root,relation_id,target,
+        SELECT public.blake3_send(public.laplace_compose(array_remove(ARRAY[root, relation_id, target]::public.blake3[], NULL))),root,relation_id,target,
                3000000000000,30000000000,60000000,5,now()
-        FROM (SELECT laplace.word_id(value) AS target
+        FROM (SELECT public.blake3_send(public.laplace_text_id(value)) AS target
               FROM unnest(ARRAY['κ','λ','μ','ν','ξ','ο','π','ρ']) value) candidates;
 
-        expected_seed := laplace.hash128_lo(
-            public.laplace_hash128_blake3(convert_to(prompt,'UTF8')));
+        expected_seed := ('x' || encode(substring(
+            public.blake3_send(public.laplace_text_id(prompt)) FROM 1 FOR 8), 'hex'))::bit(64)::bigint;
         SELECT jsonb_agg(to_jsonb(g) ORDER BY g.step,g.event,g.entity)
         INTO implicit_trace
         FROM generation.forward_program(prompt,1,0,10.0,8,NULL,0,8,NULL,ARRAY[relation_id]) g;

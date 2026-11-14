@@ -9,8 +9,8 @@ BEGIN ATOMIC
     -- that happen to share a surface AND rendered a label for every consensus
     -- edge of every input word. Aggregate per (type_id, object_id), then realize.render
     -- exactly once per output row at the boundary.
-    WITH v AS (SELECT w AS word, laplace.word_id(w) AS id
-               FROM unnest(p_words) AS w WHERE laplace.word_id(w) IS NOT NULL),
+    WITH v AS (SELECT w AS word, public.blake3_send(public.laplace_text_id(w)) AS id
+               FROM unnest(p_words) AS w WHERE public.blake3_send(public.laplace_text_id(w)) IS NOT NULL),
     g AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
                array_agg(DISTINCT v.word ORDER BY v.word) AS words,
@@ -24,7 +24,7 @@ BEGIN ATOMIC
     ), labels AS MATERIALIZED (
       SELECT i.id, i.txt FROM ids,
         LATERAL ROWS FROM (
-          unnest(ids.a), unnest(realize.label_batch(ids.a))
+          unnest(ids.a), unnest(ARRAY(SELECT lp_l.content FROM unnest((ids.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ids.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
         ) i(id,txt)
     )
     SELECT COALESCE(NULLIF(consensus.relation_canonical(g.type_id), ''), rt.txt) AS relation,
