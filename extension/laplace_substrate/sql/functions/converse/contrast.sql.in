@@ -21,13 +21,14 @@ BEGIN ATOMIC
                  (SELECT b.key FROM lang, converse.bindings(ARRAY[p_y], lang.l) b WHERE b.rank = 1),
                  p_y) AS yk
     ), xf AS (
-        SELECT f.type_id, f.object_id, f.eff_mu FROM pair, converse.key_facts(ARRAY[pair.xk], 64) f
+        SELECT f.type_id, f.object_id, f.eff_mu, f.relation_id FROM pair, converse.key_facts(ARRAY[pair.xk], 64) f
     ), yf AS (
-        SELECT f.type_id, f.object_id, f.eff_mu FROM pair, converse.key_facts(ARRAY[pair.yk], 64) f
+        SELECT f.type_id, f.object_id, f.eff_mu, f.relation_id FROM pair, converse.key_facts(ARRAY[pair.yk], 64) f
     ), tape AS MATERIALIZED (
         SELECT CASE WHEN xf.type_id IS NULL THEN 'y-only'
                     WHEN yf.type_id IS NULL THEN 'x-only' ELSE 'both' END AS holder,
                COALESCE(xf.type_id, yf.type_id) AS type_id,
+               COALESCE(xf.relation_id, yf.relation_id, xf.type_id, yf.type_id) AS relation_id,
                COALESCE(xf.object_id, yf.object_id) AS object_id,
                GREATEST(xf.eff_mu, yf.eff_mu) AS mu
         FROM xf FULL JOIN yf ON yf.type_id = xf.type_id AND yf.object_id = xf.object_id
@@ -35,11 +36,11 @@ BEGIN ATOMIC
         SELECT t.*, row_number() OVER (ORDER BY (t.holder = 'both') DESC, t.mu DESC NULLS LAST,
                                                 t.type_id, t.object_id) AS ord
         FROM tape t
-        ORDER BY 5
+        ORDER BY ord
         LIMIT GREATEST(p_limit, 0)
     ), labels AS (
         SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(o.object_id ORDER BY o.ord))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(o.object_id ORDER BY o.ord))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l,
-               ARRAY(SELECT rl.label FROM consensus.relation_labels((array_agg(o.type_id ORDER BY o.ord))::bytea[]) rl ORDER BY rl.n) AS types
+               ARRAY(SELECT rl.label FROM consensus.relation_labels((array_agg(o.relation_id ORDER BY o.ord))::bytea[]) rl ORDER BY rl.n) AS types
         FROM ordered o
     )
     SELECT o.holder, COALESCE(labels.types[o.ord], 'Unrealized relation'),

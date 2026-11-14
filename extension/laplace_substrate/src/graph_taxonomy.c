@@ -42,7 +42,8 @@ ensure_tax_edges_plan(void)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT e.ord, e.object_id, e.type_id, e.rating, e.rd "
+            /* the relation as the claim recorded it (its own word), the registry type only where none was */
+            "SELECT e.ord, e.object_id, COALESCE(e.relation_id, e.type_id), e.rating, e.rd "
             "FROM taxonomy.consensus_taxonomy_edges_batch($1, $2) e "
             "ORDER BY e.ord",
             2, argtypes, CURSOR_OPT_PARALLEL_OK);
