@@ -87,6 +87,7 @@ functions/readback/canonical_names.sql.in
 functions/readback/register_canonical.sql.in
 functions/identity/relation_type_id.sql.in
 functions/identity/entity_type_id.sql.in
+functions/identity/physicality_id.sql.in
 generated/relation_set_ids.sql.in
 generated/relation_family_ids.sql.in
 functions/readback/register_canonicals.sql.in

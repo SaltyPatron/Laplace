@@ -3,6 +3,32 @@
 \set ECHO none
 BEGIN;
 
+-- Wire-protocol sentinels of the native UD-parse and task-shape codecs
+-- (engine/core/src/ud_parse.c laplace_ud_markers_init, engine/core/src/task_shape.c):
+-- BLAKE3-128 of each name, private codec markers rather than content identity,
+-- so no SQL surface mints them. These are their conformance vectors.
+CREATE FUNCTION pg_temp.wire_marker(p_name text)
+RETURNS bytea LANGUAGE sql IMMUTABLE STRICT AS $marker$
+    SELECT decode(m.digest,'hex') FROM (VALUES
+        ('ud/parse/schema/v1','b0a94249c64d01be202ec16943d03eae'),
+        ('ud/parse/none/v1','90fed72d88fccfb5c40beeb675653c6d'),
+        ('ud/parse/root/v1','2dbe5abfb16a6c906688509e2f1effb4'),
+        ('ud/parse/features-end/v1','0cf5db2b6c5e1e910e7d4a8b927f8bf7'),
+        ('ud/parse/enhanced-end/v1','194f97416ec522fb841d42656d1c561d'),
+        ('ud/parse/misc-end/v1','992f45d3afa868f58b2b4f9cb5b8546e'),
+        ('ud/parse/tokens-end/v1','9e3d08d82b7d710ddad540064e14e406'),
+        ('laplace/task-shape/relation-read/token-slots/v1','ed9f75a23674019f4c4c7be4ae139a26'),
+        ('laplace/task-shape/token-slot/v1','2196ac8ded72a06f57912c2d21686241'),
+        ('laplace/task-shape/slots-end/v1','7dd50ee7f1159893990fefe63ed86cb3'),
+        ('laplace/task-shape/relation-read/token-slots/v2','f0b9255937dd246a78dc362a992e4f87'),
+        ('laplace/task-shape/token-slot/v2','146ecd333144eaa3594c3d3a2d83f41e'),
+        ('laplace/task-shape/slots-end/v2','261205036ebfaf6cf7726395b98cf4ae'),
+        ('laplace/task-shape/binding/current-form/v1','65f702738f540b1c56c52e67ef9ab8a6'),
+        ('laplace/task-shape/binding/witnessed-semantic/v1','ca0e4576516bb264240e7d26f6c860b0'))
+        AS m(name,digest)
+     WHERE m.name=p_name;
+$marker$;
+
 CREATE FUNCTION pg_temp.shape_surface(p_text text,p_source bytea)
 RETURNS bytea LANGUAGE plpgsql AS $surface$
 DECLARE v_root bytea;
@@ -17,9 +43,14 @@ BEGIN
           FROM nodes WHERE parent_index IS NOT NULL
          GROUP BY parent_index HAVING count(*)=1
     )
-    SELECT DISTINCT p.id,p.tier,laplace.entity_type_id(CASE p.tier
-        WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme' WHEN 2 THEN 'Word'
-        WHEN 3 THEN 'Sentence' ELSE 'Document' END)
+    -- Tiers are Native heights, not roles: a node's type is its place in the
+    -- tree. Codepoints are leaves, a root over segments is the Sentence, and
+    -- every other composed node (a lone word's root included) is a Word.
+    SELECT DISTINCT p.id,p.tier,laplace.entity_type_id(CASE
+        WHEN p.tier=0 THEN 'Codepoint'
+        WHEN p.parent_index IS NULL AND EXISTS (
+            SELECT 1 FROM nodes s WHERE s.parent_index=p.node_index AND s.tier>0) THEN 'Sentence'
+        ELSE 'Word' END)
       FROM nodes p
      WHERE NOT EXISTS (
         SELECT 1 FROM unary_children u JOIN nodes c ON c.node_index=u.child_index
@@ -62,7 +93,7 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(v_id), public.laplace_cp_id(8)])),
+    VALUES(laplace.physicality_id(v_id,8::smallint),
         v_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
         public.laplace_trajectory_build(p_flat),cardinality(p_flat))
     ON CONFLICT (id) DO NOTHING;
@@ -83,8 +114,8 @@ CREATE FUNCTION pg_temp.shape_parse(
 RETURNS bytea LANGUAGE plpgsql AS $parse$
 DECLARE
     v_root bytea := pg_temp.shape_surface(p_text,p_source);
-    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1')),v_root,p_language];
-    v_none bytea := public.blake3_send(public.laplace_text_id('ud/parse/none/v1'));
+    v_flat bytea[] := ARRAY[pg_temp.wire_marker('ud/parse/schema/v1'),v_root,p_language];
+    v_none bytea := pg_temp.wire_marker('ud/parse/none/v1');
     v_form bytea;
     v_parse bytea;
 BEGIN
@@ -94,13 +125,13 @@ BEGIN
             public.blake3_send(public.laplace_text_id('test/task-shapes/upos')),v_none];
         IF i=1 THEN v_flat := v_flat || p_first_features; END IF;
         v_flat := v_flat || ARRAY[
-            public.blake3_send(public.laplace_text_id('ud/parse/features-end/v1')),
-            CASE WHEN p_heads[i]=0 THEN public.blake3_send(public.laplace_text_id('ud/parse/root/v1'))
+            pg_temp.wire_marker('ud/parse/features-end/v1'),
+            CASE WHEN p_heads[i]=0 THEN pg_temp.wire_marker('ud/parse/root/v1')
                  ELSE pg_temp.shape_ref(p_heads[i]) END,p_dependencies[i],
-            public.blake3_send(public.laplace_text_id('ud/parse/enhanced-end/v1')),
-            public.blake3_send(public.laplace_text_id('ud/parse/misc-end/v1'))];
+            pg_temp.wire_marker('ud/parse/enhanced-end/v1'),
+            pg_temp.wire_marker('ud/parse/misc-end/v1')];
     END LOOP;
-    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/tokens-end/v1'))];
+    v_flat := v_flat || ARRAY[pg_temp.wire_marker('ud/parse/tokens-end/v1')];
     INSERT INTO laplace.entities(id,tier,type_id)
     SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker')
       FROM unnest(v_flat) value
@@ -116,8 +147,8 @@ CREATE FUNCTION pg_temp.declare_shape(
     p_exemplar bytea,p_predicate bytea,p_ordinals int[],p_types bytea[],p_source bytea,p_context bytea)
 RETURNS bytea LANGUAGE plpgsql AS $shape$
 DECLARE
-    v_slot_schema bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v1'));
-    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/relation-read/token-slots/v1')),p_exemplar,p_predicate];
+    v_slot_schema bytea := pg_temp.wire_marker('laplace/task-shape/token-slot/v1');
+    v_flat bytea[] := ARRAY[pg_temp.wire_marker('laplace/task-shape/relation-read/token-slots/v1'),p_exemplar,p_predicate];
     v_slots bytea[] := ARRAY[]::bytea[];
     v_slot bytea;
     v_shape bytea;
@@ -130,7 +161,7 @@ BEGIN
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
-    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v1'))];
+    v_flat := v_flat || ARRAY[pg_temp.wire_marker('laplace/task-shape/slots-end/v1')];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
     PERFORM pg_temp.shape_cell(p_exemplar,laplace.relation_type_id('IS_EXAMPLE_OF'),v_shape,p_source,p_context);
     PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('CALLS'),p_predicate,p_source,p_context);
@@ -147,8 +178,8 @@ CREATE FUNCTION pg_temp.declare_shape_v2(
     p_source bytea,p_context bytea)
 RETURNS bytea LANGUAGE plpgsql AS $shape_v2$
 DECLARE
-    v_slot_schema bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v2'));
-    v_flat bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/relation-read/token-slots/v2')),p_exemplar,p_predicate];
+    v_slot_schema bytea := pg_temp.wire_marker('laplace/task-shape/token-slot/v2');
+    v_flat bytea[] := ARRAY[pg_temp.wire_marker('laplace/task-shape/relation-read/token-slots/v2'),p_exemplar,p_predicate];
     v_slots bytea[] := ARRAY[]::bytea[];
     v_slot bytea;
     v_shape bytea;
@@ -161,7 +192,7 @@ BEGIN
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'))
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
-    v_flat := v_flat || ARRAY[public.blake3_send(public.laplace_text_id('laplace/task-shape/slots-end/v2'))];
+    v_flat := v_flat || ARRAY[pg_temp.wire_marker('laplace/task-shape/slots-end/v2')];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
     PERFORM pg_temp.shape_cell(p_exemplar,laplace.relation_type_id('IS_EXAMPLE_OF'),v_shape,p_source,p_context);
     PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('CALLS'),p_predicate,p_source,p_context);
@@ -213,8 +244,8 @@ DECLARE
     v_lemma bytea := laplace.relation_type_id('IS_LEMMA_OF');
     v_example_of bytea := laplace.relation_type_id('IS_EXAMPLE_OF');
     v_has_parse bytea := laplace.relation_type_id('HAS_PARSE');
-    v_semantic bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/binding/witnessed-semantic/v1'));
-    v_form bytea := public.blake3_send(public.laplace_text_id('laplace/task-shape/binding/current-form/v1'));
+    v_semantic bytea := pg_temp.wire_marker('laplace/task-shape/binding/witnessed-semantic/v1');
+    v_form bytea := pg_temp.wire_marker('laplace/task-shape/binding/current-form/v1');
     v_deps bytea[] := ARRAY[public.blake3_send(public.laplace_text_id('test/task-shapes/v2/root-role')),
         public.blake3_send(public.laplace_text_id('test/task-shapes/v2/input-role'))];
     v_prompt text := 'ζξ žđþ';
@@ -240,7 +271,7 @@ BEGIN
     v_original := pg_temp.shape_surface('žđþ',v_source);
     v_alternative_a := pg_temp.shape_surface('čŋł',v_source);
     v_alternative_b := pg_temp.shape_surface('ðřŝ',v_source);
-    IF (SELECT count(*) FROM laplace.entities WHERE tier=2 AND type_id=v_word
+    IF (SELECT count(*) FROM laplace.entities WHERE tier=1 AND type_id=v_word
          AND id=ANY(ARRAY[v_original,v_alternative_a,v_alternative_b])) <> 3 THEN
         RAISE EXCEPTION 'FAIL: binding-mode fixture requires three distinct native Word identities';
     END IF;
@@ -260,7 +291,7 @@ BEGIN
     IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
          AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY[v_original]
          AND NOT public.laplace_trajectory_constituent_ids(p.trajectory) @>
-             ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]) < 11 THEN
+             ARRAY[pg_temp.wire_marker('ud/parse/schema/v1')]) < 11 THEN
         RAISE EXCEPTION 'FAIL: non-UD membership noise did not exceed the eight-row envelope';
     END IF;
 
@@ -352,7 +383,7 @@ BEGIN
          AND public.laplace_trajectory_constituent_ids(p.trajectory) &&
              ARRAY[public.blake3_send(public.laplace_text_id('ζξ')),v_original]
          AND public.laplace_trajectory_constituent_ids(p.trajectory) @>
-             ARRAY[public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'))]) <> 9 THEN
+             ARRAY[pg_temp.wire_marker('ud/parse/schema/v1')]) <> 9 THEN
         RAISE EXCEPTION 'FAIL: eligible UD overflow fixture must contain exactly nine matching parses';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
@@ -412,7 +443,7 @@ BEGIN
     PERFORM pg_temp.shape_reject('available result without task shape',v_prompt);
     v_shape := pg_temp.declare_shape(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_concept],v_source,v_context);
     v_slot := public.blake3_send(public.laplace_compose(ARRAY(SELECT public.blake3_from_bytea(c) FROM unnest(ARRAY[
-        public.blake3_send(public.laplace_text_id('laplace/task-shape/token-slot/v1')),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
+        pg_temp.wire_marker('laplace/task-shape/token-slot/v1'),pg_temp.shape_ref(2),v_concept]) WITH ORDINALITY u(c, o) ORDER BY o)));
     IF EXISTS (SELECT 1 FROM laplace.attestations
                 WHERE subject_id=v_root AND type_id IN (v_calls,v_inputs,v_has_parse))
        OR EXISTS (SELECT 1 FROM laplace.physicalities ph
