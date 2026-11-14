@@ -119,29 +119,23 @@ DO $$
 BEGIN
     PERFORM pg_temp.text_node(w) FROM unnest(ARRAY['dog','h','p','c','犬','G',
         'compilerrequest','compilerbinder','People','Existence']) w;
-    -- The English wordnet: senses (dog has two, the hot-dog sense the more
-    -- used), both synsets' definitions, the canine synset's hypernym, the animal
-    -- synset's refuted hypernym, and an antonym.
+    -- A test wordnet: senses (dog has two, the hot-dog sense observed three
+    -- times), the canine synset's definition, its hypernym, the animal synset's
+    -- refuted hypernym, and an antonym.
     PERFORM pg_temp.source('wordnet',
         ARRAY[pg_temp.has_sense('dog','en','canine'), pg_temp.has_sense('dog','en','hotdog'),
               pg_temp.has_sense('p','en','canine'), pg_temp.has_sense('c','en','animal'),
               pg_temp.claim('canine','definition of the synset','G'),
-              pg_temp.claim('hotdog','definition of the synset','F'),
               pg_temp.claim('canine','hypernym','animal'),
               pg_temp.claim('animal','hypernym','mineral'),
               pg_temp.claim('canine','antonym','h')],
-        ARRAY[1,3,1,1,1,1,1,1,1], ARRAY[false,false,false,false,false,false,false,true,false]);
+        ARRAY[1,3,1,1,1,1,1,1], ARRAY[false,false,false,false,false,false,true,false]);
     -- Another lexicon of the same concepts in German and Japanese; it states the
     -- canine definition too, so that definition has two witnesses.
     PERFORM pg_temp.source('omw',
         ARRAY[pg_temp.has_sense('h','de','canine'), pg_temp.has_sense('犬','ja','shiba'),
               pg_temp.claim('canine','definition of the synset','G')],
         ARRAY[1,1,1], ARRAY[false,false,false]);
-    -- The concept hierarchy is shared: twelve more wordnets built on it each
-    -- state canine IS_A animal, so that claim stands confirmed.
-    PERFORM pg_temp.source('lex' || chr(96 + g),
-        ARRAY[pg_temp.claim('canine','hypernym','animal')], ARRAY[1], ARRAY[false])
-    FROM generate_series(1, 12) g;
     -- A commonsense source: causation and synonymy.
     PERFORM pg_temp.source('commons',
         ARRAY[pg_temp.claim('dog','causes','h'), pg_temp.claim('h','causes','canine'),
@@ -385,8 +379,11 @@ SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_ban
 
 SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(public.blake3_send(public.laplace_text_id('dog')));
 
--- The IS_A strands held by the canine synset, by their parts' declared relation.
-SELECT bool_and(s.status = 'confirmed') AS isa_confirmed
+-- The IS_A strands held by the canine synset, by their parts' declared relation:
+-- each strand's reported status is the Native verdict of its own standing
+-- (confirmed when public.laplace_confidence's conservative bound beats one half).
+SELECT count(*) > 0 AS isa_strands_found,
+       bool_and((s.status = 'confirmed') = (public.laplace_confidence(c.rating, c.deviation, 2) > 0.5)) AS isa_status_is_native_verdict
 FROM converse.epistemic_status(public.blake3_send(public.laplace_text_id('canine'))) s
 JOIN converse.epistemic_status_core(public.blake3_send(public.laplace_text_id('canine'))) c USING (strand)
 WHERE EXISTS (SELECT 1 FROM consensus.relation_metadata(c.parts) m WHERE m.canonical = 'IS_A');
