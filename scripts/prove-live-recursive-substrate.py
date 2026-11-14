@@ -175,7 +175,7 @@ packed AS MATERIALIZED (
   SELECT p.physicality_id,p.parent_id,p.n_constituents,p.parent_tier,
          c.ordinal,c.entity_id AS child_id,
          GREATEST(c.run_length,1)::bigint AS run_length,c.flags,
-         realize.vertex_tier(c.flags)::int AS child_tier
+         public.laplace_vertex_tier(c.flags)::int AS child_tier
   FROM parents p
   CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c
 ),
