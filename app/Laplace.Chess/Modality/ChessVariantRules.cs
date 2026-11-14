@@ -69,6 +69,9 @@ public sealed record ChessVariantRules
     /// <summary>Giving check is illegal (Racing Kings).</summary>
     public bool CheckForbidden { get; init; }
 
+    /// <summary>A pawn on its side's first rank steps one or two (Horde).</summary>
+    public bool PawnsDoubleFromFirstRank { get; init; }
+
     /// <summary>The law the Engine plays these rules by: its name as the Engine's firmware/chess.firmware declares it
     /// (a PGN Variant tag as written). Moves, results and SAN under any law but Standard's come from the Engine
     /// (<see cref="NativeChessRules"/>); "" is Standard. It names the law and is no rule axis, so it is in no
@@ -105,6 +108,7 @@ public sealed record ChessVariantRules
         if (WinBySquares.Length > 0) Add("winsq", WinBySquares);
         if (WinByCheckCount > 0) Add("winchk", WinByCheckCount.ToString());
         if (CheckForbidden) Add("nocheck", "1");
+        if (PawnsDoubleFromFirstRank) Add("firstdouble", "1");
         return sb.ToString();
     }
 
@@ -153,7 +157,7 @@ public static class ChessVariants
 
     /// <summary>Horde: Standard's rules from Horde's start (the array is the FEN's), where a pawn on its first rank
     /// steps one or two and the side left with nothing has lost; the Engine's law says so.</summary>
-    public static readonly ChessVariantRules Horde = ChessVariantRules.Standard with { Law = "Horde" };
+    public static readonly ChessVariantRules Horde = ChessVariantRules.Standard with { PawnsDoubleFromFirstRank = true, Law = "Horde" };
 
     public static readonly ChessVariantRules Capablanca = ChessVariantRules.Standard with
     {
@@ -195,9 +199,11 @@ public static class ChessVariants
     /// </summary>
     public static ChessVariantRules? ByLaw(string? name)
     {
-        if (string.IsNullOrEmpty(name) || name == "Standard") return Standard;
-        foreach (var (_, rules) in Conventional) if (rules.Law == name) return rules;
-        return NativeChessRules.LawKnown(name) ? ChessVariantRules.Standard with { Law = name } : null;
+        if (string.IsNullOrEmpty(name)) return Standard;
+        if (NativeChessRules.LawCanonical(name) is not { } law) return null;           // every name a law goes by: its own
+        if (law == "Standard") return Standard;
+        foreach (var (_, rules) in Conventional) if (rules.Law == law) return rules;
+        return ChessVariantRules.Standard with { Law = law };
     }
 
     /// <summary>Every pre-seeded rule set, for bootstrap and for narrowing.</summary>

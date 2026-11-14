@@ -45,6 +45,36 @@ internal static unsafe class NativeChessRules
     private static extern int LawKnownNative(byte* name);
     [DllImport("laplace_core", EntryPoint = "laplace_chess_law_start", CallingConvention = CallingConvention.Cdecl)]
     private static extern int LawStartNative(byte* name, byte* output, nuint capacity);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_canonical", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawCanonicalNative(byte* name, byte* output, nuint capacity);
+    [DllImport("laplace_core", EntryPoint = "laplace_chess_law_name", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int LawNameNative(int index, byte* output, nuint capacity);
+
+    /// <summary>The law's own name for a name it goes by (a PGN tag, Lichess's API key, a UCI_Variant value), as the
+    /// Engine's firmware declares it; null when no law has that name.</summary>
+    internal static string? LawCanonical(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        _ = Laws.Value;
+        byte[] bytes = Encoding.UTF8.GetBytes(name + "\0"); Span<byte> output = stackalloc byte[64];
+        int n;
+        fixed (byte* p = bytes) fixed (byte* o = output) n = LawCanonicalNative(p, o, (nuint)output.Length);
+        return n < 0 ? null : Encoding.UTF8.GetString(output[..n]);
+    }
+
+    /// <summary>Every name a law goes by, in the firmware's order.</summary>
+    internal static IReadOnlyList<string> LawNames()
+    {
+        _ = Laws.Value;
+        var names = new List<string>(); Span<byte> output = stackalloc byte[64];
+        for (int i = 0; ; i++)
+        {
+            int n;
+            fixed (byte* o = output) n = LawNameNative(i, o, (nuint)output.Length);
+            if (n < 0) return names;
+            names.Add(Encoding.UTF8.GetString(output[..n]));
+        }
+    }
 
     /// <summary>The Engine's chess firmware, beside the program firmware of the recipe estate this host runs
     /// (LAPLACE_CHESS_FIRMWARE names another); read once per process.</summary>

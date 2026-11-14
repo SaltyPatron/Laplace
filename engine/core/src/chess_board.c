@@ -61,6 +61,17 @@ LAPLACE_CHESS_API int laplace_chess_law_start(const char *name, char *out, size_
     size_t n = strlen(law->start); if (n + 1 > capacity) return -1;
     memcpy(out, law->start, n + 1); return (int)n;
 }
+static int written(const char *text, char *out, size_t capacity){
+    size_t n = strlen(text); if (!out || n + 1 > capacity) return -1;
+    memcpy(out, text, n + 1); return (int)n;
+}
+LAPLACE_CHESS_API int laplace_chess_law_canonical(const char *name, char *out, size_t capacity){
+    const LpChessLaw *law = name && *name ? lp_chess_law_named(name, strlen(name)) : NULL;
+    return law ? written(law->name, out, capacity) : -1;
+}
+LAPLACE_CHESS_API int laplace_chess_law_name(int i, char *out, size_t capacity){
+    const char *name = lp_chess_law_name(i); return name ? written(name, out, capacity) : -1;
+}
 LAPLACE_CHESS_API size_t laplace_chess_moves(const laplace_chess_state_t *s, int legal, laplace_chess_move_t *out, size_t capacity){
     Bd b; if (!s || !board_of(s, &b)) return 0;
     Mv all[LP_CHESS_MOVES]; int n = legal ? lp_chess_gen(&b, all) : lp_chess_pseudo(&b, all);

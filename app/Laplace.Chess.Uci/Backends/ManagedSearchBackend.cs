@@ -40,7 +40,12 @@ public sealed class ManagedSearchBackend : IChessBackend
     public IReadOnlyList<string> OptionLines =>
         [$"option name Substrate type combo default {_substrateMode} var substrate var off",
          "option name Refresh Database Snapshot type button",
-         "option name UCI_Variant type string default Standard"];
+         VariantOption];
+
+    /// <summary>UCI_Variant as the convention cutechess, Fairy-Stockfish and lichess-bot keep: a combo of the names, without
+    /// spaces, that the Engine's chess firmware says its laws go by.</summary>
+    private static readonly string VariantOption = "option name UCI_Variant type combo default standard"
+        + string.Concat(NativeChessRules.LawNames().Where(static n => !n.Contains(' ')).Select(static n => " var " + n));
 
     public void SetOption(string name, string value)
     {

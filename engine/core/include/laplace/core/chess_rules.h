@@ -41,6 +41,11 @@ LAPLACE_CHESS_API int laplace_chess_law_known(const char* name);
 /* The FEN a law starts from, as its firmware declares it, written to out (NUL-terminated); its length, 0 when the law
  * starts from Standard's array, or -1 when no law has that name or out is too small. */
 LAPLACE_CHESS_API int laplace_chess_law_start(const char* name, char* out, size_t capacity);
+/* The law's own name for a name it goes by (Lichess's kingOfTheHill, UCI's kingofthehill: "King of the Hill"), written
+ * to out; its length, or -1 when no law has that name or out is too small. */
+LAPLACE_CHESS_API int laplace_chess_law_canonical(const char* name, char* out, size_t capacity);
+/* The i-th name a law goes by, written to out; its length, or -1 past the last name or when out is too small. */
+LAPLACE_CHESS_API int laplace_chess_law_name(int i, char* out, size_t capacity);
 /* Returns required output length. No partial output is reported as complete.
  * With legal=0, emits pseudo moves; castling still checks its transit squares. */
 LAPLACE_CHESS_API size_t laplace_chess_moves(const laplace_chess_state_t* state,
