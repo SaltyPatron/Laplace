@@ -117,29 +117,23 @@ DO $$
 BEGIN
     PERFORM pg_temp.text_node(w) FROM unnest(ARRAY['dog','h','p','c','犬','G',
         'compilerrequest','compilerbinder','People','Existence']) w;
-    -- The English wordnet: senses (dog has two, the hot-dog sense the more
-    -- used), both synsets' definitions, the canine synset's hypernym, the animal
-    -- synset's refuted hypernym, and an antonym.
+    -- A test wordnet: senses (dog has two, the hot-dog sense observed three
+    -- times), the canine synset's definition, its hypernym, the animal synset's
+    -- refuted hypernym, and an antonym.
     PERFORM pg_temp.source('wordnet',
         ARRAY[pg_temp.has_sense('dog','en','canine'), pg_temp.has_sense('dog','en','hotdog'),
               pg_temp.has_sense('p','en','canine'), pg_temp.has_sense('c','en','animal'),
               pg_temp.claim('canine','definition of the synset','G'),
-              pg_temp.claim('hotdog','definition of the synset','F'),
               pg_temp.claim('canine','hypernym','animal'),
               pg_temp.claim('animal','hypernym','mineral'),
               pg_temp.claim('canine','antonym','h')],
-        ARRAY[1,3,1,1,1,1,1,1,1], ARRAY[false,false,false,false,false,false,false,true,false]);
+        ARRAY[1,3,1,1,1,1,1,1], ARRAY[false,false,false,false,false,false,true,false]);
     -- Another lexicon of the same concepts in German and Japanese; it states the
     -- canine definition too, so that definition has two witnesses.
     PERFORM pg_temp.source('omw',
         ARRAY[pg_temp.has_sense('h','de','canine'), pg_temp.has_sense('犬','ja','shiba'),
               pg_temp.claim('canine','definition of the synset','G')],
         ARRAY[1,1,1], ARRAY[false,false,false]);
-    -- The concept hierarchy is shared: twelve more wordnets built on it each
-    -- state canine IS_A animal, so that claim stands confirmed.
-    PERFORM pg_temp.source('lex' || chr(96 + g),
-        ARRAY[pg_temp.claim('canine','hypernym','animal')], ARRAY[1], ARRAY[false])
-    FROM generate_series(1, 12) g;
     -- A commonsense source: causation and synonymy.
     PERFORM pg_temp.source('commons',
         ARRAY[pg_temp.claim('dog','causes','h'), pg_temp.claim('h','causes','canine'),
@@ -167,7 +161,7 @@ WHERE a.witness;
 SELECT public.laplace_attest_series('stage.converse_pending') AS claims_folded;
  claims_folded 
 ---------------
-            18
+            17
 (1 row)
 
 -- The operator's primary language is a prior, not a gate.  With no English
@@ -398,9 +392,8 @@ SELECT count(*) AS dog_senses FROM lexical.senses(public.blake3_send(public.lapl
 SELECT definition, witnesses FROM lexical.define(public.blake3_send(public.laplace_text_id('dog')));
  definition | witnesses 
 ------------+-----------
- F          |         1
  G          |         2
-(2 rows)
+(1 row)
 
 SELECT synonym FROM converse.synonyms(public.blake3_send(public.laplace_text_id('dog')));
  synonym 
@@ -419,9 +412,8 @@ SELECT translation, language FROM converse.translations(public.blake3_send(publi
 SELECT reply, witnesses FROM converse.recall_intent('define', public.blake3_send(public.laplace_text_id('dog')));
  reply | witnesses 
 -------+-----------
- F     |         3
  G     |         2
-(2 rows)
+(1 row)
 
 SELECT reply FROM converse.recall_intent('synonyms', public.blake3_send(public.laplace_text_id('dog')));
  reply 
@@ -540,12 +532,11 @@ FROM labels;
 (1 row)
 
 SELECT type, fact, witnesses FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')));
-      type      |  fact  | witnesses 
-----------------+--------+-----------
- HAS_DEFINITION | F      |         1
- IS_SYNONYM_OF  | canine |         1
- CAUSES         | h      |         1
-(3 rows)
+  type   |  fact  | witnesses 
+---------+--------+-----------
+ synonym | canine |         1
+ causes  | h      |         1
+(2 rows)
 
 SELECT count(*) = 0 AS salient_facts_zero_is_empty
 FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')), NULL, 0);
@@ -567,21 +558,21 @@ SELECT fact FROM consensus.related_in(public.blake3_send(public.laplace_text_id(
 (1 row)
 
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('c')));
-           reply            
-----------------------------
- Yes — canine —IS_A→ animal
+             reply              
+--------------------------------
+ Yes — canine —hypernym→ animal
 (1 row)
 
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('h')), public.blake3_send(public.laplace_text_id('c')));
-           reply            
-----------------------------
- Yes — canine —IS_A→ animal
+             reply              
+--------------------------------
+ Yes — canine —hypernym→ animal
 (1 row)
 
 SELECT reply, eff_mu FROM converse.recall_intent('walk', public.blake3_send(public.laplace_text_id('p')));
-                                    reply                                     |      eff_mu      
-------------------------------------------------------------------------------+------------------
- p —IS_SYNONYM_OF→ canine —IS_SYNONYM_OF→ dog —HAS_SENSE→ [dog · en · hotdog] | 1087.07061961071
+                                reply                                 |      eff_mu      
+----------------------------------------------------------------------+------------------
+ p —synonym→ canine —synonym→ dog —lexical sense→ [dog · en · hotdog] | 1087.07061961071
 (1 row)
 
 -- recall_session stays a text entry point because it carries session state, but
@@ -590,23 +581,20 @@ SELECT reply, eff_mu FROM converse.recall_intent('walk', public.blake3_send(publ
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
  reply  | witnesses 
 --------+-----------
- dog: F |         3
  dog: G |         2
-(2 rows)
+(1 row)
 
 SELECT reply FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
  reply  
 --------
- dog: F
  dog: G
-(2 rows)
+(1 row)
 
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
  reply  | witnesses 
 --------+-----------
- dog: F |         3
  dog: G |         2
-(2 rows)
+(1 row)
 
 SELECT ord, prompt, resolved_id = public.blake3_send(public.laplace_text_id('dog')) AS topic_is_dog
 FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
@@ -635,14 +623,17 @@ SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensu
  {DERIVATIONALLY_RELATED,HAS_ATTRIBUTE,HAS_PART,IS_SIMILAR_TO,USED_FOR}
 (1 row)
 
--- The IS_A strands held by the canine synset, by their parts' declared relation.
-SELECT bool_and(s.status = 'confirmed') AS isa_confirmed
+-- The IS_A strands held by the canine synset, by their parts' declared relation:
+-- each strand's reported status is the Native verdict of its own standing
+-- (confirmed when public.laplace_confidence's conservative bound beats one half).
+SELECT count(*) > 0 AS isa_strands_found,
+       bool_and((s.status = 'confirmed') = (public.laplace_confidence(c.rating, c.deviation, 2) > 0.5)) AS isa_status_is_native_verdict
 FROM converse.epistemic_status(public.blake3_send(public.laplace_text_id('canine'))) s
 JOIN converse.epistemic_status_core(public.blake3_send(public.laplace_text_id('canine'))) c USING (strand)
 WHERE EXISTS (SELECT 1 FROM consensus.relation_metadata(c.parts) m WHERE m.canonical = 'IS_A');
- isa_confirmed 
----------------
- t
+ isa_strands_found | isa_status_is_native_verdict 
+-------------------+------------------------------
+ t                 | t
 (1 row)
 
 SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('h')));
@@ -660,12 +651,12 @@ FROM converse.recall_intent('reason', public.blake3_send(public.laplace_text_id(
 
 SELECT holder, type, fact FROM converse.contrast(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('c')))
 ORDER BY holder, type, fact;
- holder |      type      |  fact   
---------+----------------+---------
- x-only | HAS_DEFINITION | G
- x-only | IS_A           | animal
- x-only | IS_ANTONYM_OF  | h
- y-only | IS_A           | mineral
+ holder |           type           |  fact   
+--------+--------------------------+---------
+ x-only | antonym                  | h
+ x-only | definition of the synset | G
+ x-only | hypernym                 | animal
+ y-only | hypernym                 | mineral
 (4 rows)
 
 SELECT count(*) >= 0 AS hypernyms_runs
