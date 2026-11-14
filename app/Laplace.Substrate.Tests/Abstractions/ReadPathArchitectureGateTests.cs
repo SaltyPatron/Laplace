@@ -352,7 +352,6 @@ public sealed class ReadPathArchitectureGateTests
     }
 
     [Fact]
-    [Fact]
     public void ConversePresentationCapacity_IsCallerOwnedAndPreservesZero()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
