@@ -71,17 +71,14 @@ BEGIN
          2, now());
 
     -- The semantic output has actual canonical content, independent of every
-    -- sequence context. Admission never classifies candidates by rendered text.
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    VALUES
-        (public.blake3_send(public.laplace_text_id('test/steer/content-identity')),
-         semantic, 1, public.ST_SetSRID(public.ST_MakePoint(101, 1, 1, 1), 0),
-         decode('00000000000000000000000000000000', 'hex'),
-         public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(public.blake3_send(public.laplace_text_id('β')), 1, 1, 0),
-             public.laplace_mantissa_pack(public.blake3_send(public.laplace_text_id('β')), 2, 1, 0)]),
-         2, now());
+    -- sequence context: its Native entity and composition, which realization
+    -- reads. Admission never classifies candidates by rendered text.
+    INSERT INTO public.entity(id,tier,coord,hilbert)
+    VALUES (public.laplace_id('ββ'),public.laplace_tier('ββ'),
+            public.laplace_coord('ββ'),public.laplace_hilbert('ββ'));
+    INSERT INTO public.physicality(entity,tier,hilbert,path)
+    VALUES (public.laplace_id('ββ'),public.laplace_tier('ββ'),public.laplace_hilbert('ββ'),
+            public.laplace_path(public.laplace_parts('ββ')));
     IF (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(semantic)::bytea],NULL)::public.blake3[]) lp_l) IS DISTINCT FROM 'ββ' THEN
         RAISE EXCEPTION 'FAIL: semantic fixture is not realizable canonical content';
     END IF;
@@ -373,7 +370,7 @@ BEGIN
     -- earlier synthetic corpus rows deliberately model separate observations.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_sem), public.laplace_cp_id(1)])),sent_sem,1,
+    VALUES (laplace.physicality_id(sent_sem,1::smallint),sent_sem,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(ctx,1,1,t2flag),
                                 public.laplace_mantissa_pack(gap,2,1,0),
@@ -422,7 +419,7 @@ BEGIN
     -- An explicit graph result can instead establish a new observation scope.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(next_root), public.laplace_cp_id(1)])),next_root,1,
+    VALUES (laplace.physicality_id(next_root,1::smallint),next_root,1,
         public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(semantic,1,1,t2flag),
                                 public.laplace_mantissa_pack(noise,2,1,t2flag)]),2);
@@ -477,7 +474,7 @@ BEGIN
     -- edge of their own. Repetition lives in one canonical ordered manifest.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(sent_noise), public.laplace_cp_id(1)])),sent_noise,1,
+    VALUES (laplace.physicality_id(sent_noise,1::smallint),sent_noise,1,
         public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY(
             SELECT public.laplace_mantissa_pack(

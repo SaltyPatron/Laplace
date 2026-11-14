@@ -444,7 +444,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: hidden vocabulary candidate multiplier/cap returned';
     END IF;
     IF pg_get_functiondef('generation.corpus_word_vocab(integer,integer)'::regprocedure)
-           NOT LIKE '%render_text_batch%' THEN
+           NOT LIKE '%laplace_labels(%' THEN
         RAISE EXCEPTION 'FAIL: corpus vocabulary no longer uses set-based ranked render pages';
     END IF;
     IF EXISTS (SELECT 1 FROM generation.corpus_word_vocab(0, NULL))
@@ -561,7 +561,7 @@ DECLARE
 BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-    SELECT public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(v.root), public.laplace_cp_id(1)])),
+    SELECT laplace.physicality_id(v.root,1::smallint),
            v.root, 1, public.ST_MakePoint(0,0,0,0), decode(repeat('00',16),'hex'),
            public.ST_MakeLine(ARRAY[
                public.laplace_mantissa_pack(prefix, 1, 1, 4),
@@ -598,23 +598,21 @@ BEGIN
 END
 $observation_scope$;
 
--- A selected typed result keeps its semantic identity through selection. Only
--- the final surface operation descends to its witnessed name. This fixture is
+-- A selected typed result keeps its semantic identity through selection and
+-- realization: Native realization gives an identity with no content of its own
+-- as its canonical identity, never an elected name. This fixture is
 -- an explicit continuation claim, not evidence of natural-language orientation.
 DO $realization$
 DECLARE
     prompt_id bytea := public.blake3_send(public.laplace_text_id('β'));
     result_id bytea := public.blake3_send(public.laplace_text_id('test/forward/semantic-result'));
     relation_id bytea := laplace.relation_type_id('COMPLETES_TO');
-    actual text[];
+    actual bytea[];
 BEGIN
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
     VALUES
         (public.blake3_send(public.laplace_compose(array_remove(ARRAY[prompt_id, relation_id, result_id]::public.blake3[], NULL))),prompt_id,relation_id,result_id,
-         2000000000000,30000000000,60000000,5,now()),
-        (public.blake3_send(public.laplace_compose(array_remove(ARRAY[result_id, laplace.relation_type_id('HAS_NAME'), public.blake3_send(public.laplace_text_id('λ'))]::public.blake3[], NULL))),
-         result_id,laplace.relation_type_id('HAS_NAME'),public.blake3_send(public.laplace_text_id('λ')),
          2000000000000,30000000000,60000000,5,now());
     IF (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(result_id)::bytea],NULL)::public.blake3[]) lp_l) IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: semantic result unexpectedly has a text physicality';
@@ -622,13 +620,18 @@ BEGIN
     -- Bind the result operation explicitly. This fixture establishes a
     -- continuation claim; it does not establish a natural-language request.
     -- Zero interpretation hops must not suppress an already bound result.
-    SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(g.entity ORDER BY g.step))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(g.entity ORDER BY g.step))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) INTO actual
+    SELECT array_agg(g.entity ORDER BY g.step) INTO actual
     FROM generation.forward_prompt('β',1,0,0.0,8,7,0,8,NULL,
                                    ARRAY[relation_id]) g;
-    IF actual IS DISTINCT FROM ARRAY['λ'] THEN
-        RAISE EXCEPTION 'FAIL: selected semantic result lost its witnessed surface: %',actual;
+    IF actual IS DISTINCT FROM ARRAY[result_id] THEN
+        RAISE EXCEPTION 'FAIL: selected semantic result lost its identity: %',actual;
     END IF;
-    IF (ARRAY(SELECT lp_l.content FROM unnest((ARRAY[public.blake3_send(public.laplace_text_id(' ')))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[public.blake3_send(public.laplace_text_id(' ')))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
+    IF (SELECT array_agg(l.content ORDER BY l.i) FROM public.laplace_labels(actual::public.blake3[]) l)
+        IS DISTINCT FROM ARRAY[result_id::public.blake3::text] THEN
+        RAISE EXCEPTION 'FAIL: realization invented a surface for an identity without content';
+    END IF;
+    IF (SELECT array_agg(l.content ORDER BY l.i) FROM public.laplace_labels(ARRAY[
+            public.laplace_text_id(' '),public.laplace_text_id('.'),public.laplace_text_id('λ')]) l)
         IS DISTINCT FROM ARRAY[' ','.','λ'] THEN
         RAISE EXCEPTION 'FAIL: final realization changed exact content';
     END IF;

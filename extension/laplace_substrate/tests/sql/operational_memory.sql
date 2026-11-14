@@ -2,6 +2,32 @@
 -- Naming an operation is semantic evidence; it does not establish a request.
 \set ECHO none
 BEGIN;
+
+-- Wire-protocol sentinels of the native UD-parse and task-shape codecs
+-- (engine/core/src/ud_parse.c laplace_ud_markers_init, engine/core/src/task_shape.c):
+-- BLAKE3-128 of each name, private codec markers rather than content identity,
+-- so no SQL surface mints them. These are their conformance vectors.
+CREATE FUNCTION pg_temp.wire_marker(p_name text)
+RETURNS bytea LANGUAGE sql IMMUTABLE STRICT AS $marker$
+    SELECT decode(m.digest,'hex') FROM (VALUES
+        ('ud/parse/schema/v1','b0a94249c64d01be202ec16943d03eae'),
+        ('ud/parse/none/v1','90fed72d88fccfb5c40beeb675653c6d'),
+        ('ud/parse/root/v1','2dbe5abfb16a6c906688509e2f1effb4'),
+        ('ud/parse/features-end/v1','0cf5db2b6c5e1e910e7d4a8b927f8bf7'),
+        ('ud/parse/enhanced-end/v1','194f97416ec522fb841d42656d1c561d'),
+        ('ud/parse/misc-end/v1','992f45d3afa868f58b2b4f9cb5b8546e'),
+        ('ud/parse/tokens-end/v1','9e3d08d82b7d710ddad540064e14e406'),
+        ('laplace/task-shape/relation-read/token-slots/v1','ed9f75a23674019f4c4c7be4ae139a26'),
+        ('laplace/task-shape/token-slot/v1','2196ac8ded72a06f57912c2d21686241'),
+        ('laplace/task-shape/slots-end/v1','7dd50ee7f1159893990fefe63ed86cb3'),
+        ('laplace/task-shape/relation-read/token-slots/v2','f0b9255937dd246a78dc362a992e4f87'),
+        ('laplace/task-shape/token-slot/v2','146ecd333144eaa3594c3d3a2d83f41e'),
+        ('laplace/task-shape/slots-end/v2','261205036ebfaf6cf7726395b98cf4ae'),
+        ('laplace/task-shape/binding/current-form/v1','65f702738f540b1c56c52e67ef9ab8a6'),
+        ('laplace/task-shape/binding/witnessed-semantic/v1','ca0e4576516bb264240e7d26f6c860b0'))
+        AS m(name,digest)
+     WHERE m.name=p_name;
+$marker$;
 CREATE FUNCTION pg_temp.admit_operational_prompt(p_prompt text,p_source bytea)
 RETURNS void LANGUAGE sql AS $admit$
     INSERT INTO laplace.entities(id,tier,type_id)
@@ -451,13 +477,13 @@ DECLARE
     scope bytea := public.blake3_send(public.laplace_text_id('test/structure/active-context'));
     occurrence bytea := public.blake3_send(public.laplace_text_id('test/structure/parse-occurrence'));
     lang bytea := public.blake3_send(public.laplace_text_id('test/structure/language'));
-    schema bytea := public.blake3_send(public.laplace_text_id('ud/parse/schema/v1'));
-    none_id bytea := public.blake3_send(public.laplace_text_id('ud/parse/none/v1'));
-    root_marker bytea := public.blake3_send(public.laplace_text_id('ud/parse/root/v1'));
-    features_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/features-end/v1'));
-    enhanced_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/enhanced-end/v1'));
-    misc_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/misc-end/v1'));
-    tokens_end bytea := public.blake3_send(public.laplace_text_id('ud/parse/tokens-end/v1'));
+    schema bytea := pg_temp.wire_marker('ud/parse/schema/v1');
+    none_id bytea := pg_temp.wire_marker('ud/parse/none/v1');
+    root_marker bytea := pg_temp.wire_marker('ud/parse/root/v1');
+    features_end bytea := pg_temp.wire_marker('ud/parse/features-end/v1');
+    enhanced_end bytea := pg_temp.wire_marker('ud/parse/enhanced-end/v1');
+    misc_end bytea := pg_temp.wire_marker('ud/parse/misc-end/v1');
+    tokens_end bytea := pg_temp.wire_marker('ud/parse/tokens-end/v1');
     ref_one bytea := public.blake3_send(public.laplace_text_id('ud/token-ref/31/v1'));
     ref_two bytea := public.blake3_send(public.laplace_text_id('ud/token-ref/32/v1'));
     pos_id bytea := public.blake3_send(public.laplace_text_id('test/structure/pos'));
@@ -500,7 +526,7 @@ BEGIN
     VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'));
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
-    VALUES(public.blake3_send(public.laplace_compose(ARRAY[public.blake3_from_bytea(parse_id), public.laplace_cp_id(8)])),
+    VALUES(laplace.physicality_id(parse_id,8::smallint),
         parse_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,
         decode(repeat('00',16),'hex'),public.laplace_trajectory_build(manifest),
         cardinality(manifest),now());
