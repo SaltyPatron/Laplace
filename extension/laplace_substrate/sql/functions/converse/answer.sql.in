@@ -1,5 +1,4 @@
--- Installed after generation/walk_text: its BEGIN ATOMIC body binds realize.forward_text_batch
--- when the function is created.
+-- The selected candidate is realized by the Native labels (public.laplace_labels).
 -- converse.answer(prompt, lang): an open turn's answer is the joint meeting of its
 -- content terms (converse.respond), realized in the asked language. One term asks
 -- what the term is; several ask what answers all of them.
@@ -42,8 +41,6 @@ BEGIN ATOMIC
         WHERE cardinality(t.ids) > 0
         LIMIT 1
     )
-    SELECT (realize.forward_text_batch(
-                ARRAY[m.candidate],
-                COALESCE(p_lang, converse.prompt_language_top(p_prompt))))[1]
+    SELECT (ARRAY(SELECT lp_l.content FROM unnest((ARRAY[m.candidate])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[m.candidate])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))[1]
     FROM met m;
 END;

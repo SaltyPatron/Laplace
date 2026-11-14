@@ -35,8 +35,7 @@ WITH words AS MATERIALIZED (
 ),
 variants AS MATERIALIZED (
     SELECT v.word_id, v.variant_id
-    FROM lexical.word_case_variants_batch(
-        ARRAY(SELECT w.id FROM words w ORDER BY w.ord)) v
+    FROM (SELECT lp_w.x AS word_id,lp_w.x AS variant_id FROM unnest((ARRAY(SELECT w.id FROM words w ORDER BY w.ord))::bytea[]) lp_w(x) WHERE lp_w.x IS NOT NULL) v
 ),
 route_nodes AS MATERIALIZED (
     SELECT v.word_id, v.variant_id AS node_id

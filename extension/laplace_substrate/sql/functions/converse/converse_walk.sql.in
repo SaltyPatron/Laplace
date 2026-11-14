@@ -129,7 +129,7 @@ BEGIN ATOMIC
         CROSS JOIN LATERAL unnest(e.ids) AS u(id)
     ),
     realized AS MATERIALIZED (
-        SELECT i.a, realize.render_text_batch(i.a) AS txt
+        SELECT i.a, ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((i.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((i.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

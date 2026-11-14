@@ -34,8 +34,7 @@ BEGIN
             FROM (SELECT DISTINCT def_id FROM defs WHERE def_id IS NOT NULL) d
         ),
         rendered AS MATERIALIZED (
-            SELECT realize.render_text_batch(
-                COALESCE(array_agg(dd.def_id ORDER BY dd.rn), '{}'::bytea[]), 24) AS txt
+            SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((COALESCE(array_agg(dd.def_id ORDER BY dd.rn), '{}'::bytea[]))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((COALESCE(array_agg(dd.def_id ORDER BY dd.rn), '{}'::bytea[]))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt
             FROM distinct_defs dd
         )
         SELECT COALESCE(array_agg(r.txt[dd.rn] ORDER BY i.ord), '{}'::text[])
@@ -51,5 +50,5 @@ CREATE OR REPLACE FUNCTION taxonomy.synset_gloss(p_synset bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT realize._defines(p_synset);
+    SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[((SELECT lp_g.neighbour_id FROM consensus.edges_raw(p_synset,'out',consensus.relation_family_ids('HAS_DEFINITION'),8,false,'eff_mu') lp_g WHERE lp_g.neighbour_id IS NOT NULL ORDER BY consensus.eff_mu(lp_g.rating,lp_g.rd) DESC,lp_g.neighbour_id LIMIT 1))::bytea],NULL)::public.blake3[]) lp_l);
 END;

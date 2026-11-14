@@ -20,8 +20,8 @@ BEGIN
          laplace.relation_type_id('gc'),category,source,2,now(),1,1000000000,30000000000),
         (public.blake3_send(public.laplace_text_id('test/source-predicates/old')),legacy,
          laplace.relation_type_id('HAS_CHARACTER_PROPERTY'),category,source,2,now(),1,1000000000,30000000000);
-    IF NOT separator=ANY(generation.separator_ids())
-       OR legacy=ANY(generation.separator_ids()) THEN
+    IF NOT separator=ANY((public.laplace_separator_ids()::bytea[]))
+       OR legacy=ANY((public.laplace_separator_ids()::bytea[])) THEN
         RAISE EXCEPTION 'Separator reader did not follow the source gc predicate';
     END IF;
     SELECT array_agg(vocab_idx ORDER BY vocab_idx) INTO actual

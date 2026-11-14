@@ -16,8 +16,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///
 /// The ordering is not a style preference, it is the semantics:
 ///
-///   word_segment      graphemes -> tokens.                  Knows no ids.
-///   prompt_words      tokens -> content ids.                Knows no language.
+///   prompt_words      Native word segments (public.laplace_segments): surfaces and
+///                     content ids.                          Knows no language.
 ///   prompt_language   ids -> a ranked language tally.       Knows no per-token language.
 ///   prompt_state      ids + tally -> per-token language.    First rung that ASSIGNS one.
 ///   prompt_coherence  the rated candidate set.
@@ -35,7 +35,6 @@ public sealed class PromptResolutionLadderGateTests
     /// <summary>Bottom to top. Index is the rung.</summary>
     private static readonly string[] Ladder =
     [
-        "word_segment",
         "prompt_words",
         "prompt_language",
         "prompt_state",

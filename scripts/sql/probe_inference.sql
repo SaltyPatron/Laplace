@@ -35,9 +35,17 @@ SELECT 'related'     AS intent, reply FROM converse.recall('what is related to k
 SELECT neighbor, relation, round(attention::numeric,4) AS attention, round(geodesic::numeric,4) AS geodesic
 FROM converse.attention(public.blake3_send(public.laplace_text_id(:'probe')), 12);
 
-\echo '================ 9. S3 GEOMETRY (nearest neighbors on the glome) ========================'
-SELECT neighbor, round(geodesic::numeric,4) AS geodesic, round(frechet::numeric,4) AS frechet
-FROM structural.nearest_neighbors_4d(:'probe', 8);
+\echo '================ 9. S3 SHAPE (nearest stored coordinates; Frechet over realized curves) ========'
+WITH anchor AS MATERIALIZED (SELECT public.laplace_text_id(:'probe') AS id,public.laplace_text_coord(:'probe') AS coord),
+nearest AS MATERIALIZED (SELECT n.id,n.geodesic FROM anchor a CROSS JOIN LATERAL (
+  SELECT e.id,e.coord OPERATOR(public.<=>) a.coord AS geodesic FROM public.entity e WHERE e.id<>a.id
+  ORDER BY e.coord OPERATOR(public.<=>) a.coord LIMIT 8) n),
+curves AS MATERIALIZED (SELECT c.entity,public.ST_GeomFromEWKB(c.curve_ewkb) AS curve
+  FROM public.laplace_curves(ARRAY(SELECT id FROM nearest)||ARRAY(SELECT id FROM anchor)) c)
+SELECT l.content AS neighbor, round(n.geodesic::numeric,4) AS geodesic,
+       round(public.laplace_frechet4d(c.curve,(SELECT ac.curve FROM curves ac JOIN anchor a ON ac.entity=a.id LIMIT 1))::numeric,4) AS frechet
+FROM nearest n JOIN public.laplace_labels(ARRAY(SELECT id FROM nearest)) l ON l.entity=n.id
+LEFT JOIN curves c ON c.entity=n.id ORDER BY n.geodesic,n.id;
 
 \timing off
 \echo '================ probe complete ================'

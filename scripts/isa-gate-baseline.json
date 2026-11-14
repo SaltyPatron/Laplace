@@ -147,8 +147,6 @@
       "extension/laplace_substrate/sql/functions/link/concept_peers.sql.in::IS_SYNONYM_OF": 1,
       "extension/laplace_substrate/sql/functions/link/concept_ref.sql.in::HAS_SYNSET_KEY": 1,
       "extension/laplace_substrate/sql/functions/ops/modality_counts.sql.in::ATTENDS": 1,
-      "extension/laplace_substrate/sql/functions/realize/resolve_name.sql.in::HAS_LANGUAGE": 1,
-      "extension/laplace_substrate/sql/functions/realize/resolve_name.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::CAUSES": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::CAUSES_DESIRE": 1,
       "extension/laplace_substrate/sql/functions/recall/recall_interaction_response.sql.in::HAS_PREREQUISITE": 1,
@@ -201,7 +199,6 @@
       "extension/laplace_substrate/sql/functions/taxonomy/consensus_taxonomy_edges.sql.in::consensus_taxonomy_edges": 1,
       "extension/laplace_substrate/sql/functions/taxonomy/retrieve_grounded.sql.in::retrieve_grounded": 1,
       "extension/laplace_substrate/sql/functions/taxonomy/synset_gloss.sql.in::synset_gloss": 1,
-      "extension/laplace_substrate/sql/functions/trajectory/trajectory_prefix_distance.sql.in::trajectory_prefix_distance": 1,
       "extension/laplace_substrate/sql/functions/variant/walk_completes_floor.sql.in::walk_completes_floor": 1
     },
     "g8_band_literalism": {}

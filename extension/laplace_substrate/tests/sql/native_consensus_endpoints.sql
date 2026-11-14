@@ -75,12 +75,12 @@ BEGIN
     END IF;
     -- Single-entity inspection and the UI's batch geometry query share the
     -- Native exact-ID reader. A repeated request stays a repeated occurrence.
-    IF (SELECT count(*) FROM realize.display_label_batch(ARRAY[
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),NULL,aa,decode(repeat('00',16),'hex'),
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]))<>4
-       OR (SELECT count(*) FROM realize.display_label_batch(ARRAY[
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])),aa,
-          public.blake3_send(public.laplace_compose(ARRAY[a,r,b]))]) WHERE tier=1)<>2 THEN
+    IF (SELECT count(*) FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i))<>4
+       OR (SELECT count(*) FROM (SELECT public.blake3_send(lp_l.entity) AS id,lp_l.content AS label,coalesce(lp_e.tier,CASE WHEN public.laplace_codepoint(lp_l.entity)>=0 THEN 0::smallint END) AS tier FROM public.laplace_labels(array_remove((ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])))::bytea[],NULL)::public.blake3[]) lp_l LEFT JOIN public.laplace_entities(array_remove((ARRAY[
+          public.blake3_send(public.laplace_compose(ARRAY[a,r,b])))::bytea[],NULL)::public.blake3[]) lp_e ON lp_e.ordinal=lp_l.i) WHERE tier=1)<>2 THEN
         RAISE EXCEPTION 'shared facet/label reader lost unique facets, repeated labels or virtual/missing tiers';
     END IF;
     -- Reuse the actual SPI plans beyond PostgreSQL's custom-plan warmup.

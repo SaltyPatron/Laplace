@@ -1,5 +1,5 @@
 BEGIN;
-SELECT realize.render(public.blake3_send(public.laplace_text_id('A'))) = 'A'
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.blake3_send(public.laplace_text_id('A')))::bytea],NULL)::public.blake3[]) lp_l) = 'A'
     AS render_t0_via_perfcache;
  render_t0_via_perfcache 
 -------------------------

@@ -352,21 +352,6 @@ public sealed class ReadPathArchitectureGateTests
     }
 
     [Fact]
-    public void ConsensusWeb_LabelsSurvivorsInBoundedBatches()
-    {
-        var labels = SqlCatalog.Get("realize.labels_fast").Text;
-
-        Assert.Contains("realize.resolve_name_batch($1::bytea[])", labels,
-            StringComparison.Ordinal);
-        Assert.Contains("realize.render_text_batch(s.ids, 3)", labels,
-            StringComparison.Ordinal);
-        Assert.Contains("WHERE i.tier <= 3", labels, StringComparison.Ordinal);
-        Assert.DoesNotContain("realize.resolve_name(x.id)", labels,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("realize.render_text_fast(x.id", labels,
-            StringComparison.Ordinal);
-    }
-
     [Fact]
     public void ConversePresentationCapacity_IsCallerOwnedAndPreservesZero()
     {

@@ -20,7 +20,7 @@ BEGIN ATOMIC
     langs AS MATERIALIZED (
         SELECT DISTINCT code
         FROM lang_ids li,
-             LATERAL unnest(realize.label_batch(li.ids)) AS code
+             LATERAL unnest(ARRAY(SELECT lp_l.content FROM unnest((li.ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((li.ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) AS code
         WHERE code IS NOT NULL
     ),
     cnt AS MATERIALIZED (
@@ -29,7 +29,7 @@ BEGIN ATOMIC
     shown AS (
         SELECT code FROM langs ORDER BY code LIMIT p_limit
     )
-    SELECT COALESCE(realize.label(p_word), '?') || ' is witnessed across '
+    SELECT COALESCE((SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_word)::bytea],NULL)::public.blake3[]) lp_l), '?') || ' is witnessed across '
            || c.total::text || ' languages: '
            || (SELECT string_agg(code, ', ' ORDER BY code) FROM shown)
            || CASE WHEN c.total > p_limit THEN ', …' ELSE '' END,

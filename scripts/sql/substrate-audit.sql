@@ -24,7 +24,3 @@ SELECT ops.multi_source_entity_count();
 \echo '=== entities per tier (heights; every entity is a composition) ==='
 SELECT e.tier, count(*) AS n FROM public.entity e GROUP BY e.tier ORDER BY e.tier;
 
-\echo '=== realize.render_gaps(orphan consensus ids, top 10) ==='
-SELECT count(*) AS gap_count FROM realize.render_gaps(1000);
-SELECT realize.render(id), roles, refs FROM realize.render_gaps(10);
-

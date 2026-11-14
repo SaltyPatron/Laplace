@@ -1,5 +1,0 @@
--- Labels for many type ids in one native call, input order preserved.
-CREATE OR REPLACE FUNCTION lexical.type_label_batch(p_ids bytea[])
-    RETURNS text[]
-    AS 'MODULE_PATHNAME', 'pg_laplace_type_label_batch'
-    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

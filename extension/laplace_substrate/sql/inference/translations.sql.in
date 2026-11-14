@@ -21,8 +21,8 @@ BEGIN ATOMIC
         LIMIT p_limit
     ),
     rendered AS MATERIALIZED (
-        SELECT realize.render_text_batch(array_agg(member ORDER BY rn)) AS txt,
-               realize.label_batch(array_agg(lang ORDER BY rn)) AS lbl
+        SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((array_agg(member ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(member ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS txt,
+               ARRAY(SELECT lp_l.content FROM unnest((array_agg(lang ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(lang ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS lbl
         FROM ranked
     )
     SELECT NULLIF(btrim(r.txt[a.rn]), '') AS translation,

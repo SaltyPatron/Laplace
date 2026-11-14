@@ -49,8 +49,8 @@ glossed AS MATERIALIZED (
 ), numbered AS MATERIALIZED (
     SELECT g.*, row_number() OVER (ORDER BY score DESC NULLS LAST,entity_id) AS rn FROM glossed g
 ), batches AS MATERIALIZED (
-    SELECT realize.render_text_batch(array_agg(entity_id ORDER BY rn)) AS surfaces,
-           realize.render_text_batch(array_agg(definition_id ORDER BY rn)) AS definitions
+    SELECT ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((array_agg(entity_id ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(entity_id ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS surfaces,
+           ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest((array_agg(definition_id ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(definition_id ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS definitions
     FROM numbered
 )
 SELECT entity_id,

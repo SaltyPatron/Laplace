@@ -10,11 +10,7 @@ CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth 
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT realize.path(
-               p_topic || array_agg(g.entity_id ORDER BY g.step),
-               array_agg(g.type_id ORDER BY g.step),
-               array_fill(1, ARRAY[count(*)::int]),
-               converse.word_language(p_topic)),
+    SELECT (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN (array_fill(1, ARRAY[count(*)::int]))[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest((p_topic || array_agg(g.entity_id ORDER BY g.step))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((p_topic || array_agg(g.entity_id ORDER BY g.step))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest((array_agg(g.type_id ORDER BY g.step))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(g.type_id ORDER BY g.step))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1),
            min(g.eff_mu),
            NULL::bigint
     FROM (SELECT (u.n-1)::int AS step,

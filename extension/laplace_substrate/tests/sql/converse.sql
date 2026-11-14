@@ -275,11 +275,11 @@ FROM taxonomy.bubble_up(public.blake3_send(public.laplace_text_id('dog')), NULL:
 WITH words AS (
     SELECT ARRAY[public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('NoSuchPeer'))]::bytea[] AS ids
 ), scalar AS (
-    SELECT w.id AS word_id, unnest(lexical.word_case_variants(w.id)) AS variant_id
+    SELECT w.id AS word_id, unnest(ARRAY[(w.id)::bytea]) AS variant_id
     FROM words, unnest(words.ids) AS w(id)
 ), batched AS (
     SELECT b.word_id, b.variant_id
-    FROM words, lexical.word_case_variants_batch(words.ids) b
+    FROM words, (SELECT lp_w.x AS word_id,lp_w.x AS variant_id FROM unnest((words.ids)::bytea[]) lp_w(x) WHERE lp_w.x IS NOT NULL) b
 )
 SELECT NOT EXISTS (
     (SELECT * FROM scalar EXCEPT SELECT * FROM batched)
@@ -327,14 +327,10 @@ SELECT (SELECT sn.synset_id FROM lexical.senses(public.blake3_send(public.laplac
 SELECT (SELECT sn.synset_id FROM lexical.senses(public.blake3_send(public.laplace_text_id('dog')), ARRAY[public.blake3_send(public.laplace_text_id('h'))]) sn LIMIT 1)
        = public.blake3_send(public.laplace_text_id('test/converse/synset1')) AS context_flips_to_1;
 
-SELECT realize.realize(public.blake3_send(public.laplace_text_id('p')), NULL) AS leaf_realizes;
-SELECT realize.realize(public.blake3_send(public.laplace_text_id('test/converse/synset1')),
-               public.blake3_send(public.laplace_text_id('test/converse/lang_en'))) AS synset_realizes_member;
-SELECT lexical.type_label(laplace.relation_type_id('IS_A')) AS isa_label;
-SELECT realize.path(ARRAY[public.blake3_send(public.laplace_text_id('test/converse/synset1')),
-                          public.blake3_send(public.laplace_text_id('test/converse/synset2'))],
-                    ARRAY[laplace.relation_type_id('IS_A')],
-                    public.blake3_send(public.laplace_text_id('test/converse/lang_en'))) AS realized_path;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(laplace.word_id('p'))::bytea],NULL)::public.blake3[]) lp_l) AS leaf_realizes;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(public.laplace_hash128_blake3('test/converse/synset1'))::bytea],NULL)::public.blake3[]) lp_l) AS synset_realizes_member;
+SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(laplace.relation_type_id('IS_A'))::bytea],NULL)::public.blake3[]) lp_l) AS isa_label;
+SELECT (SELECT string_agg(CASE WHEN lp_u.n=1 THEN coalesce(lp_l.content,'?') ELSE CASE WHEN (ARRAY[laplace.relation_type_id('IS_A')])[lp_u.n-1]=-1 THEN ' ←'||coalesce(lp_t.content,'?')||'— ' ELSE ' —'||coalesce(lp_t.content,'?')||'→ ' END||coalesce(lp_l.content,'?') END,'' ORDER BY lp_u.n) FROM unnest((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((ARRAY[public.laplace_hash128_blake3('test/converse/synset1'))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 LEFT JOIN unnest(ARRAY(SELECT lp_l.content FROM unnest((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((public.laplace_hash128_blake3('test/converse/synset2')])::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) WITH ORDINALITY lp_t(content,n) ON lp_t.n=lp_u.n-1) AS realized_path;
 
 SELECT type, fact, witnesses FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id('dog')));
 SELECT count(*) = 0 AS salient_facts_zero_is_empty

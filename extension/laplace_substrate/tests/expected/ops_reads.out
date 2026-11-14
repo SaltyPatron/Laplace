@@ -448,7 +448,7 @@ BEGIN
     SELECT p.root_id, p.tier,
            public.ST_MakePoint(p.coord[1], p.coord[2], p.coord[3], p.coord[4])
     INTO STRICT existing_id, existing_tier, observed_coord
-    FROM converse.text_root_placements(ARRAY[chr(57344)]) p;
+    FROM (SELECT lp_u.n::int AS ord,public.blake3_send(public.laplace_text_id(lp_u.t)) AS root_id,public.laplace_tier(lp_u.t) AS tier,ARRAY[public.ST_X(lp_g.c),public.ST_Y(lp_g.c),public.ST_Z(lp_g.c),public.ST_M(lp_g.c)] AS coord,public.laplace_text_hilbert(lp_u.t) AS hilbert_index,public.laplace_distance4d(lp_g.c,public.ST_MakePoint(0,0,0,0)) AS radius_origin FROM unnest((ARRAY[chr(57344)])::text[]) WITH ORDINALITY lp_u(t,n) CROSS JOIN LATERAL (SELECT public.laplace_text_coord(lp_u.t) AS c) lp_g) p;
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
             public.blake3_send(public.laplace_text_id('substrate/source/IntegrityRegressionTest/v1')))

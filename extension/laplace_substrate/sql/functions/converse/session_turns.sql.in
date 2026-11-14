@@ -135,10 +135,10 @@ WITH traj AS MATERIALIZED (
     LEFT JOIN observed ON observed.turn_id = tr.turn_id
     LEFT JOIN message_content content ON content.turn_id = tr.turn_id
 ), surfaces AS MATERIALIZED (
-    SELECT realize.render_batch(array_agg(pk.content_id ORDER BY pk.rn)) AS texts
+    SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(pk.content_id ORDER BY pk.rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(pk.content_id ORDER BY pk.rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS texts
     FROM picked pk
 ), names AS MATERIALIZED (
-    SELECT unnest(a.ids) AS id, unnest(realize.render_batch(a.ids)) AS txt
+    SELECT unnest(a.ids) AS id, unnest(ARRAY(SELECT lp_l.content FROM unnest((a.ids)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((a.ids)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) AS txt
     FROM (
         SELECT array_agg(DISTINCT u.id) AS ids
         FROM (SELECT pk.role_name_id AS id FROM picked pk WHERE pk.role_name_id IS NOT NULL

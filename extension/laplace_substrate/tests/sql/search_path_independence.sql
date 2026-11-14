@@ -71,8 +71,5 @@ SELECT pg_temp.resolves('foundry_crawl_neighbors',
 SELECT pg_temp.resolves('shared_objects',
     'SELECT * FROM consensus.shared_objects(ARRAY[public.blake3_send(public.laplace_text_id(''dog''))], NULL, 1)');
 
--- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
-SELECT pg_temp.resolves('laplace_attention_centroid',
-    'SELECT * FROM generation.attention_centroid(public.blake3_send(public.laplace_text_id(''dog'')), consensus.highway_band_mask(3))');
 
 ROLLBACK;

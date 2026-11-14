@@ -29,10 +29,10 @@ order_closure AS (
     FROM (SELECT entity_id, weight FROM order1_cut UNION ALL SELECT entity_id, weight FROM order2_cut) u
     GROUP BY entity_id
 )
-SELECT 'closure' AS stage, realize.render_text(entity_id, 40) AS surface, weight, rn FROM order_closure
-WHERE realize.render_text(entity_id, 40) IN ('France', 'Paris', 'of', 'capital', 'france')
+SELECT 'closure' AS stage, (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) AS surface, weight, rn FROM order_closure
+WHERE (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('France', 'Paris', 'of', 'capital', 'france')
    OR rn <= 8
 UNION ALL
-SELECT 'order2' AS stage, realize.render_text(entity_id, 40), weight, rn FROM order2
-WHERE realize.render_text(entity_id, 40) IN ('France', 'Paris') OR rn BETWEEN 348 AND 355
+SELECT 'order2' AS stage, (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l), weight, rn FROM order2
+WHERE (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[(entity_id)::bytea],NULL)::public.blake3[]) lp_l) IN ('France', 'Paris') OR rn BETWEEN 348 AND 355
 ORDER BY stage, rn;

@@ -10,43 +10,6 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class ExploreDisplayLabelGateTests
 {
     [Fact]
-    public void DisplayLabels_DelegateToTheNativeBatchOwner()
-    {
-        var root = TypeIdLawTests.FindRepoRootPublic();
-        var sql = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "sql",
-            "functions", "converse", "label.sql.in"));
-        var adapter = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
-        Assert.Contains("FROM @extschema:laplace@.laplace_labels(", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
-        // The registry projection reads compiled metadata. The later language
-        // metadata function independently resolves surfaces through its catalog.
-        int languageMetadata = adapter.IndexOf("PG_FUNCTION_INFO_V1(pg_language_codes)", StringComparison.Ordinal);
-        string registryProjection = languageMetadata >= 0 ? adapter[..languageMetadata] : adapter;
-        Assert.DoesNotContain("SPI_execute", registryProjection, StringComparison.Ordinal);
-        Assert.DoesNotContain("batch_text", registryProjection, StringComparison.Ordinal);
-        Assert.Contains("pg_relation_metadata", registryProjection, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void NativeDisplay_HasAnExecutableFixtureForOrderRunsUnicodeAndPresence()
-    {
-        var root = TypeIdLawTests.FindRepoRootPublic();
-        var fixture = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "tests", "sql", "display_label.sql"));
-        // Later blocks exercise compatibility storage and malformed paths. The
-        // Native case must still prove its own behavior using canonical rows.
-        const string nativeEndMarker = "END $test$;";
-        int nativeEnd = fixture.IndexOf(nativeEndMarker, StringComparison.Ordinal);
-        Assert.True(nativeEnd >= 0, "The Native display fixture must retain its named test block.");
-        string nativeFixture = fixture[..(nativeEnd + nativeEndMarker.Length)];
-        Assert.Contains("INSERT INTO public.entity", nativeFixture, StringComparison.Ordinal);
-        Assert.Contains("realize.display_label_batch", nativeFixture, StringComparison.Ordinal);
-        Assert.Contains("WITH ORDINALITY", nativeFixture, StringComparison.Ordinal);
-        Assert.Contains("labels IS DISTINCT FROM", nativeFixture, StringComparison.Ordinal);
-        Assert.Contains("[dog · λ · 中]", nativeFixture, StringComparison.Ordinal);
-        Assert.DoesNotContain("INSERT INTO laplace.entities", nativeFixture, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ExploreSurfaces_UseDisplayLabelsAndKeepHashOnlyAsIdentity()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();

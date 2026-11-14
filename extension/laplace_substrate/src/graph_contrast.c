@@ -328,8 +328,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             rargs[0] = PointerGetDatum(type_arr);
             rc2 = SPI_execute_plan(
                 spi_common_ensure_plan(&plan_type_lbl,
-                    "SELECT array_agg(lexical.type_label(u.id) ORDER BY u.ord) "
-                    "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
+                    "SELECT ARRAY(SELECT lp_l.content FROM unnest(($1)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)",
                     1, rtypes),
                 rargs, NULL, true, 1);
             if (rc2 == SPI_OK_SELECT && SPI_processed > 0)

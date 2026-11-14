@@ -25,8 +25,7 @@ BEGIN ATOMIC
         LIMIT p_limit
     ), labels AS MATERIALIZED (
         -- ONE realize_batch over exactly the returned rows, position-aligned.
-        SELECT realize.batch(array_agg(r.object_id ORDER BY r.ord),
-                             COALESCE(p_lang, converse.word_language(p_word))) AS l
+        SELECT ARRAY(SELECT lp_l.content FROM unnest((array_agg(r.object_id ORDER BY r.ord))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(r.object_id ORDER BY r.ord))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) AS l
         FROM ranked r
     )
     SELECT labels.l[r.ord], consensus.eff_mu_display(r.rating, r.rd), r.witness_count

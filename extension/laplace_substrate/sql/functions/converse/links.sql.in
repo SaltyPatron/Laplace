@@ -50,7 +50,7 @@ BEGIN ATOMIC
         SELECT i.id, i.txt
         FROM ids b,
              LATERAL ROWS FROM (
-                 unnest(b.a), unnest(realize.label_batch(b.a))
+                 unnest(b.a), unnest(ARRAY(SELECT lp_l.content FROM unnest((b.a)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((b.a)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n))
              ) AS i(id, txt)
     ), rel AS MATERIALIZED (
         SELECT t.type_id,
