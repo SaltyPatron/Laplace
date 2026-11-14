@@ -231,50 +231,6 @@ BEGIN
         RAISE EXCEPTION 'FAIL: gap is not the witnessed ordinal offset';
     END IF;
 
-    -- Multi-identity containment is one shared GIN probe.  It returns the
-    -- composition carrying both points, not a manufactured capital->of edge.
-    IF NOT EXISTS (
-        SELECT 1
-        FROM structural.containers_containing_all(ARRAY[w_capital, w_of]) c
-        WHERE c.entity_id = sent) THEN
-        RAISE EXCEPTION 'FAIL: shared container for capital/of missing';
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM structural.containers_containing_all(ARRAY[]::bytea[])) THEN
-        RAISE EXCEPTION 'FAIL: empty shared-container set scanned physicalities';
-    END IF;
-    IF EXISTS (SELECT 1 FROM structural.containers_containing_all(NULL::bytea[]))
-       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,NULL]))
-       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,w_end])) THEN
-        RAISE EXCEPTION 'FAIL: containment admitted absent or NULL member';
-    END IF;
-    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_capital,w_of])) <> 1
-       OR (SELECT structural.containers_containing_all(ARRAY[w_capital,w_of])) <> sent THEN
-        RAISE EXCEPTION 'FAIL: duplicate operand or scalar SRF changed containment';
-    END IF;
-    IF (SELECT candidate_count FROM structural.word_containers_containing_all(ARRAY[w_capital,w_of],0)) <> 1 THEN
-        RAISE EXCEPTION 'FAIL: Browse capacity hid containing identities';
-    END IF;
-    BEGIN
-        PERFORM structural.containers_containing_all(ARRAY[decode('01','hex')]);
-        RAISE EXCEPTION 'FAIL: containment accepted a malformed identity';
-    EXCEPTION WHEN internal_error THEN
-        IF SQLERRM <> 'content membership requires 16-byte identities' THEN RAISE; END IF;
-    END;
-    -- Distinct entity output survives duplicate physicalities, while ordinal
-    -- consumers still count each witnessed physicality. Updates remain MVCC reads.
-    INSERT INTO laplace.physicalities
-        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
-        SELECT public.blake3_send(public.laplace_text_id('test/corpus/duplicate-physicality')),
-               entity_id, type, coord, hilbert_index, trajectory, n_constituents,
-               observed_at
-        FROM laplace.physicalities
-        WHERE id=public.blake3_send(public.laplace_text_id('test/corpus/phys-sentence'));
-    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_of])) <> 1 THEN
-        RAISE EXCEPTION 'FAIL: duplicate physicalities duplicated containing entity';
-    END IF;
-    DELETE FROM laplace.physicalities
-        WHERE id=public.blake3_send(public.laplace_text_id('test/corpus/duplicate-physicality'));
 
     -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -464,68 +420,6 @@ BEGIN
     END IF;
 
 
-    -- Two physical observations may attest the same entity. geometry_successors
-    -- must keep their trajectories separate rather than interleaving equal
-    -- ordinals under entity_id. Together with sent and sent3 this makes three
-    -- containers whose first content successor/predecessor is capital↔of.
-    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
-                               trajectory, n_constituents, observed_at)
-    VALUES (public.blake3_send(public.laplace_text_id('test/corpus/phys-sentence3-observation2')), sent3, 1,
-            public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
-            decode('00000000000000000000000000000000','hex'),
-            public.ST_MakeLine(ARRAY[
-                public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
-                public.laplace_mantissa_pack(sp, 2, 1, t2flag),
-                public.laplace_mantissa_pack(w_of, 3, 1, t2flag)]),
-            3, now());
-    IF NOT EXISTS (
-        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
-        WHERE g.successor_id = w_of AND g.seen = 3) THEN
-        RAISE EXCEPTION 'FAIL: geometry successor did not count three physical observations separately';
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM structural.geometry_successors(w_of, 8, 8, true) g
-        WHERE g.successor_id = w_capital AND g.seen = 3) THEN
-        RAISE EXCEPTION 'FAIL: geometry predecessor did not count three physical observations separately';
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
-        WHERE g.successor_id = sp) THEN
-        RAISE EXCEPTION 'FAIL: geometry successor leaked a separator';
-    END IF;
-    IF EXISTS (
-        (SELECT b.point_id, b.successor_id, b.seen
-         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b
-         EXCEPT
-         SELECT p.id, g.successor_id, g.seen
-         FROM unnest(ARRAY[w_capital, w_of]) p(id)
-         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g)
-        UNION ALL
-        (SELECT p.id, g.successor_id, g.seen
-         FROM unnest(ARRAY[w_capital, w_of]) p(id)
-         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g
-         EXCEPT
-         SELECT b.point_id, b.successor_id, b.seen
-         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b)) THEN
-        RAISE EXCEPTION 'FAIL: batched geometry successors differ from scalar results';
-    END IF;
-    IF EXISTS (
-        (SELECT b.point_id, b.successor_id, b.seen
-         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b
-         EXCEPT
-         SELECT p.id, g.successor_id, g.seen
-         FROM unnest(ARRAY[w_capital, w_of]) p(id)
-         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g)
-        UNION ALL
-        (SELECT p.id, g.successor_id, g.seen
-         FROM unnest(ARRAY[w_capital, w_of]) p(id)
-         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g
-         EXCEPT
-         SELECT b.point_id, b.successor_id, b.seen
-         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b)) THEN
-        RAISE EXCEPTION 'FAIL: batched geometry predecessors differ from scalar results';
-    END IF;
-
     -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that
     -- nothing caught, and the fix landed with no test (GH #1061). One invocation closes the
     -- gap: a plpgsql body is only parsed at first EXECUTE, so a call is the only thing that
@@ -559,47 +453,10 @@ BEGIN
         RAISE EXCEPTION 'FAIL: zero vocabulary limit returned rows';
     END IF;
     IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 0))
-       OR EXISTS (SELECT 1 FROM structural.geometry_successors(w_the, 0, 8, false))
-       OR EXISTS (SELECT 1 FROM structural.geometry_successors(w_the, 8, 0, false))
        OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 0, 3, 0.7, 4, 42))
        OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 6, 3, 0.7, 0, 42)) THEN
         RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
     END IF;
-
-    -- 134,215,680 repeated occurrences remain 2,048 compressed runs.
-    -- Expanding these IDs needs over 2 GB and is not an adjacency algorithm.
-    DECLARE
-        rle_root bytea := public.blake3_send(public.laplace_text_id('compressed-run-root'));
-        rle_next bytea := public.blake3_send(public.laplace_text_id('compressed-run-successor'));
-    BEGIN
-    INSERT INTO laplace.physicalities
-        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    SELECT public.blake3_send(public.laplace_text_id('test/corpus/wide-rle-physicality')),
-           public.blake3_send(public.laplace_text_id('test/corpus/wide-rle-entity')),1,
-           public.ST_SetSRID(public.ST_MakePoint(0,0,0,0),0),decode(repeat('00',16),'hex'),
-           public.ST_SetSRID(public.ST_MakeLine(ARRAY(
-             SELECT public.laplace_mantissa_pack(rle_root,series.ordinal,65535,t2flag)
-             FROM generate_series(1,2048) series(ordinal) ORDER BY series.ordinal) || ARRAY[
-             public.laplace_mantissa_pack(sp,2049,1,t2flag),
-             public.laplace_mantissa_pack(rle_next,2050,1,t2flag)]),4326),134215682;
-    IF NOT EXISTS (SELECT FROM structural.geometry_successors_batch(
-        ARRAY[rle_root,rle_root],NULL,2,false) g WHERE g.point_id=rle_root AND g.successor_id=rle_next)
-       OR NOT EXISTS (SELECT FROM structural.geometry_successors_batch(
-        ARRAY[rle_next],NULL,2,true) g WHERE g.point_id=rle_next AND g.successor_id=rle_root) THEN
-        RAISE EXCEPTION 'FAIL: compressed adjacency lost long-run successor or predecessor';
-    END IF;
-    UPDATE laplace.physicalities SET trajectory=public.ST_MakeLine(ARRAY[
-        public.laplace_mantissa_pack(rle_root,1,1,t2flag),
-        public.laplace_mantissa_pack(sp,2,65535,t2flag),
-        public.laplace_mantissa_pack(rle_next,3,1,t2flag)]),n_constituents=65537
-    WHERE id=public.blake3_send(public.laplace_text_id('test/corpus/wide-rle-physicality'));
-    IF EXISTS (SELECT FROM structural.geometry_successors_batch(
-        ARRAY[rle_root],NULL,8,false) g WHERE g.successor_id=rle_next) THEN
-        RAISE EXCEPTION 'FAIL: compressed separator run did not consume the logical window';
-    END IF;
-    DELETE FROM laplace.physicalities
-    WHERE id=public.blake3_send(public.laplace_text_id('test/corpus/wide-rle-physicality'));
-    END;
 
     -- RLE expansion and overlapping contexts preserve every ordinal match.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -682,15 +539,6 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM jsonb_path_query(plan::jsonb,'$.**."Lossy Heap Blocks"') v
                    WHERE v::text::bigint > 0) THEN
         RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap: %',plan;
-    END IF;
-    SELECT array_agg(entity_id) INTO actual
-      FROM structural.containers_containing_all(ARRAY[needle,needle]);
-    IF actual IS DISTINCT FROM ARRAY[matched] THEN
-        RAISE EXCEPTION 'FAIL: lossy AND membership admitted a wrong entity/type';
-    END IF;
-    SELECT array_agg(entity_id) INTO actual FROM structural.containers_of(needle,1,NULL);
-    IF actual IS DISTINCT FROM ARRAY[matched] THEN
-        RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
     END IF;
 END
 $membership_bitmap$;
@@ -871,11 +719,6 @@ DO $$ BEGIN
     RAISE EXCEPTION 'FAIL: native observation read bypassed SELECT privilege';
 EXCEPTION WHEN insufficient_privilege THEN NULL;
 END $$;
-DO $$ BEGIN
-    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
-    RAISE EXCEPTION 'FAIL: native membership bypassed SELECT privilege';
-EXCEPTION WHEN insufficient_privilege THEN NULL;
-END $$;
 RESET ROLE;
 GRANT SELECT ON laplace.attestations TO laplace_membership_reader_test;
 ALTER TABLE laplace.attestations ENABLE ROW LEVEL SECURITY;
@@ -912,11 +755,5 @@ ALTER TABLE public.physicality DISABLE ROW LEVEL SECURITY;
 GRANT SELECT ON laplace.physicalities TO laplace_membership_reader_test;
 ALTER TABLE laplace.physicalities ENABLE ROW LEVEL SECURITY;
 SET LOCAL ROLE laplace_membership_reader_test;
-DO $$ BEGIN
-    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
-    RAISE EXCEPTION 'FAIL: native membership bypassed row security';
-EXCEPTION WHEN internal_error THEN
-    IF SQLERRM <> 'native content membership read cannot bypass row security' THEN RAISE; END IF;
-END $$;
 RESET ROLE;
 ROLLBACK;

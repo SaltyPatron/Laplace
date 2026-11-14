@@ -126,14 +126,6 @@ WHERE fact_kind IN ('parts', 'kin');
  t
 (1 row)
 
-SELECT converse.tiered(
-    public.blake3_send(public.laplace_text_id('test/chat_loop/synset1')), NULL, 0, NULL)
-    IS NULL AS tiered_zero_steps_is_empty;
- tiered_zero_steps_is_empty 
-----------------------------
- t
-(1 row)
-
 -- 2. The prose wrapper weaves the fact rows (web drill-down row excluded).
 SELECT converse.about(public.blake3_send(public.laplace_text_id('test/chat_loop/synset1'))) AS about;
                                             about                                             

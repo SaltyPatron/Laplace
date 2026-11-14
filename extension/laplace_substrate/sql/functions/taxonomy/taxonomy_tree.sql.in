@@ -16,8 +16,17 @@ BEGIN ATOMIC
       SELECT 'self'::text AS dir, 0 AS ord, root.id, NULL::numeric AS eff_mu FROM root
       UNION ALL
       SELECT 'up', w.step, w.entity_id, w.eff_mu
-      FROM root, rel r, consensus.walk_strongest(
-          root.id, r.is_a, p_depth) w
+      FROM root CROSS JOIN LATERAL (SELECT (u.n-1)::int AS step,
+                public.blake3_send((public.laplace_parts(pp.path))[2]) AS type_id,
+                public.blake3_send(u.x) AS entity_id,
+                (st.rating-2*st.deviation)::numeric AS eff_mu
+         FROM (SELECT w.chain,w.claims FROM public.laplace_pull(ARRAY[public.blake3_from_bytea(root.id)],NULL,
+                   COALESCE(p_depth,4),64::bigint,4096::bigint,ARRAY[public.laplace_text_id('hypernym')]) w
+               WHERE w.hops>=1 ORDER BY w.hops DESC,w.cost,w.ordinal LIMIT 1) b
+         CROSS JOIN LATERAL unnest(b.chain) WITH ORDINALITY u(x,n)
+         LEFT JOIN public.laplace_paths(b.claims) pp ON pp.entity=b.claims[u.n-1]
+         LEFT JOIN public.laplace_standings(b.claims) st ON st.claim=b.claims[u.n-1]
+         WHERE u.n>1) w
       UNION ALL
       (SELECT 'child',
             row_number() OVER (ORDER BY ch.mu DESC, ch.subject_id)::int,

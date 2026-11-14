@@ -66,12 +66,6 @@ SELECT pg_temp.resolves('top_relations',
     'SELECT * FROM consensus.top_relations(1, NULL)');
 SELECT pg_temp.resolves('salient_facts',
     'SELECT * FROM consensus.salient_facts(public.blake3_send(public.laplace_text_id(''dog'')), NULL, 1)');
-SELECT pg_temp.resolves('consensus_neighbors_directed',
-    'SELECT * FROM consensus.neighbors_directed(public.blake3_send(public.laplace_text_id(''dog'')), NULL, 1)');
-SELECT pg_temp.resolves('consensus_neighbors_undirected',
-    'SELECT * FROM consensus.neighbors_undirected(public.blake3_send(public.laplace_text_id(''dog'')), NULL, 1)');
-SELECT pg_temp.resolves('explore_web_neighbors',
-    'SELECT * FROM consensus.explore_web_neighbors(public.blake3_send(public.laplace_text_id(''dog'')), 1)');
 SELECT pg_temp.resolves('foundry_crawl_neighbors',
     'SELECT * FROM consensus.foundry_crawl_neighbors(public.blake3_send(public.laplace_text_id(''dog'')), 1, NULL)');
 SELECT pg_temp.resolves('shared_objects',
@@ -80,15 +74,5 @@ SELECT pg_temp.resolves('shared_objects',
 -- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
 SELECT pg_temp.resolves('laplace_attention_centroid',
     'SELECT * FROM generation.attention_centroid(public.blake3_send(public.laplace_text_id(''dog'')), consensus.highway_band_mask(3))');
-SELECT pg_temp.resolves('laplace_nearest_entity',
-    'SELECT * FROM generation.nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
-SELECT pg_temp.resolves('laplace_forward_step',
-    'SELECT generation.forward_step(public.blake3_send(public.laplace_text_id(''dog'')), consensus.highway_band_mask(3))');
-
--- The new operations added alongside them.
-SELECT pg_temp.resolves('entity_container_degree',
-    'SELECT * FROM structural.entity_container_degree(ARRAY[public.blake3_send(public.laplace_text_id(''dog''))])');
-SELECT pg_temp.resolves('election_token_profile',
-    'SELECT * FROM converse.election_token_profile(ARRAY[''dog''])');
 
 ROLLBACK;

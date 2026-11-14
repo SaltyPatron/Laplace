@@ -11,7 +11,8 @@ BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
         SELECT DISTINCT ON (w.id) w.id AS did, w.trajectory
-        FROM laplace.v_word_points w
+        FROM (SELECT e.id, e.type_id, p.id AS physicality_id, p.trajectory
+              FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1) w
         WHERE w.type_id = laplace.entity_type_id('Document')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id LIMIT p_docs
@@ -33,7 +34,8 @@ BEGIN ATOMIC
     ),
     sent_traj AS (
         SELECT DISTINCT ON (w.id) w.id AS sid, w.trajectory
-        FROM laplace.v_word_points w
+        FROM (SELECT e.id, e.type_id, p.id AS physicality_id, p.trajectory
+              FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id = e.id AND p.type = 1) w
         JOIN live s ON s.sid = w.id
         WHERE w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id

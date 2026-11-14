@@ -1,8 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.query_program() RETURNS jsonb
-AS 'EXECUTION_LIBRARY','pg_laplace_query_program' LANGUAGE C IMMUTABLE PARALLEL SAFE;
-CREATE OR REPLACE FUNCTION ops.declared_paths(p_roots bytea[],p_program jsonb,p_cap integer DEFAULT 4096)
-RETURNS TABLE(root_index integer,program_index integer,path_index bigint,depth integer,
- claim_id bytea,entity_id bytea,relation text,label text,eff_mu numeric,witnesses bigint)
-AS 'EXECUTION_LIBRARY','pg_laplace_declared_paths' LANGUAGE C STABLE;
-COMMENT ON FUNCTION ops.declared_paths(bytea[],jsonb,integer) IS
-'Complete producer-declared paths over canonical scored claims. Roots and duplicate programs retain input positions; incomplete paths emit nothing. One Native frontier issues one masked set read per depth. Exceeding the admitted frontier raises an error and returns no partial result. No session schema, planner or role state is changed.';

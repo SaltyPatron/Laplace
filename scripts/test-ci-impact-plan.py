@@ -322,7 +322,7 @@ class ImpactPlanTests(unittest.TestCase):
     def test_native_test_change_runs_native_qualification_without_delivery(self):
         for path in (
             "engine/core/tests/test_content_root_placement.cpp",
-            "extension/laplace_substrate/tests/physicality_readback_native_probe.c",
+            "engine/core/tests/test_task_shape.c",
         ):
             with self.subTest(path=path):
                 value = plan(path)

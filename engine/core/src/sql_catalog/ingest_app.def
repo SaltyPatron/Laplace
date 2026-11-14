@@ -132,10 +132,6 @@ SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 AND p.entity_id>$3"
     ") candidate ORDER BY candidate.entity_id LIMIT $4")
-SQL_QUERY("readback.physicality_descriptors", "bytea[],int8,int4,int8",
-    "SELECT * FROM structural.physicality_descriptor_read($1,$2,$3,$4)")
-SQL_QUERY("readback.physicality_forms", "bytea[],bytea,int4,int8,int4,int8",
-    "SELECT * FROM structural.physicality_forms($1,$2,$3,$4,$5,$6)")
 
 SQL_QUERY("maintenance.database_identity", "",
     "SELECT current_database(), "

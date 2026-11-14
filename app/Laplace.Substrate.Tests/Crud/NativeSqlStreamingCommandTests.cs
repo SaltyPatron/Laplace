@@ -72,11 +72,11 @@ public sealed class NativeSqlStreamingCommandTests
     public void CatalogCommandsRetainSmallintArraysAndTypedNullsOnConnectionsAndBatches()
     {
         using var connection = new NpgsqlConnection("Host=127.0.0.1;Port=1;Database=unused");
-        var trajectories = SqlCatalog.Get("generation.typed_trajectory_constituents");
-        using var command = NpgsqlCatalog.Command(connection, null, trajectories, parameters =>
+        var probe = SqlCatalog.Get("ingest.tier_batch_existence_probe");
+        using var command = NpgsqlCatalog.Command(connection, null, probe, parameters =>
         {
             parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea, new[] { new byte[16] });
-            parameters.AddWithValue("types", NpgsqlDbType.Array | NpgsqlDbType.Smallint, new short[] { 1, 3 });
+            parameters.AddWithValue("tiers", NpgsqlDbType.Array | NpgsqlDbType.Smallint, new short[] { 1, 3 });
         });
         Assert.Equal(NpgsqlDbType.Array | NpgsqlDbType.Smallint, command.Parameters[1].NpgsqlDbType);
         var sourceStatus = SqlCatalog.Get("ops.source_status");

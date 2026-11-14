@@ -345,11 +345,6 @@ SELECT fact FROM consensus.related_in(public.blake3_send(public.laplace_text_id(
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('c')));
 SELECT reply FROM converse.recall_intent('is_a', public.blake3_send(public.laplace_text_id('h')), public.blake3_send(public.laplace_text_id('c')));
 
-SELECT g.step, lexical.type_label(g.type_id) AS rel_type,
-       g.entity_id = public.blake3_send(public.laplace_text_id('test/converse/synset2')) AS is_synset2
-FROM consensus.walk_strongest(public.blake3_send(public.laplace_text_id('test/converse/synset1')), laplace.relation_type_id('IS_A')) g;
-SELECT count(*) AS tree_nodes
-FROM consensus.walk_branches(public.blake3_send(public.laplace_text_id('test/converse/synset1')), laplace.relation_type_id('IS_A'), 4, 5);
 SELECT reply, eff_mu FROM converse.recall_intent('walk', public.blake3_send(public.laplace_text_id('p')));
 
 -- recall_session stays a text entry point because it carries session state, but
@@ -361,12 +356,7 @@ SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UT
 SELECT ord, prompt, resolved_id = public.blake3_send(public.laplace_text_id('dog')) AS topic_is_dog
 FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
-SELECT cardinality(nodes) = cardinality(types) + 1
-       AND cardinality(types) = cardinality(dirs) AS raw_path_shape,
-       plane_type = laplace.relation_type_id('IS_SYNONYM_OF') AS raw_direct_plane
-FROM consensus.relate_path_raw(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('h')));
 
-SELECT plane AS reason_plane FROM consensus.relate_path(public.blake3_send(public.laplace_text_id('dog')), public.blake3_send(public.laplace_text_id('h')));
 
 SELECT count(*) AS band_rows FROM converse.relation_bands();
 SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_bands();

@@ -177,18 +177,6 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             NpgsqlContentReconstructor.ReconstructUtf8Async(_pg.DataSource, a));
-
-        // Reverse traversal must terminate on the same corrupted cycle, omit
-        // the requested root, and return its parent once at the shortest hop.
-        await using var connection = await _pg.DataSource.OpenConnectionAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT count(*) = 1 AND bool_and(entity_id = @b AND hops = 1)
-            FROM structural.containers_of(@a, 20, NULL)
-            """;
-        command.Parameters.Add("a", NpgsqlDbType.Bytea).Value = a.ToBytes();
-        command.Parameters.Add("b", NpgsqlDbType.Bytea).Value = b.ToBytes();
-        Assert.Equal(true, await command.ExecuteScalarAsync());
     }
 
     [Fact]

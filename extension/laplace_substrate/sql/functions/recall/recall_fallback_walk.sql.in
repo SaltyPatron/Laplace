@@ -1,11 +1,11 @@
 -- THE walk responder. recall_walk_response's walk_reply branch used to carry a
--- byte-for-byte second copy of this body (GH #906 item 1) -- same walk_strongest
+-- byte-for-byte second copy of this body (GH #906 item 1) -- same public.laplace_pull
 -- call, same arrow realize.render, same min(consensus.eff_mu) -- differing only in depth and in how
 -- the arrow character was spelled (E'→' against a literal). Two maintained
 -- copies of one realize.render; the depth is now the parameter that separated them.
 --
 -- The realize.render itself goes through realize.path(GH #906 item 2) instead of a third
--- hand-rolled arrow join. walk_strongest walks forward, so every direction is 1.
+-- hand-rolled arrow join. public.laplace_pull walks forward, so every direction is 1.
 CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -17,6 +17,16 @@ BEGIN ATOMIC
                converse.word_language(p_topic)),
            min(g.eff_mu),
            NULL::bigint
-    FROM consensus.walk_strongest(p_topic, NULL::bytea, p_depth) g
+    FROM (SELECT (u.n-1)::int AS step,
+                public.blake3_send((public.laplace_parts(pp.path))[2]) AS type_id,
+                public.blake3_send(u.x) AS entity_id,
+                (st.rating-2*st.deviation)::numeric AS eff_mu
+         FROM (SELECT w.chain,w.claims FROM public.laplace_pull(ARRAY[public.blake3_from_bytea(p_topic)],NULL,
+                   COALESCE(p_depth,4),64::bigint,4096::bigint,NULL::public.blake3[]) w
+               WHERE w.hops>=1 ORDER BY w.hops DESC,w.cost,w.ordinal LIMIT 1) b
+         CROSS JOIN LATERAL unnest(b.chain) WITH ORDINALITY u(x,n)
+         LEFT JOIN public.laplace_paths(b.claims) pp ON pp.entity=b.claims[u.n-1]
+         LEFT JOIN public.laplace_standings(b.claims) st ON st.claim=b.claims[u.n-1]
+         WHERE u.n>1) g
     HAVING count(*) > 0;
 END;

@@ -130,9 +130,11 @@ SELECT * FROM tri;
 
 \echo ''
 \echo '=== RECALL TRAJECTORIES (sentences containing word) ==='
-SELECT 'capital' AS word, answer FROM generation.recall_trajectories('capital', 8);
-SELECT 'france' AS word, answer FROM generation.recall_trajectories('france', 8);
-SELECT 'Paris' AS word, answer FROM generation.recall_trajectories('Paris', 8);
+SELECT w.word, left(replace(public.laplace_text(h.entity), chr(10), ' '), 180) AS answer
+FROM unnest(ARRAY['capital', 'france', 'Paris']) AS w(word)
+CROSS JOIN LATERAL public.laplace_holders(ARRAY[public.laplace_text_id(w.word)], '{}'::public.blake3[],
+    true, -1::smallint, 8::bigint, 2::smallint) h
+WHERE h.entity IS NOT NULL;
 
 \echo ''
 \echo '=== ATTESTATIONS OUT (top 30 per word) ==='

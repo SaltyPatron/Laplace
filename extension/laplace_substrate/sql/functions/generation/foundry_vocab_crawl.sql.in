@@ -37,20 +37,27 @@ BEGIN ATOMIC
 
 
 
-    -- Pillar 5 (2026-07-20): sequence proposals come from geometry_successors --
-    -- the next content constituent in the text projection of every trajectory --
-    -- not from PRECEDES consensus, which merely materialized the same sequence
-    -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
-    -- frequency (seen), not consensus.eff_mu, because there is no rated edge to read.
-    -- This is proposal evidence, not a direct semantic edge: the underlying
-    -- structural path remains point -> containing composition -> constituent.
+    -- Sequence proposals: what follows each seed in every Native observation that
+    -- holds it (laplace_holders + laplace_follows), not PRECEDES consensus, which
+    -- merely restated the sequence the observation already holds. Weight is the
+    -- observed frequency (seen), because there is no rated edge to read. A seed held
+    -- by more than 4096 observations is a hub: reached, not crossed.
     order1 AS (
         SELECT gs.point_id,
                gs.successor_id AS entity_id,
                gs.seen::numeric AS w,
                row_number() OVER (PARTITION BY gs.point_id ORDER BY gs.seen DESC, gs.successor_id) AS rn
         FROM seed_ids si
-        CROSS JOIN LATERAL structural.geometry_successors_batch(si.ids, p_fanout, 8, false) gs
+        CROSS JOIN LATERAL (
+            SELECT si.ids[h.ordinal] AS point_id, public.blake3_send(f.id) AS successor_id, count(*) AS seen
+            FROM (SELECT ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest(si.ids) WITH ORDINALITY AS u(x, n)
+                               ORDER BY n) AS keys) k
+            CROSS JOIN LATERAL public.laplace_holders(k.keys, '{}'::public.blake3[], true, -1::smallint,
+                4096::bigint, 2::smallint) h
+            CROSS JOIN LATERAL unnest(public.laplace_follows(h.path, ARRAY[k.keys[h.ordinal]])) AS f(id)
+            WHERE h.path IS NOT NULL
+            GROUP BY si.ids[h.ordinal], f.id
+        ) gs
         JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.entity_type_id('Word')
     ),
     order1_cut AS (

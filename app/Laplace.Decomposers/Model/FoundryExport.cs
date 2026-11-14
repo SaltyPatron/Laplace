@@ -357,14 +357,13 @@ internal static partial class FoundryExport
 
 
 
-    /// Per-token 128-bit Hilbert index of the entity's coordinate (packed MSB-first;
-    /// leading octets = coarsest locality), feeding the content-PE dims.
-
-    internal static async Task<Hilbert128?[]> FillHilbertKeysAsync(
+    /// Per-token Native Hilbert key of the entity's coordinate (most significant
+    /// octet = coarsest locality), feeding the content-PE dims.
+    internal static async Task<ulong?[]> FillHilbertKeysAsync(
         NpgsqlDataSource ds, Dictionary<Hash128, List<int>> tokenSlots, int vocabSize)
     {
         var vocab = VocabArray(tokenSlots);
-        var keys = new Hilbert128?[vocabSize];
+        var keys = new ulong?[vocabSize];
         try
         {
             var rows = await NpgsqlFoundryReads.EntityHilbertKeysAsync(ds, vocab);
@@ -372,7 +371,7 @@ internal static partial class FoundryExport
             {
                 if (!tokenSlots.TryGetValue(FromBytes(row.EntityId), out var slots)) continue;
                 foreach (int s in slots)
-                    if (s >= 0 && s < vocabSize) keys[s] = row.HilbertIndex;
+                    if (s >= 0 && s < vocabSize) keys[s] = row.Hilbert;
             }
         }
         catch (PostgresException ex) when (ex.SqlState is "42P01" or "42883")

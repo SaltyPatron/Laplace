@@ -1,8 +1,0 @@
--- structural.entities_at_depth: the entity rows at one tier (altitude).
-CREATE OR REPLACE FUNCTION structural.entities_at_depth(p_depth smallint)
-RETURNS SETOF laplace.entities
-LANGUAGE sql STABLE
-BEGIN ATOMIC
-    SELECT e.* FROM laplace.entities e
-    WHERE e.tier = p_depth;
-END;

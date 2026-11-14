@@ -55,7 +55,7 @@ fixture(match,typ,expr) AS (VALUES
   ('type','bytea[]','ARRAY[laplace.relation_type_id(''IS_A'')]'),
   (NULL,'bytea[]','ARRAY[public.blake3_send(public.laplace_text_id(''hot'')), public.blake3_send(public.laplace_text_id(''dog''))]'),
   (NULL,'text[]','ARRAY[''wolf'']'), (NULL,'integer[]','ARRAY[1]'),
-  (NULL,'geometry','(SELECT trajectory FROM laplace.v_word_points WHERE trajectory IS NOT NULL LIMIT 1)'),
+  (NULL,'geometry','(SELECT path FROM public.physicality LIMIT 1)'),
   (NULL,'timestamp with time zone','now()'), (NULL,'jsonb','''{}''::jsonb'))
 SELECT DISTINCT ON (f.fq) f.fq||'|'||f.proretset::text||'|'||
        COALESCE((SELECT string_agg(COALESCE(x.expr,'<<unfixtured>>'), ', ' ORDER BY x.ord)

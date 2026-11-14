@@ -59,7 +59,7 @@ public sealed partial class NativeSqlCatalogPreparationTests
         var witness = Compose([xc, xc, xc, yc, link, .. declaredClaims,localizedDefinition,nonLanguagePair]);
         var writer = new NpgsqlSubstrateWriter(native);
         await writer.ApplyCanonicalWorkingSetAsync(window, connection, transaction, [witness.Id]);
-        await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(structural.entity_curve($1))", connection, transaction))
+        await using (var curve = new NpgsqlCommand("SELECT public.ST_NPoints(public.ST_GeomFromEWKB(c.curve_ewkb)) FROM public.laplace_curves(ARRAY[encode($1,'hex')::public.blake3]) c", connection, transaction))
         {
             curve.Parameters.AddWithValue(witness.Id.ToBytes());
             // The repeated xc run must remain three ordered points. The curve
@@ -204,22 +204,6 @@ public sealed partial class NativeSqlCatalogPreparationTests
             Assert.Equal(witness.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
             Assert.Equal(2L, rows.GetInt64(1)); Assert.Equal(4L, rows.GetInt64(2));
             Assert.True(rows.GetDouble(3) > 0); Assert.Equal(10000, rows.GetInt32(4));
-            Assert.False(await rows.ReadAsync());
-        }
-        // The witness repeats xc three times. Evidence counts one (claim,witness) pair.
-        await using (var selected = new NpgsqlCommand("""
-            SELECT nbr,witness_count FROM consensus.explore_web_neighbors(
-                ARRAY[$1,$1]::bytea[],ARRAY[$2]::bytea[],1,false) WHERE outbound
-            """, connection, transaction))
-        {
-            selected.Parameters.AddWithValue(x.Id.ToBytes()); selected.Parameters.AddWithValue(predicate.Id.ToBytes());
-            await using var rows = await selected.ExecuteReaderAsync();
-            for (int i = 0; i < 2; i++)
-            {
-                Assert.True(await rows.ReadAsync());
-                Assert.Equal(value.Id.ToBytes(), rows.GetFieldValue<byte[]>(0));
-                Assert.Equal(1L, rows.GetInt64(1));
-            }
             Assert.False(await rows.ReadAsync());
         }
         await using (var counts = NpgsqlCatalog.Command(connection, transaction, "native.claim_witness_counts",

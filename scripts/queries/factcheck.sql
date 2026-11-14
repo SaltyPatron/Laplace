@@ -20,4 +20,4 @@ SELECT * FROM consensus.relation_summary(public.blake3_send(public.laplace_text_
 \echo 
 SELECT * FROM converse.links('Paris');
 \echo 
-SELECT * FROM consensus.relate_path(public.blake3_send(public.laplace_text_id('Paris')), public.blake3_send(public.laplace_text_id('France')), 7);
+SELECT * FROM public.laplace_pull(ARRAY[public.laplace_text_id('Paris')], ARRAY[public.laplace_text_id('France')], 7) WHERE goal;

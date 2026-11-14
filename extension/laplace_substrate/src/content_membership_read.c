@@ -409,22 +409,3 @@ laplace_content_membership_entities(ArrayType *members, bool require_all, int *c
     return laplace_content_membership_entities_bounded(members, require_all, 0, count, NULL);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_containers_containing_all);
-Datum
-pg_laplace_containers_containing_all(PG_FUNCTION_ARGS)
-{
-    InitMaterializedSRF(fcinfo, MAT_SRF_USE_EXPECTED_DESC);
-    ReturnSetInfo *result = (ReturnSetInfo *)fcinfo->resultinfo;
-    if (PG_ARGISNULL(0)) return (Datum)0;
-    int count;
-    hash128_t *ids = laplace_content_membership_entities(PG_GETARG_ARRAYTYPE_P(0), true, &count);
-    for (int i = 0; i < count; ++i)
-    {
-        Datum value = hash128_to_datum(&ids[i]);
-        bool isnull = false;
-        tuplestore_putvalues(result->setResult, result->setDesc, &value, &isnull);
-        pfree(DatumGetPointer(value));
-    }
-    pfree(ids);
-    return (Datum)0;
-}

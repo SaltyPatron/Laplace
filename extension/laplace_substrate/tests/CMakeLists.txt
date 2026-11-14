@@ -1,12 +1,3 @@
-add_executable(physicality_readback_pg_native_probe physicality_readback_native_probe.c)
-target_include_directories(physicality_readback_pg_native_probe SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
-target_link_libraries(physicality_readback_pg_native_probe PRIVATE laplace_core m)
-target_compile_options(physicality_readback_pg_native_probe PRIVATE
-    -ffunction-sections -fdata-sections -Wno-unused-parameter)
-target_link_options(physicality_readback_pg_native_probe PRIVATE "LINKER:--gc-sections")
-add_test(NAME physicality_readback_pg_native_helpers COMMAND physicality_readback_pg_native_probe)
-set_tests_properties(physicality_readback_pg_native_helpers PROPERTIES LABELS "native;readback;physicality")
-
 find_program(LAPLACE_PG_REGRESS pg_regress
     PATHS "${LAPLACE_PG_PKGLIBDIR}/pgxs/src/test/regress"
     NO_DEFAULT_PATH
@@ -36,9 +27,9 @@ else()
     set(REGRESS_USER laplace_admin)
 endif()
 
-set(REGRESS_TESTS bootstrap journal_batch glicko2_aggregate entities_exist_bitmap entity_identity_storage physicalities_exist_bitmap consensus_signed consensus_upsert consensus_bulk_write explore_web_neighbors attestation_merge generation_corpus cognition_completion couple_ordered_continuation couple_standing_state couple_provenance_state operational_memory task_shapes steer_semantic_precedence converse chat_loop word_law identity_law identity_native schema_law structural_surface walk_richer_forward_pass ops_reads source_catalog native_claim_leaders ops_control ingest_throughput walk_edge_weight_parity belief_distribution realize_ladder_parity perfcache_read display_label search_path_independence evict_source prompt_election apply_epoch walk_symmetry highway_mask_deposit highway_mask_recovery concept_ref)
+set(REGRESS_TESTS bootstrap journal_batch glicko2_aggregate entities_exist_bitmap entity_identity_storage physicalities_exist_bitmap consensus_signed consensus_upsert consensus_bulk_write attestation_merge generation_corpus cognition_completion couple_ordered_continuation couple_standing_state couple_provenance_state operational_memory task_shapes steer_semantic_precedence converse chat_loop word_law identity_law identity_native schema_law structural_surface ops_reads source_catalog native_claim_leaders ops_control ingest_throughput walk_edge_weight_parity belief_distribution realize_ladder_parity perfcache_read display_label search_path_independence evict_source prompt_election apply_epoch highway_mask_deposit highway_mask_recovery concept_ref)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
-list(APPEND REGRESS_TESTS text_root_placements content_carrier_vertices forward_seed_parity physicality_readback physicality_readback_cold leaf_swap_routing relation_band_counts inspection_display)
+list(APPEND REGRESS_TESTS text_root_placements forward_seed_parity leaf_swap_routing relation_band_counts inspection_display)
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 list(APPEND REGRESS_TESTS unicode_source_predicates consensus_evidence_batch render_depth)
 
@@ -76,7 +67,7 @@ set_tests_properties(regress_laplace_substrate PROPERTIES
 
 # Closed-world psql cases: each builds its own fixture, asserts exact results over it and rolls back, so it needs
 # a database holding only that fixture. They run in the same installed-server regression database as the suite above.
-foreach(case native_consensus_endpoints prompt_segments session_identity declared_paths_input)
+foreach(case native_consensus_endpoints prompt_segments session_identity)
     add_test(NAME regress_psql_${case}
         COMMAND ${LAPLACE_PG_BINDIR}/psql -X --no-password -U ${REGRESS_USER} --dbname=${REGRESS_DB}
             --set=ON_ERROR_STOP=1 --file=${CMAKE_CURRENT_SOURCE_DIR}/sql/${case}.sql)

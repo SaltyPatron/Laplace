@@ -129,9 +129,12 @@ BEGIN ATOMIC
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
         FROM own_sent os
-        CROSS JOIN LATERAL generation.trajectory_unpacked_points(os.gid)
-             WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
-        WHERE u.ctier = 2 AND u.entity_id IN (SELECT id FROM ctx)
+        CROSS JOIN LATERAL (
+            SELECT public.blake3_send(v.id) AS entity_id, v.ord
+            FROM public.laplace_physicalities(ARRAY[public.blake3_from_bytea(os.gid)]) h
+            CROSS JOIN LATERAL unnest(public.laplace_parts(h.path)) WITH ORDINALITY AS v(id, ord)
+        ) u
+        WHERE u.entity_id IN (SELECT id FROM ctx)
         GROUP BY os.sid
     ),
     -- FRAME: shared frame between a context sense and the candidate.

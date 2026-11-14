@@ -237,10 +237,6 @@ FROM structural.mesh_position(public.blake3_send(public.laplace_text_id('x')), 0
 SELECT count(*) = 1 AS taxonomy_zero_branches_keeps_self
 FROM taxonomy.tree(public.blake3_send(public.laplace_text_id('x')), 0, 0);
 
-SELECT count(*) = 0 AS containers_zero_hops_is_empty
-FROM structural.containers_of(public.blake3_send(public.laplace_text_id('x')), 0, 10);
-SELECT count(*) = 0 AS containers_zero_limit_is_empty
-FROM structural.containers_of(public.blake3_send(public.laplace_text_id('x')), 1, 0);
 
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
 

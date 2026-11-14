@@ -1,0 +1,2 @@
+CREATE OR REPLACE FUNCTION converse.query_program() RETURNS jsonb
+AS 'EXECUTION_LIBRARY','pg_laplace_query_program' LANGUAGE C IMMUTABLE PARALLEL SAFE;

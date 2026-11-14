@@ -28,10 +28,6 @@ DECLARE dog public.blake3=public.laplace_id('dog'); scalar public.blake3=public.
  row_id public.blake3; nested public.blake3; opaque public.blake3; shared public.blake3; root_a public.blake3; root_b public.blake3; claim_id public.blake3;
  absent public.blake3=public.laplace_id('native-display-absent'); labels text[]; shifted bytea[]; got bytea[];
 BEGIN
- IF NOT EXISTS(SELECT FROM structural.starts_with(ARRAY[decode(dog::text,'hex')],ARRAY[public.blake3_send(public.laplace_text_id('d'))]) WHERE entity_id=decode(dog::text,'hex'))
- OR EXISTS(SELECT FROM structural.starts_with(ARRAY[decode(dog::text,'hex')],ARRAY[public.blake3_send(public.laplace_text_id('o'))]) WHERE entity_id=decode(dog::text,'hex')) THEN
-  RAISE EXCEPTION 'Native first-constituent closure lost order or a stored word';
- END IF;
  row_id=pg_temp.display_tuple(ARRAY[dog,scalar,public.laplace_id('中')],'tuple');
  nested=pg_temp.display_tuple(ARRAY[row_id,dog,dog],'tuple');
  opaque=pg_temp.display_tuple(ARRAY[nested,row_id],'file');
@@ -62,15 +58,6 @@ BEGIN
  OR EXISTS(SELECT FROM realize.display_label_batch(ARRAY[NULL::bytea])) THEN
   RAISE EXCEPTION 'Native display did not preserve the non-null endpoint batch';
  END IF;
- IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(dog::text,'hex')]) WHERE tier=public.laplace_tier('dog') AND type_id IS NULL) THEN
-  RAISE EXCEPTION 'Native facet guessed a semantic type';
- END IF;
- IF NOT EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(scalar::text,'hex')]) WHERE tier=0 AND type_id IS NOT NULL) THEN
-  RAISE EXCEPTION 'Native facet lost the virtual scalar floor';
- END IF;
- IF EXISTS(SELECT FROM ops.entity_facets_batch(ARRAY[decode(absent::text,'hex')])) THEN
-  RAISE EXCEPTION 'Native facet invented presence for an absent identity';
- END IF;
  IF (SELECT count(*) FROM consensus.relation_metadata(ARRAY[decode(public.laplace_id('~')::text,'hex')]) WHERE canonical='IS_A' AND inverse AND qualifier_bit=-1)<>1 THEN
   RAISE EXCEPTION 'Native original-ID alias metadata lost inversion';
  END IF;
@@ -79,17 +66,9 @@ BEGIN
  shared=pg_temp.display_tuple(ARRAY[dog,scalar],'tuple');
  root_a=pg_temp.display_tuple(ARRAY[scalar,shared],'file');
  root_b=pg_temp.display_tuple(ARRAY[public.laplace_id('中'),shared],'file');
- IF (SELECT count(*) FROM structural.containers_of(decode(shared::text,'hex'),1,100)
-     WHERE entity_id IN (decode(root_a::text,'hex'),decode(root_b::text,'hex')) AND type_id IS NULL)<>2 THEN
-  RAISE EXCEPTION 'Native containment lost shared content roots or fabricated a type';
- END IF;
  claim_id=pg_temp.display_tuple(ARRAY[shared,scalar,dog],'claim');
  INSERT INTO public.consensus(claim,rating,deviation,volatility,matches)
  VALUES(claim_id,1500,350,0.06,0) ON CONFLICT DO NOTHING;
- IF NOT EXISTS(SELECT FROM consensus.explore_web_neighbors(ARRAY[decode(shared::text,'hex')],NULL,100,false)
-     WHERE nbr=decode(dog::text,'hex') AND type_id=decode(scalar::text,'hex') AND outbound) THEN
-  RAISE EXCEPTION 'Native typed claims disappeared from graph navigation';
- END IF;
 END $test$;
 -- Recorded names may still reside on the compatibility storage face. The
 -- shared display operation must preserve their semantic realization alongside
@@ -124,11 +103,6 @@ BEGIN
  VALUES(public.blake3_send(public.laplace_text_id('display/cyclic-name/path')),cyclic,1,
  'POINT ZM (0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
  public.laplace_trajectory_build(ARRAY[cyclic]),1,now());
- SELECT array_agg(entity_id) INTO got FROM structural.starts_with(
- ARRAY[cyclic,public.blake3_send(public.laplace_text_id('dog'))],ARRAY[public.blake3_send(public.laplace_text_id('d'))]);
- IF got IS DISTINCT FROM ARRAY[public.blake3_send(public.laplace_text_id('dog'))] THEN
-  RAISE EXCEPTION 'Scoped first paths lost a match or failed to terminate a cycle: %',got;
- END IF;
 END $first_paths$;
 ROLLBACK;
 SELECT 'native_display_label: ok';
