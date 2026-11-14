@@ -4,7 +4,7 @@
 CREATE OR REPLACE FUNCTION taxonomy.consensus_taxonomy_edges_batch(
         p_subjects bytea[],
         p_types    bytea[])
-    RETURNS TABLE(ord bigint, object_id bytea, type_id bytea, rating bigint, rd bigint)
+    RETURNS TABLE(ord bigint, object_id bytea, type_id bytea, rating bigint, rd bigint, relation_id bytea)
     LANGUAGE plpgsql STABLE PARALLEL SAFE
 AS $$
 BEGIN
@@ -25,13 +25,13 @@ BEGIN
     raw_edges AS MATERIALIZED (
         SELECT e.subject_id, e.neighbour_id AS object_id,
                COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) AS type_id,
-               e.rating, e.rd
+               e.rating, e.rd, e.relation_id
         FROM consensus.edges_raw_batch(p_subjects, 'out', p_types, 64, false, 'eff_mu') e
         WHERE e.neighbour_id IS NOT NULL
           AND COALESCE(laplace.relation_type_id(consensus.relation_canonical(e.type_id)), e.type_id) = ANY (p_types)
           AND NOT EXISTS (SELECT 1 FROM rel_reg r WHERE r.type_id = e.neighbour_id)
     )
-    SELECT f.ord, c.object_id, c.type_id, c.rating, c.rd
+    SELECT f.ord, c.object_id, c.type_id, c.rating, c.rd, c.relation_id
     FROM frontier f
     JOIN raw_edges c ON c.subject_id = f.subject_id
     ORDER BY f.ord;

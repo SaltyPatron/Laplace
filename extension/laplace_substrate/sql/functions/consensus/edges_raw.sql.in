@@ -37,7 +37,8 @@ CREATE OR REPLACE FUNCTION consensus._edges_raw_batch_impl(
         p_refuted   boolean,
         p_rank      text)
     RETURNS TABLE(subject_id bytea, direction text, type_id bytea, neighbour_id bytea,
-                  rating bigint, rd bigint, volatility bigint, witness_count bigint)
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint,
+                  relation_id bytea)
     LANGUAGE plpgsql STABLE PARALLEL SAFE
 AS $$
 BEGIN
@@ -100,6 +101,7 @@ BEGIN
                    CASE WHEN cardinality(c.parts) = 3
                         THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
                    END AS type_id,
+                   CASE WHEN cardinality(c.parts) = 3 THEN public.blake3_send(c.parts[2]) END AS relation_id,
                    CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3
                         THEN public.blake3_send(c.parts[1])
                         ELSE public.blake3_send(CASE WHEN cardinality(c.parts) <= 3 THEN c.parts[cardinality(c.parts)] ELSE c.entity END)
@@ -141,7 +143,7 @@ BEGIN
             FROM native_dedup e
         )
         SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-               r.rating, r.rd, r.volatility, r.witness_count
+               r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
         FROM ranked r
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
@@ -153,7 +155,7 @@ BEGIN
         RETURN QUERY
         WITH combined AS (
             SELECT c.subject_id, 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
-                   c.rating, c.rd, c.volatility, c.witness_count
+                   c.rating, c.rd, c.volatility, c.witness_count, c.type_id AS relation_id
             FROM laplace.consensus c
             WHERE c.subject_id = ANY (p_subjects)
               AND c.object_id IS NOT NULL
@@ -181,7 +183,7 @@ BEGIN
             FROM deduped_all e
         )
         SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-               r.rating, r.rd, r.volatility, r.witness_count
+               r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
         FROM ranked r
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
@@ -243,6 +245,7 @@ BEGIN
                    CASE WHEN cardinality(c.parts) = 3
                         THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
                    END AS type_id,
+                   CASE WHEN cardinality(c.parts) = 3 THEN public.blake3_send(c.parts[2]) END AS relation_id,
                    CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3
                         THEN public.blake3_send(c.parts[3])
                         ELSE public.blake3_send(c.parts[1])
@@ -284,7 +287,7 @@ BEGIN
             FROM native_dedup e
         )
         SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-               r.rating, r.rd, r.volatility, r.witness_count
+               r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
         FROM ranked r
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
@@ -296,7 +299,7 @@ BEGIN
         RETURN QUERY
         WITH combined AS (
             SELECT c.object_id AS subject_id, 'in'::text AS direction, c.type_id, c.subject_id AS neighbour_id,
-                   c.rating, c.rd, c.volatility, c.witness_count
+                   c.rating, c.rd, c.volatility, c.witness_count, c.type_id AS relation_id
             FROM laplace.consensus c
             WHERE c.object_id = ANY (p_subjects)
               AND (p_types IS NULL OR c.type_id = ANY (p_types))
@@ -323,7 +326,7 @@ BEGIN
             FROM deduped_all e
         )
         SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-               r.rating, r.rd, r.volatility, r.witness_count
+               r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
         FROM ranked r
         WHERE p_limit IS NULL OR r.rn <= p_limit
         ORDER BY r.subject_id, r.rn;
@@ -385,6 +388,7 @@ BEGIN
                CASE WHEN cardinality(c.parts) = 3
                     THEN COALESCE(m.canonical_id, public.blake3_send(c.parts[2]))
                END AS type_id,
+               CASE WHEN cardinality(c.parts) = 3 THEN public.blake3_send(c.parts[2]) END AS relation_id,
                CASE WHEN COALESCE(m.inverse, false) AND cardinality(c.parts) = 3 THEN
                         CASE WHEN public.laplace_path_ends(c.path, c.subj_b3)
                              THEN public.blake3_send(c.parts[1])
@@ -431,7 +435,7 @@ BEGIN
         FROM native_dedup e
     )
     SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-           r.rating, r.rd, r.volatility, r.witness_count
+           r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
     FROM ranked r
     WHERE p_limit IS NULL OR r.rn <= p_limit
     ORDER BY r.subject_id, r.rn;
@@ -443,7 +447,7 @@ BEGIN
     RETURN QUERY
     WITH combined AS (
         SELECT c.subject_id, 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
-               c.rating, c.rd, c.volatility, c.witness_count
+               c.rating, c.rd, c.volatility, c.witness_count, c.type_id AS relation_id
         FROM laplace.consensus c
         WHERE c.subject_id = ANY (p_subjects)
           AND c.object_id IS NOT NULL
@@ -451,7 +455,7 @@ BEGIN
           AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
         UNION ALL
         SELECT c.object_id AS subject_id, 'in'::text AS direction, c.type_id, c.subject_id AS neighbour_id,
-               c.rating, c.rd, c.volatility, c.witness_count
+               c.rating, c.rd, c.volatility, c.witness_count, c.type_id AS relation_id
         FROM laplace.consensus c
         WHERE c.object_id = ANY (p_subjects)
           AND c.subject_id <> c.object_id
@@ -480,7 +484,7 @@ BEGIN
         FROM deduped_all e
     )
     SELECT r.subject_id, r.direction, r.type_id, r.neighbour_id,
-           r.rating, r.rd, r.volatility, r.witness_count
+           r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
     FROM ranked r
     WHERE p_limit IS NULL OR r.rn <= p_limit
     ORDER BY r.subject_id, r.rn;
@@ -495,7 +499,8 @@ CREATE OR REPLACE FUNCTION consensus.edges_raw_batch(
         p_refuted   boolean DEFAULT false,    -- include edges the fold consensus.refuted
         p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
     RETURNS TABLE(subject_id bytea, direction text, type_id bytea, neighbour_id bytea,
-                  rating bigint, rd bigint, volatility bigint, witness_count bigint)
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint,
+                  relation_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT *
@@ -512,11 +517,12 @@ CREATE OR REPLACE FUNCTION consensus.edges_raw(
         p_refuted   boolean DEFAULT false,    -- include edges the fold consensus.refuted
         p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
     RETURNS TABLE(direction text, type_id bytea, neighbour_id bytea,
-                  rating bigint, rd bigint, volatility bigint, witness_count bigint)
+                  rating bigint, rd bigint, volatility bigint, witness_count bigint,
+                  relation_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT b.direction, b.type_id, b.neighbour_id,
-           b.rating, b.rd, b.volatility, b.witness_count
+           b.rating, b.rd, b.volatility, b.witness_count, b.relation_id
     FROM consensus.edges_raw_batch(
         CASE WHEN p_subject IS NULL THEN '{}'::bytea[] ELSE ARRAY[p_subject] END,
         p_direction, p_types, p_limit, p_refuted, p_rank) b;

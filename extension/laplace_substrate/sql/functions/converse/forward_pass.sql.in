@@ -457,7 +457,8 @@ END;
 -- first. Bindings and non-salient structure are not facts about the key.
 CREATE OR REPLACE FUNCTION converse.key_facts(p_keys bytea[], p_per_key int DEFAULT 24)
     RETURNS TABLE(key bytea, type_id bytea, object_id bytea, eff_mu numeric,
-                  witnesses bigint, rating bigint, rd bigint, volatility bigint)
+                  witnesses bigint, rating bigint, rd bigint, volatility bigint,
+                  relation_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH root_keys AS MATERIALIZED (
@@ -482,7 +483,7 @@ BEGIN ATOMIC
             'out', NULL, GREATEST(p_per_key * 2, 48), true, 'eff_mu')
     ), raw_edges AS (
         SELECT e.root_key AS key, c.type_id, c.neighbour_id AS object_id,
-               c.rating, c.rd, 60000000::bigint AS volatility, c.witness_count
+               c.rating, c.rd, 60000000::bigint AS volatility, c.witness_count, c.relation_id
         FROM expanded e
         JOIN batch_edges c ON c.subject_id = e.subj_id
         WHERE c.neighbour_id IS NOT NULL
@@ -491,12 +492,12 @@ BEGIN ATOMIC
     ), deduped AS (
         SELECT DISTINCT ON (r.key, r.type_id, r.object_id)
                r.key, r.type_id, r.object_id,
-               r.rating, r.rd, r.volatility, r.witness_count
+               r.rating, r.rd, r.volatility, r.witness_count, r.relation_id
         FROM raw_edges r
         ORDER BY r.key, r.type_id, r.object_id,
                  consensus.eff_mu(r.rating, r.rd) DESC
     ), f AS MATERIALIZED (
-        SELECT d.key, d.type_id, d.object_id, d.rating, d.rd, d.volatility, d.witness_count,
+        SELECT d.key, d.type_id, d.object_id, d.rating, d.rd, d.volatility, d.witness_count, d.relation_id,
                row_number() OVER (
                    PARTITION BY d.key
                    ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.type_id, d.object_id
@@ -504,7 +505,7 @@ BEGIN ATOMIC
         FROM deduped d
     )
     SELECT f.key, f.type_id, f.object_id, consensus.eff_mu_display(f.rating, f.rd),
-           f.witness_count, f.rating, f.rd, f.volatility
+           f.witness_count, f.rating, f.rd, f.volatility, f.relation_id
     FROM f
     WHERE f.rn <= GREATEST(p_per_key, 0);
 END;
