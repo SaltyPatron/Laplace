@@ -24,6 +24,10 @@ internal static class DatabaseRecreation
         string createOptions = Scalar(connection, "migration.database_options", name) ?? throw new InvalidOperationException(
                 "The selected database must exist and accept connections. Install or repair it before recreation.");
 
+        // A retired copy an earlier recreation switched out but could not drop is dropped first: it is never served.
+        foreach (var (leftover, _) in Rows(connection, "migration.retired_databases", null))
+            Execute(connection, Statement("migration.database_drop", ("database", Identifier(leftover))), timeout: 0);
+
         string replacement = "laplace_recreate_" + Guid.NewGuid().ToString("N");
         string retired = "laplace_retired_" + Guid.NewGuid().ToString("N");
         var settings = Rows(connection, "migration.database_settings", name);
@@ -83,7 +87,9 @@ internal static class DatabaseRecreation
                 tx.Commit();
                 switched = true;
             }
-            Execute(connection, Statement("migration.database_drop", ("database", Identifier(retired))));
+            // The switch is done; dropping the retired copy waits on a checkpoint, which a busy server can hold for
+            // minutes, so it runs to completion rather than failing a recreation that already serves.
+            Execute(connection, Statement("migration.database_drop", ("database", Identifier(retired))), timeout: 0);
         }
         catch
         {
@@ -154,9 +160,9 @@ internal static class DatabaseRecreation
                 ? value : throw new ArgumentException("A catalog DDL slot was not supplied.", nameof(substitutions)));
     }
 
-    private static void Execute(NpgsqlConnection connection, string sql, NpgsqlTransaction? transaction = null)
+    private static void Execute(NpgsqlConnection connection, string sql, NpgsqlTransaction? transaction = null, int timeout = 60)
     {
-        using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 60 };
+        using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = timeout };
         command.ExecuteNonQuery();
     }
 

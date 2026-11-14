@@ -467,6 +467,8 @@ SQL_QUERY("migration.database_rename", "",
     "ALTER DATABASE {database} RENAME TO {replacement}")
 SQL_QUERY("migration.database_reopen", "",
     "ALTER DATABASE {database} ALLOW_CONNECTIONS true")
+SQL_QUERY("migration.retired_databases", "",
+    "SELECT datname, '' FROM pg_database WHERE datname ~ '^laplace_retired_[0-9a-f]{32}$' ORDER BY datname")
 SQL_QUERY("migration.database_drop", "",
     "DROP DATABASE {database} WITH (FORCE)")
 SQL_QUERY("migration.application_schema_owner", "",
