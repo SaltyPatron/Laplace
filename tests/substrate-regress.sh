@@ -40,21 +40,6 @@ while IFS= read -r setting; do
     name=${setting%%=*} value=${setting#*=}
     q -c "ALTER DATABASE \"$db\" SET $name = \$v\$$value\$v\$"
 done <<<"$settings"
-# LAPLACE_REGRESS_PREFIX: another installation of this tree (a pull request's, from site.sh build install with that
-# LAPLACE_INSTALL_PREFIX) is what the scratch database loads: its modules, control files and laplace.* caches. The
-# laplace_substrate perf-cache paths are server settings (PGC_SIGHUP), so those stay the delivered ones.
-if [[ -n ${LAPLACE_REGRESS_PREFIX:-} ]]; then
-    prefix=$LAPLACE_REGRESS_PREFIX
-    major=$("$pg_config" --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')
-    [[ -d $prefix/lib/postgresql/$major && -d $prefix/share/postgresql/$major/extension ]] \
-        || { echo "substrate-regress: $prefix holds no PostgreSQL $major installation" >&2; exit 2; }
-    q -c "ALTER DATABASE \"$db\" SET dynamic_library_path = \$v\$$prefix/lib/postgresql/$major:\$libdir\$v\$" \
-      -c "ALTER DATABASE \"$db\" SET extension_control_path = \$v\$$prefix/share/postgresql/$major:\$system\$v\$"
-    for g in tier0:tier0.bin flags:tier0.flags highway:highway.bin; do
-        [[ -s $prefix/share/laplace/${g#*:} ]] || { echo "substrate-regress: $prefix lacks share/laplace/${g#*:}" >&2; exit 2; }
-        q -c "ALTER DATABASE \"$db\" SET laplace.${g%%:*} = \$v\$$prefix/share/laplace/${g#*:}\$v\$"
-    done
-fi
 status=0
 (cd "$out" && "$regress" --bindir="$bindir" --inputdir="$tests_dir" --outputdir="$out" --dbname="$db" \
     --user="${PGUSER:-$(id -un)}" --use-existing "${tests[@]}") || status=$?
