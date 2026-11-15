@@ -258,7 +258,12 @@ public sealed class UciClientTests
         using var provider = engine.Open();
         Assert.StartsWith("Stockfish", provider.Identity.Via?.Name);
         var decision = provider.Choose(ChessPosition.From(null, ["e2e4"]), new UciClock(5_000, 5_000, 100, 100), CancellationToken.None);
-        Assert.Equal("go wtime 4800 btime 4800 winc 100 binc 100", decision.Analysis.Receipt.Go);
+        // Black is to move, and the mover's clock is charged for the time spent preparing the engine
+        // before the search, so only White's clock is exact.
+        var go = System.Text.RegularExpressions.Regex.Match(
+            decision.Analysis.Receipt.Go ?? "", @"^go wtime 4800 btime (\d+) winc 100 binc 100$");
+        Assert.True(go.Success, decision.Analysis.Receipt.Go);
+        Assert.InRange(long.Parse(go.Groups[1].Value), 4_000, 4_800);
         Assert.Equal(200, decision.Analysis.Receipt.OverheadMs);
         Assert.Equal("warm", decision.Analysis.Receipt.StateMode);
         Assert.Matches("^[a-h][1-8][a-h][1-8]$", decision.Move.Text);
