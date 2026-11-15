@@ -148,6 +148,7 @@ internal static class AppComposition
         services.AddSingleton<IStripeWebhookProvisioner, StripeWebhookProvisioner>();
         services.AddSingleton<IBillingBootstrap, BillingBootstrap>();
         services.AddServerHostedService<BillingBootstrapService>();
+        services.AddServerHostedService<Competitions.CompetitionRetentionService>();
         services.AddSingleton<IApiKeyService, ApiKeyService>();
 
         services.AddOptions<LaplaceAuthOptions>().Configure(options =>

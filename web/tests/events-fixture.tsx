@@ -13,6 +13,8 @@ interface Match { id: string; stage: string; round: number; name: string; state:
 interface Event { id: string; title: string; format: string; status: 'registration' | 'running'; session?: string | null; pairing?: string; entrants: { id: string; name: string; seed: number | null }[]; matches: Match[] }
 
 const params = new URLSearchParams(location.search);
+const frozen = params.get('view') === 'frozen';
+const retention = { frozen, delete_on: frozen ? '2027-02-03T12:00:00Z' : null };
 const FREE = 8;
 const events = new Map<string, Event>();
 const sessions: { id: string; title: string; created_at: string; covered_until: string | null }[] = [];
@@ -33,6 +35,7 @@ function draw(event: Event): Match[] {
   ];
 }
 
+if (frozen) events.set('old', { id: 'old', title: 'Spring league', format: 'single_elimination', status: 'registration', entrants: [], matches: [] });
 if (params.get('view') === 'large') {
   events.set('big', {
     id: 'big', title: 'Big sweeper', format: 'single_elimination', status: 'registration', matches: [],
@@ -62,8 +65,9 @@ window.fetch = async (input, init) => {
   }
   if (path === '/v1/billing/preflight') return json({ quote_id: 'q_fixture', stripe_checkout_url: null });
   if (path === '/v1/competitions' && method === 'GET') {
-    return json({ competitions: [...events.values()].map((e) => ({ id: e.id, title: e.title, format: e.format, status: e.status, created_at: '2026-11-15T12:00:00Z', entrants: e.entrants.length, session: e.session ?? null })) });
+    return json({ competitions: [...events.values()].map((e) => ({ id: e.id, title: e.title, format: e.format, status: e.status, created_at: '2026-11-15T12:00:00Z', entrants: e.entrants.length, session: e.session ?? null })), retention });
   }
+  if (frozen && method !== 'GET') return refuse(403, 'account_frozen', 'This workspace’s plan has ended, so its events are read-only.');
   if (path === '/v1/competitions' && method === 'POST') {
     const id = `e${next++}`;
     events.set(id, { id, title: body.title, format: body.format, status: 'registration', session: body.session ?? null, entrants: [], matches: [] });
@@ -73,7 +77,7 @@ window.fetch = async (input, init) => {
   if (!event) return refuse(404, 'competition_not_found', 'No such event exists.');
   if (parts.length === 1 && method === 'GET') {
     const held = sessions.find((s) => s.id === event.session);
-    return json({ ...event, pairing: event.pairing ?? 'seeded', session: held ? { id: held.id, title: held.title, covered: false } : null, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
+    return json({ ...event, retention: frozen ? retention : { frozen: false, delete_on: '2027-02-13T12:00:00Z' }, pairing: event.pairing ?? 'seeded', session: held ? { id: held.id, title: held.title, covered: false } : null, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
       stages: [{ id: 'main', title: 'Bracket', rounds: ['Semifinals', 'Final'] }] });
   }
   if (parts.length === 1 && method === 'DELETE') { events.delete(event.id); return new Response(null, { status: 204 }); }

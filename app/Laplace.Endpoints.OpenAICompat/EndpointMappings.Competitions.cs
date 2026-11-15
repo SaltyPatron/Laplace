@@ -58,7 +58,8 @@ internal static class CompetitionEndpoints
                     created_at = reader.GetFieldValue<DateTimeOffset>(4), entrants = reader.GetInt64(5),
                     session = reader.IsDBNull(6) ? (Guid?)null : reader.GetGuid(6),
                 });
-            return Results.Ok(new { competitions });
+            var retention = await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct);
+            return Results.Ok(new { competitions, retention = new { frozen = retention.Frozen, delete_on = retention.Frozen ? retention.DeleteOn : null } });
         }).WithTags("competitions");
 
         app.MapGet("/v1/competitions/sessions", async (HttpContext http, ITenantResolver resolver,
@@ -82,6 +83,7 @@ internal static class CompetitionEndpoints
         {
             if (Clean(request.Title, 120) is not { } title) return Error(400, "invalid_title", "Give the session a title of up to 120 characters.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             var id = Guid.NewGuid();
             await using var command = NpgsqlCatalog.Command(application, "competition.session_create", id, tenant, title);
             await command.ExecuteNonQueryAsync(ct);
@@ -94,6 +96,7 @@ internal static class CompetitionEndpoints
             if (Clean(request.Title, 120) is not { } title) return Error(400, "invalid_title", "Give the event a title of up to 120 characters.");
             if (CompetitionFormats.Find(request.Format) is not { } format) return Error(400, "invalid_format", "Choose one of the listed formats.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             var id = Guid.NewGuid();
             await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
@@ -165,11 +168,13 @@ internal static class CompetitionEndpoints
                 if (await reader.ReadAsync(ct))
                     session = new { id = reader.GetGuid(0), title = reader.GetString(1), covered = reader.GetBoolean(2) };
 
+            var retention = await CompetitionRetention.OfEventAsync(application, id, ct);
             var caller = await resolver.ResolveAsync(http, ct);
             var signedIn = !auth.Value.RequiresIdentity || caller.AuthKind is "browser" or "api_key" or "dev";
             return Results.Ok(new
             {
                 id, title, format = formatId, status, session, pairing = pairing.Id,
+                retention = new { frozen = retention.Frozen, delete_on = retention.DeleteOn },
                 host = signedIn && string.Equals(caller.TenantId, owner, StringComparison.Ordinal),
                 entrants = entrants.Select(entrant => new { id = entrant.Id, name = entrant.Name, seed = entrant.Seed }),
                 stages = format?.Stages(rounds).Select(stage => new { id = stage.Id, title = stage.Title, rounds = stage.Rounds }),
@@ -194,6 +199,7 @@ internal static class CompetitionEndpoints
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             if (Clean(request.Name, 60) is not { } name) return Error(400, "invalid_name", "Enter a name of up to 60 characters.");
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfEventAsync(application, id, ct)) is { } frozen) return frozen;
             var entrant = Guid.NewGuid();
             await using (var command = NpgsqlCatalog.Command(application, "competition.register", id, entrant, name, MaxEntrants))
                 if (await command.ExecuteNonQueryAsync(ct) == 1) return Results.Created($"/v1/competitions/{id}", new { id = entrant, name });
@@ -212,6 +218,7 @@ internal static class CompetitionEndpoints
             if (names.Length is 0 or > MaxEntrants || names.Any(name => name is null))
                 return Error(400, "invalid_names", $"Send between 1 and {MaxEntrants} names of up to 60 characters each.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             var distinct = names.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             await using var command = NpgsqlCatalog.Command(application, "competition.register_many", id, tenant,
                 distinct.Select(_ => Guid.NewGuid()).ToArray(), distinct, MaxEntrants);
@@ -227,6 +234,7 @@ internal static class CompetitionEndpoints
             var pairing = request.Pairing is null ? null : Pairings.Find(request.Pairing);
             if (request.Pairing is not null && pairing is null) return Error(400, "invalid_pairing", "Choose one of the listed pairings.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             if (await LockAsync(connection, transaction, id, tenant, ct) is not { } locked) return NotFound();
@@ -268,6 +276,7 @@ internal static class CompetitionEndpoints
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             await using var command = NpgsqlCatalog.Command(application, "competition.withdraw", id, entrant, tenant);
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent()
                 : Error(409, "withdraw_refused", "That entrant is not registered, or the event has already started.");
@@ -277,6 +286,7 @@ internal static class CompetitionEndpoints
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
         {
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             if (await LockAsync(connection, transaction, id, tenant, ct) is not { } locked) return NotFound();
@@ -346,6 +356,7 @@ internal static class CompetitionEndpoints
             }
 
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            if (CompetitionRetention.Refusal(await CompetitionRetention.OfWorkspaceAsync(application, tenant, ct)) is { } frozen) return frozen;
             await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             if (await LockAsync(connection, transaction, id, tenant, ct) is not { } locked) return NotFound();

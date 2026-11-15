@@ -649,3 +649,17 @@ CREATE TABLE IF NOT EXISTS app.competition_draws (
     competition_id uuid PRIMARY KEY REFERENCES app.competitions(competition_id) ON DELETE CASCADE,
     pairing        text NOT NULL CHECK (char_length(pairing) BETWEEN 1 AND 40)
 );
+
+-- Whether a workspace's plan currently includes a service, and if not, when it last did.
+-- lapsed_at is NULL for a workspace that never had such a plan.
+CREATE OR REPLACE FUNCTION app.plan_lapse(p_tenant text, p_service text)
+    RETURNS TABLE(covered boolean, lapsed_at timestamptz)
+    LANGUAGE sql STABLE
+    SET search_path = pg_catalog, app
+AS $$
+    SELECT COALESCE(bool_or(e.status IN ('active', 'trialing', 'past_due') AND e.period_end > now()), false),
+           max(CASE WHEN e.status IN ('active', 'trialing', 'past_due') THEN e.period_end
+                    ELSE LEAST(e.period_end, e.updated_at) END)
+    FROM app.billing_entitlements e
+    WHERE e.tenant = p_tenant AND e.monthly_credits ? p_service;
+$$;
