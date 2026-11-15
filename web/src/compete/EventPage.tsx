@@ -5,6 +5,7 @@ import { useAppStore } from '../store';
 import { readEvent, register, type HostedEvent } from './api';
 import { CompetitionView } from './CompetitionView';
 import { HostSetup, ShareLink, useAction } from './EventHost';
+import { FrozenNotice, Keeping } from './Keeping';
 import { ResultEntry } from './ResultEntry';
 import type { Match } from './model';
 import styles from './Events.module.css';
@@ -21,6 +22,7 @@ export function EventPage() {
   return (
     <div className={styles.page}>
       {event.data.host && <nav aria-label="Events"><RouterLink to="/events">All your events</RouterLink></nav>}
+      <FrozenNotice retention={event.data.retention} />
       {event.data.status === 'registration'
         ? <Registration event={event.data} refresh={event.refresh} />
         : <UnderWay event={event.data} refresh={event.refresh} />}
@@ -94,6 +96,7 @@ function UnderWay({ event, refresh }: StageProps) {
             ))}
           </ul>
           <ShareLink />
+          <Keeping event={event} />
         </Panel>
       )}
       {scoring && <ResultEntry event={event} match={scoring} onClose={() => setScoring(null)} onSaved={async () => { setScoring(null); await refresh(); }} />}

@@ -433,6 +433,24 @@ SQL_QUERY("competition.list", "text",
     "(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id),"
     "(SELECT m.session_id FROM app.competition_session_events m WHERE m.competition_id=c.competition_id) "
     "FROM app.competitions c WHERE c.tenant=$1 ORDER BY c.created_at DESC LIMIT 200")
+SQL_QUERY("competition.hold_tenant", "text,text,int4",
+    "SELECT NOT l.covered AND l.lapsed_at IS NOT NULL,l.lapsed_at+make_interval(days=>$3) "
+    "FROM app.plan_lapse($1,$2) l")
+SQL_QUERY("competition.hold", "uuid,text,int4",
+    "SELECT NOT l.covered AND l.lapsed_at IS NOT NULL,"
+    "CASE WHEN l.covered THEN NULL ELSE GREATEST(COALESCE(c.started_at,c.created_at),"
+    "COALESCE(l.lapsed_at,'-infinity'))+make_interval(days=>$3) END "
+    "FROM app.competitions c,app.plan_lapse(c.tenant,$2) l WHERE c.competition_id=$1")
+SQL_QUERY("competition.purge", "text,int4",
+    "DELETE FROM app.competitions WHERE competition_id IN("
+    "SELECT c.competition_id FROM app.competitions c,app.plan_lapse(c.tenant,$1) l "
+    "WHERE NOT l.covered AND GREATEST(COALESCE(c.started_at,c.created_at),"
+    "COALESCE(l.lapsed_at,'-infinity'))<now()-make_interval(days=>$2))")
+SQL_QUERY("competition.purge_sessions", "text,int4",
+    "DELETE FROM app.competition_sessions WHERE session_id IN("
+    "SELECT s.session_id FROM app.competition_sessions s,app.plan_lapse(s.tenant,$1) l "
+    "WHERE NOT l.covered AND s.created_at<now()-make_interval(days=>$2) "
+    "AND NOT EXISTS(SELECT 1 FROM app.competition_session_events m WHERE m.session_id=s.session_id))")
 SQL_QUERY("competition.session_create", "uuid,text,text",
     "INSERT INTO app.competition_sessions(session_id,tenant,title) VALUES($1,$2,$3)")
 SQL_QUERY("competition.sessions", "text",

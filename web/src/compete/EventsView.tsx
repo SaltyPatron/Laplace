@@ -5,6 +5,7 @@ import { plainMessage } from '../api/client';
 import { useAppStore } from '../store';
 import { createEvent, createSession, readEvents, readFormats, readSessions } from './api';
 import { EventPage } from './EventPage';
+import { FrozenNotice } from './Keeping';
 import styles from './Events.module.css';
 
 export function EventsView() {
@@ -58,6 +59,7 @@ function EventList() {
   }
   return (
     <div className={styles.page}>
+      {events.data && <FrozenNotice retention={events.data.retention} />}
       <Panel title="Host an event">
         <form className={styles.create} onSubmit={(submit) => { submit.preventDefault(); void create(); }}>
           <Field label="Title"><Input value={title} maxLength={120} required placeholder="Friday sweeper" onChange={(change) => setTitle(change.target.value)} /></Field>

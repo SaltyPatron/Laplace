@@ -121,3 +121,11 @@
   display: inline-flex;
   margin-inline-start: var(--space-3);
 }
+
+.notice {
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--space-hair) solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel-2);
+}

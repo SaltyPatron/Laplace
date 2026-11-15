@@ -10,6 +10,8 @@ export interface Formats { free_entrants: number; max_entrants: number; host_ser
 export interface EventSession { id: string; title: string; created_at: string; covered_until: string | null }
 export interface EventSummary { id: string; title: string; format: string; status: EventStatus; created_at: string; entrants: number; session: string | null }
 export type EventStatus = 'registration' | 'running';
+/** `frozen`: the workspace's plan ended, so its events are read-only. `delete_on`: when the event is deleted, or null while a plan keeps it. */
+export interface Retention { frozen: boolean; delete_on: string | null }
 
 /** An event as the server gives it: the competition, plus whether this viewer hosts it. */
 export interface HostedEvent extends Competition {
@@ -18,11 +20,12 @@ export interface HostedEvent extends Competition {
   status: EventStatus;
   host: boolean;
   pairing: string;
+  retention: Retention;
   session: { id: string; title: string; covered: boolean } | null;
 }
 
 export const readFormats = (signal?: AbortSignal) => apiGet<Formats>('/v1/competitions/formats', { signal });
-export const readEvents = (signal?: AbortSignal) => apiGet<{ competitions: EventSummary[] }>('/v1/competitions', { signal });
+export const readEvents = (signal?: AbortSignal) => apiGet<{ competitions: EventSummary[]; retention: Retention }>('/v1/competitions', { signal });
 
 export async function readEvent(id: string, signal?: AbortSignal): Promise<HostedEvent> {
   const event = await apiGet<HostedEvent>(`/v1/competitions/${encodeURIComponent(id)}`, { signal });

@@ -62,6 +62,8 @@ test('a host creates an event, people register, and results fill the bracket', a
   await expect(final).toContainText('Devon Pike');
   await expect(page.getByRole('article', { name: 'Semifinal 1' })).toContainText('262');
   await expect(page.getByRole('listitem').filter({ hasText: 'Semifinal 1' }).getByRole('button', { name: 'Change result' })).toBeVisible();
+  await expect(page.getByText('This event is kept until')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download results' })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
@@ -105,4 +107,15 @@ test('events made in one session are listed under it', async ({ page }) => {
   await page.getByRole('link', { name: 'All your events' }).click();
   await expect(page.getByRole('row', { name: /Doubles bracket/ })).toContainText('Tuesday league night');
   await expect(page.getByLabel('Session', { exact: true }).getByRole('option', { name: 'Tuesday league night' })).toBeAttached();
+});
+test('a workspace whose plan ended sees its events read-only with the deletion date', async ({ page }) => {
+  await page.goto('/tests/events.html?view=frozen');
+  await expect(page.getByRole('status')).toContainText('read-only');
+  await expect(page.getByRole('status')).toContainText('2027');
+  await page.getByLabel('Title').fill('New one');
+  await page.getByRole('button', { name: 'Create event' }).click();
+  await expect(page.getByRole('alert')).toContainText('read-only');
+  await page.getByRole('link', { name: 'Spring league' }).click();
+  await expect(page.getByRole('status').first()).toContainText('will be deleted on');
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
