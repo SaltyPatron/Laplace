@@ -217,10 +217,10 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
         _plans = new[]
         {
             Plan(
-                "league", "plan.league", "League", "Twenty hosted events a month for a league or a bowling center: brackets, sweepers, round robins and ladders, with results kept for as long as the account is active.", 2000,
+                "league", "plan.league", "League", "Ten hosted events a month for a league or a bowling center: brackets, sweepers, round robins and ladders, with results kept for as long as the account is active.", 2000,
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["competition.host"] = 20
+                    ["competition.host"] = 10
                 },
                 "community"),
             Plan(
