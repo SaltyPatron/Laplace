@@ -3,8 +3,10 @@ import { PaymentRequiredError, apiDelete, apiGet, apiPost, apiPut, type Prefligh
 import type { Competition } from './model';
 
 export interface FormatInfo { id: string; title: string; summary: string }
-export interface Formats { free_entrants: number; max_entrants: number; host_service: string; formats: FormatInfo[] }
-export interface EventSummary { id: string; title: string; format: string; status: EventStatus; created_at: string; entrants: number }
+export interface Formats { free_entrants: number; max_entrants: number; host_service: string; session_hours: number; formats: FormatInfo[] }
+/** One occasion holding several events; one hosting fee covers them all while `covered_until` is ahead. */
+export interface EventSession { id: string; title: string; created_at: string; covered_until: string | null }
+export interface EventSummary { id: string; title: string; format: string; status: EventStatus; created_at: string; entrants: number; session: string | null }
 export type EventStatus = 'registration' | 'running';
 
 /** An event as the server gives it: the competition, plus whether this viewer hosts it. */
@@ -13,6 +15,7 @@ export interface HostedEvent extends Competition {
   format: string;
   status: EventStatus;
   host: boolean;
+  session: { id: string; title: string; covered: boolean } | null;
 }
 
 export const readFormats = (signal?: AbortSignal) => apiGet<Formats>('/v1/competitions/formats', { signal });
@@ -23,7 +26,10 @@ export async function readEvent(id: string, signal?: AbortSignal): Promise<Hoste
   return { ...event, stages: event.stages ?? [], standings: event.standings ?? [] };
 }
 
-export const createEvent = (title: string, format: string) => apiPost<{ id: string }>('/v1/competitions', { title, format });
+export const readSessions = (signal?: AbortSignal) => apiGet<{ sessions: EventSession[] }>('/v1/competitions/sessions', { signal });
+export const createSession = (title: string) => apiPost<{ id: string; title: string }>('/v1/competitions/sessions', { title });
+export const createEvent = (title: string, format: string, session?: string) =>
+  apiPost<{ id: string }>('/v1/competitions', { title, format, session: session ?? null });
 export const deleteEvent = (id: string) => apiDelete(`/v1/competitions/${encodeURIComponent(id)}`);
 export const register = (id: string, name: string) =>
   apiPost<{ id: string; name: string }>(`/v1/competitions/${encodeURIComponent(id)}/entrants`, { name });

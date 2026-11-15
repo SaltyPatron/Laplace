@@ -10,11 +10,12 @@ import '../src/ui/theme.css';
 
 interface Slot { entrant: string | null; from: { match: string; place: number } | null; score: string | null; place: number | null }
 interface Match { id: string; stage: string; round: number; name: string; state: 'scheduled' | 'final'; slots: Slot[] }
-interface Event { id: string; title: string; format: string; status: 'registration' | 'running'; entrants: { id: string; name: string; seed: number | null }[]; matches: Match[] }
+interface Event { id: string; title: string; format: string; status: 'registration' | 'running'; session?: string | null; entrants: { id: string; name: string; seed: number | null }[]; matches: Match[] }
 
 const params = new URLSearchParams(location.search);
 const FREE = 8;
 const events = new Map<string, Event>();
+const sessions: { id: string; title: string; created_at: string; covered_until: string | null }[] = [];
 let next = 1;
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const refuse = (status: number, code: string, message: string) => json({ error: { type: 'competition_error', code, message } }, status);
@@ -45,24 +46,31 @@ window.fetch = async (input, init) => {
   const body = init?.body ? JSON.parse(String(init.body)) : {};
   const parts = path.split('/').filter(Boolean).slice(2);
   if (path === '/v1/competitions/formats') {
-    return json({ free_entrants: FREE, max_entrants: 256, host_service: 'competition.host', formats: [
+    return json({ free_entrants: FREE, max_entrants: 256, host_service: 'competition.host', session_hours: 24, formats: [
       { id: 'single_elimination', title: 'Single elimination', summary: 'Lose once and you are out. Top seeds get the byes.' },
       { id: 'round_robin', title: 'Round robin', summary: 'Everyone plays everyone once.' },
     ] });
   }
+  if (path === '/v1/competitions/sessions' && method === 'GET') return json({ sessions });
+  if (path === '/v1/competitions/sessions' && method === 'POST') {
+    const session = { id: `s${next++}`, title: body.title as string, created_at: '2026-11-15T12:00:00Z', covered_until: null };
+    sessions.push(session);
+    return json(session, 201);
+  }
   if (path === '/v1/billing/preflight') return json({ quote_id: 'q_fixture', stripe_checkout_url: null });
   if (path === '/v1/competitions' && method === 'GET') {
-    return json({ competitions: [...events.values()].map((e) => ({ id: e.id, title: e.title, format: e.format, status: e.status, created_at: '2026-11-15T12:00:00Z', entrants: e.entrants.length })) });
+    return json({ competitions: [...events.values()].map((e) => ({ id: e.id, title: e.title, format: e.format, status: e.status, created_at: '2026-11-15T12:00:00Z', entrants: e.entrants.length, session: e.session ?? null })) });
   }
   if (path === '/v1/competitions' && method === 'POST') {
     const id = `e${next++}`;
-    events.set(id, { id, title: body.title, format: body.format, status: 'registration', entrants: [], matches: [] });
+    events.set(id, { id, title: body.title, format: body.format, status: 'registration', session: body.session ?? null, entrants: [], matches: [] });
     return json({ id }, 201);
   }
   const event = events.get(parts[0]);
   if (!event) return refuse(404, 'competition_not_found', 'No such event exists.');
   if (parts.length === 1 && method === 'GET') {
-    return json({ ...event, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
+    const held = sessions.find((s) => s.id === event.session);
+    return json({ ...event, session: held ? { id: held.id, title: held.title, covered: false } : null, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
       stages: [{ id: 'main', title: 'Bracket', rounds: ['Semifinals', 'Final'] }] });
   }
   if (parts.length === 1 && method === 'DELETE') { events.delete(event.id); return new Response(null, { status: 204 }); }

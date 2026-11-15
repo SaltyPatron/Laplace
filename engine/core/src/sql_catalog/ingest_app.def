@@ -430,8 +430,28 @@ SQL_QUERY("competition.create", "uuid,text,text,text",
     "INSERT INTO app.competitions(competition_id,tenant,title,format) VALUES($1,$2,$3,$4)")
 SQL_QUERY("competition.list", "text",
     "SELECT c.competition_id,c.title,c.format,c.status,c.created_at,"
-    "(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id) "
+    "(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id),"
+    "(SELECT m.session_id FROM app.competition_session_events m WHERE m.competition_id=c.competition_id) "
     "FROM app.competitions c WHERE c.tenant=$1 ORDER BY c.created_at DESC LIMIT 200")
+SQL_QUERY("competition.session_create", "uuid,text,text",
+    "INSERT INTO app.competition_sessions(session_id,tenant,title) VALUES($1,$2,$3)")
+SQL_QUERY("competition.sessions", "text",
+    "SELECT session_id,title,created_at,covered_until FROM app.competition_sessions "
+    "WHERE tenant=$1 ORDER BY created_at DESC LIMIT 200")
+SQL_QUERY("competition.session_join", "uuid,uuid,text",
+    "INSERT INTO app.competition_session_events(competition_id,session_id) "
+    "SELECT c.competition_id,s.session_id FROM app.competitions c,app.competition_sessions s "
+    "WHERE c.competition_id=$1 AND s.session_id=$2 AND c.tenant=$3 AND s.tenant=$3")
+SQL_QUERY("competition.session_of", "uuid",
+    "SELECT s.session_id,s.title,COALESCE(s.covered_until>now(),false) "
+    "FROM app.competition_session_events m JOIN app.competition_sessions s ON s.session_id=m.session_id "
+    "WHERE m.competition_id=$1 FOR UPDATE OF s")
+SQL_QUERY("competition.session_title", "uuid",
+    "SELECT s.session_id,s.title,COALESCE(s.covered_until>now(),false) "
+    "FROM app.competition_session_events m JOIN app.competition_sessions s ON s.session_id=m.session_id "
+    "WHERE m.competition_id=$1")
+SQL_QUERY("competition.session_cover", "uuid,int4",
+    "UPDATE app.competition_sessions SET covered_until=now()+make_interval(hours=>$2) WHERE session_id=$1")
 SQL_QUERY("competition.get", "uuid",
     "SELECT competition_id,tenant,title,format,status,created_at,started_at "
     "FROM app.competitions WHERE competition_id=$1")
