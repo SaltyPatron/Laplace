@@ -624,3 +624,22 @@ CREATE TABLE IF NOT EXISTS app.competition_slots (
 CREATE INDEX IF NOT EXISTS competition_slots_source
     ON app.competition_slots (competition_id, from_match)
     WHERE from_match IS NOT NULL;
+
+-- A session is one occasion (a league night, a tournament day) holding any number of events.
+-- Hosting is paid once per session: while covered_until is ahead, its events start without a further fee.
+CREATE TABLE IF NOT EXISTS app.competition_sessions (
+    session_id    uuid PRIMARY KEY,
+    tenant        text NOT NULL REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
+    title         text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    covered_until timestamptz
+);
+CREATE INDEX IF NOT EXISTS competition_sessions_tenant
+    ON app.competition_sessions (tenant, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS app.competition_session_events (
+    competition_id uuid PRIMARY KEY REFERENCES app.competitions(competition_id) ON DELETE CASCADE,
+    session_id     uuid NOT NULL REFERENCES app.competition_sessions(session_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS competition_session_events_session
+    ON app.competition_session_events (session_id);

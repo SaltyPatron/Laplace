@@ -95,9 +95,10 @@ export function HostSetup({ event, refresh }: { event: HostedEvent; refresh: () 
         </div>
         <ShareLink />
         <p>Starting closes registration and fixes the matches as drawn above.</p>
-        {free != null && (count > free
-          ? <p>This event is over the free size of {free}. Starting it takes the flat hosting fee, unless this workspace is on the League plan.</p>
-          : <Muted>Free to host up to {free} entrants.</Muted>)}
+        {event.session && <p>Part of {event.session.title}.</p>}
+        {free != null && (count <= free ? <Muted>Free to host up to {free} entrants.</Muted>
+          : event.session?.covered ? <p>Hosting for this session is already paid, so this event starts at no further cost.</p>
+          : <p>This event is over the free size of {free}. Starting it takes the flat hosting fee, unless this workspace is on the League plan.{event.session ? ` That one fee then covers the other events in this session for ${formats.data?.session_hours} hours.` : ''}</p>)}
         <div className={styles.actions}>
           <Button loading={hosting.busy} disabled={hosting.busy || count < 2 || !formats.data}
             onClick={() => void hosting.run(async () => {

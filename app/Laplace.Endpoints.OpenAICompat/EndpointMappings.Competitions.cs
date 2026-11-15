@@ -17,6 +17,8 @@ internal static class CompetitionEndpoints
     public const string HostService = "competition.host";
     public const int FreeEntrants = 8;
     public const int MaxEntrants = 256;
+    /// <summary>How long one hosting payment covers the other events in the same session.</summary>
+    public const int SessionHours = 24;
 
     /// <summary>The two routes a visitor with only the link may use: read the event, and register for it.</summary>
     public static bool IsPublic(HttpRequest request, string path)
@@ -37,6 +39,7 @@ internal static class CompetitionEndpoints
             free_entrants = FreeEntrants,
             max_entrants = MaxEntrants,
             host_service = HostService,
+            session_hours = SessionHours,
             formats = CompetitionFormats.All.Select(format => new { id = format.Id, title = format.Title, summary = format.Summary }),
         })).WithTags("competitions");
 
@@ -52,8 +55,36 @@ internal static class CompetitionEndpoints
                 {
                     id = reader.GetGuid(0), title = reader.GetString(1), format = reader.GetString(2), status = reader.GetString(3),
                     created_at = reader.GetFieldValue<DateTimeOffset>(4), entrants = reader.GetInt64(5),
+                    session = reader.IsDBNull(6) ? (Guid?)null : reader.GetGuid(6),
                 });
             return Results.Ok(new { competitions });
+        }).WithTags("competitions");
+
+        app.MapGet("/v1/competitions/sessions", async (HttpContext http, ITenantResolver resolver,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            var sessions = new List<object>();
+            await using var command = NpgsqlCatalog.Command(application, "competition.sessions", tenant);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                sessions.Add(new
+                {
+                    id = reader.GetGuid(0), title = reader.GetString(1), created_at = reader.GetFieldValue<DateTimeOffset>(2),
+                    covered_until = reader.IsDBNull(3) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(3),
+                });
+            return Results.Ok(new { sessions });
+        }).WithTags("competitions");
+
+        app.MapPost("/v1/competitions/sessions", async (HttpContext http, NewSession request, ITenantResolver resolver,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            if (Clean(request.Title, 120) is not { } title) return Error(400, "invalid_title", "Give the session a title of up to 120 characters.");
+            var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            var id = Guid.NewGuid();
+            await using var command = NpgsqlCatalog.Command(application, "competition.session_create", id, tenant, title);
+            await command.ExecuteNonQueryAsync(ct);
+            return Results.Created("/v1/competitions/sessions", new { id, title });
         }).WithTags("competitions");
 
         app.MapPost("/v1/competitions", async (HttpContext http, NewCompetition request, ITenantResolver resolver,
@@ -63,8 +94,14 @@ internal static class CompetitionEndpoints
             if (CompetitionFormats.Find(request.Format) is not { } format) return Error(400, "invalid_format", "Choose one of the listed formats.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
             var id = Guid.NewGuid();
-            await using var command = NpgsqlCatalog.Command(application, "competition.create", id, tenant, title, format.Id);
-            await command.ExecuteNonQueryAsync(ct);
+            await using var connection = await application.OpenConnectionAsync(ct);
+            await using var transaction = await connection.BeginTransactionAsync(ct);
+            await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.create", id, tenant, title, format.Id))
+                await command.ExecuteNonQueryAsync(ct);
+            if (request.Session is { } session)
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.session_join", id, session, tenant))
+                    if (await command.ExecuteNonQueryAsync(ct) != 1) return Error(400, "invalid_session", "That session does not exist in this workspace.");
+            await transaction.CommitAsync(ct);
             return Results.Created($"/v1/competitions/{id}", new { id });
         }).WithTags("competitions");
 
@@ -120,11 +157,17 @@ internal static class CompetitionEndpoints
                 if (rows.Count > 0) standings.Add(new { stage = matches[0].Stage, columns = new[] { "W", "L" }, rows });
             }
 
+            object? session = null;
+            await using (var command = NpgsqlCatalog.Command(connection, null, "competition.session_title", id))
+            await using (var reader = await command.ExecuteReaderAsync(ct))
+                if (await reader.ReadAsync(ct))
+                    session = new { id = reader.GetGuid(0), title = reader.GetString(1), covered = reader.GetBoolean(2) };
+
             var caller = await resolver.ResolveAsync(http, ct);
             var signedIn = !auth.Value.RequiresIdentity || caller.AuthKind is "browser" or "api_key" or "dev";
             return Results.Ok(new
             {
-                id, title, format = formatId, status,
+                id, title, format = formatId, status, session,
                 host = signedIn && string.Equals(caller.TenantId, owner, StringComparison.Ordinal),
                 entrants = entrants.Select(entrant => new { id = entrant.Id, name = entrant.Name, seed = entrant.Seed }),
                 stages = format?.Stages(rounds).Select(stage => new { id = stage.Id, title = stage.Title, rounds = stage.Rounds }),
@@ -239,8 +282,14 @@ internal static class CompetitionEndpoints
                 while (await reader.ReadAsync(ct)) entrants.Add(reader.GetGuid(0));
             if (entrants.Count < 2) return Error(409, "too_few_entrants", "An event needs at least two entrants before it can start.");
 
+            // One hosting payment covers every event of its session for the hours that follow.
+            (Guid Id, bool Covered)? session = null;
+            await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.session_of", id))
+            await using (var reader = await command.ExecuteReaderAsync(ct))
+                if (await reader.ReadAsync(ct)) session = (reader.GetGuid(0), reader.GetBoolean(2));
+
             QuoteExecutionGate? gate = null;
-            if (entrants.Count > FreeEntrants)
+            if (entrants.Count > FreeEntrants && session?.Covered != true)
             {
                 gate = await QuoteGate.RequireQuoteAsync(http.Request, billing, HostService, ct);
                 if (!gate.Allowed)
@@ -265,6 +314,9 @@ internal static class CompetitionEndpoints
                 await command.ExecuteNonQueryAsync(ct);
             await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.start", id))
                 await command.ExecuteNonQueryAsync(ct);
+            if (gate is not null && session is { } paidFor)
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.session_cover", paidFor.Id, SessionHours))
+                    await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
             if (gate?.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
             return Results.Ok(new { id, matches = plan.Count });
@@ -336,7 +388,8 @@ internal static class CompetitionEndpoints
     private sealed record SlotView(Guid? Entrant, SourceView? From, string? Score, short? Place);
     private sealed record SourceView(string Match, short Place);
 
-    internal sealed record NewCompetition(string? Title, string? Format);
+    internal sealed record NewCompetition(string? Title, string? Format, Guid? Session);
+    internal sealed record NewSession(string? Title);
     internal sealed record NewEntrant(string? Name);
     internal sealed record NewEntrants(string?[]? Names);
     internal sealed record DrawChange(Guid[]? Order, bool Shuffle, string? Format);

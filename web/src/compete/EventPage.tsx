@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link as RouterLink, useParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Muted, Panel, ReadStatus, useReadResource } from '@ui';
 import { useAppStore } from '../store';
 import { readEvent, register, type HostedEvent } from './api';
@@ -18,9 +18,14 @@ export function EventPage() {
     read: (signal) => readEvent(id, signal),
   });
   if (!event.data) return <Panel title="Event"><ReadStatus label="Event" resource={event} /></Panel>;
-  return event.data.status === 'registration'
-    ? <Registration event={event.data} refresh={event.refresh} />
-    : <UnderWay event={event.data} refresh={event.refresh} />;
+  return (
+    <div className={styles.page}>
+      {event.data.host && <nav aria-label="Events"><RouterLink to="/events">All your events</RouterLink></nav>}
+      {event.data.status === 'registration'
+        ? <Registration event={event.data} refresh={event.refresh} />
+        : <UnderWay event={event.data} refresh={event.refresh} />}
+    </div>
+  );
 }
 
 interface StageProps { event: HostedEvent; refresh: () => Promise<void> }

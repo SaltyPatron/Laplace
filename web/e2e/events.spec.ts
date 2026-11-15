@@ -87,3 +87,14 @@ test('a host fills the field from a list and sees the draw', async ({ page }) =>
   await expect(page.getByText('4 added, 1 skipped as already registered or over the limit.')).toBeVisible();
   await expect(page.getByRole('article', { name: 'Final', exact: true })).toContainText('Winner of Semifinal 2');
 });
+test('events made in one session are listed under it', async ({ page }) => {
+  await page.goto('/tests/events.html');
+  await page.getByLabel('Title').fill('Doubles bracket');
+  await page.getByLabel('Session', { exact: true }).selectOption('new');
+  await page.getByLabel('Session name').fill('Tuesday league night');
+  await page.getByRole('button', { name: 'Create event' }).click();
+  await expect(page.getByText('Part of Tuesday league night.')).toBeVisible();
+  await page.getByRole('link', { name: 'All your events' }).click();
+  await expect(page.getByRole('row', { name: /Doubles bracket/ })).toContainText('Tuesday league night');
+  await expect(page.getByLabel('Session', { exact: true }).getByRole('option', { name: 'Tuesday league night' })).toBeAttached();
+});
