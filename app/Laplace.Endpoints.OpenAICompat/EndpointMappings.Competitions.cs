@@ -79,11 +79,12 @@ internal static class CompetitionEndpoints
                 if (!await reader.ReadAsync(ct)) return NotFound();
                 (owner, title, formatId, status) = (reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4));
             }
-            var entrants = new List<object>();
+            // Until the event starts, entrants are seeded in the order they registered.
+            var entrants = new List<(Guid Id, string Name, int Seed)>();
             await using (var command = NpgsqlCatalog.Command(connection, null, "competition.entrants", id))
             await using (var reader = await command.ExecuteReaderAsync(ct))
                 while (await reader.ReadAsync(ct))
-                    entrants.Add(new { id = reader.GetGuid(0), name = reader.GetString(1), seed = reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2) });
+                    entrants.Add((reader.GetGuid(0), reader.GetString(1), reader.IsDBNull(2) ? entrants.Count + 1 : reader.GetInt32(2)));
 
             var matches = new List<MatchView>();
             await using (var command = NpgsqlCatalog.Command(connection, null, "competition.matches", id))
@@ -101,6 +102,12 @@ internal static class CompetitionEndpoints
                 }
 
             var format = CompetitionFormats.Find(formatId);
+            // While registration is open nothing is stored yet: show the draw as it would be made now.
+            if (status == "registration" && format is not null && entrants.Count >= 2)
+                matches.AddRange(format.Plan(entrants.Select(entrant => entrant.Id).ToArray()).Select(match => new MatchView(
+                    match.Id, match.Stage, match.Round, match.Name, "scheduled",
+                    match.Slots.Select(slot => new SlotView(slot.Entrant,
+                        slot.FromMatch is null ? null : new SourceView(slot.FromMatch, slot.FromPlace ?? 1), null, null)).ToList())));
             var rounds = matches.GroupBy(match => match.Stage).ToDictionary(stage => stage.Key, stage => stage.Max(match => match.Round));
             var standings = new List<object>();
             if (matches.Count > 0 && matches.All(match => match.Slots.Count == 2 && match.Slots.All(slot => slot.From is null)))
@@ -119,7 +126,7 @@ internal static class CompetitionEndpoints
             {
                 id, title, format = formatId, status,
                 host = signedIn && string.Equals(caller.TenantId, owner, StringComparison.Ordinal),
-                entrants,
+                entrants = entrants.Select(entrant => new { id = entrant.Id, name = entrant.Name, seed = entrant.Seed }),
                 stages = format?.Stages(rounds).Select(stage => new { id = stage.Id, title = stage.Title, rounds = stage.Rounds }),
                 matches = matches.Select(match => new
                 {
@@ -152,6 +159,60 @@ internal static class CompetitionEndpoints
                 ? Error(409, "registration_closed", "Registration for this event has closed.")
                 : Error(409, "registration_refused", "That name is already registered, or the event is full.");
         }).RequireRateLimiting("public-query").WithTags("competitions");
+
+        app.MapPost("/v1/competitions/{id:guid}/entrants/batch", async (Guid id, NewEntrants request, HttpContext http, ITenantResolver resolver,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            var names = (request.Names ?? []).Select(name => Clean(name, 60)).ToArray();
+            if (names.Length is 0 or > MaxEntrants || names.Any(name => name is null))
+                return Error(400, "invalid_names", $"Send between 1 and {MaxEntrants} names of up to 60 characters each.");
+            var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            var distinct = names.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            await using var command = NpgsqlCatalog.Command(application, "competition.register_many", id, tenant,
+                distinct.Select(_ => Guid.NewGuid()).ToArray(), distinct, MaxEntrants);
+            var added = await command.ExecuteNonQueryAsync(ct);
+            return Results.Ok(new { added, skipped = names.Length - added });
+        }).WithTags("competitions");
+
+        app.MapPut("/v1/competitions/{id:guid}/draw", async (Guid id, DrawChange request, HttpContext http, ITenantResolver resolver,
+            [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
+        {
+            var format = request.Format is null ? null : CompetitionFormats.Find(request.Format);
+            if (request.Format is not null && format is null) return Error(400, "invalid_format", "Choose one of the listed formats.");
+            var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
+            await using var connection = await application.OpenConnectionAsync(ct);
+            await using var transaction = await connection.BeginTransactionAsync(ct);
+            if (await LockAsync(connection, transaction, id, tenant, ct) is not { } locked) return NotFound();
+            if (locked.Status != "registration") return Error(409, "already_started", "The draw is fixed once the event has started.");
+
+            if (format is not null)
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.reformat", id, format.Id))
+                    await command.ExecuteNonQueryAsync(ct);
+            if (request.Order is not null || request.Shuffle)
+            {
+                var entrants = new List<Guid>();
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.entrants", id))
+                await using (var reader = await command.ExecuteReaderAsync(ct))
+                    while (await reader.ReadAsync(ct)) entrants.Add(reader.GetGuid(0));
+                Guid[] order;
+                if (request.Order is { } given)
+                {
+                    // Anyone who registered after the host loaded the page keeps their place at the end.
+                    if (given.Distinct().Count() != given.Length || given.Except(entrants).Any())
+                        return Error(400, "invalid_order", "The order must list this event's entrants, each once.");
+                    order = [.. given, .. entrants.Except(given)];
+                }
+                else
+                {
+                    order = [.. entrants];
+                    System.Security.Cryptography.RandomNumberGenerator.Shuffle(order.AsSpan());
+                }
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.seed", id, order))
+                    await command.ExecuteNonQueryAsync(ct);
+            }
+            await transaction.CommitAsync(ct);
+            return Results.NoContent();
+        }).WithTags("competitions");
 
         app.MapDelete("/v1/competitions/{id:guid}/entrants/{entrant:guid}", async (Guid id, Guid entrant, HttpContext http, ITenantResolver resolver,
             [FromKeyedServices(AppComposition.ApplicationDatabaseKey)] Npgsql.NpgsqlDataSource application, CancellationToken ct) =>
@@ -277,6 +338,8 @@ internal static class CompetitionEndpoints
 
     internal sealed record NewCompetition(string? Title, string? Format);
     internal sealed record NewEntrant(string? Name);
+    internal sealed record NewEntrants(string?[]? Names);
+    internal sealed record DrawChange(Guid[]? Order, bool Shuffle, string? Format);
     internal sealed record MatchResult(SlotResult[]? Slots);
     internal sealed record SlotResult(string? Score, short Place);
 }

@@ -153,6 +153,8 @@ public sealed class CompetitionFormatsTests
         Assert.False(Public("DELETE", $"/v1/competitions/{id}/entrants/{Guid.NewGuid()}"));
         Assert.False(Public("PUT", $"/v1/competitions/{id}/matches/gf/result"));
         Assert.False(Public("GET", $"/v1/competitions/{id}/entrants"));
+        Assert.False(Public("POST", $"/v1/competitions/{id}/entrants/batch"));
+        Assert.False(Public("PUT", $"/v1/competitions/{id}/draw"));
         Assert.False(Public("POST", $"/v1/billing/{id}/entrants"));
     }
 }
