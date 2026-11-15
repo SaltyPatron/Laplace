@@ -6,11 +6,11 @@
       "plan_id": "league",
       "service_id": "plan.league",
       "name": "League",
-      "description": "Unlimited hosted events for a league or a bowling center: brackets, sweepers, round robins and ladders every week.",
-      "monthly_price_cents": 1500,
+      "description": "Twenty hosted events a month for a league or a bowling center: brackets, sweepers, round robins and ladders, with results kept for as long as the account is active.",
+      "monthly_price_cents": 2000,
       "currency": "usd",
       "monthly_credits": {
-        "competition.host": 200
+        "competition.host": 20
       },
       "included_product_ids": [
         "laplace.audit",

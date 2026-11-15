@@ -212,7 +212,7 @@
         {
           "service_id": "plan.league",
           "unit": "month",
-          "unit_price_cents": 1500,
+          "unit_price_cents": 2000,
           "base_fee_cents": 0,
           "currency": "usd",
           "lookup_key": "laplace_plan_league_month_usd",

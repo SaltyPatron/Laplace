@@ -208,7 +208,7 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
             ["recipe.compile"] = Price("recipe.compile", "laplace.recipe", 5, "recipe_unit", "Compile Synthesis Recipe", baseFeeCents: 25, metered: true),
             ["recipe.export"] = Price("recipe.export", "laplace.recipe", 10, "content_thousand", "Private Recipe Content Export", baseFeeCents: 100, metered: true),
             ["competition.host"] = Price("competition.host", "laplace.competition", 500, "event", "Hosted Competition"),
-            ["plan.league"] = Price("plan.league", "laplace.platform", 1500, "month", "League Plan", recurringInterval: "month"),
+            ["plan.league"] = Price("plan.league", "laplace.platform", 2000, "month", "League Plan", recurringInterval: "month"),
             ["plan.developer"] = Price("plan.developer", "laplace.platform", 2900, "month", "Developer Plan", recurringInterval: "month"),
             ["plan.studio"] = Price("plan.studio", "laplace.platform", 9900, "month", "Studio Plan", recurringInterval: "month"),
             ["plan.enterprise"] = Price("plan.enterprise", "laplace.platform", 49900, "month", "Enterprise Plan", recurringInterval: "month"),
@@ -217,10 +217,10 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
         _plans = new[]
         {
             Plan(
-                "league", "plan.league", "League", "Unlimited hosted events for a league or a bowling center: brackets, sweepers, round robins and ladders every week.", 1500,
+                "league", "plan.league", "League", "Twenty hosted events a month for a league or a bowling center: brackets, sweepers, round robins and ladders, with results kept for as long as the account is active.", 2000,
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["competition.host"] = 200
+                    ["competition.host"] = 20
                 },
                 "community"),
             Plan(
