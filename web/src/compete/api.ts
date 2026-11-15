@@ -2,8 +2,10 @@
 import { PaymentRequiredError, apiDelete, apiGet, apiPost, apiPut, type PreflightQuoteResponse } from '../api/client';
 import type { Competition } from './model';
 
-export interface FormatInfo { id: string; title: string; summary: string }
-export interface Formats { free_entrants: number; max_entrants: number; host_service: string; session_hours: number; formats: FormatInfo[] }
+/** `paired` formats open with head-to-head pairs, so the host can choose how seeds are paired. */
+export interface FormatInfo { id: string; title: string; summary: string; paired: boolean }
+export interface PairingInfo { id: string; title: string; summary: string }
+export interface Formats { free_entrants: number; max_entrants: number; host_service: string; session_hours: number; formats: FormatInfo[]; pairings: PairingInfo[] }
 /** One occasion holding several events; one hosting fee covers them all while `covered_until` is ahead. */
 export interface EventSession { id: string; title: string; created_at: string; covered_until: string | null }
 export interface EventSummary { id: string; title: string; format: string; status: EventStatus; created_at: string; entrants: number; session: string | null }
@@ -15,6 +17,7 @@ export interface HostedEvent extends Competition {
   format: string;
   status: EventStatus;
   host: boolean;
+  pairing: string;
   session: { id: string; title: string; covered: boolean } | null;
 }
 
@@ -36,8 +39,8 @@ export const register = (id: string, name: string) =>
 /** Host only: adds many entrants at once; names already registered are skipped. */
 export const addEntrants = (id: string, names: string[]) =>
   apiPost<{ added: number; skipped: number }>(`/v1/competitions/${encodeURIComponent(id)}/entrants/batch`, { names });
-/** Host only, before the start: reseed in a given order, draw at random, or change the format. */
-export const changeDraw = (id: string, change: { order?: string[]; shuffle?: boolean; format?: string }) =>
+/** Host only, before the start: reseed in a given order, draw at random, or change the format or the pairing. */
+export const changeDraw = (id: string, change: { order?: string[]; shuffle?: boolean; format?: string; pairing?: string }) =>
   apiPut<void>(`/v1/competitions/${encodeURIComponent(id)}/draw`, change);
 export const withdraw = (id: string, entrant: string) =>
   apiDelete(`/v1/competitions/${encodeURIComponent(id)}/entrants/${encodeURIComponent(entrant)}`);

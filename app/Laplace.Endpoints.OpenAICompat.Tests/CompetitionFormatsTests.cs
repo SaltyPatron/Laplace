@@ -10,23 +10,25 @@ public sealed class CompetitionFormatsTests
 
     private static int Seed(Guid entrant) => BitConverter.ToInt32(entrant.ToByteArray(), 0);
 
-    private static IReadOnlyList<MatchPlan> Plan(string format, int count) => CompetitionFormats.Find(format)!.Plan(Entrants(count));
+    private static IReadOnlyList<MatchPlan> Plan(string format, int count, string pairing = "seeded") =>
+        CompetitionFormats.Find(format)!.Plan(Entrants(count), Pairings.Find(pairing)!);
 
-    public static TheoryData<string, int> EveryFormatAndSize()
+    public static TheoryData<string, string, int> EveryFormatPairingAndSize()
     {
-        var data = new TheoryData<string, int>();
+        var data = new TheoryData<string, string, int>();
         foreach (var format in CompetitionFormats.All)
-            for (var count = 2; count <= 33; count++) data.Add(format.Id, count);
+            foreach (var pairing in Pairings.All.Take(format.Paired ? Pairings.All.Count : 1))
+                for (var count = 2; count <= 33; count++) data.Add(format.Id, pairing.Id, count);
         return data;
     }
 
     /// <summary>What must hold for the storage and the drawing whatever the format: unique ids, sources
     /// that precede the matches they feed, each finishing place consumed once, each entrant entered.</summary>
     [Theory]
-    [MemberData(nameof(EveryFormatAndSize))]
-    public void EveryPlanIsAWellFormedDag(string format, int count)
+    [MemberData(nameof(EveryFormatPairingAndSize))]
+    public void EveryPlanIsAWellFormedDag(string format, string pairing, int count)
     {
-        var plan = Plan(format, count);
+        var plan = Plan(format, count, pairing);
         var seen = new Dictionary<string, MatchPlan>();
         var consumed = new HashSet<(string, short)>();
         foreach (var match in plan)
@@ -62,6 +64,29 @@ public sealed class CompetitionFormatsTests
         Assert.All(plan.SelectMany(match => match.Slots), slot => Assert.NotEqual((short)2, slot.FromPlace));
         Assert.All(plan, match => Assert.All(match.Slots.Where(slot => slot.Entrant is not null),
             slot => Assert.Equal(1, plan.SelectMany(m => m.Slots).Count(s => s.Entrant == slot.Entrant))));
+    }
+
+    private static int[][] OpeningPairs(IReadOnlyList<MatchPlan> plan) => plan.Where(match => match.Round == 1 && match.Slots.All(slot => slot.Entrant is not null))
+        .Select(match => match.Slots.Select(slot => Seed(slot.Entrant!.Value)).ToArray()).ToArray();
+
+    [Fact]
+    public void EachPairingSetsTheOpeningRound()
+    {
+        Assert.Equal([[1, 8], [4, 5], [2, 7], [3, 6]], OpeningPairs(Plan("single_elimination", 8, "seeded")));
+        Assert.Equal([[1, 5], [2, 6], [3, 7], [4, 8]], OpeningPairs(Plan("single_elimination", 8, "split")));
+        Assert.Equal([[1, 2], [3, 4], [5, 6], [7, 8]], OpeningPairs(Plan("single_elimination", 8, "list")));
+        Assert.Equal([[1, 2], [3, 4], [5, 6], [7, 8]], OpeningPairs(Plan("double_elimination", 8, "list")));
+    }
+
+    /// <summary>With byes, nobody skips more than the opening round, whichever pairing is used.</summary>
+    [Theory]
+    [MemberData(nameof(EveryFormatPairingAndSize))]
+    public void AByeSkipsOnlyTheOpeningRound(string format, string pairing, int count)
+    {
+        if (format != "single_elimination") return;
+        var plan = Plan(format, count, pairing);
+        Assert.Equal(count - 1, plan.Count);
+        Assert.All(plan.Where(match => match.Slots.Any(slot => slot.Entrant is not null)), match => Assert.InRange(match.Round, 1, 2));
     }
 
     [Fact]

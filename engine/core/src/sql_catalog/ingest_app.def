@@ -478,6 +478,11 @@ SQL_QUERY("competition.register_many", "uuid,text,uuid[],text[],int4",
     "WHERE c.competition_id=$1 AND c.tenant=$2 AND c.status='registration' "
     "AND n.ord<=$5-(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id) "
     "ON CONFLICT DO NOTHING")
+SQL_QUERY("competition.pairing", "uuid",
+    "SELECT pairing FROM app.competition_draws WHERE competition_id=$1")
+SQL_QUERY("competition.put_pairing", "uuid,text",
+    "INSERT INTO app.competition_draws(competition_id,pairing) VALUES($1,$2) "
+    "ON CONFLICT (competition_id) DO UPDATE SET pairing=EXCLUDED.pairing")
 SQL_QUERY("competition.reformat", "uuid,text",
     "UPDATE app.competitions SET format=$2 WHERE competition_id=$1 AND status='registration'")
 SQL_QUERY("competition.withdraw", "uuid,uuid,text",
