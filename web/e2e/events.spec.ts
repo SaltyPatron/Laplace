@@ -41,6 +41,14 @@ test('a host creates an event, people register, and results fill the bracket', a
   await page.getByRole('button', { name: 'Draw at random' }).click();
   await expect(opener).toContainText('Devon Pike');
 
+  await page.getByLabel('Pairing').selectOption('list');
+  await expect(opener).toContainText('Blake Rivers');
+  await page.getByRole('button', { name: 'Reverse the order' }).click();
+  await expect(opener).toContainText('Casey Lane');
+  await page.getByRole('button', { name: 'Reverse the order' }).click();
+  await page.getByLabel('Pairing').selectOption('seeded');
+  await expect(opener).toContainText('Devon Pike');
+
   await page.getByRole('button', { name: 'Start event' }).click();
   const final = page.getByRole('article', { name: 'Final', exact: true });
   await expect(final).toContainText('Winner of Semifinal 1');

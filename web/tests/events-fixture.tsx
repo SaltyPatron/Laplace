@@ -10,7 +10,7 @@ import '../src/ui/theme.css';
 
 interface Slot { entrant: string | null; from: { match: string; place: number } | null; score: string | null; place: number | null }
 interface Match { id: string; stage: string; round: number; name: string; state: 'scheduled' | 'final'; slots: Slot[] }
-interface Event { id: string; title: string; format: string; status: 'registration' | 'running'; session?: string | null; entrants: { id: string; name: string; seed: number | null }[]; matches: Match[] }
+interface Event { id: string; title: string; format: string; status: 'registration' | 'running'; session?: string | null; pairing?: string; entrants: { id: string; name: string; seed: number | null }[]; matches: Match[] }
 
 const params = new URLSearchParams(location.search);
 const FREE = 8;
@@ -27,8 +27,8 @@ function draw(event: Event): Match[] {
   if (event.entrants.length !== 4) return [];
   const [a, b, c, d] = event.entrants.map((e) => e.id);
   return [
-    { id: 'r1m1', stage: 'main', round: 1, name: 'Semifinal 1', state: 'scheduled', slots: [entry(a), entry(d)] },
-    { id: 'r1m2', stage: 'main', round: 1, name: 'Semifinal 2', state: 'scheduled', slots: [entry(b), entry(c)] },
+    { id: 'r1m1', stage: 'main', round: 1, name: 'Semifinal 1', state: 'scheduled', slots: event.pairing === 'list' ? [entry(a), entry(b)] : [entry(a), entry(d)] },
+    { id: 'r1m2', stage: 'main', round: 1, name: 'Semifinal 2', state: 'scheduled', slots: event.pairing === 'list' ? [entry(c), entry(d)] : [entry(b), entry(c)] },
     { id: 'r2m1', stage: 'main', round: 2, name: 'Final', state: 'scheduled', slots: [winner('r1m1'), winner('r1m2')] },
   ];
 }
@@ -47,8 +47,11 @@ window.fetch = async (input, init) => {
   const parts = path.split('/').filter(Boolean).slice(2);
   if (path === '/v1/competitions/formats') {
     return json({ free_entrants: FREE, max_entrants: 256, host_service: 'competition.host', session_hours: 24, formats: [
-      { id: 'single_elimination', title: 'Single elimination', summary: 'Lose once and you are out. Top seeds get the byes.' },
-      { id: 'round_robin', title: 'Round robin', summary: 'Everyone plays everyone once.' },
+      { id: 'single_elimination', title: 'Single elimination', summary: 'Lose once and you are out.', paired: true },
+      { id: 'round_robin', title: 'Round robin', summary: 'Everyone plays everyone once.', paired: false },
+    ], pairings: [
+      { id: 'seeded', title: 'Top against bottom', summary: '1 plays the last seed.' },
+      { id: 'list', title: 'As listed', summary: '1 plays 2, 3 plays 4.' },
     ] });
   }
   if (path === '/v1/competitions/sessions' && method === 'GET') return json({ sessions });
@@ -70,7 +73,7 @@ window.fetch = async (input, init) => {
   if (!event) return refuse(404, 'competition_not_found', 'No such event exists.');
   if (parts.length === 1 && method === 'GET') {
     const held = sessions.find((s) => s.id === event.session);
-    return json({ ...event, session: held ? { id: held.id, title: held.title, covered: false } : null, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
+    return json({ ...event, pairing: event.pairing ?? 'seeded', session: held ? { id: held.id, title: held.title, covered: false } : null, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
       stages: [{ id: 'main', title: 'Bracket', rounds: ['Semifinals', 'Final'] }] });
   }
   if (parts.length === 1 && method === 'DELETE') { events.delete(event.id); return new Response(null, { status: 204 }); }
@@ -84,6 +87,7 @@ window.fetch = async (input, init) => {
   }
   if (parts[1] === 'draw' && method === 'PUT') {
     if (body.format) event.format = body.format;
+    if (body.pairing) event.pairing = body.pairing;
     if (body.order) event.entrants = (body.order as string[]).map((id) => event.entrants.find((e) => e.id === id)!);
     if (body.shuffle) [event.entrants[1], event.entrants[3]] = [event.entrants[3], event.entrants[1]];
     return new Response(null, { status: 204 });

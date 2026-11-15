@@ -40,7 +40,8 @@ internal static class CompetitionEndpoints
             max_entrants = MaxEntrants,
             host_service = HostService,
             session_hours = SessionHours,
-            formats = CompetitionFormats.All.Select(format => new { id = format.Id, title = format.Title, summary = format.Summary }),
+            formats = CompetitionFormats.All.Select(format => new { id = format.Id, title = format.Title, summary = format.Summary, paired = format.Paired }),
+            pairings = Pairings.All.Select(pairing => new { id = pairing.Id, title = pairing.Title, summary = pairing.Summary }),
         })).WithTags("competitions");
 
         app.MapGet("/v1/competitions", async (HttpContext http, ITenantResolver resolver,
@@ -138,10 +139,11 @@ internal static class CompetitionEndpoints
                         reader.IsDBNull(10) ? null : reader.GetInt16(10)));
                 }
 
+            var pairing = await PairingAsync(connection, null, id, ct);
             var format = CompetitionFormats.Find(formatId);
             // While registration is open nothing is stored yet: show the draw as it would be made now.
             if (status == "registration" && format is not null && entrants.Count >= 2)
-                matches.AddRange(format.Plan(entrants.Select(entrant => entrant.Id).ToArray()).Select(match => new MatchView(
+                matches.AddRange(format.Plan(entrants.Select(entrant => entrant.Id).ToArray(), pairing).Select(match => new MatchView(
                     match.Id, match.Stage, match.Round, match.Name, "scheduled",
                     match.Slots.Select(slot => new SlotView(slot.Entrant,
                         slot.FromMatch is null ? null : new SourceView(slot.FromMatch, slot.FromPlace ?? 1), null, null)).ToList())));
@@ -167,7 +169,7 @@ internal static class CompetitionEndpoints
             var signedIn = !auth.Value.RequiresIdentity || caller.AuthKind is "browser" or "api_key" or "dev";
             return Results.Ok(new
             {
-                id, title, format = formatId, status, session,
+                id, title, format = formatId, status, session, pairing = pairing.Id,
                 host = signedIn && string.Equals(caller.TenantId, owner, StringComparison.Ordinal),
                 entrants = entrants.Select(entrant => new { id = entrant.Id, name = entrant.Name, seed = entrant.Seed }),
                 stages = format?.Stages(rounds).Select(stage => new { id = stage.Id, title = stage.Title, rounds = stage.Rounds }),
@@ -222,6 +224,8 @@ internal static class CompetitionEndpoints
         {
             var format = request.Format is null ? null : CompetitionFormats.Find(request.Format);
             if (request.Format is not null && format is null) return Error(400, "invalid_format", "Choose one of the listed formats.");
+            var pairing = request.Pairing is null ? null : Pairings.Find(request.Pairing);
+            if (request.Pairing is not null && pairing is null) return Error(400, "invalid_pairing", "Choose one of the listed pairings.");
             var tenant = (await resolver.ResolveAsync(http, ct)).TenantId;
             await using var connection = await application.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
@@ -230,6 +234,9 @@ internal static class CompetitionEndpoints
 
             if (format is not null)
                 await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.reformat", id, format.Id))
+                    await command.ExecuteNonQueryAsync(ct);
+            if (pairing is not null)
+                await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.put_pairing", id, pairing.Id))
                     await command.ExecuteNonQueryAsync(ct);
             if (request.Order is not null || request.Shuffle)
             {
@@ -298,7 +305,7 @@ internal static class CompetitionEndpoints
                         : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             }
 
-            var plan = format.Plan(entrants);
+            var plan = format.Plan(entrants, await PairingAsync(connection, transaction, id, ct));
             var slots = plan.SelectMany(match => match.Slots.Select((slot, position) => (match.Id, Position: (short)position, slot))).ToArray();
             await using (var command = NpgsqlCatalog.Command(connection, transaction, "competition.seed", id, entrants.ToArray()))
                 await command.ExecuteNonQueryAsync(ct);
@@ -374,6 +381,14 @@ internal static class CompetitionEndpoints
         return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
+    /// <summary>The pairing the host chose, or the default when none was chosen or it is no longer offered.</summary>
+    private static async Task<IPairing> PairingAsync(
+        Npgsql.NpgsqlConnection connection, Npgsql.NpgsqlTransaction? transaction, Guid id, CancellationToken ct)
+    {
+        await using var command = NpgsqlCatalog.Command(connection, transaction, "competition.pairing", id);
+        return Pairings.Find(await command.ExecuteScalarAsync(ct) as string) ?? Pairings.Default;
+    }
+
     private static string? Clean(string? text, int max)
     {
         var value = text?.Trim();
@@ -392,7 +407,7 @@ internal static class CompetitionEndpoints
     internal sealed record NewSession(string? Title);
     internal sealed record NewEntrant(string? Name);
     internal sealed record NewEntrants(string?[]? Names);
-    internal sealed record DrawChange(Guid[]? Order, bool Shuffle, string? Format);
+    internal sealed record DrawChange(Guid[]? Order, bool Shuffle, string? Format, string? Pairing);
     internal sealed record MatchResult(SlotResult[]? Slots);
     internal sealed record SlotResult(string? Score, short Place);
 }

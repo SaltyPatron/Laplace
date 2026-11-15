@@ -643,3 +643,9 @@ CREATE TABLE IF NOT EXISTS app.competition_session_events (
 );
 CREATE INDEX IF NOT EXISTS competition_session_events_session
     ON app.competition_session_events (session_id);
+
+-- How the host chose to pair the opening round. An event without a row uses the default pairing.
+CREATE TABLE IF NOT EXISTS app.competition_draws (
+    competition_id uuid PRIMARY KEY REFERENCES app.competitions(competition_id) ON DELETE CASCADE,
+    pairing        text NOT NULL CHECK (char_length(pairing) BETWEEN 1 AND 40)
+);

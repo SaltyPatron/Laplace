@@ -43,6 +43,8 @@ export function HostSetup({ event, refresh }: { event: HostedEvent; refresh: () 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const free = formats.data?.free_entrants;
   const count = event.entrants.length;
+  const paired = formats.data?.formats.find((each) => each.id === event.format)?.paired;
+  const pairing = formats.data?.pairings.find((each) => each.id === event.pairing);
   const change = (action: () => Promise<unknown>) => void hosting.run(async () => { await action(); await refresh(); });
 
   function move(index: number, by: number) {
@@ -91,7 +93,18 @@ export function HostSetup({ event, refresh }: { event: HostedEvent; refresh: () 
               {!formats.data && <option value={event.format}>{event.format}</option>}
             </Select>
           </Field>
+          {paired && (
+            <Field label="Pairing" help={pairing?.summary}>
+              <Select value={event.pairing} disabled={hosting.busy} onChange={(picked) => change(() => changeDraw(event.id, { pairing: picked.target.value }))}>
+                {formats.data?.pairings.map((each) => <option key={each.id} value={each.id}>{each.title}</option>)}
+              </Select>
+            </Field>
+          )}
+        </div>
+        <div className={styles.actions}>
           <Button variant="ghost" disabled={hosting.busy || count < 2} onClick={() => change(() => changeDraw(event.id, { shuffle: true }))}>Draw at random</Button>
+          <Button variant="ghost" disabled={hosting.busy || count < 2}
+            onClick={() => change(() => changeDraw(event.id, { order: event.entrants.map((entrant) => entrant.id).reverse() }))}>Reverse the order</Button>
         </div>
         <ShareLink />
         <p>Starting closes registration and fixes the matches as drawn above.</p>
