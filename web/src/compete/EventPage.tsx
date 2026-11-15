@@ -1,0 +1,154 @@
+import { useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, useReadResource } from '@ui';
+import { plainMessage } from '../api/client';
+import { useAppStore } from '../store';
+import { deleteEvent, readEvent, readFormats, register, startEvent, withdraw, type HostedEvent } from './api';
+import { CompetitionView } from './CompetitionView';
+import { ResultEntry } from './ResultEntry';
+import type { Match } from './model';
+import styles from './Events.module.css';
+
+/** One event, for whoever has its link: register while it is open, follow it once it is under way. The host also runs it. */
+export function EventPage() {
+  const { id = '' } = useParams();
+  const { tenant, authUser } = useAppStore();
+  const event = useReadResource({
+    key: JSON.stringify(['event', id, tenant, authUser?.id]), refreshMs: 15000,
+    read: (signal) => readEvent(id, signal),
+  });
+  if (!event.data) return <Panel title="Event"><ReadStatus label="Event" resource={event} /></Panel>;
+  return event.data.status === 'registration'
+    ? <Registration event={event.data} refresh={event.refresh} />
+    : <UnderWay event={event.data} refresh={event.refresh} />;
+}
+
+interface StageProps { event: HostedEvent; refresh: () => Promise<void> }
+
+/** Runs one request at a time and keeps its failure in view. */
+function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const pending = useRef(false);
+  async function run(action: () => Promise<void>) {
+    if (pending.current) return;
+    pending.current = true; setBusy(true); setError('');
+    try { await action(); } catch (failure) { setError(plainMessage(failure)); } finally { pending.current = false; setBusy(false); }
+  }
+  return { busy, error, run };
+}
+
+function ShareLink() {
+  const [copied, setCopied] = useState(false);
+  const link = window.location.href;
+  return (
+    <div className={styles.share}>
+      <Field label="Share this link"><Input readOnly value={link} onFocus={(focus) => focus.target.select()} /></Field>
+      <Button variant="ghost" onClick={() => { void navigator.clipboard?.writeText(link).then(() => setCopied(true)); }}>
+        {copied ? 'Copied' : 'Copy link'}
+      </Button>
+    </div>
+  );
+}
+
+function Registration({ event, refresh }: StageProps) {
+  const { tenant, authUser } = useAppStore();
+  const formats = useReadResource({ key: `event-formats ${JSON.stringify([tenant, authUser?.id])}`, enabled: event.host, read: readFormats });
+  const navigate = useNavigate();
+  const joining = useAction();
+  const hosting = useAction();
+  const [name, setName] = useState('');
+  const [joined, setJoined] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const free = formats.data?.free_entrants;
+  const count = event.entrants.length;
+
+  return (
+    <div className={styles.page}>
+      <Panel title={event.title}>
+        <p>Registration is open. {count === 0 ? 'Nobody has registered yet.' : `${count} registered so far.`}</p>
+        <form className={styles.join} onSubmit={(submit) => {
+          submit.preventDefault();
+          const entered = name.trim();
+          if (entered) void joining.run(async () => { await register(event.id, entered); setJoined(entered); setName(''); await refresh(); });
+        }}>
+          <Field label="Your name"><Input value={name} maxLength={60} required autoComplete="name" onChange={(change) => setName(change.target.value)} /></Field>
+          <Button type="submit" loading={joining.busy} disabled={joining.busy || !name.trim()}>Register</Button>
+        </form>
+        {joined && !joining.error && <p role="status">{joined} is registered.</p>}
+        {joining.error && <ErrorText role="alert">{joining.error}</ErrorText>}
+      </Panel>
+
+      <Panel title={`Entrants (${count})`}>
+        {count === 0 ? <Muted>Share the link and entrants will appear here as they register.</Muted> : (
+          <ol className={styles.entrants}>
+            {event.entrants.map((entrant) => (
+              <li key={entrant.id}>
+                <span>{entrant.name}</span>
+                {event.host && (
+                  <Button variant="ghost" size="sm" disabled={hosting.busy} aria-label={`Remove ${entrant.name}`}
+                    onClick={() => void hosting.run(async () => { await withdraw(event.id, entrant.id); await refresh(); })}>Remove</Button>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </Panel>
+
+      {event.host && (
+        <Panel title="Run this event">
+          <ShareLink />
+          <p>Entrants are seeded in the order they registered. Starting closes registration and builds the matches.</p>
+          {free != null && (count > free
+            ? <p>This event is over the free size of {free}. Starting it takes the flat hosting fee, unless this workspace is on the League plan.</p>
+            : <Muted>Free to host up to {free} entrants.</Muted>)}
+          <div className={styles.actions}>
+            <Button loading={hosting.busy} disabled={hosting.busy || count < 2 || !formats.data}
+              onClick={() => void hosting.run(async () => {
+                if (await startEvent(event.id, formats.data?.host_service ?? '') === 'started') await refresh();
+              })}>Start event</Button>
+            <Button variant="ghost" disabled={hosting.busy} onClick={() => setConfirmDelete(true)}>Delete event…</Button>
+          </div>
+          {count < 2 && <Muted>An event needs at least two entrants.</Muted>}
+          {hosting.error && <ErrorText role="alert">{hosting.error}</ErrorText>}
+          <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title={`Delete ${event.title}?`} actions={<>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+            <Button loading={hosting.busy} onClick={() => void hosting.run(async () => { await deleteEvent(event.id); navigate('/events'); })}>Delete event</Button>
+          </>}>
+            <p>The event and its registrations are removed and its link stops working. This cannot be undone.</p>
+          </Modal>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function UnderWay({ event, refresh }: StageProps) {
+  const [scoring, setScoring] = useState<Match | null>(null);
+  const ready = event.matches.filter((match) => match.slots.every((slot) => slot.entrant != null));
+  const open = ready.filter((match) => match.state !== 'final');
+  const names = new Map(event.entrants.map((entrant) => [entrant.id, entrant.name]));
+  const pairing = (match: Match) => match.slots.map((slot) => names.get(slot.entrant ?? '') ?? '').join(' v ');
+  return (
+    <div className={styles.page}>
+      <Panel><CompetitionView competition={event} /></Panel>
+      {event.host && (
+        <Panel title="Enter results">
+          {open.length === 0 && <Muted>{ready.length === event.matches.length ? 'Every match has a result.' : 'No match is waiting for a result right now.'}</Muted>}
+          <ul className={styles.results}>
+            {ready.map((match) => (
+              <li key={match.id} data-final={match.state === 'final' || undefined}>
+                <span><strong>{match.name ?? match.id}</strong> · {pairing(match)}</span>
+                <Button variant={match.state === 'final' ? 'ghost' : 'primary'} size="sm" onClick={() => setScoring(match)}>
+                  {match.state === 'final' ? 'Change result' : 'Enter result'}
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <ShareLink />
+        </Panel>
+      )}
+      {scoring && <ResultEntry event={event} match={scoring} onClose={() => setScoring(null)} onSaved={async () => { setScoring(null); await refresh(); }} />}
+    </div>
+  );
+}

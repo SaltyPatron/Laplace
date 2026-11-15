@@ -1,0 +1,64 @@
+/** Hosted events: the calls a host and a visitor with the link make. */
+import { PaymentRequiredError, apiDelete, apiGet, apiPost, apiPut, type PreflightQuoteResponse } from '../api/client';
+import type { Competition } from './model';
+
+export interface FormatInfo { id: string; title: string; summary: string }
+export interface Formats { free_entrants: number; max_entrants: number; host_service: string; formats: FormatInfo[] }
+export interface EventSummary { id: string; title: string; format: string; status: EventStatus; created_at: string; entrants: number }
+export type EventStatus = 'registration' | 'running';
+
+/** An event as the server gives it: the competition, plus whether this viewer hosts it. */
+export interface HostedEvent extends Competition {
+  id: string;
+  format: string;
+  status: EventStatus;
+  host: boolean;
+}
+
+export const readFormats = (signal?: AbortSignal) => apiGet<Formats>('/v1/competitions/formats', { signal });
+export const readEvents = (signal?: AbortSignal) => apiGet<{ competitions: EventSummary[] }>('/v1/competitions', { signal });
+
+export async function readEvent(id: string, signal?: AbortSignal): Promise<HostedEvent> {
+  const event = await apiGet<HostedEvent>(`/v1/competitions/${encodeURIComponent(id)}`, { signal });
+  return { ...event, stages: event.stages ?? [], standings: event.standings ?? [] };
+}
+
+export const createEvent = (title: string, format: string) => apiPost<{ id: string }>('/v1/competitions', { title, format });
+export const deleteEvent = (id: string) => apiDelete(`/v1/competitions/${encodeURIComponent(id)}`);
+export const register = (id: string, name: string) =>
+  apiPost<{ id: string; name: string }>(`/v1/competitions/${encodeURIComponent(id)}/entrants`, { name });
+export const withdraw = (id: string, entrant: string) =>
+  apiDelete(`/v1/competitions/${encodeURIComponent(id)}/entrants/${encodeURIComponent(entrant)}`);
+export const recordResult = (id: string, match: string, slots: { score: string | null; place: number }[]) =>
+  apiPut<void>(`/v1/competitions/${encodeURIComponent(id)}/matches/${encodeURIComponent(match)}/result`, { slots });
+
+// The hosting quote a host paid for, kept until the event it was bought for has started.
+const quoteKey = (id: string) => `laplace.event-quote.${id}`;
+function storedQuote(id: string): string | null {
+  try { return localStorage.getItem(quoteKey(id)); } catch { return null; }
+}
+function keepQuote(id: string, quote: string | null): void {
+  try { if (quote) localStorage.setItem(quoteKey(id), quote); else localStorage.removeItem(quoteKey(id)); } catch { /* Storage is optional. */ }
+}
+
+/**
+ * Starts the event. A free-size event, a workspace on a plan, or a paid quote starts at once.
+ * Otherwise the host is sent to checkout for the hosting fee and starts the event on return.
+ */
+export async function startEvent(id: string, service: string): Promise<'started' | 'checkout'> {
+  const quote = storedQuote(id);
+  try {
+    await apiPost(`/v1/competitions/${encodeURIComponent(id)}/start`, {}, quote ? { quoteId: quote } : {});
+    keepQuote(id, null);
+    return 'started';
+  } catch (failure) {
+    if (!(failure instanceof PaymentRequiredError)) throw failure;
+    const fresh = await apiPost<PreflightQuoteResponse>('/v1/billing/preflight', { service_id: service, units: 1 });
+    keepQuote(id, fresh.quote_id);
+    if (!fresh.stripe_checkout_url) {
+      throw new Error('This event is larger than the free size, and checkout is not set up on this host.');
+    }
+    window.location.assign(fresh.stripe_checkout_url);
+    return 'checkout';
+  }
+}

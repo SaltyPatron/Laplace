@@ -49,6 +49,11 @@ export const NAV: NavItem[] = [
   { id: 'ask', label: 'Ask', path: '/chat', icon: 'chat', description: 'Ask a question; every answer cites its sources.', owns: ['/chat'] },
   { id: 'data', label: 'My data', path: '/data', icon: 'upload', description: 'Add your own files and see them decomposed.', owns: ['/data'] },
   {
+    id: 'events', label: 'Events', path: '/events', icon: 'trophy',
+    description: 'Host a tournament, league or sweeper and share one link.',
+    owns: ['/events'],
+  },
+  {
     id: 'chess', label: 'Chess', path: '/chess', icon: 'chess',
     description: 'Players, games, and playing against Laplace.',
     owns: ['/chess', '/play', '/lab'],

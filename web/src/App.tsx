@@ -23,6 +23,7 @@ const loadExplore = () => import('./explore/ExploreView');
 const loadForwardProof = () => import('./forward/ForwardProofView');
 const loadOperator = () => import('./admin/AdminView');
 const loadData = () => import('./data/DataView');
+const loadEvents = () => import('./compete/EventsView');
 
 const ChatView = lazy(() => loadChat().then((m) => ({ default: m.ChatView })));
 const BillingView = lazy(() => loadBilling().then((m) => ({ default: m.BillingView })));
@@ -35,6 +36,7 @@ const ExploreView = lazy(() => loadExplore().then((m) => ({ default: m.ExploreVi
 const ForwardProofView = lazy(() => loadForwardProof().then((m) => ({ default: m.ForwardProofView })));
 const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
+const EventsView = lazy(() => loadEvents().then((m) => ({ default: m.EventsView })));
 
 function Shell() {
   const { tenant, setTenant, authReady, authUser, authProviders, devPrincipal, servicePrincipal, setAuth } = useAppStore();
@@ -84,6 +86,7 @@ function Shell() {
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<ExploreView page="query" />} />
           <Route path="/data" element={<DataView />} />
+          <Route path="/events/*" element={<EventsView />} />
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/topic" element={<ExploreView page="topic" />} />
           <Route path="/topic/:ref" element={<ExploreView page="topic" />} />

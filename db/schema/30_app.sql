@@ -616,9 +616,9 @@ CREATE TABLE IF NOT EXISTS app.competition_slots (
     FOREIGN KEY (competition_id, match_id)
         REFERENCES app.competition_matches(competition_id, match_id) ON DELETE CASCADE,
     FOREIGN KEY (competition_id, entrant_id)
-        REFERENCES app.competition_entrants(competition_id, entrant_id),
+        REFERENCES app.competition_entrants(competition_id, entrant_id) ON DELETE CASCADE,
     FOREIGN KEY (competition_id, from_match)
-        REFERENCES app.competition_matches(competition_id, match_id),
+        REFERENCES app.competition_matches(competition_id, match_id) ON DELETE CASCADE,
     CHECK ((from_match IS NULL) = (from_place IS NULL))
 );
 CREATE INDEX IF NOT EXISTS competition_slots_source
