@@ -23,6 +23,13 @@
       "status": "stripe_not_configured"
     },
     {
+      "service_id": "competition.host",
+      "lookup_key": "laplace_competition_host_event_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
       "service_id": "completions",
       "lookup_key": "laplace_completions_request_usd",
       "stripe_price_id": null,
@@ -81,6 +88,13 @@
     {
       "service_id": "plan.enterprise",
       "lookup_key": "laplace_plan_enterprise_month_usd",
+      "stripe_price_id": null,
+      "stripe_product_id": null,
+      "status": "stripe_not_configured"
+    },
+    {
+      "service_id": "plan.league",
+      "lookup_key": "laplace_plan_league_month_usd",
       "stripe_price_id": null,
       "stripe_product_id": null,
       "status": "stripe_not_configured"

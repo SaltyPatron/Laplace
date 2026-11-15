@@ -192,6 +192,7 @@ internal sealed class ApiKeyEnforcementMiddleware
             await Reject(context, "invalid_api_key", "The provided API key is unknown, malformed, or revoked."); return;
         }
         if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !PublicRead(request, path)
+            && !CompetitionEndpoints.IsPublic(request, path)
             && !(path.Equals("/v1/op", StringComparison.OrdinalIgnoreCase) && OperatorAuth.HasCredential(request, _options)))
         {
             await Reject(context, "authentication_required", "Sign in or provide a Laplace API key for this workspace."); return;

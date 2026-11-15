@@ -3,6 +3,34 @@
   "billing_enforced": true,
   "data": [
     {
+      "plan_id": "league",
+      "service_id": "plan.league",
+      "name": "League",
+      "description": "Unlimited hosted events for a league or a bowling center: brackets, sweepers, round robins and ladders every week.",
+      "monthly_price_cents": 1500,
+      "currency": "usd",
+      "monthly_credits": {
+        "competition.host": 200
+      },
+      "included_product_ids": [
+        "laplace.audit",
+        "laplace.competition",
+        "laplace.embedding",
+        "laplace.explainability",
+        "laplace.generation",
+        "laplace.inference.chat",
+        "laplace.inference.completion",
+        "laplace.inspection",
+        "laplace.neighbors",
+        "laplace.recipe",
+        "laplace.search",
+        "laplace.synthesis",
+        "laplace.visualization"
+      ],
+      "support_tier": "community",
+      "active": true
+    },
+    {
       "plan_id": "developer",
       "service_id": "plan.developer",
       "name": "Developer",
@@ -19,6 +47,7 @@
       },
       "included_product_ids": [
         "laplace.audit",
+        "laplace.competition",
         "laplace.embedding",
         "laplace.explainability",
         "laplace.generation",
@@ -54,6 +83,7 @@
       },
       "included_product_ids": [
         "laplace.audit",
+        "laplace.competition",
         "laplace.embedding",
         "laplace.explainability",
         "laplace.generation",
@@ -90,6 +120,7 @@
       },
       "included_product_ids": [
         "laplace.audit",
+        "laplace.competition",
         "laplace.embedding",
         "laplace.explainability",
         "laplace.generation",

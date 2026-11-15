@@ -562,3 +562,65 @@ BEGIN
     END LOOP;
 END $$;
 
+
+-- Competitions: an event a workspace hosts, the entrants who register for it, and its matches.
+-- A slot of a match is filled by an entrant directly or by a finishing place in an earlier match
+-- (from_match, from_place); recording a result carries each finisher into the slots that name it.
+-- Entry fees and prizes are never recorded here: the host's workspace pays only to host.
+CREATE TABLE IF NOT EXISTS app.competitions (
+    competition_id uuid PRIMARY KEY,
+    tenant         text NOT NULL REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
+    title          text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
+    format         text NOT NULL CHECK (char_length(format) BETWEEN 1 AND 40),
+    status         text NOT NULL DEFAULT 'registration' CHECK (status IN ('registration', 'running')),
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    started_at     timestamptz,
+    CHECK ((status = 'running') = (started_at IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS competitions_tenant
+    ON app.competitions (tenant, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS app.competition_entrants (
+    competition_id uuid NOT NULL REFERENCES app.competitions(competition_id) ON DELETE CASCADE,
+    entrant_id     uuid NOT NULL,
+    name           text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
+    seed           integer CHECK (seed > 0),
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (competition_id, entrant_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS competition_entrants_name
+    ON app.competition_entrants (competition_id, lower(name));
+
+CREATE TABLE IF NOT EXISTS app.competition_matches (
+    competition_id uuid NOT NULL REFERENCES app.competitions(competition_id) ON DELETE CASCADE,
+    match_id       text NOT NULL,
+    ordinal        integer NOT NULL,
+    stage          text NOT NULL,
+    round          integer NOT NULL CHECK (round > 0),
+    name           text NOT NULL,
+    state          text NOT NULL DEFAULT 'scheduled' CHECK (state IN ('scheduled', 'final')),
+    PRIMARY KEY (competition_id, match_id),
+    UNIQUE (competition_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS app.competition_slots (
+    competition_id uuid NOT NULL,
+    match_id       text NOT NULL,
+    slot           smallint NOT NULL CHECK (slot >= 0),
+    entrant_id     uuid,
+    from_match     text,
+    from_place     smallint CHECK (from_place > 0),
+    score          text CHECK (char_length(score) <= 16),
+    place          smallint CHECK (place > 0),
+    PRIMARY KEY (competition_id, match_id, slot),
+    FOREIGN KEY (competition_id, match_id)
+        REFERENCES app.competition_matches(competition_id, match_id) ON DELETE CASCADE,
+    FOREIGN KEY (competition_id, entrant_id)
+        REFERENCES app.competition_entrants(competition_id, entrant_id),
+    FOREIGN KEY (competition_id, from_match)
+        REFERENCES app.competition_matches(competition_id, match_id),
+    CHECK ((from_match IS NULL) = (from_place IS NULL))
+);
+CREATE INDEX IF NOT EXISTS competition_slots_source
+    ON app.competition_slots (competition_id, from_match)
+    WHERE from_match IS NOT NULL;

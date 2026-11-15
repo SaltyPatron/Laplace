@@ -30,6 +30,24 @@
       ]
     },
     {
+      "product_id": "laplace.competition",
+      "name": "Laplace Competition Hosting",
+      "description": "Host a tournament, league or sweeper of any format: a shareable link, self-registration, brackets and results. Small events are free; the fee is for hosting only and never touches entry fees or prizes.",
+      "category": "competition",
+      "prices": [
+        {
+          "service_id": "competition.host",
+          "unit": "event",
+          "unit_price_cents": 500,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_competition_host_event_usd",
+          "metered": false,
+          "recurring_interval": null
+        }
+      ]
+    },
+    {
       "product_id": "laplace.embedding",
       "name": "Laplace Structural Embedding",
       "description": "Native 4-D S^3 structural coordinate for content (structural, not a learned semantic vector).",
@@ -188,6 +206,16 @@
           "base_fee_cents": 0,
           "currency": "usd",
           "lookup_key": "laplace_plan_enterprise_month_usd",
+          "metered": false,
+          "recurring_interval": "month"
+        },
+        {
+          "service_id": "plan.league",
+          "unit": "month",
+          "unit_price_cents": 1500,
+          "base_fee_cents": 0,
+          "currency": "usd",
+          "lookup_key": "laplace_plan_league_month_usd",
           "metered": false,
           "recurring_interval": "month"
         },
