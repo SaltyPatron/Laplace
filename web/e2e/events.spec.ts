@@ -29,6 +29,18 @@ test('a host creates an event, people register, and results fill the bracket', a
   await expect(page.getByRole('heading', { name: 'Entrants (4)' })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
+  // The draw is on the page before the start, and the host can reseed it.
+  const opener = page.getByRole('article', { name: 'Semifinal 1' });
+  await expect(opener).toContainText('Devon Pike');
+  await page.getByRole('button', { name: 'Move Devon Pike up' }).click();
+  await expect(opener).toContainText('Casey Lane');
+  await page.getByRole('button', { name: 'Move Devon Pike down' }).click();
+  await expect(opener).toContainText('Devon Pike');
+  await page.getByRole('button', { name: 'Draw at random' }).click();
+  await expect(opener).toContainText('Blake Rivers');
+  await page.getByRole('button', { name: 'Draw at random' }).click();
+  await expect(opener).toContainText('Devon Pike');
+
   await page.getByRole('button', { name: 'Start event' }).click();
   const final = page.getByRole('article', { name: 'Final', exact: true });
   await expect(final).toContainText('Winner of Semifinal 1');
@@ -63,4 +75,15 @@ test('an event over the free size says it needs the hosting fee before it starts
   await page.getByRole('button', { name: 'Start event' }).click();
   await expect(page.getByRole('alert')).toHaveText('This event is larger than the free size, and checkout is not set up on this host.');
   await expect(page.getByRole('heading', { name: 'Big sweeper' })).toBeVisible();
+});
+
+test('a host fills the field from a list and sees the draw', async ({ page }) => {
+  await page.goto('/tests/events.html');
+  await page.getByLabel('Title').fill('Roll-off');
+  await page.getByRole('button', { name: 'Create event' }).click();
+  await expect(page.getByText('The draw appears here once two entrants have registered.')).toBeVisible();
+  await page.getByLabel('Add entrants, one name per line').fill('Avery Stone\nBlake Rivers\nCasey Lane\nDevon Pike\navery stone');
+  await page.getByRole('button', { name: 'Add entrants' }).click();
+  await expect(page.getByText('4 added, 1 skipped as already registered or over the limit.')).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Final', exact: true })).toContainText('Winner of Semifinal 2');
 });

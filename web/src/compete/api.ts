@@ -27,6 +27,12 @@ export const createEvent = (title: string, format: string) => apiPost<{ id: stri
 export const deleteEvent = (id: string) => apiDelete(`/v1/competitions/${encodeURIComponent(id)}`);
 export const register = (id: string, name: string) =>
   apiPost<{ id: string; name: string }>(`/v1/competitions/${encodeURIComponent(id)}/entrants`, { name });
+/** Host only: adds many entrants at once; names already registered are skipped. */
+export const addEntrants = (id: string, names: string[]) =>
+  apiPost<{ added: number; skipped: number }>(`/v1/competitions/${encodeURIComponent(id)}/entrants/batch`, { names });
+/** Host only, before the start: reseed in a given order, draw at random, or change the format. */
+export const changeDraw = (id: string, change: { order?: string[]; shuffle?: boolean; format?: string }) =>
+  apiPut<void>(`/v1/competitions/${encodeURIComponent(id)}/draw`, change);
 export const withdraw = (id: string, entrant: string) =>
   apiDelete(`/v1/competitions/${encodeURIComponent(id)}/entrants/${encodeURIComponent(entrant)}`);
 export const recordResult = (id: string, match: string, slots: { score: string | null; place: number }[]) =>

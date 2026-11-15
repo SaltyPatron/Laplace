@@ -448,6 +448,18 @@ SQL_QUERY("competition.register", "uuid,uuid,text,int4",
     "WHERE c.competition_id=$1 AND c.status='registration' "
     "AND (SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id)<$4 "
     "ON CONFLICT DO NOTHING")
+SQL_QUERY("competition.register_many", "uuid,text,uuid[],text[],int4",
+    "INSERT INTO app.competition_entrants(competition_id,entrant_id,name,created_at) "
+    "SELECT c.competition_id,n.entrant_id,n.name,clock_timestamp()+n.ord*interval '1 microsecond' "
+    "FROM app.competitions c,LATERAL(SELECT u.entrant_id,u.name,row_number() OVER (ORDER BY u.ord) AS ord "
+    "FROM unnest($3::uuid[],$4::text[]) WITH ORDINALITY u(entrant_id,name,ord) "
+    "WHERE NOT EXISTS(SELECT 1 FROM app.competition_entrants e "
+    "WHERE e.competition_id=c.competition_id AND lower(e.name)=lower(u.name))) n "
+    "WHERE c.competition_id=$1 AND c.tenant=$2 AND c.status='registration' "
+    "AND n.ord<=$5-(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id) "
+    "ON CONFLICT DO NOTHING")
+SQL_QUERY("competition.reformat", "uuid,text",
+    "UPDATE app.competitions SET format=$2 WHERE competition_id=$1 AND status='registration'")
 SQL_QUERY("competition.withdraw", "uuid,uuid,text",
     "DELETE FROM app.competition_entrants e USING app.competitions c "
     "WHERE e.competition_id=$1 AND e.entrant_id=$2 AND c.competition_id=e.competition_id "

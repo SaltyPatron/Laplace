@@ -21,6 +21,17 @@ const refuse = (status: number, code: string, message: string) => json({ error: 
 const entry = (entrant: string): Slot => ({ entrant, from: null, score: null, place: null });
 const winner = (match: string): Slot => ({ entrant: null, from: { match, place: 1 }, score: null, place: null });
 
+/** The one draw the stand-in knows: four entrants, single elimination, in the order they stand. */
+function draw(event: Event): Match[] {
+  if (event.entrants.length !== 4) return [];
+  const [a, b, c, d] = event.entrants.map((e) => e.id);
+  return [
+    { id: 'r1m1', stage: 'main', round: 1, name: 'Semifinal 1', state: 'scheduled', slots: [entry(a), entry(d)] },
+    { id: 'r1m2', stage: 'main', round: 1, name: 'Semifinal 2', state: 'scheduled', slots: [entry(b), entry(c)] },
+    { id: 'r2m1', stage: 'main', round: 2, name: 'Final', state: 'scheduled', slots: [winner('r1m1'), winner('r1m2')] },
+  ];
+}
+
 if (params.get('view') === 'large') {
   events.set('big', {
     id: 'big', title: 'Big sweeper', format: 'single_elimination', status: 'registration', matches: [],
@@ -51,10 +62,24 @@ window.fetch = async (input, init) => {
   const event = events.get(parts[0]);
   if (!event) return refuse(404, 'competition_not_found', 'No such event exists.');
   if (parts.length === 1 && method === 'GET') {
-    return json({ ...event, host: params.get('host') !== '0', standings: [],
+    return json({ ...event, matches: event.status === 'registration' ? draw(event) : event.matches, host: params.get('host') !== '0', standings: [],
       stages: [{ id: 'main', title: 'Bracket', rounds: ['Semifinals', 'Final'] }] });
   }
   if (parts.length === 1 && method === 'DELETE') { events.delete(event.id); return new Response(null, { status: 204 }); }
+  if (parts[1] === 'entrants' && parts[2] === 'batch') {
+    const fresh = (body.names as string[]).filter((name) => {
+      if (event.entrants.some((e) => e.name.toLowerCase() === name.toLowerCase())) return false;
+      event.entrants.push({ id: `p${next++}`, name, seed: null });
+      return true;
+    });
+    return json({ added: fresh.length, skipped: body.names.length - fresh.length });
+  }
+  if (parts[1] === 'draw' && method === 'PUT') {
+    if (body.format) event.format = body.format;
+    if (body.order) event.entrants = (body.order as string[]).map((id) => event.entrants.find((e) => e.id === id)!);
+    if (body.shuffle) [event.entrants[1], event.entrants[3]] = [event.entrants[3], event.entrants[1]];
+    return new Response(null, { status: 204 });
+  }
   if (parts[1] === 'entrants' && method === 'POST') {
     if (event.entrants.some((e) => e.name.toLowerCase() === String(body.name).toLowerCase())) {
       return refuse(409, 'registration_refused', 'That name is already registered, or the event is full.');
@@ -70,12 +95,8 @@ window.fetch = async (input, init) => {
   if (parts[1] === 'start') {
     if (event.entrants.length > FREE) return json({ error: { type: 'billing_error', code: 'quote_required', message: 'Payment required' } }, 402);
     event.entrants.forEach((e, i) => { e.seed = i + 1; });
-    const [a, b, c, d] = event.entrants.map((e) => e.id);
-    event.matches = [
-      { id: 'r1m1', stage: 'main', round: 1, name: 'Semifinal 1', state: 'scheduled', slots: [entry(a), entry(d)] },
-      { id: 'r1m2', stage: 'main', round: 1, name: 'Semifinal 2', state: 'scheduled', slots: [entry(b), entry(c)] },
-      { id: 'r2m1', stage: 'main', round: 2, name: 'Final', state: 'scheduled', slots: [winner('r1m1'), winner('r1m2')] },
-    ];
+    event.matches = draw(event);
+
     event.status = 'running';
     return json({ id: event.id, matches: 3 });
   }
