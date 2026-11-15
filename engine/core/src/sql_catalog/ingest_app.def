@@ -426,3 +426,70 @@ SQL_QUERY("consensus.evidence_rows_batch", "bytea[],bytea[],bytea[],int4[]",
 SQL_QUERY("consensus.delete_locked_empty_cells", "bytea[],bytea[],bytea",
     "DELETE FROM laplace.consensus c USING unnest($1::bytea[],$2::bytea[]) b(id,s) "
     "WHERE c.id=b.id AND c.subject_id=b.s AND c.type_id=$3")
+SQL_QUERY("competition.create", "uuid,text,text,text",
+    "INSERT INTO app.competitions(competition_id,tenant,title,format) VALUES($1,$2,$3,$4)")
+SQL_QUERY("competition.list", "text",
+    "SELECT c.competition_id,c.title,c.format,c.status,c.created_at,"
+    "(SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id) "
+    "FROM app.competitions c WHERE c.tenant=$1 ORDER BY c.created_at DESC LIMIT 200")
+SQL_QUERY("competition.get", "uuid",
+    "SELECT competition_id,tenant,title,format,status,created_at,started_at "
+    "FROM app.competitions WHERE competition_id=$1")
+SQL_QUERY("competition.lock", "uuid,text",
+    "SELECT format,status FROM app.competitions WHERE competition_id=$1 AND tenant=$2 FOR UPDATE")
+SQL_QUERY("competition.delete", "uuid,text",
+    "DELETE FROM app.competitions WHERE competition_id=$1 AND tenant=$2")
+SQL_QUERY("competition.entrants", "uuid",
+    "SELECT entrant_id,name,seed FROM app.competition_entrants WHERE competition_id=$1 "
+    "ORDER BY seed NULLS LAST,created_at,entrant_id")
+SQL_QUERY("competition.register", "uuid,uuid,text,int4",
+    "INSERT INTO app.competition_entrants(competition_id,entrant_id,name) "
+    "SELECT c.competition_id,$2,$3 FROM app.competitions c "
+    "WHERE c.competition_id=$1 AND c.status='registration' "
+    "AND (SELECT count(*) FROM app.competition_entrants e WHERE e.competition_id=c.competition_id)<$4 "
+    "ON CONFLICT DO NOTHING")
+SQL_QUERY("competition.withdraw", "uuid,uuid,text",
+    "DELETE FROM app.competition_entrants e USING app.competitions c "
+    "WHERE e.competition_id=$1 AND e.entrant_id=$2 AND c.competition_id=e.competition_id "
+    "AND c.tenant=$3 AND c.status='registration'")
+SQL_QUERY("competition.seed", "uuid,uuid[]",
+    "UPDATE app.competition_entrants e SET seed=s.n::int "
+    "FROM unnest($2::uuid[]) WITH ORDINALITY s(entrant_id,n) "
+    "WHERE e.competition_id=$1 AND e.entrant_id=s.entrant_id")
+SQL_QUERY("competition.put_matches", "uuid,text[],int4[],text[],int4[],text[]",
+    "INSERT INTO app.competition_matches(competition_id,match_id,ordinal,stage,round,name) "
+    "SELECT $1,m.match_id,m.ordinal,m.stage,m.round,m.name "
+    "FROM unnest($2::text[],$3::int4[],$4::text[],$5::int4[],$6::text[]) AS m(match_id,ordinal,stage,round,name)")
+SQL_QUERY("competition.put_slots", "uuid,text[],int2[],uuid[],text[],int2[]",
+    "INSERT INTO app.competition_slots(competition_id,match_id,slot,entrant_id,from_match,from_place) "
+    "SELECT $1,s.match_id,s.slot,s.entrant_id,s.from_match,s.from_place "
+    "FROM unnest($2::text[],$3::int2[],$4::uuid[],$5::text[],$6::int2[]) AS s(match_id,slot,entrant_id,from_match,from_place)")
+SQL_QUERY("competition.start", "uuid",
+    "UPDATE app.competitions SET status='running',started_at=now() WHERE competition_id=$1 AND status='registration'")
+SQL_QUERY("competition.matches", "uuid",
+    "SELECT m.match_id,m.stage,m.round,m.name,m.state,s.slot,s.entrant_id,s.from_match,s.from_place,s.score,s.place "
+    "FROM app.competition_matches m JOIN app.competition_slots s "
+    "ON s.competition_id=m.competition_id AND s.match_id=m.match_id "
+    "WHERE m.competition_id=$1 ORDER BY m.ordinal,s.slot")
+SQL_QUERY("competition.match_slots", "uuid,text",
+    "SELECT count(*),count(entrant_id) FROM app.competition_slots WHERE competition_id=$1 AND match_id=$2")
+SQL_QUERY("competition.finish_match", "uuid,text",
+    "UPDATE app.competition_matches m SET state='final' WHERE m.competition_id=$1 AND m.match_id=$2 "
+    "AND NOT EXISTS(SELECT 1 FROM app.competition_slots d JOIN app.competition_matches n "
+    "ON n.competition_id=d.competition_id AND n.match_id=d.match_id "
+    "WHERE d.competition_id=$1 AND d.from_match=$2 AND n.state='final')")
+SQL_QUERY("competition.put_result", "uuid,text,int2[],text[],int2[]",
+    "UPDATE app.competition_slots s SET score=r.score,place=r.place "
+    "FROM unnest($3::int2[],$4::text[],$5::int2[]) AS r(slot,score,place) "
+    "WHERE s.competition_id=$1 AND s.match_id=$2 AND s.slot=r.slot")
+SQL_QUERY("competition.advance", "uuid,text",
+    "UPDATE app.competition_slots d SET entrant_id=s.entrant_id FROM app.competition_slots s "
+    "WHERE d.competition_id=$1 AND d.from_match=$2 "
+    "AND s.competition_id=$1 AND s.match_id=$2 AND s.place=d.from_place")
+SQL_QUERY("competition.record", "uuid",
+    "SELECT s.entrant_id,count(*) FILTER (WHERE s.place=1),count(*) FILTER (WHERE s.place>1) "
+    "FROM app.competition_slots s JOIN app.competition_matches m "
+    "ON m.competition_id=s.competition_id AND m.match_id=s.match_id "
+    "JOIN app.competition_entrants e ON e.competition_id=s.competition_id AND e.entrant_id=s.entrant_id "
+    "WHERE s.competition_id=$1 AND m.state='final' "
+    "GROUP BY s.entrant_id,e.seed ORDER BY 2 DESC,3,e.seed")

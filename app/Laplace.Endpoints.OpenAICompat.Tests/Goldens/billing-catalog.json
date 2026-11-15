@@ -44,6 +44,20 @@
       "stripe_price_id": null
     },
     {
+      "service_id": "competition.host",
+      "product_id": "laplace.competition",
+      "display_name": "Hosted Competition",
+      "unit": "event",
+      "unit_price_cents": 500,
+      "base_fee_cents": 0,
+      "currency": "usd",
+      "lookup_key": "laplace_competition_host_event_usd",
+      "active": true,
+      "metered": false,
+      "recurring_interval": null,
+      "stripe_price_id": null
+    },
+    {
       "service_id": "completions",
       "product_id": "laplace.inference.completion",
       "display_name": "Laplace Text Completion",
@@ -164,6 +178,20 @@
       "base_fee_cents": 0,
       "currency": "usd",
       "lookup_key": "laplace_plan_enterprise_month_usd",
+      "active": true,
+      "metered": false,
+      "recurring_interval": "month",
+      "stripe_price_id": null
+    },
+    {
+      "service_id": "plan.league",
+      "product_id": "laplace.platform",
+      "display_name": "League Plan",
+      "unit": "month",
+      "unit_price_cents": 2000,
+      "base_fee_cents": 0,
+      "currency": "usd",
+      "lookup_key": "laplace_plan_league_month_usd",
       "active": true,
       "metered": false,
       "recurring_interval": "month",

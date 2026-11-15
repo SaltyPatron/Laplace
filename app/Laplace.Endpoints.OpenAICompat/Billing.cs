@@ -162,6 +162,10 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
                 "laplace.explainability", "Laplace Explainability Trace",
                 "Step-by-step 'how the answer formed' report: the token-by-token, path-by-path generation traversal with per-path consensus μ and witness fan-in. The academic tier expands every node with its evidence provenance and citations. Metered by trace size.",
                 "explainability"),
+            ["laplace.competition"] = new(
+                "laplace.competition", "Laplace Competition Hosting",
+                "Host a tournament, league or sweeper of any format: a shareable link, self-registration, brackets and results. Small events are free; the fee is for hosting only and never touches entry fees or prizes.",
+                "competition"),
             ["laplace.platform"] = new(
                 "laplace.platform", "Laplace Platform Plans",
                 "Monthly access bundles for teams building on Laplace: included credits across inference, synthesis, audit, visualization, recipe, and explainability services.",
@@ -203,6 +207,8 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
             ["explain.report"] = Price("explain.report", "laplace.explainability", 200, "report", "Academic Explainability Report"),
             ["recipe.compile"] = Price("recipe.compile", "laplace.recipe", 5, "recipe_unit", "Compile Synthesis Recipe", baseFeeCents: 25, metered: true),
             ["recipe.export"] = Price("recipe.export", "laplace.recipe", 10, "content_thousand", "Private Recipe Content Export", baseFeeCents: 100, metered: true),
+            ["competition.host"] = Price("competition.host", "laplace.competition", 500, "event", "Hosted Competition"),
+            ["plan.league"] = Price("plan.league", "laplace.platform", 2000, "month", "League Plan", recurringInterval: "month"),
             ["plan.developer"] = Price("plan.developer", "laplace.platform", 2900, "month", "Developer Plan", recurringInterval: "month"),
             ["plan.studio"] = Price("plan.studio", "laplace.platform", 9900, "month", "Studio Plan", recurringInterval: "month"),
             ["plan.enterprise"] = Price("plan.enterprise", "laplace.platform", 49900, "month", "Enterprise Plan", recurringInterval: "month"),
@@ -210,6 +216,13 @@ internal sealed class StaticBillingCatalog : IBillingCatalog
 
         _plans = new[]
         {
+            Plan(
+                "league", "plan.league", "League", "Ten hosted events a month for a league or a bowling center: brackets, sweepers, round robins and ladders, with results kept for as long as the account is active.", 2000,
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["competition.host"] = 10
+                },
+                "community"),
             Plan(
                 "developer", "plan.developer", "Developer", "Individual builder access with enough credits to prototype paid quote-gated workflows.", 2900,
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
