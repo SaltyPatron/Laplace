@@ -1,0 +1,324 @@
+/* --col, --head and --row are set by CompetitionView from layout.ts, so the page and the layout
+   function cannot disagree about how big a match is. */
+.compete {
+  container: compete / inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+}
+
+.sectionTitle {
+  margin: 0;
+  margin-block-end: var(--space-2);
+  font-size: var(--text-base);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ── Bracket ─────────────────────────────────────────────────────────── */
+
+.bracket {
+  overflow-x: auto;
+  padding-block-end: var(--space-2);
+}
+
+.canvas {
+  --title: 2rem;
+  position: relative;
+  inline-size: var(--w);
+  block-size: calc(var(--h) + var(--title));
+}
+
+.links {
+  position: absolute;
+  inset-block-start: var(--title);
+  inset-inline-start: 0;
+  inline-size: var(--w);
+  block-size: var(--h);
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--color-border-default);
+  stroke-width: 0.125;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.links path {
+  transition: stroke var(--duration-fast) var(--ease-standard);
+}
+
+.links path[data-open] {
+  stroke-dasharray: 0.25 0.3;
+}
+
+.links path[data-on] {
+  stroke: var(--color-accent);
+  stroke-width: 0.1875;
+}
+
+.round {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: var(--x);
+  inline-size: var(--col);
+}
+
+.roundTitle {
+  display: flex;
+  align-items: center;
+  block-size: var(--title, auto);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.roundList {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  position: absolute;
+  inset-block-start: var(--y);
+  inline-size: 100%;
+}
+
+/* ── Match ───────────────────────────────────────────────────────────── */
+
+.card {
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+  /* A ring, not a border: the card's height stays exactly HEAD + slots × ROW. */
+  box-shadow: 0 0 0 var(--space-hair) var(--color-border-default), var(--shadow-instrument);
+}
+
+.card[data-state='live'] {
+  box-shadow: 0 0 0 var(--space-half) var(--color-gold-deep), var(--shadow-instrument);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  block-size: var(--head);
+  padding-inline: var(--space-2);
+  background: var(--color-bg-panel-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.cardName {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardStatus {
+  flex: none;
+}
+
+.card[data-state='live'] .cardStatus {
+  color: var(--color-gold-ink);
+  font-weight: 700;
+}
+
+.card[data-state='live'] .cardHead {
+  background: var(--color-gold);
+  color: var(--color-gold-ink);
+}
+
+.slots {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  block-size: var(--row);
+  padding-inline: var(--space-2);
+  border-block-start: var(--space-hair) solid var(--color-border-default);
+  font-size: var(--text-sm);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.slot[data-open] {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+.slot[data-out] {
+  color: var(--color-text-muted);
+}
+
+.slot[data-won] {
+  font-weight: 700;
+  box-shadow: inset var(--space-half) 0 0 var(--color-accent);
+}
+
+.slot[data-on] {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.slotButton {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  block-size: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.slotButton:focus-visible {
+  outline: var(--space-half) solid var(--color-accent);
+  outline-offset: calc(-1 * var(--space-half));
+}
+
+.slotName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seed {
+  flex: none;
+  min-inline-size: 1.25em;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  text-align: end;
+}
+
+.score {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tables and schedule ─────────────────────────────────────────────── */
+
+.fields {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.schedule {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--col)), 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.number {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.cross .crossName {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--color-bg-panel);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.crossCell {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.crossSelf {
+  background: var(--color-bg-panel-2);
+}
+
+.crossResult {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+.crossResult[data-won] {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+/* ── Narrow: one round per swipe ─────────────────────────────────────── */
+
+@container compete (max-width: 40rem) {
+  .bracket {
+    overflow-x: visible;
+  }
+
+  .canvas {
+    --title: auto;
+    display: flex;
+    gap: var(--space-4);
+    inline-size: auto;
+    block-size: auto;
+    overflow-x: auto;
+    padding-block: var(--space-1) var(--space-3);
+    scroll-snap-type: x mandatory;
+  }
+
+  .links {
+    display: none;
+  }
+
+  /* The next round shows at the edge, so it is plain there is more to swipe to. */
+  .round {
+    position: static;
+    flex: 0 0 86%;
+    scroll-snap-align: start;
+  }
+
+  .roundList {
+    display: grid;
+    gap: var(--space-3);
+    padding-block-start: var(--space-2);
+    padding-inline: var(--space-hair);
+  }
+
+  .node {
+    position: static;
+  }
+}
