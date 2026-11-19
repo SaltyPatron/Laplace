@@ -30,61 +30,307 @@
 #include "utils/rls.h"
 #include "utils/snapmgr.h"
 #include "content_membership_read.h"
+#include "public_direct.h"
 #include "spi_common.h"
-#include "spi_nested.h"
-#include "laplace/core/sql_catalog.h"
 #include "laplace_pg/executor.h"
 
-typedef struct {
-    MemoryContext caller;LaplaceContentMembershipConsumer consume;void *context;
-    uint64 maximum,rows;bool complete;
-} NativeMembership;
-static bool native_membership_row(TupleTableSlot *slot,void *context)
+PG_FUNCTION_INFO_V1(pg_laplace_native_membership_any);
+PG_FUNCTION_INFO_V1(pg_laplace_native_membership_all);
+
+typedef struct
 {
-    NativeMembership *read=context;
-    if(read->maximum && read->rows>=read->maximum){read->complete=false;return false;}
-    bool missing;Datum id=slot_getattr(slot,1,&missing);
-    if(missing)elog(ERROR,"Native membership identity is null");
-    Datum path=slot_getattr(slot,2,&missing);
-    if(missing)elog(ERROR,"Native membership path is null");
-    MemoryContext previous=MemoryContextSwitchTo(read->caller);
-    read->consume(id,id,path,read->context);read->rows++;
-    MemoryContextSwitchTo(previous);return true;
+    hash128_t entity;
+    Datum     path;
+} NativeMemberItem;
+
+typedef struct
+{
+    MemoryContext     caller;
+    NativeMemberItem *items;
+    uint64            count;
+    uint64            cap;
+} NativeMemberCollect;
+
+static int
+native_member_cmp(const void *a, const void *b)
+{
+    const NativeMemberItem *x = (const NativeMemberItem *) a;
+    const NativeMemberItem *y = (const NativeMemberItem *) b;
+    return memcmp(&x->entity, &y->entity, sizeof(hash128_t));
 }
 
-/* Native paths use their own indexed codec. Never decode them through the
- * historical trajectory expression index. Keep the frontier walk in C and
- * delegate the set probe to the canonical Native/PostgreSQL operation. */
+static bool
+visit_native_member(TupleTableSlot *slot, void *opaque, AttrNumber ent_col, AttrNumber path_col)
+{
+    NativeMemberCollect *col = (NativeMemberCollect *) opaque;
+    bool                 isnull = false;
+    Datum                d_ent, d_path, path_cp;
+    hash128_t            ent;
+    MemoryContext        prev;
+
+    d_ent = slot_getattr(slot, ent_col, &isnull);
+    if (isnull)
+        elog(ERROR, "Native membership identity is null");
+    ent = laplace_pub_blake3_to_hash128(d_ent);
+
+    d_path = slot_getattr(slot, path_col, &isnull);
+    if (isnull)
+        elog(ERROR, "Native membership path is null");
+
+    prev = MemoryContextSwitchTo(col->caller);
+    path_cp = PointerGetDatum(PG_DETOAST_DATUM_COPY(d_path));
+    if (col->count >= col->cap)
+    {
+        Size sz;
+        col->cap = col->cap ? col->cap * 2 : 64;
+        sz = sizeof(NativeMemberItem) * (Size) col->cap;
+        col->items = col->items
+            ? (NativeMemberItem *) repalloc(col->items, sz)
+            : (NativeMemberItem *) palloc(sz);
+    }
+    col->items[col->count].entity = ent;
+    col->items[col->count].path = path_cp;
+    col->count++;
+    MemoryContextSwitchTo(prev);
+    return true;
+}
+
+static bool
+visit_holder_member(TupleTableSlot *slot, void *opaque)
+{
+    return visit_native_member(slot, opaque, 2, 3);
+}
+
+static bool
+visit_container_member(TupleTableSlot *slot, void *opaque)
+{
+    return visit_native_member(slot, opaque, 1, 2);
+}
+
+static int
+cm_cmp_hash128(const void *a, const void *b)
+{
+    return memcmp(a, b, sizeof(hash128_t));
+}
+
+static int
+cm_dedup_bytea_ids(ArrayType *arr, hash128_t *dst)
+{
+    Datum *vals;
+    bool  *nulls;
+    int    n = 0, out = 0;
+
+    if (arr == NULL)
+        return 0;
+    deconstruct_array(arr, BYTEAOID, -1, false, TYPALIGN_INT, &vals, &nulls, &n);
+    if (n <= 0)
+        return 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (!nulls[i])
+            dst[out++] = datum_to_hash128(vals[i]);
+    }
+    pfree(vals);
+    pfree(nulls);
+    if (out > 1)
+    {
+        int uniq = 1;
+        qsort(dst, (Size) out, sizeof(hash128_t), cm_cmp_hash128);
+        for (int i = 1; i < out; i++)
+        {
+            if (memcmp(&dst[uniq - 1], &dst[i], sizeof(hash128_t)) != 0)
+                dst[uniq++] = dst[i];
+        }
+        return uniq;
+    }
+    return out;
+}
+
+static NativeMemberItem *
+collect_native_membership(ArrayType *members, bool require_all, ArrayType *required,
+                          uint64 *out_count)
+{
+    MemoryContext       caller = CurrentMemoryContext;
+    MemoryContext       work, prev;
+    Oid                 b3_arr_oid = laplace_pub_blake3_array_oid();
+    int                 n_mem_raw = members ? ArrayGetNItems(ARR_NDIM(members), ARR_DIMS(members)) : 0;
+    int                 n_req_raw = required ? ArrayGetNItems(ARR_NDIM(required), ARR_DIMS(required)) : 0;
+    hash128_t          *mem_ids = NULL, *req_ids = NULL;
+    int                 n_mem = 0, n_req = 0;
+    NativeMemberCollect col;
+    NativeMemberItem   *res = NULL;
+
+    *out_count = 0;
+    if (members == NULL)
+        return NULL;
+
+    work = AllocSetContextCreate(caller, "native_membership", ALLOCSET_DEFAULT_SIZES);
+    prev = MemoryContextSwitchTo(work);
+
+    if (n_mem_raw > 0)
+    {
+        mem_ids = (hash128_t *) palloc(sizeof(hash128_t) * (Size) n_mem_raw);
+        n_mem = cm_dedup_bytea_ids(members, mem_ids);
+    }
+    if (n_req_raw > 0)
+    {
+        req_ids = (hash128_t *) palloc(sizeof(hash128_t) * (Size) n_req_raw);
+        n_req = cm_dedup_bytea_ids(required, req_ids);
+    }
+
+    MemSet(&col, 0, sizeof(col));
+    col.caller = work;
+
+    if (require_all)
+    {
+        hash128_t *comb = (hash128_t *) palloc(sizeof(hash128_t) * (Size) (n_mem + n_req + 1));
+        ArrayType *comb_arr;
+        ArrayType *empty_i2 = construct_empty_array(INT2OID);
+        Oid        types[2] = { b3_arr_oid, INT2ARRAYOID };
+        Datum      args[2];
+        bool       nulls[2] = { false, false };
+
+        if (n_mem > 0)
+            memcpy(comb, mem_ids, sizeof(hash128_t) * (Size) n_mem);
+        if (n_req > 0)
+            memcpy(comb + n_mem, req_ids, sizeof(hash128_t) * (Size) n_req);
+        comb_arr = laplace_pub_blake3_array(comb, n_mem + n_req);
+        args[0] = PointerGetDatum(comb_arr);
+        args[1] = PointerGetDatum(empty_i2);
+        (void) laplace_pub_call_srf("public", "laplace_containers", 2,
+                                    types, args, nulls,
+                                    visit_container_member, &col);
+    }
+    else
+    {
+        ArrayType *mem_arr = laplace_pub_blake3_array(mem_ids, n_mem);
+        ArrayType *req_arr = laplace_pub_blake3_array(req_ids, n_req);
+        Oid        types[6] = { b3_arr_oid, b3_arr_oid, BOOLOID, INT2OID, INT8OID, INT2OID };
+        Datum      args[6] = {
+            PointerGetDatum(mem_arr),
+            PointerGetDatum(req_arr),
+            BoolGetDatum(false),
+            Int16GetDatum(-1),
+            Int64GetDatum(-1),
+            Int16GetDatum(3)
+        };
+        bool       nulls[6] = { false, false, false, false, false, false };
+
+        (void) laplace_pub_call_srf("public", "laplace_holders", 6,
+                                    types, args, nulls,
+                                    visit_holder_member, &col);
+    }
+
+    if (col.count > 1)
+        qsort(col.items, (Size) col.count, sizeof(NativeMemberItem), native_member_cmp);
+
+    if (col.count > 0)
+    {
+        MemoryContextSwitchTo(caller);
+        res = (NativeMemberItem *) MemoryContextAlloc(
+            caller, sizeof(NativeMemberItem) * (Size) col.count);
+        for (uint64 i = 0; i < col.count; i++)
+        {
+            res[i].entity = col.items[i].entity;
+            res[i].path = PointerGetDatum(PG_DETOAST_DATUM_COPY(col.items[i].path));
+        }
+        *out_count = col.count;
+    }
+
+    MemoryContextSwitchTo(prev);
+    MemoryContextDelete(work);
+    return res;
+}
+
 static bool
 native_membership(ArrayType *members, bool require_all, ArrayType *required,
                   uint64 maximum, LaplaceContentMembershipConsumer consume,
                   void *context, uint64 *matched)
 {
-    static SPIPlanPtr plans[2];
-    MemoryContext caller = CurrentMemoryContext;
-    bool finish;
-    if (maximum > PG_INT64_MAX - 1) elog(ERROR, "membership boundary exceeds SQL capacity");
-    if (laplace_spi_connect(&finish) != SPI_OK_CONNECT) elog(ERROR, "Native membership SPI connect failed");
-    int which = require_all ? 1 : 0;
-    if (plans[which] == NULL)
+    uint64            total = 0;
+    NativeMemberItem *items;
+    bool              complete = true;
+    uint64            emitted = 0;
+
+    if (maximum > PG_INT64_MAX - 1)
+        elog(ERROR, "membership boundary exceeds SQL capacity");
+
+    items = collect_native_membership(members, require_all, required, &total);
+    for (uint64 i = 0; i < total; i++)
     {
-        Oid types[] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8OID};
-        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(require_all ?
-            "native.membership_all" : "native.membership_any"), 3, types, CURSOR_OPT_PARALLEL_OK);
-        if (plans[which] == NULL || SPI_keepplan(plans[which]) != 0)
-            elog(ERROR, "cannot prepare Native membership");
+        Datum id_d;
+        if (maximum && emitted >= maximum)
+        {
+            complete = false;
+            break;
+        }
+        id_d = hash128_to_datum(&items[i].entity);
+        consume(id_d, id_d, items[i].path, context);
+        pfree(DatumGetPointer(id_d));
+        emitted++;
     }
-    Datum args[] = {PointerGetDatum(members), PointerGetDatum(required), Int64GetDatum((int64)maximum)};
-    char nulls[] = {' ', required ? ' ' : 'n', ' '};
-    ParamListInfo parameters=makeParamList(3);
-    Oid types[]={BYTEAARRAYOID,BYTEAARRAYOID,INT8OID};
-    for(int i=0;i<3;i++)parameters->params[i]=(ParamExternData){
-        .value=args[i],.isnull=nulls[i]=='n',.pflags=PARAM_FLAG_CONST,.ptype=types[i]};
-    NativeMembership read={caller,consume,context,maximum,0,true};
-    lp_pg_execute_stream_until(plans[which],parameters,true,native_membership_row,&read);
-    pfree(parameters);*matched=read.rows;
-    laplace_spi_finish(finish);
-    return read.complete;
+    if (items != NULL)
+    {
+        for (uint64 i = 0; i < total; i++)
+            pfree(DatumGetPointer(items[i].path));
+        pfree(items);
+    }
+    *matched = emitted;
+    return complete;
+}
+
+static Datum
+native_membership_sql(PG_FUNCTION_ARGS, bool require_all)
+{
+    ReturnSetInfo    *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    ArrayType        *members;
+    ArrayType        *required;
+    int64             limit = 0;
+    NativeMemberItem *items;
+    uint64            total = 0;
+    uint64            emit_cap;
+
+    InitMaterializedSRF(fcinfo, 0);
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(2))
+        return (Datum) 0;
+    members = PG_GETARG_ARRAYTYPE_P(0);
+    required = PG_ARGISNULL(1) ? NULL : PG_GETARG_ARRAYTYPE_P(1);
+    limit = PG_GETARG_INT64(2);
+    if (limit < 0)
+        limit = 0;
+
+    items = collect_native_membership(members, require_all, required, &total);
+    emit_cap = (limit == 0) ? total : Min(total, (uint64) limit + 1);
+    for (uint64 i = 0; i < emit_cap; i++)
+    {
+        Datum values[2] = {
+            hash128_to_datum(&items[i].entity),
+            items[i].path
+        };
+        bool  nulls[2] = { false, false };
+
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        pfree(DatumGetPointer(values[0]));
+    }
+    if (items != NULL)
+    {
+        for (uint64 i = 0; i < total; i++)
+            pfree(DatumGetPointer(items[i].path));
+        pfree(items);
+    }
+    return (Datum) 0;
+}
+
+Datum
+pg_laplace_native_membership_any(PG_FUNCTION_ARGS)
+{
+    return native_membership_sql(fcinfo, false);
+}
+
+Datum
+pg_laplace_native_membership_all(PG_FUNCTION_ARGS)
+{
+    return native_membership_sql(fcinfo, true);
 }
 
 static bool

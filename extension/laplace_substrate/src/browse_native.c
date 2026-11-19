@@ -7,6 +7,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_nested.h"
 #include "content_membership_read.h"
+#include "converse_bindings.h"
 #include "spi_stream.h"
 
 /* Resolves a query's constituent ids to ranked entities. Membership,
@@ -229,10 +230,14 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     if (has_exact && !exact_in_names)
         name_datums[name_datum_count++] = hash128_to_datum(&exact);
     Datum args[] = {PointerGetDatum(construct_array(name_datums, name_datum_count, BYTEAOID, -1, false, TYPALIGN_INT))};
-    SPIPlanPtr p = plan(&names_plan,
-        laplace_sql_query_text("browse.names"),
-        1, array_type);
-    laplace_spi_stream(p, 1, array_type, args, NULL, browse_name, hits);
+    SPIPlanPtr p;
+    if (converse_legacy_consensus_has_rows())
+    {
+        p = plan(&names_plan,
+            laplace_sql_query_text("browse.names"),
+            1, array_type);
+        laplace_spi_stream(p, 1, array_type, args, NULL, browse_name, hits);
+    }
     if (has_exact) {
         add_structural_hit(hits, &exact, BROWSE_MATCH_SURFACE);
     }

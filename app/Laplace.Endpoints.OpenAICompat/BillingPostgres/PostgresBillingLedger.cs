@@ -11,24 +11,29 @@ internal sealed class PostgresBillingLedger : IBillingLedger
 
     public async Task RecordAsync(BillingUsageRecord record, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(
-            _dataSource,
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+            conn,
+            null,
             "billing.record_usage",
+            ct,
             record.QuoteId,
             record.Tenant,
             record.ServiceId,
             record.Units,
             record.AmountCents,
-            record.ExecutedAt);
-        await cmd.ExecuteNonQueryAsync(ct);
+            record.ExecutedAt).ConfigureAwait(false);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<BillingUsageRecord>> GetByTenantAsync(string tenant, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.usage_by_tenant", tenant);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+            conn, null, "billing.usage_by_tenant", ct, tenant).ConfigureAwait(false);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var rows = new List<BillingUsageRecord>();
-        while (await reader.ReadAsync(ct))
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
             rows.Add(Read(reader));
         return rows;
     }
@@ -46,43 +51,71 @@ internal sealed class PostgresBillingLedger : IBillingLedger
         if (records.Count == 0)
             return;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        foreach (var r in records)
+        int n = records.Count;
+        var quoteIds = new string[n];
+        var payerTenants = new string[n];
+        var serviceIds = new string[n];
+        var sourceIds = new string[n];
+        var sourceOwnerTenants = new string?[n];
+        var shareBps = new int[n];
+        var royaltyCents = new long[n];
+        var hitCounts = new long[n];
+        var totalWeights = new double[n];
+        var executedAts = new DateTimeOffset[n];
+        for (int i = 0; i < n; i++)
         {
-            await using var cmd = NpgsqlCatalog.Command(
-                conn,
-                null,
-                "billing.record_royalty",
-                r.QuoteId,
-                r.PayerTenant,
-                r.ServiceId,
-                r.SourceIdHex,
-                (object?)r.SourceOwnerTenant ?? DBNull.Value,
-                r.ShareBp,
-                r.RoyaltyCents,
-                r.HitCount,
-                r.TotalWeight,
-                r.ExecutedAt);
-            await cmd.ExecuteNonQueryAsync(ct);
+            var r = records[i];
+            quoteIds[i] = r.QuoteId;
+            payerTenants[i] = r.PayerTenant;
+            serviceIds[i] = r.ServiceId;
+            sourceIds[i] = r.SourceIdHex;
+            sourceOwnerTenants[i] = r.SourceOwnerTenant;
+            shareBps[i] = r.ShareBp;
+            royaltyCents[i] = r.RoyaltyCents;
+            hitCounts[i] = r.HitCount;
+            totalWeights[i] = r.TotalWeight;
+            executedAts[i] = r.ExecutedAt;
         }
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+            conn,
+            null,
+            "billing.record_royalties_batch",
+            ct,
+            quoteIds,
+            payerTenants,
+            serviceIds,
+            sourceIds,
+            sourceOwnerTenants,
+            shareBps,
+            royaltyCents,
+            hitCounts,
+            totalWeights,
+            executedAts).ConfigureAwait(false);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesByTenantAsync(string tenant, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.royalties_by_tenant", tenant);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+            conn, null, "billing.royalties_by_tenant", ct, tenant).ConfigureAwait(false);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var rows = new List<BillingRoyaltyRecord>();
-        while (await reader.ReadAsync(ct))
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
             rows.Add(ReadRoyalty(reader));
         return rows;
     }
 
     public async Task<IReadOnlyList<BillingRoyaltyRecord>> GetRoyaltiesBySourceAsync(string sourceIdHex, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "billing.royalties_by_source", sourceIdHex.ToLowerInvariant());
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+            conn, null, "billing.royalties_by_source", ct, sourceIdHex.ToLowerInvariant()).ConfigureAwait(false);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var rows = new List<BillingRoyaltyRecord>();
-        while (await reader.ReadAsync(ct))
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
             rows.Add(ReadRoyalty(reader));
         return rows;
     }

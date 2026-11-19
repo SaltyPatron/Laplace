@@ -27,6 +27,11 @@ Laplace is a deterministic, content-addressed, recursively compositional substra
    - Fixed-width types at every persisted, generated, wire and ABI boundary; ownership, nullability, byte order and overflow are explicit.
    - No semantic algorithms, recursive search, cursors or RBAR in SQL; set-oriented, prepared, schema-qualified plans only, with no per-row crossings on batch paths.
    - Contracts generate identifiers, ABI declarations and bindings; nothing repeated is hand-copied.
+7. **Greenfield enterprise discipline — operate the real installed stack, never invent shadow instances:**
+   - Laplace is **greenfield** until a release is cut, modeled and operated as an enterprise deployment through `laplace-ops` (`Laplace-Operations/laplace.ps1` on Windows, `Laplace-Operations/laplace-ops` on Linux) and `acceptance/criteria.json`.
+   - **Never** spin up private PostgreSQL clusters (`initdb`, `ctest` `postgres_regress`), private Kestrel/web servers, or manual disposable substitute databases (`laplace_test_disposable`, `laplace_regress_*`) to avoid touching local databases.
+   - On `HART-DESKTOP`, deploy directly to the installed stack (`laplace-ops deploy -Target desktop`), recreate local databases cleanly through their owners when schema or extensions change (`laplace-ops db -Target desktop -Database both -DatabaseOperation recreate -Yes` for `laplace-mono`/`laplace-desktop-app`; `pwsh Laplace-Operations/deploy.ps1 drop -Installed` for modular `laplace`), seed strictly from local `$LAPLACE_DATA` (no 5G downloads), and verify against the installed runtime (`laplace-ops verify -Target desktop -Installed`, `laplace-ops test -Check ...`, `Laplace-postgres/tests/deployed.sh`, `Laplace-Engine/tests/deployed/run.sh`, `Laplace-MCP/tests/deployed/run.sh`).
+   - When context compacts in a long session, inspect the on-disk session transcript (`transcript.jsonl`) rather than guessing or repeating superseded approaches.
 
 ---
 
@@ -46,7 +51,7 @@ Laplace is a deterministic, content-addressed, recursively compositional substra
 | `Laplace-Wiki` | **All documentation** (repo READMEs are 3-line stubs pointing here) | `README.md` page tree; own rules in `Laplace-Wiki/AGENTS.md` (`python3 tools/check_wiki.py` before commit) |
 | `Laplace-Refactor` | **Frozen** — never build, modify, or run CI | — |
 
-Build order: PostgreSQL → `Laplace-Native` → `Laplace-postgres` → `Laplace-Engine` (→ MCP / monorepo). Every C repo has CMake preset `icx-release` (Ninja, output `$LAPLACE_BUILD/<repo>/<preset>`); Native also has `icx-debug`, `gcc-release` and ctest presets. postgres tests: `ctest` → `postgres_regress` (cases in `tests/regression_cases.txt`). Engine tests: mostly `EXCLUDE_FROM_ALL` targets in `CMakeLists.txt` + scripts in `tests/`; CI recipe in `.github/workflows/laplace.yml`.
+Build order: PostgreSQL → `Laplace-Native` → `Laplace-postgres` → `Laplace-Engine` (→ MCP / monorepo). Every C repo has CMake preset `icx-release` (Ninja, output `$LAPLACE_BUILD/<repo>/<preset>`); Native also has `icx-debug`, `gcc-release` and ctest presets. Verify extension and runtime changes against the installed PostgreSQL 18 server and deployed runtime (`Laplace-postgres/tests/deployed.sh`, `Laplace-Engine/tests/deployed/run.sh`, `Laplace-MCP/tests/deployed/run.sh`, `laplace-ops test -Check ...`) — never spin up `postgres_regress` or disposable DBs on desktop. Engine tests: mostly `EXCLUDE_FROM_ALL` targets in `CMakeLists.txt` + scripts in `tests/`; CI recipe in `.github/workflows/laplace.yml`.
 
 ---
 
@@ -86,7 +91,7 @@ Build order: PostgreSQL → `Laplace-Native` → `Laplace-postgres` → `Laplace
   - **Trust** is the source's declared class (`manifest/trust_classes.toml` → native law), carried with the declared lineage on each attestation row. The class prior seeds and bounds each attestation ($s_{eff} = 0.5 + t(s - 0.5)$, `Sequence/Conflicts.md`). Lineage keeps derived copies from counting as independent witnesses.
   - Persistent tables: `entity`, `physicality`, `attestation`, `consensus`.
 - Database crossings are $O(\text{tiers})$, never $O(\text{rows})$. Standings update **inside PostgreSQL**. Never pull `consensus` rows to the client to update them.
-- Never `DROP EXTENSION laplace CASCADE`. Never reset or reseed shared databases (`laplace`, `laplace-mono`) without explicit instruction.
+- **Greenfield database lifecycle:** Never run raw `DROP EXTENSION laplace CASCADE` in-place (it leaves broken state, and there are no legacy extension upgrade shims). On `HART-DESKTOP`, schema or extension changes recreate the canonical databases cleanly through their installation owners (`laplace-ops db -Target desktop -Database both -DatabaseOperation recreate -Yes` for `laplace-mono` / `laplace-desktop-app`; `pwsh Laplace-Operations/deploy.ps1 drop -Installed` for modular `laplace`) and reseed from local `$LAPLACE_DATA`. Do not reset or reseed remote `hart-server` (staging) databases without explicit instruction, and never touch `hart-prod` outside CI/CD promotion.
 - Monorepo: 100% of SQL lives in `engine/core/src/sql_catalog.def` (+ `sql_catalog/*.def`) and runs via `NpgsqlCatalog.Command(...)`. `ReadPathArchitectureGateTests` enforces zero hand-written SQL. Schema = ONE declaration in `db/schema/*.sql` (idempotent `CREATE ... IF NOT EXISTS`, `CREATE OR REPLACE`, reconciling grants), applied in full on every create and every deploy by `Laplace.Migrations`; there is no run-once migration journal (`schemaversions` is gone). Change the declaration in place; never add a per-change file. `status` reports drift between the declaration and the live catalog.
 
 ---
@@ -147,10 +152,12 @@ laplace ingest --catalog
 laplace replay                  # recompute standings from containment, bit-for-bit
 # Operations (Windows: laplace-ops → pwsh Laplace-Operations/laplace.ps1; `laplace-ops help`):
 laplace-ops runs                                   # recent CI/CD runs
-laplace-ops status -Target desktop                 # NOTE: no -Target defaults to staging
-laplace-ops build|verify|deploy -Target desktop    # deploy -Components modular-web for MCP/IIS only
-laplace-ops db -Database both -DatabaseOperation status
-laplace-ops deploy -Target staging -Wait           # then -Target production -Wait to promote
+laplace-ops status -Target desktop                                     # NOTE: no -Target defaults to staging
+laplace-ops build|verify|deploy -Target desktop                        # -Components all,modular,modular-web,native,postgres,api,cli,uci,migrations,web
+laplace-ops verify -Target desktop -Installed                          # verify installed IIS + substrate runtime
+laplace-ops db -Target desktop -Database both -DatabaseOperation status|recreate -Yes
+laplace-ops test -List                                                 # acceptance checks (desktop-installed-databases, desktop-installed-deployment, desktop-source-interpretation, desktop-sql-foundation, desktop-installed-runtime)
+laplace-ops deploy -Target staging -Wait                               # then -Target production -Wait to promote
 laplace-ops ingest staging [SOURCE...] -Wait       # dispatches Laplace-Operations ingest.yml on hart-server
 laplace-ops data staging ...                       # data.sh over SSH to $LAPLACE_PEER
 ```

@@ -17,11 +17,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     internal SubstrateClient(string? baseConnectionString)
     {
-        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString);
+        _dataSource = baseConnectionString is null
+            ? LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+            {
+                if (!dsb.ConnectionStringBuilder.ShouldSerialize("Minimum Pool Size"))
+                    dsb.ConnectionStringBuilder.MinPoolSize =
+                        Math.Min(4, dsb.ConnectionStringBuilder.MaxPoolSize);
+            }, null)
+            : LaplaceDataSource.Create(SubstrateAccess.Serving, baseConnectionString);
         // Read-only is enforced by the server session. Each command sets its own
         // timeout; a datasource-wide statement_timeout would override it.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
+            if (baseConnectionString is null &&
+                !dsb.ConnectionStringBuilder.ShouldSerialize("Minimum Pool Size"))
+                dsb.ConnectionStringBuilder.MinPoolSize =
+                    Math.Min(2, dsb.ConnectionStringBuilder.MaxPoolSize);
             dsb.ConnectionStringBuilder.CommandTimeout =
                 InstalledOpInvoker.DefaultCommandTimeoutSeconds;
             var options = dsb.ConnectionStringBuilder.Options;

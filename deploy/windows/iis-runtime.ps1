@@ -41,6 +41,10 @@ function Read-IisInstallation([string]$Path) {
     $null=@(Get-IisCredentialReferences $c)
     if($c.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Declare the package revision.'}
     if($c.database.pool_max -lt 1 -or $c.database.port -lt 1 -or $c.database.port -gt 65535){throw 'Invalid database budget or port.'}
+    $poolMinProp=$c.database.PSObject.Properties['pool_min']
+    if($null -ne $poolMinProp -and $null -ne $poolMinProp.Value -and ([int]$poolMinProp.Value -lt 0 -or [int]$poolMinProp.Value -gt [int]$c.database.pool_max)){
+        throw 'Invalid database minimum pool size.'
+    }
     return $c
 }
 function Write-IisAtomic([string]$Path,[string]$Content) {
@@ -233,7 +237,9 @@ function Get-IisEnvironment($c,$records) {
     }
     foreach($item in @(@('substrate','substrate_database','substrate_role','LAPLACE_DB'),@('appdb','application_database','application_role','LAPLACE_APP_DB'))) {
         $authentication=Get-IisDatabaseAuthentication $c
+        $poolMinProp=$c.database.PSObject.Properties['pool_min']
         $selection=@{host=$c.database.host;port=$c.database.port;database=$c.database.($item[1]);role=$c.database.($item[2]);pool_max=$c.database.pool_max;authentication=$authentication;root_certificate=(Join-Path $state 'postgres-root.crt')}
+        if($null -ne $poolMinProp -and $null -ne $poolMinProp.Value){$selection['pool_min']=[int]$poolMinProp.Value}
         $record=if($authentication -eq 'sspi'){$null}else{$records.($item[0])}
         if($authentication -eq 'scram' -and $record.password -notmatch '^[a-f0-9]{64}$'){throw 'Invalid database credential contract.'}
         $values[$item[3]]=New-LaplaceWindowsDatabaseConnection $selection $record

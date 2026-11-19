@@ -19,6 +19,8 @@ internal sealed class CatalogPrewarmService : BackgroundService
     {
         await WarmAsync("explore catalog",
             () => _substrate.ExploreCatalogAsync(stoppingToken), stoppingToken);
+        await WarmAsync("substrate readiness",
+            () => _substrate.ReadinessAsync(stoppingToken), stoppingToken);
     }
 
     private async Task WarmAsync(string what, Func<Task> load, CancellationToken ct)

@@ -1,6 +1,11 @@
 #ifndef LAPLACE_PROMPT_INTENT_GEOMETRY_H
 #define LAPLACE_PROMPT_INTENT_GEOMETRY_H
 
+#include "port/pg_bswap.h"
+#include "laplace/laplace.h"
+#include "public_direct.h"
+#include "trajectory_wkb.h"
+
 static inline int
 laplace_prompt_hilbert_compare(const void *left, const void *right)
 {
@@ -72,101 +77,238 @@ laplace_prompt_geometry_append(LaplacePromptIntent *intent,
         memcpy(target->hilbert_delta, hilbert_delta, sizeof(target->hilbert_delta));
 }
 
+typedef struct PromptAngularCtx
+{
+    MemoryContext        owner;
+    LaplacePromptIntent *intent;
+    const hash128_t     *source;
+    int                  fanout;
+    hash128_t           *root_angular;
+    int                 *root_angular_count;
+    uint32               rank;
+} PromptAngularCtx;
+
+static bool
+visit_prompt_angular(TupleTableSlot *slot, void *vctx)
+{
+    PromptAngularCtx *ctx = (PromptAngularCtx *) vctx;
+    bool              id_null = false;
+    bool              dist_null = false;
+    Datum             d_id = slot_getattr(slot, 2, &id_null);
+    Datum             d_dist = slot_getattr(slot, 5, &dist_null);
+    hash128_t         id;
+    double            distance;
+    MemoryContext     prev;
+
+    if (id_null || dist_null)
+        return true;
+
+    id = laplace_pub_blake3_to_hash128(d_id);
+    distance = DatumGetFloat8(d_dist);
+    ctx->rank++;
+
+    prev = MemoryContextSwitchTo(ctx->owner);
+    laplace_prompt_geometry_append(
+        ctx->intent, ctx->source, &id, LAPLACE_PROMPT_GEOMETRY_ANGULAR,
+        ctx->rank, NULL, distance);
+    if (ctx->root_angular && ctx->root_angular_count &&
+        hash128_eq(ctx->source, &ctx->intent->root) &&
+        *ctx->root_angular_count < ctx->fanout)
+        ctx->root_angular[(*ctx->root_angular_count)++] = id;
+    MemoryContextSwitchTo(prev);
+    return true;
+}
+
+typedef struct PromptHilbertCtx
+{
+    MemoryContext                 owner;
+    LaplacePromptHilbertCandidate *items;
+    int                           count;
+    int                           cap;
+} PromptHilbertCtx;
+
+static bool
+visit_prompt_hilbert(TupleTableSlot *slot, void *vctx)
+{
+    PromptHilbertCtx *ctx = (PromptHilbertCtx *) vctx;
+    bool              id_null = false, key_null = false, anc_null = false;
+    Datum             d_id = slot_getattr(slot, 1, &id_null);
+    Datum             d_key = slot_getattr(slot, 2, &key_null);
+    Datum             d_anc = slot_getattr(slot, 3, &anc_null);
+    int64             cand_h, anchor_h;
+    uint64            raw_ah, raw_ch;
+    uint8             left[16] = {0}, right[16] = {0};
+    LaplacePromptHilbertCandidate item;
+    MemoryContext     prev;
+
+    if (id_null || key_null || anc_null)
+        elog(ERROR, "prompt geometry: indexed Hilbert row contains NULL");
+
+    cand_h = DatumGetInt64(d_key);
+    anchor_h = DatumGetInt64(d_anc);
+    raw_ah = pg_hton64(((uint64) anchor_h) ^ UINT64CONST(0x8000000000000000));
+    raw_ch = pg_hton64(((uint64) cand_h) ^ UINT64CONST(0x8000000000000000));
+    memcpy(left + 8, &raw_ah, 8);
+    memcpy(right + 8, &raw_ch, 8);
+
+    item.id = laplace_pub_blake3_to_hash128(d_id);
+    laplace_prompt_hilbert_delta(left, right, item.delta);
+
+    prev = MemoryContextSwitchTo(ctx->owner);
+    if (ctx->count == ctx->cap)
+    {
+        int new_cap = ctx->cap == 0 ? 32 : ctx->cap * 2;
+        if ((Size) new_cap > MaxAllocSize / sizeof(*ctx->items))
+            elog(ERROR, "prompt geometry: Hilbert candidate set exceeds allocation capacity");
+        ctx->items = ctx->items == NULL
+            ? palloc(sizeof(*ctx->items) * (Size) new_cap)
+            : repalloc(ctx->items, sizeof(*ctx->items) * (Size) new_cap);
+        ctx->cap = new_cap;
+    }
+    ctx->items[ctx->count++] = item;
+    MemoryContextSwitchTo(prev);
+    return true;
+}
+
 /* Geometry response of one anchor: an indexed S3 angular KNN over same-tier
  * points, then at most fanout equal, predecessor and successor Hilbert keys
- * each from the btree, ranked in C by exact unsigned Native-key delta. Two SPI
- * reads per anchor, whatever the candidate count. */
+ * each from the btree, ranked in C by exact unsigned Native-key delta. Direct
+ * fmgr calls per anchor without SPI planning. */
 static inline void
 laplace_prompt_geometry_scan_anchor(
     LaplacePromptIntent *intent, const hash128_t *source, uint32 node,
-    int fanout, SPIPlanPtr angular_plan, SPIPlanPtr hilbert_plan,
-    hash128_t *root_angular, int *root_angular_count)
+    int fanout, hash128_t *root_angular, int *root_angular_count)
 {
-    const double *coords = tier_tree_coord_array(intent->input->tree);
-    const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
-    Datum source_datum = hash128_to_datum(source);
-    Datum angular_args[7] = {
-        Float8GetDatum(coords[(Size) node * 4 + 0]),
-        Float8GetDatum(coords[(Size) node * 4 + 1]),
-        Float8GetDatum(coords[(Size) node * 4 + 2]),
-        Float8GetDatum(coords[(Size) node * 4 + 3]),
-        source_datum,
+    const double    *coords = tier_tree_coord_array(intent->input->tree);
+    const uint8     *tiers = tier_tree_tier_array(intent->input->tree);
+    double           xyzm[4] = {
+        coords[(Size) node * 4 + 0],
+        coords[(Size) node * 4 + 1],
+        coords[(Size) node * 4 + 2],
+        coords[(Size) node * 4 + 3]
+    };
+    Datum            pt_geom = laplace_pub_point4d_geom(xyzm);
+    Datum            excl_b3 = laplace_pub_hash128_to_blake3(source);
+    Oid              geom_oid = laplace_pub_geometry_oid();
+    Oid              b3_oid = laplace_pub_blake3_oid();
+    Oid              knn_types[6] = { geom_oid, INT4OID, BOOLOID, INT2OID, INT2OID, b3_oid };
+    Datum            knn_args[6] = {
+        pt_geom,
+        Int32GetDatum(Max(fanout, 0)),
+        BoolGetDatum(true),
+        Int16GetDatum((int16) tiers[node]),
+        Int16GetDatum((int16) tiers[node]),
+        excl_b3
+    };
+    bool             knn_nulls[6] = { false, false, false, false, false, false };
+    PromptAngularCtx actx = {
+        intent->owner, intent, source, fanout, root_angular, root_angular_count, 0
+    };
+    Oid              hilb_types[4] = { geom_oid, b3_oid, INT4OID, INT2OID };
+    Datum            hilb_args[4] = {
+        pt_geom,
+        excl_b3,
         Int32GetDatum(fanout),
         Int16GetDatum((int16) tiers[node])
     };
-    int rc = SPI_execute_plan(angular_plan, angular_args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "prompt geometry: angular KNN failed: %s",
-             SPI_result_code_string(rc));
-    for (uint64 row = 0; row < SPI_processed; ++row)
-    {
-        bool id_null, distance_null;
-        Datum id_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
-        Datum distance_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &distance_null);
-        if (id_null || distance_null) continue;
-        hash128_t id = datum_to_hash128(id_value);
-        double distance = DatumGetFloat8(distance_value);
-        laplace_prompt_geometry_append(
-            intent, source, &id, LAPLACE_PROMPT_GEOMETRY_ANGULAR,
-            (uint32) row + 1u, NULL, distance);
-        if (root_angular && root_angular_count &&
-            hash128_eq(source, &intent->root) && *root_angular_count < fanout)
-            root_angular[(*root_angular_count)++] = id;
-    }
-    SPI_freetuptable(SPI_tuptable);
+    bool             hilb_nulls[4] = { false, false, false, false };
+    PromptHilbertCtx hctx = { intent->owner, NULL, 0, 0 };
 
-    /* The stored Native key has 64 bits. Project the anchor with that same
-     * owner instead of comparing it to the retired 128-bit key encoding. */
-    rc = SPI_execute_plan(hilbert_plan, angular_args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "prompt geometry: Hilbert locality read failed: %s",
-             SPI_result_code_string(rc));
-    if (SPI_processed > (uint64) INT_MAX ||
-        SPI_processed > (uint64) (MaxAllocSize / sizeof(LaplacePromptHilbertCandidate)))
-        elog(ERROR, "prompt geometry: Hilbert candidate set exceeds allocation capacity");
-    int hilbert_count = (int) SPI_processed;
-    LaplacePromptHilbertCandidate *ordered = hilbert_count > 0 ?
-        palloc(sizeof(*ordered) * (Size) hilbert_count) : NULL;
-    for (int row = 0; row < hilbert_count; ++row)
-    {
-        bool id_null, key_null;
-        Datum id_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
-        Datum key_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &key_null);
-        if (id_null || key_null)
-            elog(ERROR, "prompt geometry: indexed Hilbert row contains NULL");
-        bool anchor_null;
-        Datum anchor_value = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 3, &anchor_null);
-        bytea *key = DatumGetByteaPP(key_value);
-        bytea *anchor = anchor_null ? NULL : DatumGetByteaPP(anchor_value);
-        if (VARSIZE_ANY_EXHDR(key) != 8 || !anchor || VARSIZE_ANY_EXHDR(anchor) != 8)
-            elog(ERROR, "prompt geometry: Native Hilbert key is not 64 bits");
-        uint8 left[16] = {0}, right[16] = {0};
-        memcpy(left + 8, VARDATA_ANY(anchor), 8);
-        memcpy(right + 8, VARDATA_ANY(key), 8);
-        ordered[row].id = datum_to_hash128(id_value);
-        laplace_prompt_hilbert_delta(left, right, ordered[row].delta);
-    }
-    if (hilbert_count > 1)
-        qsort(ordered, hilbert_count, sizeof(*ordered), laplace_prompt_hilbert_compare);
-    for (int row = 0; row < Min(hilbert_count, fanout); ++row)
+    (void) laplace_pub_call_srf("public", "laplace_knn4d", 6, knn_types,
+                                knn_args, knn_nulls, visit_prompt_angular, &actx);
+
+    (void) laplace_pub_call_srf("public", "laplace_hilbert_neighbors", 4, hilb_types,
+                                hilb_args, hilb_nulls, visit_prompt_hilbert, &hctx);
+
+    if (hctx.count > 1)
+        qsort(hctx.items, (Size) hctx.count, sizeof(*hctx.items), laplace_prompt_hilbert_compare);
+    for (int row = 0; row < Min(hctx.count, fanout); ++row)
         laplace_prompt_geometry_append(
-            intent, source, &ordered[row].id, LAPLACE_PROMPT_GEOMETRY_HILBERT,
-            (uint32) row + 1u, ordered[row].delta, 0.0);
-    SPI_freetuptable(SPI_tuptable);
-    if (ordered) pfree(ordered);
-    pfree(DatumGetPointer(source_datum));
+            intent, source, &hctx.items[row].id, LAPLACE_PROMPT_GEOMETRY_HILBERT,
+            (uint32) row + 1u, hctx.items[row].delta, 0.0);
+
+    if (hctx.items) pfree(hctx.items);
+    pfree(DatumGetPointer(pt_geom));
+    pfree(DatumGetPointer(excl_b3));
+}
+
+typedef struct PromptFrechetScored
+{
+    hash128_t id;
+    double    d;
+} PromptFrechetScored;
+
+typedef struct PromptFrechetCtx
+{
+    MemoryContext        owner;
+    const double        *anchor_pts;
+    int                  point_count;
+    PromptFrechetScored *items;
+    int                  count;
+    int                  cap;
+} PromptFrechetCtx;
+
+static int
+laplace_prompt_frechet_compare(const void *left, const void *right)
+{
+    const PromptFrechetScored *a = (const PromptFrechetScored *) left;
+    const PromptFrechetScored *b = (const PromptFrechetScored *) right;
+
+    if (a->d != b->d)
+        return a->d < b->d ? -1 : 1;
+    return memcmp(&a->id, &b->id, sizeof(hash128_t));
+}
+
+static bool
+visit_prompt_frechet_curve(TupleTableSlot *slot, void *vctx)
+{
+    PromptFrechetCtx    *ctx = (PromptFrechetCtx *) vctx;
+    bool                 id_null = false, wkb_null = false;
+    Datum                d_id = slot_getattr(slot, 2, &id_null);
+    Datum                d_wkb = slot_getattr(slot, 3, &wkb_null);
+    bytea               *wkb;
+    uint32               n_pts = 0;
+    const unsigned char *raw;
+    double               d;
+    MemoryContext        prev;
+
+    if (id_null || wkb_null)
+        return true;
+
+    wkb = DatumGetByteaPP(d_wkb);
+    raw = laplace_trajectory_wkb_points(wkb, &n_pts);
+    if (n_pts == 0)
+        return true;
+
+    d = lp_frechet4((const double *) raw, (size_t) n_pts,
+                    ctx->anchor_pts, (size_t) ctx->point_count);
+    if (isnan(d) || !isfinite(d) || d < 0.0)
+        return true;
+
+    prev = MemoryContextSwitchTo(ctx->owner);
+    if (ctx->count == ctx->cap)
+    {
+        int new_cap = ctx->cap == 0 ? 32 : ctx->cap * 2;
+        if ((Size) new_cap > MaxAllocSize / sizeof(*ctx->items))
+            elog(ERROR, "prompt geometry: Frechet candidate set exceeds allocation capacity");
+        ctx->items = ctx->items == NULL
+            ? palloc(sizeof(*ctx->items) * (Size) new_cap)
+            : repalloc(ctx->items, sizeof(*ctx->items) * (Size) new_cap);
+        ctx->cap = new_cap;
+    }
+    ctx->items[ctx->count++] = (PromptFrechetScored){
+        .id = laplace_pub_blake3_to_hash128(d_id),
+        .d  = d
+    };
+    MemoryContextSwitchTo(prev);
+    return true;
 }
 
 static inline void
 laplace_prompt_geometry_shape(LaplacePromptIntent *intent, uint32 root_node,
-                              int fanout, SPIPlanPtr frechet_plan,
-                              const hash128_t *candidates, int candidate_count)
+                              int fanout, const hash128_t *candidates, int candidate_count)
 {
-    if (!frechet_plan || candidate_count <= 0 || fanout <= 0)
+    if (candidate_count <= 0 || fanout <= 0)
         return;
     size_t node_count = tier_tree_node_count(intent->input->tree);
     const uint32 *first_children =
@@ -188,60 +330,29 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, uint32 root_node,
     /* One point per immediate ordered constituent of the root: the level
      * public.laplace_curves realizes for each candidate. Points from another
      * composition level would not give a Frechet distance over one physicality. */
-    int point_count = (int) child_count;
-    Datum *x = palloc(sizeof(Datum) * point_count);
-    Datum *y = palloc(sizeof(Datum) * point_count);
-    Datum *z = palloc(sizeof(Datum) * point_count);
-    Datum *m = palloc(sizeof(Datum) * point_count);
-    for (int i = 0; i < point_count; ++i)
-    {
-        Size base = ((Size) first_child + (Size) i) * 4;
-        x[i] = Float8GetDatum(coords[base + 0]);
-        y[i] = Float8GetDatum(coords[base + 1]);
-        z[i] = Float8GetDatum(coords[base + 2]);
-        m[i] = Float8GetDatum(coords[base + 3]);
-    }
-    Datum *ids = palloc(sizeof(Datum) * candidate_count);
-    for (int i = 0; i < candidate_count; ++i)
-        ids[i] = hash128_to_datum(&candidates[i]);
-
-    ArrayType *xa = construct_array(x, point_count, FLOAT8OID,
-                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
-    ArrayType *ya = construct_array(y, point_count, FLOAT8OID,
-                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
-    ArrayType *za = construct_array(z, point_count, FLOAT8OID,
-                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
-    ArrayType *ma = construct_array(m, point_count, FLOAT8OID,
-                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
-    ArrayType *candidate_array = construct_array(
-        ids, candidate_count, BYTEAOID, -1, false, TYPALIGN_INT);
-    Datum args[6] = {
-        PointerGetDatum(xa), PointerGetDatum(ya), PointerGetDatum(za),
-        PointerGetDatum(ma), PointerGetDatum(candidate_array), Int32GetDatum(fanout)
+    ArrayType *cand_b3 = laplace_pub_blake3_array(candidates, candidate_count);
+    Oid        b3_arr_oid = laplace_pub_blake3_array_oid();
+    Datum      args[1] = { PointerGetDatum(cand_b3) };
+    bool       nulls[1] = { false };
+    PromptFrechetCtx fctx = {
+        intent->owner,
+        &coords[(Size) first_child * 4],
+        (int) child_count,
+        NULL, 0, 0
     };
-    int rc = SPI_execute_plan(frechet_plan, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "prompt geometry: Frechet refinement failed: %s",
-             SPI_result_code_string(rc));
-    for (uint64 row = 0; row < SPI_processed; ++row)
-    {
-        bool id_null, distance_null;
-        Datum id_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
-        Datum distance_value = SPI_getbinval(
-            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &distance_null);
-        if (id_null || distance_null) continue;
-        hash128_t id = datum_to_hash128(id_value);
-        laplace_prompt_geometry_append(
-            intent, &intent->root, &id, LAPLACE_PROMPT_GEOMETRY_FRECHET,
-            (uint32) row + 1u, NULL, DatumGetFloat8(distance_value));
-    }
-    SPI_freetuptable(SPI_tuptable);
 
-    for (int i = 0; i < candidate_count; ++i)
-        pfree(DatumGetPointer(ids[i]));
-    pfree(candidate_array); pfree(xa); pfree(ya); pfree(za); pfree(ma);
-    pfree(ids); pfree(x); pfree(y); pfree(z); pfree(m);
+    (void) laplace_pub_call_srf("public", "laplace_curves", 1, &b3_arr_oid,
+                                args, nulls, visit_prompt_frechet_curve, &fctx);
+
+    if (fctx.count > 1)
+        qsort(fctx.items, (Size) fctx.count, sizeof(*fctx.items), laplace_prompt_frechet_compare);
+    for (int row = 0; row < Min(fctx.count, fanout); ++row)
+        laplace_prompt_geometry_append(
+            intent, &intent->root, &fctx.items[row].id, LAPLACE_PROMPT_GEOMETRY_FRECHET,
+            (uint32) row + 1u, NULL, fctx.items[row].d);
+
+    if (fctx.items) pfree(fctx.items);
+    pfree(cand_b3);
 }
 
 static inline void
@@ -253,41 +364,6 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     {
         MemoryContextSwitchTo(previous);
         return;
-    }
-
-    const char *angular_sql = laplace_sql_query_text("geometry.prompt.angular");
-    const char *hilbert_sql = laplace_sql_query_text("geometry.prompt.hilbert");
-    const char *frechet_sql = laplace_sql_query_text("geometry.prompt.frechet");
-    Oid angular_types[7] = {
-        FLOAT8OID,FLOAT8OID,FLOAT8OID,FLOAT8OID,BYTEAOID,INT4OID,INT2OID};
-    Oid frechet_types[6] = {
-        FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,
-        BYTEAARRAYOID,INT4OID};
-    static SPIPlanPtr angular_plan = NULL;
-    static SPIPlanPtr hilbert_plan = NULL;
-    static SPIPlanPtr frechet_plan = NULL;
-    if (!angular_plan || !hilbert_plan || !frechet_plan)
-    {
-        /* Retain parameterized plans using PostgreSQL's normal plan policy.
-         * Forcing custom plans here prevents automatic reuse of a generic plan
-         * and replans the partitioned geometry joins on every prompt in auto mode. */
-        SPIPlanPtr angular = SPI_prepare_cursor(
-            angular_sql, 7, angular_types,
-            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
-        SPIPlanPtr hilbert = SPI_prepare_cursor(
-            hilbert_sql, 7, angular_types,
-            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
-        SPIPlanPtr frechet = SPI_prepare_cursor(
-            frechet_sql, 6, frechet_types,
-            CURSOR_OPT_PARALLEL_OK | CURSOR_OPT_GENERIC_PLAN);
-        if (!angular || !hilbert || !frechet ||
-            SPI_keepplan(angular) != 0 ||
-            SPI_keepplan(hilbert) != 0 ||
-            SPI_keepplan(frechet) != 0)
-            elog(ERROR, "prompt geometry: cannot retain indexed response plans");
-        angular_plan = angular;
-        hilbert_plan = hilbert;
-        frechet_plan = frechet;
     }
 
     size_t tree_nodes = tier_tree_node_count(intent->input->tree);
@@ -309,13 +385,13 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     hash128_t *root_angular = palloc(sizeof(hash128_t) * (Size) fanout);
     int root_angular_count = 0;
     laplace_prompt_geometry_scan_anchor(
-        intent, &intent->root, root_node, fanout, angular_plan, hilbert_plan,
+        intent, &intent->root, root_node, fanout,
         root_angular, &root_angular_count);
 
     /* Frechet refinement ranks only the root's angular KNN population, over
      * each candidate's realized curve rather than its packed trajectory values. */
     laplace_prompt_geometry_shape(
-        intent, root_node, fanout, frechet_plan,
+        intent, root_node, fanout,
         root_angular, root_angular_count);
     pfree(root_angular);
 

@@ -131,10 +131,6 @@ functions/ops/partition_pressure.sql.in
 functions/ops/index_usage_report.sql.in
 functions/ops/consensus_tier_distribution.sql.in
 functions/ops/api.sql.in
-functions/lexical/senses_bootstrap.sql.in
-functions/lexical/senses_with_context_bootstrap.sql.in
-functions/lexical/define_bootstrap.sql.in
-functions/lexical/define_with_context_bootstrap.sql.in
 functions/identity/property_value_id.sql.in
 functions/identity/is_language.sql.in
 functions/lexical/lexical_peers.sql.in
@@ -186,7 +182,6 @@ functions/structural/model_recipes.sql.in
 functions/converse/operation_frame_routes.sql.in
 functions/converse/compile_prompt.sql.in
 functions/lexical/define.sql.in
-functions/lexical/define_with_context.sql.in
 functions/lexical/examples.sql.in
 functions/lexical/synset_members.sql.in
 functions/link/concept_ref.sql.in
@@ -232,6 +227,8 @@ functions/generation/walk_text.sql.in
 functions/converse/answer.sql.in
 functions/generation/generate.sql.in
 functions/generation/continue_text.sql.in
+functions/generation/path_plane.sql.in
+functions/generation/metric_edges.sql.in
 functions/inspect/consensus_out_labeled.sql.in
 views/v_attestation_readable.sql.in
 inference/synonyms.sql.in
@@ -311,9 +308,9 @@ functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in
 functions/ops/log_readers.sql.in
 functions/highway/entities_has_highway.sql.in
-views/v_entities_highway.sql.in
 views/v_word_senses.sql.in
 functions/lexical/senses_with_context.sql.in
+functions/lexical/define_with_context.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
@@ -325,4 +322,5 @@ functions/converse/infer.sql.in
 functions/lexical/sense_audit.sql.in
 functions/converse/resolve_audit.sql.in
 
+functions/query/catalog_native_reads.sql.in
 functions/query/query_program.sql.in

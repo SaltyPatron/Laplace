@@ -24,6 +24,7 @@ public static class NpgsqlChessTransitionStandings
         using var conn = dataSource.OpenConnection();
         using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("chess.transition_standings"),
             parameters => AddIds(parameters, claims));
+        cmd.Prepare();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             map[Hash128.FromBytes((byte[])reader[0])] = new Row(reader.GetDouble(1), reader.GetDouble(2), reader.GetInt64(3));
@@ -38,6 +39,7 @@ public static class NpgsqlChessTransitionStandings
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = NpgsqlCatalog.Command(conn, null, SqlCatalog.Get("chess.transition_standings"),
             parameters => AddIds(parameters, claims));
+        await cmd.PrepareAsync(ct).ConfigureAwait(false);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
             map[Hash128.FromBytes((byte[])reader[0])] = new Row(reader.GetDouble(1), reader.GetDouble(2), reader.GetInt64(3));

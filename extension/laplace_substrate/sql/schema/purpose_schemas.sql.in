@@ -16,14 +16,14 @@
 -- stay in the extension schema.
 --
 -- Every purpose schema is an extension member.
-CREATE SCHEMA consensus;
-CREATE SCHEMA converse;
-CREATE SCHEMA lexical;
-CREATE SCHEMA taxonomy;
-CREATE SCHEMA generation;
-CREATE SCHEMA structural;
-CREATE SCHEMA realize;
-CREATE SCHEMA ops;
+CREATE SCHEMA IF NOT EXISTS consensus;
+CREATE SCHEMA IF NOT EXISTS converse;
+CREATE SCHEMA IF NOT EXISTS lexical;
+CREATE SCHEMA IF NOT EXISTS taxonomy;
+CREATE SCHEMA IF NOT EXISTS generation;
+CREATE SCHEMA IF NOT EXISTS structural;
+CREATE SCHEMA IF NOT EXISTS realize;
+CREATE SCHEMA IF NOT EXISTS ops;
 
 COMMENT ON SCHEMA consensus  IS 'Laplace: the fold and its edge reads (spec 37 WEIGHT, SCAN).';
 COMMENT ON SCHEMA converse   IS 'Laplace: the speaking loop (spec 37 SEQUENCE).';

@@ -341,16 +341,27 @@ public static partial class NpgsqlSubstrateReads
     /// </summary>
     public readonly record struct ApiCatalogRow(string Name, string? Args, string? Returns, string? Kind);
 
+    private static ApiCatalogRow ReadApiCatalogRow(NpgsqlDataReader r) => new(
+        r.GetString(0),
+        r.IsDBNull(1) ? null : r.GetString(1),
+        r.IsDBNull(2) ? null : r.GetString(2),
+        r.IsDBNull(3) ? null : r.GetString(3));
+
     /// <summary><c>ops.api(query)</c> — installed-function catalog search.</summary>
     public static Task<IReadOnlyList<ApiCatalogRow>> ApiCatalogAsync(
         NpgsqlDataSource dataSource, string query, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("ops.api_catalog"),
-            static r => new ApiCatalogRow(
-                r.GetString(0),
-                r.IsDBNull(1) ? null : r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.IsDBNull(3) ? null : r.GetString(3)),
+            ReadApiCatalogRow,
+            p => p.AddWithValue("q", query),
+            ct: ct, label: "api_catalog", onError: onError);
+
+    /// <summary><c>ops.api(query)</c> — installed-function catalog search on an open connection.</summary>
+    public static Task<IReadOnlyList<ApiCatalogRow>> ApiCatalogAsync(
+        NpgsqlConnection connection, string query, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(connection, SqlCatalog.Get("ops.api_catalog"),
+            ReadApiCatalogRow,
             p => p.AddWithValue("q", query),
             ct: ct, label: "api_catalog", onError: onError);
 

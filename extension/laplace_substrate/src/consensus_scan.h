@@ -94,6 +94,26 @@ extern void laplace_consensus_ranked_candidates(ArrayType *subjects,ArrayType *o
     bool default_only,bool planes,LaplaceConsensusConsumer consume,LaplaceConsensusCutoff cutoff,
     void *context,LaplaceConsensusScanStats *stats);
 extern void laplace_consensus_witness_counts(const hash128_t *claims,int count,int64 *counts);
+
+typedef struct LaplaceBandEdgeRow
+{
+    hash128_t subject_id;
+    hash128_t type_id;
+    hash128_t object_id;
+    int64     rating;
+    int64     rd;
+    int64     witness_count;
+    int64     eff_mu;
+} LaplaceBandEdgeRow;
+
+extern LaplaceBandEdgeRow *laplace_consensus_band_edges_scan_c(
+    const hash128_t *types,
+    int n_types,
+    bool has_min_eff_mu,
+    int64 min_eff_mu,
+    int64 limit_rows,
+    int *out_count);
+
 extern void laplace_consensus_enrich(void *rows,int count,Size stride,
     Size claim_offset,Size native_offset,Size witnesses_offset);
 #define LAPLACE_CONSENSUS_ENRICH(rows,count,type) \

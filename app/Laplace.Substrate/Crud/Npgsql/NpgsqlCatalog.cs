@@ -21,8 +21,8 @@ public static class NpgsqlCatalog
         return await connection.BeginRawBinaryCopyAsync(command.CommandText, ct);
     }
 
-    internal static NpgsqlCommand InstalledOperationCommand(
-        NpgsqlDataSource source, bool procedure, string qualifiedName,
+    private static string InstalledOperationSql(
+        bool procedure, string qualifiedName,
         IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments, long rowsToFetch)
     {
         var argumentTemplate = SqlCatalog.Get("operation.argument").Text;
@@ -34,14 +34,33 @@ public static class NpgsqlCatalog
                 .Replace("{slot}", arguments[i].Parameter.ParameterName, StringComparison.Ordinal)
                 .Replace("{type}", arguments[i].Type, StringComparison.Ordinal);
         var query = SqlCatalog.Get(procedure ? "operation.procedure" : "operation.function");
-        var text = query.Text
+        return query.Text
             .Replace("{operation}", qualifiedName, StringComparison.Ordinal)
             .Replace("{arguments}", string.Join(", ", slots), StringComparison.Ordinal)
             .Replace("{rows}", rowsToFetch.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
-        var command = source.CreateCommand(text);
+    }
+
+    private static NpgsqlCommand BindInstalledOperationParameters(
+        NpgsqlCommand command,
+        IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments)
+    {
         foreach (var argument in arguments) command.Parameters.Add(argument.Parameter);
         return command;
     }
+
+    internal static NpgsqlCommand InstalledOperationCommand(
+        NpgsqlDataSource source, bool procedure, string qualifiedName,
+        IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments, long rowsToFetch)
+        => BindInstalledOperationParameters(
+            source.CreateCommand(InstalledOperationSql(procedure, qualifiedName, arguments, rowsToFetch)),
+            arguments);
+
+    internal static NpgsqlCommand InstalledOperationCommand(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, bool procedure, string qualifiedName,
+        IReadOnlyList<(string Name, string Type, NpgsqlParameter Parameter)> arguments, long rowsToFetch)
+        => BindInstalledOperationParameters(
+            new NpgsqlCommand(InstalledOperationSql(procedure, qualifiedName, arguments, rowsToFetch), connection, transaction),
+            arguments);
 
     private static readonly Regex QualifiedRelation = new(
         "^(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*)(?:\\.(?:\"(?:\"\"|[^\"])+\"|[a-z_][a-z0-9_$]*))?\\z",
@@ -82,6 +101,40 @@ public static class NpgsqlCatalog
     {
         var query = SqlCatalog.Get(name);
         return Bind(new NpgsqlCommand(query.Text, connection, transaction), query, arguments);
+    }
+
+    public static NpgsqlCommand PreparedCommand(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction,
+        string name, params object?[] arguments)
+    {
+        var command = Command(connection, transaction, name, arguments);
+        try
+        {
+            command.Prepare();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    public static async Task<NpgsqlCommand> PreparedCommandAsync(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction,
+        string name, CancellationToken ct, params object?[] arguments)
+    {
+        var command = Command(connection, transaction, name, arguments);
+        try
+        {
+            await command.PrepareAsync(ct).ConfigureAwait(false);
+            return command;
+        }
+        catch
+        {
+            await command.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>One round trip for fixed catalog utilities that have no parameters.</summary>

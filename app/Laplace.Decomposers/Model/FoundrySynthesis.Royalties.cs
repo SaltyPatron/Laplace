@@ -78,16 +78,23 @@ public static partial class FoundrySynthesis
         if (!string.IsNullOrWhiteSpace(scopeSource))
         {
             var names = scopeSource.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var ids = new List<byte[]>(names.Length);
+            IReadOnlyList<(string RequestedName, byte[] Id)> resolved;
             await using (var probeDs = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString))
+                resolved = await NpgsqlFoundryReads.SourceIdsBatchAsync(probeDs, names);
+
+            var matched = new HashSet<string>(StringComparer.Ordinal);
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            var ids = new List<byte[]>(resolved.Count);
+            foreach (var (requestedName, id) in resolved)
             {
-                foreach (var name in names)
-                {
-                    var sourceIds = await NpgsqlFoundryReads.SourceIdsAsync(probeDs, name);
-                    if (sourceIds.Count == 0)
-                        return Fail($"--scope-source: unknown source '{name}' (use a registered source label or trunk ID)");
-                    ids.AddRange(sourceIds);
-                }
+                matched.Add(requestedName);
+                if (seenIds.Add(Convert.ToHexString(id)))
+                    ids.Add(id);
+            }
+            foreach (var name in names)
+            {
+                if (!matched.Contains(name))
+                    return Fail($"--scope-source: unknown source '{name}' (use a registered source label or trunk ID)");
             }
             scopeSourceIds = ids;
             Console.WriteLine($"  scope: {names.Length} source(s) — Native paths and attribution select those registered witnesses ({scopeSource})");

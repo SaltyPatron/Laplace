@@ -80,9 +80,12 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
     {
         try
         {
-            await using var cmd = NpgsqlCatalog.Command(
-                _dataSource,
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+                conn,
+                null,
                 "apikey.put",
+                ct,
                 record.KeyHash,
                 record.KeyPrefix,
                 record.Tenant,
@@ -101,20 +104,23 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
 
     public async Task<ApiKeyRecord?> TryGetAsync(string keyHash, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.get", keyHash);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "apikey.get", ct, keyHash);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? Map(reader) : null;
     }
 
     public async Task<IReadOnlyList<ApiKeyRecord>> GetByTenantAsync(string tenant, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.by_tenant", tenant);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "apikey.by_tenant", ct, tenant);
         return await ReadAllAsync(cmd, ct);
     }
 
     public async Task<IReadOnlyList<ApiKeyRecord>> GetByLabelAsync(string label, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.by_label", label);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "apikey.by_label", ct, label);
         return await ReadAllAsync(cmd, ct);
     }
 
@@ -129,13 +135,15 @@ internal sealed class PostgresApiKeyStore : IApiKeyStore
 
     public async Task<bool> RevokeAsync(string keyHash, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.revoke", keyHash);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "apikey.revoke", ct, keyHash);
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
     public async Task TouchAsync(string keyHash, DateTimeOffset usedAt, CancellationToken ct)
     {
-        await using var cmd = NpgsqlCatalog.Command(_dataSource, "apikey.touch", keyHash, usedAt);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "apikey.touch", ct, keyHash, usedAt);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

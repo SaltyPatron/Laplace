@@ -1,0 +1,10 @@
+CREATE OR REPLACE FUNCTION generation.path_plane(
+    p_roots        bytea[],
+    p_steps        text,
+    p_fanout       integer,
+    p_cap          integer,
+    p_visible_only boolean DEFAULT false,
+    p_sources      bytea[] DEFAULT NULL)
+RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, paths jsonb)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_path_plane'
+LANGUAGE C STABLE PARALLEL SAFE;

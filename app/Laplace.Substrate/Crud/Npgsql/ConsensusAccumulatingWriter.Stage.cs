@@ -296,6 +296,7 @@ public sealed partial class ConsensusAccumulatingWriter
                 subjects, types, objects, phis, games, sums, timestamps, opponents, periodOffsets,
                 periodOpponents, periodPhis, periodGames, periodSums);
             command.CommandTimeout = 0;
+            await command.PrepareAsync(ct).ConfigureAwait(false);
             folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             foldCalls++;
         }
@@ -330,6 +331,7 @@ public sealed partial class ConsensusAccumulatingWriter
             await using var command = NpgsqlCatalog.Command(connection, transaction,
                 "consensus.deposit_mask", entities, maskTypes);
             command.CommandTimeout = 0;
+            await command.PrepareAsync(ct).ConfigureAwait(false);
             masks += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             maskCalls++;
         }

@@ -3,7 +3,6 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
-#include "executor/spi.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "utils/array.h"
@@ -16,10 +15,9 @@
 #include "laplace/core/math4d.h"
 
 #include "recall_internal.h"
+#include "query_response_field.h"
 #include "spi_common.h"
-#include "spi_nested.h"
 #include "consensus_scan.h"
-#include "laplace/core/sql_catalog.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_define_fast);
 
@@ -49,25 +47,26 @@ static void define_fast_impl(Datum word,ArrayType *context,int limit,ReplyBuf *b
 {
     if(limit<0)ereport(ERROR,(errcode(ERRCODE_INVALID_PARAMETER_VALUE),errmsg("Definition limit must not be negative")));
     if(!limit)return;
-    static SPIPlanPtr plan;Oid types[]={BYTEAOID};Datum args[]={word};
-    spi_common_ensure_plan(&plan,laplace_sql_query_text("recall.declared_definitions"),1,types);
-    int rc=SPI_execute_plan(plan,args,NULL,true,0);
-    if(rc!=SPI_OK_SELECT)elog(ERROR,"Declared definition read failed");
-    uint64 n=SPI_processed;
+    hash128_t w=datum_to_hash128(word);
+    int n_defs=0;
+    RdDefOutRow *defs=laplace_recall_declared_definitions_c(&w,&n_defs);
+    uint64 n=(uint64)n_defs;
     if(n>MaxAllocSize/sizeof(DefineCandidate))elog(ERROR,"Declared definitions exceed memory capacity");
     DefineCandidate *rows=palloc(Max(n,1)*sizeof(*rows));Datum *ids=palloc(Max(n,1)*sizeof(Datum));
     HASHCTL ctl={0};ctl.keysize=sizeof(hash128_t);ctl.entrysize=sizeof(DefineIndex);
     HTAB *index=hash_create("Declared definition context",Max(n,16),&ctl,HASH_ELEM|HASH_BLOBS);
     for(uint64 i=0;i<n;i++){
-        bool missing;Datum values[4];
-        for(int j=0;j<4;j++){
-            values[j]=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,j+1,&missing);
-            if(missing)elog(ERROR,"Declared definition has a null field");
-        }
-        rows[i]=(DefineCandidate){datum_to_hash128(values[0]),datumCopy(values[1],false,-1),DatumGetInt64(values[2]),DatumGetInt64(values[3])};
+        rows[i]=(DefineCandidate){
+            defs[i].entity_id,
+            CStringGetTextDatum(defs[i].label?defs[i].label:""),
+            defs[i].rating_fp,
+            defs[i].witnesses
+        };
+        if(defs[i].label)pfree(defs[i].label);
         ids[i]=hash128_to_datum(&rows[i].id);
         DefineIndex *entry=hash_search(index,&rows[i].id,HASH_ENTER,NULL);entry->ordinal=(int)i;
     }
+    if(defs)pfree(defs);
     if(n && context && ArrayGetNItems(ARR_NDIM(context),ARR_DIMS(context))){
         ArrayType *candidates=construct_array(ids,(int)n,BYTEAOID,-1,false,TYPALIGN_INT);
         DefineContext read={rows,index};
@@ -88,7 +87,6 @@ pg_laplace_define_fast(PG_FUNCTION_ARGS)
     ArrayType     *context_arr = NULL;
     int            limit;
     ReplyBuf       buf;
-    bool           spi_top = false;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
@@ -98,12 +96,7 @@ pg_laplace_define_fast(PG_FUNCTION_ARGS)
     limit = PG_ARGISNULL(2) ? 5 : PG_GETARG_INT32(2);
 
     reply_buf_init(&buf);
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "define_fast: SPI_connect failed");
-
     define_fast_impl(word, context_arr, limit, &buf);
-
-    laplace_spi_finish(spi_top);
     InitMaterializedSRF(fcinfo, 0);
     reply_buf_emit(rsinfo, &buf);
     return (Datum) 0;

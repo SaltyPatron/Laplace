@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION converse.recall_is_a_no_reply(p_from bytea, p_to byte
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT 'No witnessed IS_A path from "'
-           || COALESCE((SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_from)::bytea],NULL)::public.blake3[]) lp_l), (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_from)::bytea],NULL)::public.blake3[]) lp_l))
+           || COALESCE(public.laplace_label_text((p_from)::bytea, false), public.laplace_label_text((p_from)::bytea, false))
            || '" to "'
-           || COALESCE((SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_to)::bytea],NULL)::public.blake3[]) lp_l), (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(p_to)::bytea],NULL)::public.blake3[]) lp_l)) || '".';
+           || COALESCE(public.laplace_label_text((p_to)::bytea, false), public.laplace_label_text((p_to)::bytea, false)) || '".';
 END;

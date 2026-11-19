@@ -185,7 +185,7 @@ BEGIN
 END
 $$;
 
-CREATE TRIGGER ingest_run_throughput_apply
+CREATE OR REPLACE TRIGGER ingest_run_throughput_apply
 BEFORE UPDATE OF status, ended_at, entities, physicalities, attestations
 ON ingest_run_journal
 FOR EACH ROW

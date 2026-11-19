@@ -89,29 +89,9 @@ CREATE TRIGGER preserve_web_session_revocation
     BEFORE UPDATE ON app.web_sessions
     FOR EACH ROW EXECUTE FUNCTION app.preserve_web_session_revocation();
 
-CREATE OR REPLACE FUNCTION app.check_browser_ticket_identity()
-RETURNS trigger
-LANGUAGE plpgsql
-SET search_path = pg_catalog, app
-AS $function$
-DECLARE
-    bound_user uuid;
-    bound_tenant text;
-BEGIN
-    SELECT user_id, tenant_id INTO bound_user, bound_tenant
-    FROM app.web_sessions WHERE session_id = NEW.session_id FOR UPDATE;
-    IF FOUND AND (bound_user IS DISTINCT FROM NEW.user_id
-                  OR bound_tenant IS DISTINCT FROM NEW.tenant_id) THEN
-        RAISE EXCEPTION 'A browser session cannot be rebound to another identity; sign out before signing in again'
-            USING ERRCODE = '23514';
-    END IF;
-    RETURN NEW;
-END;
-$function$;
 DROP TRIGGER IF EXISTS check_browser_ticket_identity ON app.web_sessions;
-CREATE TRIGGER check_browser_ticket_identity
-    BEFORE INSERT ON app.web_sessions
-    FOR EACH ROW EXECUTE FUNCTION app.check_browser_ticket_identity();
+DROP TRIGGER IF EXISTS web_sessions_check_identity ON app.web_sessions;
+DROP FUNCTION IF EXISTS app.check_browser_ticket_identity();
 
 CREATE TABLE IF NOT EXISTS app.conversation_sessions (
     tenant_id    text NOT NULL REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
@@ -163,6 +143,8 @@ CREATE TABLE IF NOT EXISTS app.platform_role_events (
     role          text,
     occurred_at   timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS platform_role_events_user
+    ON app.platform_role_events (user_id, event_id DESC);
 
 CREATE TABLE IF NOT EXISTS app.workspace_role_events (
     event_id      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -220,22 +202,31 @@ CREATE INDEX IF NOT EXISTS billing_usage_tenant_executed
 -- Two-sided "BitTorrent of AI" / Mold-A-Model micro-royalty attribution ledger:
 -- records exact basis-point (share_bp, 10000 = 100%) contributor splits per metered quote.
 CREATE TABLE IF NOT EXISTS app.billing_royalties (
-    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    quote_id           text NOT NULL,
-    payer_tenant       text NOT NULL,
-    source_id          text NOT NULL,
-    service_id         text NOT NULL,
-    share_bp           int NOT NULL CHECK (share_bp > 0 AND share_bp <= 10000),
-    gross_amount_cents bigint NOT NULL CHECK (gross_amount_cents >= 0),
-    royalty_cents      bigint NOT NULL CHECK (royalty_cents >= 0),
-    executed_at        timestamptz NOT NULL DEFAULT now(),
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    quote_id            text NOT NULL,
+    payer_tenant        text NOT NULL,
+    service_id          text NOT NULL,
+    source_id           text NOT NULL,
+    source_owner_tenant text,
+    share_bp            int NOT NULL CHECK (share_bp >= 0 AND share_bp <= 10000),
+    royalty_cents       bigint NOT NULL CHECK (royalty_cents >= 0),
+    hit_count           bigint NOT NULL DEFAULT 0 CHECK (hit_count >= 0),
+    total_weight        double precision NOT NULL DEFAULT 0,
+    executed_at         timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT billing_royalties_payer_tenant_fk FOREIGN KEY (payer_tenant)
         REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
     CONSTRAINT billing_royalties_quote_tenant_fk FOREIGN KEY (quote_id, payer_tenant)
         REFERENCES app.billing_quotes(quote_id, tenant) ON DELETE CASCADE
 );
+ALTER TABLE app.billing_royalties ADD COLUMN IF NOT EXISTS source_owner_tenant text;
+ALTER TABLE app.billing_royalties ADD COLUMN IF NOT EXISTS hit_count bigint NOT NULL DEFAULT 0;
+ALTER TABLE app.billing_royalties ADD COLUMN IF NOT EXISTS total_weight double precision NOT NULL DEFAULT 0;
+ALTER TABLE app.billing_royalties DROP COLUMN IF EXISTS gross_amount_cents;
 CREATE INDEX IF NOT EXISTS billing_royalties_payer_executed
     ON app.billing_royalties (payer_tenant, executed_at DESC);
+CREATE INDEX IF NOT EXISTS billing_royalties_owner_executed
+    ON app.billing_royalties (source_owner_tenant, executed_at DESC)
+    WHERE source_owner_tenant IS NOT NULL;
 CREATE INDEX IF NOT EXISTS billing_royalties_source_executed
     ON app.billing_royalties (source_id, executed_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS billing_royalties_quote_source
@@ -258,9 +249,7 @@ CREATE TABLE IF NOT EXISTS app.billing_entitlements (
     CONSTRAINT billing_entitlements_tenant_fk FOREIGN KEY (tenant)
         REFERENCES app.tenants(tenant_id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS billing_entitlements_subscription
-    ON app.billing_entitlements (stripe_subscription_id)
-    WHERE stripe_subscription_id IS NOT NULL;
+DROP INDEX IF EXISTS app.billing_entitlements_subscription;
 CREATE UNIQUE INDEX IF NOT EXISTS billing_entitlements_subscription_unique
     ON app.billing_entitlements (stripe_subscription_id)
     WHERE stripe_subscription_id IS NOT NULL;
@@ -407,6 +396,9 @@ CREATE TABLE IF NOT EXISTS app.api_keys (
 );
 CREATE INDEX IF NOT EXISTS api_keys_tenant
     ON app.api_keys (tenant, created_at DESC);
+CREATE INDEX IF NOT EXISTS api_keys_label_active
+    ON app.api_keys (label, created_at DESC, key_hash)
+    WHERE label IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS app.billing_config (
     key        text PRIMARY KEY,

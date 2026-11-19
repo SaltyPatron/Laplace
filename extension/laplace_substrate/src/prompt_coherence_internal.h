@@ -15,11 +15,15 @@
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "bubble_up_native.h"
+#include "converse_bindings.h"
+#include "public_direct.h"
 #include "spi_common.h"
 #include "walk_score.h"
 #include "relation_symmetry.h"
-#include "spi_nested.h"
-#include "spi_stream.h"
+#include "consensus_scan.h"
+#include "edges_raw_internal.h"
+#include "relations_internal.h"
 #include "laplace/core/sql_catalog.h"
 
 typedef struct PcCand
@@ -104,11 +108,12 @@ void pc_type_add_namers(PcTypeEntry *te, const PcTokEntry *tk, HTAB *namer_h,
                         MemoryContext cxt);
 bool pc_type_has_other_namer(const PcTypeEntry *te, int32 ord);
 void pc_syn_add(HTAB *h, const uint8 *syn, int idx, MemoryContext cxt);
-SPIPlanPtr ensure_pc_plan(SPIPlanPtr *slot, const char *sql, int nargs,
-                          Oid *argtypes, const char *label);
 void pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
                    ArrayType *syn_arr, bool forward);
-void pc_receive_candidate(TupleTableSlot *row, void *opaque);
-void pc_receive_relation_mass(TupleTableSlot *row, void *opaque);
+void pc_add_candidate_c(PcCandidateRead *read, int32 ord, const hash128_t *tok,
+                        const hash128_t *syn, double mu, int64 wit,
+                        int32 lang_agree);
+void pc_credit_relation_mass_c(PcEdgeRead *read, const hash128_t *subj,
+                               const hash128_t *tid, int64 rating, int64 rd);
 
 #endif

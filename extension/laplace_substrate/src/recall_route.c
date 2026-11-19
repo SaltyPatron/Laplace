@@ -84,9 +84,10 @@ int
 spi_forward_replies(ReplyBuf *buf, const char *query,
                     int nparams, Oid *types, Datum *values, const char *nulls)
 {
-    static struct { const char *q; SPIPlanPtr plan; } cache[16];
+    static struct { const char *q; SPIPlanPtr plan; } cache[64];
     static int n_cached = 0;
     SPIPlanPtr plan = NULL;
+    SPIPlanPtr overflow_plan = NULL;
     int rc;
 
     for (int i = 0; i < n_cached; i++)
@@ -107,10 +108,16 @@ spi_forward_replies(ReplyBuf *buf, const char *query,
         }
         else
         {
-            spi_common_ensure_plan(&plan, query, nparams, types);
+            overflow_plan = SPI_prepare_cursor(query, nparams, types, CURSOR_OPT_PARALLEL_OK);
+            if (overflow_plan == NULL)
+                elog(ERROR, "recall: SPI_prepare_cursor failed: %s",
+                     SPI_result_code_string(SPI_result));
+            plan = overflow_plan;
         }
     }
     rc = SPI_execute_plan(plan, values, nulls, true, 0);
+    if (overflow_plan != NULL)
+        SPI_freeplan(overflow_plan);
 
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "recall: query failed: %s", SPI_result_code_string(rc));

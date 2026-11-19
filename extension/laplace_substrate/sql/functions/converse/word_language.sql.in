@@ -23,36 +23,8 @@
 -- deterministic. Same winner as before wherever a winner existed.
 CREATE OR REPLACE FUNCTION converse._word_language_candidates_batch_impl(p_words bytea[])
     RETURNS TABLE(word bytea, lang bytea, mu double precision)
-    LANGUAGE plpgsql STABLE PARALLEL SAFE
-AS $$
-BEGIN
-    IF COALESCE(cardinality(p_words), 0) = 0 THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    SELECT DISTINCT ON (b.term, b.language)
-           b.term AS word, b.language AS lang,
-           (b.eff_mu * 1e9)::double precision AS mu
-    FROM converse.binding_evidence(p_words, NULL, false) b
-    WHERE b.language IS NOT NULL
-    ORDER BY b.term, b.language, (b.eff_mu * 1e9)::double precision DESC;
-
-    IF FOUND OR NOT EXISTS (SELECT 1 FROM laplace.consensus) THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    SELECT DISTINCT ON (c.subject_id, c.object_id)
-           c.subject_id AS word, c.object_id AS lang,
-           consensus.eff_mu(c.rating, c.rd)::double precision AS mu
-    FROM laplace.consensus c
-    WHERE c.subject_id = ANY (p_words)
-      AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-      AND c.object_id IS NOT NULL
-    ORDER BY c.subject_id, c.object_id, consensus.eff_mu(c.rating, c.rd)::double precision DESC;
-END;
-$$;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_word_language_candidates_batch'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
 CREATE OR REPLACE FUNCTION converse.word_language_candidates_batch(p_words bytea[])
     RETURNS TABLE(word bytea, lang bytea, mu double precision)

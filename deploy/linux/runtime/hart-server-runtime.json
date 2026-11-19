@@ -9,7 +9,7 @@
   "database_owner": "laplace",
   "port": 5432,
   "pool_max": 2,
-  "connection_limit": 6,
+  "connection_limit": 16,
   "pgbin": "/usr/local/pgsql/bin",
   "pgsocket": "/tmp",
   "database_data": "/data/pgdata",
@@ -43,14 +43,14 @@
     "role": "laplace_staging_db",
     "port": 5432,
     "pool_max": 2,
-    "connection_limit": 6
+    "connection_limit": 32
   },
   "mcp": {
     "user": "laplace-mcp",
     "role": "laplace_mcp_runtime",
     "state": "/hosting/laplace/runtime/mcp",
     "pool_max": 2,
-    "connection_limit": 4,
+    "connection_limit": 8,
     "base": "http://127.0.0.1:5190"
   }
 }

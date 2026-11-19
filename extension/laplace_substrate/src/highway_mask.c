@@ -14,8 +14,7 @@
 #include "miscadmin.h"
 
 #include "spi_common.h"
-#include "spi_nested.h"
-#include "spi_stream.h"
+#include "consensus_scan.h"
 
 #include "laplace/core/highway_table.h"
 #include "laplace/core/entity_type_law.h"
@@ -467,29 +466,26 @@ pg_laplace_relation_registry(PG_FUNCTION_ARGS)
  * from the highway table in memory; one kept, indexed set read fetches the
  * cells, each relation contributing at most `limit` before the merged limit.
  */
-static SPIPlanPtr band_edges_plan = NULL;
-
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_band_edges);
 
 Datum
 pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
 {
-    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    int32      band;
-    int64      min_eff_mu;
-    int64      limit_rows;
-    Datum     *type_ids;
-    int        n_types = 0;
-    ArrayType *type_arr;
-    Oid        argtypes[3] = { BYTEAARRAYOID, INT8OID, INT8OID };
-    Datum      args[3];
-    bool       spi_top = false;
-    int        rc;
+    ReturnSetInfo      *rsinfo;
+    int32               band;
+    bool                has_min_eff_mu;
+    int64               min_eff_mu;
+    int64               limit_rows;
+    hash128_t           type_ids[256];
+    int                 n_types = 0;
+    LaplaceBandEdgeRow *rows;
+    int                 n_rows = 0;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("consensus_band_edges: band must not be NULL")));
     band = PG_GETARG_INT32(0);
-    min_eff_mu = PG_ARGISNULL(1) ? PG_INT64_MIN : PG_GETARG_INT64(1);
+    has_min_eff_mu = !PG_ARGISNULL(1);
+    min_eff_mu = has_min_eff_mu ? PG_GETARG_INT64(1) : PG_INT64_MIN;
     limit_rows = PG_ARGISNULL(2) ? 1000 : PG_GETARG_INT64(2);
     if (limit_rows < 1)
         ereport(ERROR, (errmsg("consensus_band_edges: limit must be >= 1")));
@@ -497,7 +493,6 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
     require_highway_table("consensus_band_edges");
 
     /* The band's relation ids, from at most 256 registry bits. */
-    type_ids = (Datum *) palloc(sizeof(Datum) * 256);
     for (int bit = 0; bit < 256; bit++)
     {
         const char *canonical = NULL;
@@ -511,41 +506,33 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
             continue;
         if (laplace_relation_type_id(canonical, &type_id) < 0)
             continue;
-        type_ids[n_types++] = hash128_to_datum(&type_id);
+        type_ids[n_types++] = type_id;
     }
 
     InitMaterializedSRF(fcinfo, 0);
+    rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     if (n_types == 0)
         return (Datum) 0;
 
-    type_arr = construct_array(type_ids, n_types, BYTEAOID, -1,
-                               false, TYPALIGN_INT);
-
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "consensus_band_edges: SPI_connect failed");
-
-    args[0] = PointerGetDatum(type_arr);
-    args[1] = Int64GetDatum(min_eff_mu);
-    args[2] = Int64GetDatum(limit_rows);
-    if (band_edges_plan == NULL)
+    rows = laplace_consensus_band_edges_scan_c(
+        type_ids, n_types, has_min_eff_mu, min_eff_mu, limit_rows, &n_rows);
+    for (int i = 0; i < n_rows; ++i)
     {
-        /* The relation set and page size select the typed ranking index. A
-         * generic LIMIT estimate can instead choose score-only scans and sort
-         * every tied row before returning a small page. Keep the prepared query,
-         * but plan its indexed reads with the actual arguments. */
-        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("consensus.band_edges"),
-            3, argtypes, CURSOR_OPT_CUSTOM_PLAN | CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL || SPI_keepplan(plan) != 0)
-            elog(ERROR, "consensus_band_edges: cannot retain typed page plan");
-        band_edges_plan = plan;
+        const LaplaceBandEdgeRow *r = &rows[i];
+        Datum vals[7] = {
+            hash128_to_datum(&r->subject_id),
+            hash128_to_datum(&r->type_id),
+            hash128_to_datum(&r->object_id),
+            Int64GetDatum(r->rating),
+            Int64GetDatum(r->rd),
+            Int64GetDatum(r->witness_count),
+            Int64GetDatum(r->eff_mu)
+        };
+        bool nulls[7] = { false, false, false, false, false, false, false };
+
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, vals, nulls);
     }
-    rc = SPI_execute_plan(band_edges_plan, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "consensus_band_edges: query failed: %s",
-             SPI_result_code_string(rc));
-
-    spi_emit_all_rows(rsinfo);
-
-    laplace_spi_finish(spi_top);
+    if (rows != NULL)
+        pfree(rows);
     return (Datum) 0;
 }

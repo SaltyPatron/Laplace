@@ -14,9 +14,9 @@ SELECT a.id,
        a.sum_score_fp1e9,
        a.opponent_rd_fp1e9,
        a.last_observed_at,
-       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.subject_id)::bytea],NULL)::public.blake3[]) lp_l) AS subject_label,
+       public.laplace_label_text((a.subject_id)::bytea, false) AS subject_label,
        (SELECT rl.label FROM consensus.relation_labels(ARRAY[a.type_id]) rl)    AS type_label,
-       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.object_id)::bytea],NULL)::public.blake3[]) lp_l)  AS object_label,
-       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.source_id)::bytea],NULL)::public.blake3[]) lp_l)  AS source_label,
-       (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[(a.context_id)::bytea],NULL)::public.blake3[]) lp_l) AS context_label
+       public.laplace_label_text((a.object_id)::bytea, false)  AS object_label,
+       public.laplace_label_text((a.source_id)::bytea, false)  AS source_label,
+       public.laplace_label_text((a.context_id)::bytea, false) AS context_label
 FROM laplace.attestations a;

@@ -28,7 +28,8 @@ internal sealed partial class SubstrateTools : IMcpTools
         if (id is null)
             return JsonRows(Array.Empty<JsonObject>());
 
-        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "taxonomy.bubble_up_rendered", id, Int(args, "k", 5));
+        using var conn = _dbReadOnly.OpenConnection();
+        using var cmd = NpgsqlCatalog.PreparedCommand(conn, null, "taxonomy.bubble_up_rendered", id, Int(args, "k", 5));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())

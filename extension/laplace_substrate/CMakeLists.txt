@@ -67,9 +67,22 @@ set(EXT_EXECUTION_SOURCES
     src/highway_mask_deposit.c
     src/entity_mask_write.c
     src/band_leaders.c
+    src/edges_raw.c
+    src/ancestry_walk.c
+    src/generation_path_plane.c
+    src/generation_metric_edges.c
     src/laplace_substrate_relations.c
     src/lexical_case.c
     src/lexical_case_peers.c
+    src/public_direct.c
+    src/graph_taxonomy.c
+    src/foundry_crawl.c
+    src/converse_bindings.c
+    src/ops_batch_reads.c
+    src/structural_neighbors.c
+    src/query_response_field.c
+    src/bubble_up_native.c
+    src/converse_facts_native.c
 )
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
@@ -187,6 +200,29 @@ string(APPEND _ext_sql_hashes "module_pathname=${EXT_MODULE_PATHNAME};execution=
 string(SHA256 _ext_sql_hash "${_ext_sql_hashes}")
 string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 
+# Persistent storage layout identity: determines whether an existing database
+# can run ALTER EXTENSION UPDATE IN-PLACE via laplace_substrate.reconcile.sql
+# or requires recreation because table/type storage changed.
+set(_ext_storage_inputs
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/schema/tables/entities.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/schema/tables/physicalities.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/schema/tables/attestations.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/schema/tables/consensus.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/functions/glicko2/laplace_glicko2_result.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/functions/fold/consensus_fold_result.sql.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/functions/ingest/intent_preflight_result.sql.in")
+set(_ext_storage_hashes "")
+foreach(_f IN LISTS _ext_storage_inputs)
+    if(NOT EXISTS "${_f}")
+        message(FATAL_ERROR "Storage-layout SQL input is missing: ${_f}")
+    endif()
+    file(SHA256 "${_f}" _fh)
+    string(APPEND _ext_storage_hashes "${_fh}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_f}")
+endforeach()
+string(SHA256 _ext_storage_hash "${_ext_storage_hashes}")
+string(SUBSTRING "${_ext_storage_hash}" 0 16 EXT_STORAGE_VERSION)
+
 # One source list for every platform. MODULE libraries link with undefined
 # symbols allowed (PG extensions resolve against the postgres binary at dlopen),
 # so a file missing from one platform's list only surfaces as a runtime
@@ -202,9 +238,12 @@ set(EXT_C_SOURCES
     src/prompt_coherence_scan.c
     src/prompt_language.c
     src/consensus_fold_step.c
+    src/public_direct.c
+    src/edges_raw.c
     src/graph_taxonomy.c
-    src/graph_contrast.c
     src/foundry_crawl.c
+    src/converse_bindings.c
+    src/bubble_up_native.c
     src/perfcache.c
     src/descent_probe.c
     src/fold_route.c
@@ -378,12 +417,63 @@ elseif(NOT EXISTS "${_query_program_include}/query_program.h")
 endif()
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)
+set(EXT_RECONCILE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.reconcile.sql)
+set(EXT_VERIFY_STORAGE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.verify-storage.sql)
 set(EXT_TMP_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.tmp)
+set(_finalize_substrate_cmake "${CMAKE_CURRENT_BINARY_DIR}/finalize_substrate_sql.cmake")
+
+function(_laplace_write_if_changed path content)
+    set(_existing "")
+    if(EXISTS "${path}")
+        file(READ "${path}" _existing)
+    endif()
+    if(NOT EXISTS "${path}" OR NOT _existing STREQUAL "${content}")
+        file(WRITE "${path}" "${content}")
+    endif()
+endfunction()
+
+string(CONCAT _substrate_finalize_script
+    "file(READ \"\${SRC}\" _s)\n"
+    "string(APPEND _s \"\\nCOMMENT ON TABLE laplace.entities IS 'laplace-substrate-storage:${EXT_STORAGE_VERSION}';\\n\")\n"
+    "file(WRITE \"\${DST_SQL}\" \"\${_s}\")\n"
+    "file(WRITE \"\${DST_RECONCILE}\" \"\${_s}\")\n")
+_laplace_write_if_changed("${_finalize_substrate_cmake}" "${_substrate_finalize_script}")
+
+string(CONCAT _substrate_verify_sql
+    "SELECT CASE\n"
+    "  WHEN to_regclass('laplace.entities') IS NULL THEN 'missing'\n"
+    "  WHEN pg_catalog.obj_description(pg_catalog.to_regclass('laplace.entities'), 'pg_class') = 'laplace-substrate-storage:${EXT_STORAGE_VERSION}' THEN 'ok'\n"
+    "  WHEN pg_catalog.obj_description(pg_catalog.to_regclass('laplace.entities'), 'pg_class') IS NULL\n"
+    "    AND (SELECT p.partstrat::text || ':' || (SELECT count(*) FROM pg_catalog.pg_inherits i WHERE i.inhparent = p.partrelid)\n"
+    "         FROM pg_catalog.pg_partitioned_table p WHERE p.partrelid = pg_catalog.to_regclass('laplace.entities')) = 'h:64'\n"
+    "    AND (SELECT pg_catalog.string_agg(a.attname, ',' ORDER BY a.attnum)\n"
+    "         FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('laplace.entities') AND a.attnum > 0 AND NOT a.attisdropped)\n"
+    "        = 'id,tier,type_id,created_at,highway_mask'\n"
+    "    AND (SELECT p.partstrat::text || ':' || (SELECT count(*) FROM pg_catalog.pg_inherits i WHERE i.inhparent = p.partrelid)\n"
+    "         FROM pg_catalog.pg_partitioned_table p WHERE p.partrelid = pg_catalog.to_regclass('laplace.physicalities')) = 'h:64'\n"
+    "    AND (SELECT pg_catalog.string_agg(a.attname, ',' ORDER BY a.attnum)\n"
+    "         FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('laplace.physicalities') AND a.attnum > 0 AND NOT a.attisdropped)\n"
+    "        = 'id,entity_id,type,coord,hilbert_index,trajectory,radius_origin,n_constituents,alignment_residual,source_dim,observed_at'\n"
+    "    AND (SELECT p.partstrat::text || ':' || (SELECT count(*) FROM pg_catalog.pg_inherits i WHERE i.inhparent = p.partrelid)\n"
+    "         FROM pg_catalog.pg_partitioned_table p WHERE p.partrelid = pg_catalog.to_regclass('laplace.attestations')) = 'h:64'\n"
+    "    AND (SELECT pg_catalog.string_agg(a.attname, ',' ORDER BY a.attnum)\n"
+    "         FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('laplace.attestations') AND a.attnum > 0 AND NOT a.attisdropped)\n"
+    "        = 'id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,qualifier_mask'\n"
+    "    AND (SELECT p.partstrat::text || ':' || (SELECT count(*) FROM pg_catalog.pg_inherits i WHERE i.inhparent = p.partrelid)\n"
+    "         FROM pg_catalog.pg_partitioned_table p WHERE p.partrelid = pg_catalog.to_regclass('laplace.consensus')) = 'h:64'\n"
+    "    AND (SELECT pg_catalog.string_agg(a.attname, ',' ORDER BY a.attnum)\n"
+    "         FROM pg_catalog.pg_attribute a WHERE a.attrelid = pg_catalog.to_regclass('laplace.consensus') AND a.attnum > 0 AND NOT a.attisdropped)\n"
+    "        = 'id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at'\n"
+    "  THEN 'ok'\n"
+    "  ELSE 'incompatible'\n"
+    "END;\n")
+_laplace_write_if_changed("${EXT_VERIFY_STORAGE_SQL}" "${_substrate_verify_sql}")
 
 add_custom_command(
-    OUTPUT  ${EXT_BUILT_SQL}
+    OUTPUT  ${EXT_BUILT_SQL} ${EXT_RECONCILE_SQL}
     DEPENDS ${EXT_SQL_MODULES}
             ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
+            ${_finalize_substrate_cmake}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND ${LAPLACE_SQLPP} ${LAPLACE_SQLPP_FLAGS}
             -I${CMAKE_CURRENT_SOURCE_DIR}/sql
@@ -393,13 +483,18 @@ add_custom_command(
             > ${EXT_TMP_SQL}
     COMMAND ${BASH} -c "grep -v '^#' ${EXT_TMP_SQL} \
             | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g; s'EXECUTION_LIBRARY'${EXT_EXECUTION_MODULE}'g\" \
-            > ${EXT_BUILT_SQL}"
-    COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL}
+            > ${EXT_TMP_SQL}.out"
+    COMMAND ${CMAKE_COMMAND}
+            "-DSRC=${EXT_TMP_SQL}.out"
+            "-DDST_SQL=${EXT_BUILT_SQL}"
+            "-DDST_RECONCILE=${EXT_RECONCILE_SQL}"
+            -P "${_finalize_substrate_cmake}"
+    COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL} ${EXT_TMP_SQL}.out
     COMMENT "Preprocessing ${EXT_NAME} .sql.in → ${EXT_NAME}--${EXT_VERSION}.sql"
     VERBATIM
 )
 
-add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
+add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL} ${EXT_RECONCILE_SQL} ${EXT_VERIFY_STORAGE_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 add_dependencies(laplace_execution ${EXT_NAME}_sql)
 
@@ -412,6 +507,8 @@ if(NOT WIN32)
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
         ${EXT_BUILT_SQL}
+        ${EXT_RECONCILE_SQL}
+        ${EXT_VERIFY_STORAGE_SQL}
         ${CMAKE_CURRENT_BINARY_DIR}/laplace_execution_module.txt
         DESTINATION ${LAPLACE_EXT_SHAREDIR}
         PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}

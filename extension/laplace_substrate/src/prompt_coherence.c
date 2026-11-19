@@ -22,10 +22,388 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_coherence);
 
-static SPIPlanPtr pc_cand_plan = NULL;
-static SPIPlanPtr pc_single_mass_plan = NULL;
-static SPIPlanPtr pc_lemma_plan = NULL;
-static SPIPlanPtr pc_rel_plan = NULL;
+typedef struct PcPromptTok
+{
+    int32     ord;
+    hash128_t id;
+} PcPromptTok;
+
+typedef struct PcSegLoadCtx
+{
+    MemoryContext caller;
+    PcPromptTok  *toks;
+    int           n_toks;
+    int           cap_toks;
+    HTAB         *uniq_set;
+    hash128_t    *uniq_ids;
+    int           n_uniq;
+    int           cap_uniq;
+    Datum         ws_prop;
+    Datum         ws_val;
+} PcSegLoadCtx;
+
+static bool
+pc_receive_prompt_seg(TupleTableSlot *slot, void *opaque)
+{
+    PcSegLoadCtx *ctx = (PcSegLoadCtx *) opaque;
+    bool          isnull = false;
+    Datum         d_ord, d_seg, d_id;
+    Oid           types[3] = { TEXTOID, TEXTOID, TEXTOID };
+    Datum         args[3];
+    bool          argnulls[3] = { false, false, false };
+    bool          ws_null = false;
+    Datum         ws_res;
+    int32         ord;
+    hash128_t     id;
+    bool          found = false;
+    MemoryContext prev;
+
+    d_ord = slot_getattr(slot, 1, &isnull);
+    if (isnull)
+        return true;
+    d_id = slot_getattr(slot, 3, &isnull);
+    if (isnull)
+        return true;
+    d_seg = slot_getattr(slot, 2, &isnull);
+    if (!isnull)
+    {
+        args[0] = d_seg;
+        args[1] = ctx->ws_prop;
+        args[2] = ctx->ws_val;
+        ws_res = laplace_pub_call("public", "laplace_text_is", 3,
+                                  types, args, argnulls, &ws_null);
+        if (!ws_null && DatumGetBool(ws_res))
+            return true;
+    }
+
+    ord = (int32) DatumGetInt64(d_ord);
+    id = laplace_pub_blake3_to_hash128(d_id);
+
+    prev = MemoryContextSwitchTo(ctx->caller);
+    if (ctx->n_toks >= ctx->cap_toks)
+    {
+        Size sz;
+        ctx->cap_toks = ctx->cap_toks ? ctx->cap_toks * 2 : 32;
+        sz = sizeof(PcPromptTok) * (Size) ctx->cap_toks;
+        ctx->toks = ctx->toks ? (PcPromptTok *) repalloc(ctx->toks, sz)
+                              : (PcPromptTok *) palloc(sz);
+    }
+    ctx->toks[ctx->n_toks].ord = ord;
+    ctx->toks[ctx->n_toks].id = id;
+    ctx->n_toks++;
+
+    (void) hash_search(ctx->uniq_set, &id, HASH_ENTER, &found);
+    if (!found)
+    {
+        if (ctx->n_uniq >= ctx->cap_uniq)
+        {
+            Size sz;
+            ctx->cap_uniq = ctx->cap_uniq ? ctx->cap_uniq * 2 : 32;
+            sz = sizeof(hash128_t) * (Size) ctx->cap_uniq;
+            ctx->uniq_ids = ctx->uniq_ids ? (hash128_t *) repalloc(ctx->uniq_ids, sz)
+                                          : (hash128_t *) palloc(sz);
+        }
+        ctx->uniq_ids[ctx->n_uniq++] = id;
+    }
+    MemoryContextSwitchTo(prev);
+    return true;
+}
+
+typedef struct PcLangMassEntry
+{
+    hash128_t key;
+    double    mass;
+} PcLangMassEntry;
+
+typedef struct PcBestLangEntry
+{
+    hash128_t id;
+    hash128_t lang;
+    double    tally_mass;
+    double    cand_mu;
+} PcBestLangEntry;
+
+static void
+pc_tally_cons_lang_cb(const LaplaceConsensusRow *row, void *opaque)
+{
+    HTAB            *lang_h = (HTAB *) opaque;
+    bool             found = false;
+    PcLangMassEntry *le;
+    if (row->object_is_null)
+        return;
+    le = (PcLangMassEntry *) hash_search(lang_h, &row->object, HASH_ENTER, &found);
+    if (!found)
+        le->mass = 0.0;
+    le->mass += (double) laplace_effective_mu_fp(row->rating, row->rd);
+}
+
+static int
+pc_tok_ord_cmp(const void *a, const void *b)
+{
+    const PcPromptTok *x = (const PcPromptTok *) a;
+    const PcPromptTok *y = (const PcPromptTok *) b;
+    if (x->ord != y->ord)
+        return x->ord < y->ord ? -1 : 1;
+    return 0;
+}
+
+static void
+pc_load_candidates_c(text *prompt, PcCandidateRead *read)
+{
+    MemoryContext        caller = CurrentMemoryContext;
+    MemoryContext        tmp, old;
+    HASHCTL              ctl;
+    PcSegLoadCtx         sctx;
+    Oid                  text_oid = TEXTOID;
+    Datum                seg_arg[1];
+    bool                 seg_null[1] = { false };
+    hash128_t            has_lang_id;
+    ArrayType           *tok_arr, *has_lang_arr;
+    HTAB                *lang_tally, *agreed_h, *fallback_h, *sense_lang_h;
+    ConverseBindingRow  *brows;
+    int                  n_brows = 0;
+    ConverseWordLangRow *wl_rows;
+    int                  n_wl = 0;
+    LaplaceBubbleRow    *bub_rows;
+    int                  n_bub = 0;
+
+    tmp = AllocSetContextCreate(caller, "pc_load_candidates", ALLOCSET_DEFAULT_SIZES);
+    old = MemoryContextSwitchTo(tmp);
+
+    MemSet(&sctx, 0, sizeof(sctx));
+    sctx.caller = tmp;
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = tmp;
+    sctx.uniq_set = hash_create("pc load uniq", 64, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    sctx.ws_prop = CStringGetTextDatum("White_Space");
+    sctx.ws_val = CStringGetTextDatum("Yes");
+
+    seg_arg[0] = PointerGetDatum(prompt);
+    (void) laplace_pub_call_srf("public", "laplace_segments", 1, &text_oid,
+                                seg_arg, seg_null, pc_receive_prompt_seg, &sctx);
+
+    if (sctx.n_toks == 0 || sctx.n_uniq == 0)
+    {
+        MemoryContextSwitchTo(old);
+        MemoryContextDelete(tmp);
+        return;
+    }
+    if (sctx.n_toks > 1)
+        qsort(sctx.toks, (Size) sctx.n_toks, sizeof(PcPromptTok), pc_tok_ord_cmp);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(PcLangMassEntry);
+    ctl.hcxt = tmp;
+    lang_tally = hash_create("pc load ltally", 32, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    if (laplace_relation_type_id("HAS_LANGUAGE", &has_lang_id) != 0)
+        elog(ERROR, "prompt_coherence: HAS_LANGUAGE type unavailable");
+
+    tok_arr = hash128_array_from_ids(sctx.uniq_ids, sctx.n_uniq);
+    has_lang_arr = hash128_array_from_ids(&has_lang_id, 1);
+    laplace_consensus_candidates_stored(tok_arr, NULL, has_lang_arr,
+                                        pc_tally_cons_lang_cb, lang_tally);
+    pfree(tok_arr);
+    pfree(has_lang_arr);
+
+    brows = converse_binding_evidence_c(sctx.uniq_ids, sctx.n_uniq, NULL, false, &n_brows);
+    for (int i = 0; i < n_brows; i++)
+    {
+        bool             f = false;
+        PcLangMassEntry *le;
+        if (brows[i].language_null)
+            continue;
+        le = (PcLangMassEntry *) hash_search(lang_tally, &brows[i].language, HASH_ENTER, &f);
+        if (!f)
+            le->mass = 0.0;
+        le->mass += (double) laplace_effective_mu_fp((int64) llround(brows[i].eff_mu * 1e9), 0);
+    }
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(PcBestLangEntry);
+    ctl.hcxt = tmp;
+    agreed_h = hash_create("pc load ag", sctx.n_uniq, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    fallback_h = hash_create("pc load fb", sctx.n_uniq, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    wl_rows = converse_word_language_candidates_batch_c(sctx.uniq_ids, sctx.n_uniq, &n_wl);
+    for (int i = 0; i < n_wl; i++)
+    {
+        const ConverseWordLangRow *w = &wl_rows[i];
+        bool                       f = false;
+        PcBestLangEntry           *fb = (PcBestLangEntry *) hash_search(fallback_h, &w->word, HASH_ENTER, &f);
+        PcLangMassEntry           *tm = (PcLangMassEntry *) hash_search(lang_tally, &w->lang, HASH_FIND, NULL);
+
+        if (!f || w->mu > fb->cand_mu ||
+            (w->mu == fb->cand_mu && memcmp(&w->lang, &fb->lang, sizeof(hash128_t)) < 0))
+        {
+            fb->lang = w->lang;
+            fb->cand_mu = w->mu;
+        }
+        if (tm != NULL)
+        {
+            bool             af = false;
+            PcBestLangEntry *ag = (PcBestLangEntry *) hash_search(agreed_h, &w->word, HASH_ENTER, &af);
+            if (!af ||
+                tm->mass > ag->tally_mass ||
+                (tm->mass == ag->tally_mass &&
+                 (w->mu > ag->cand_mu ||
+                  (w->mu == ag->cand_mu && memcmp(&w->lang, &ag->lang, sizeof(hash128_t)) < 0))))
+            {
+                ag->lang = w->lang;
+                ag->tally_mass = tm->mass;
+                ag->cand_mu = w->mu;
+            }
+        }
+    }
+
+    bub_rows = laplace_bubble_up_batch_c(sctx.uniq_ids, sctx.n_uniq,
+                                         NULL, 0, false, 0, true, &n_bub);
+    if (bub_rows != NULL && n_bub > 0)
+    {
+        HTAB                *seen_senses = hash_create("pc load ss", n_bub, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        hash128_t           *sids = (hash128_t *) palloc(sizeof(hash128_t) * (Size) n_bub);
+        int                  ns = 0;
+        ConverseWordLangRow *sl_rows;
+        int                  n_sl = 0;
+
+        for (int i = 0; i < n_bub; i++)
+        {
+            bool f = false;
+            (void) hash_search(seen_senses, &bub_rows[i].sense_id, HASH_ENTER, &f);
+            if (!f)
+                sids[ns++] = bub_rows[i].sense_id;
+        }
+
+        sense_lang_h = hash_create("pc load sl", Max(ns, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        sl_rows = converse_word_language_candidates_batch_c(sids, ns, &n_sl);
+        for (int i = 0; i < n_sl; i++)
+        {
+            const ConverseWordLangRow *w = &sl_rows[i];
+            bool                       f = false;
+            PcBestLangEntry           *se = (PcBestLangEntry *) hash_search(sense_lang_h, &w->word, HASH_ENTER, &f);
+            if (!f || w->mu > se->cand_mu ||
+                (w->mu == se->cand_mu && memcmp(&w->lang, &se->lang, sizeof(hash128_t)) < 0))
+            {
+                se->lang = w->lang;
+                se->cand_mu = w->mu;
+            }
+        }
+
+        for (int ti = 0; ti < sctx.n_toks; ti++)
+        {
+            const PcPromptTok *pt = &sctx.toks[ti];
+            PcBestLangEntry   *tl = (PcBestLangEntry *) hash_search(agreed_h, &pt->id, HASH_FIND, NULL);
+            if (tl == NULL)
+                tl = (PcBestLangEntry *) hash_search(fallback_h, &pt->id, HASH_FIND, NULL);
+
+            for (int bi = 0; bi < n_bub; bi++)
+            {
+                const LaplaceBubbleRow *b = &bub_rows[bi];
+                PcBestLangEntry        *sl;
+                int32                   lang_agree = 0;
+
+                if (!hash128_eq(&b->term, &pt->id))
+                    continue;
+                sl = (PcBestLangEntry *) hash_search(sense_lang_h, &b->sense_id, HASH_FIND, NULL);
+                if (tl != NULL && sl != NULL)
+                    lang_agree = hash128_eq(&tl->lang, &sl->lang) ? 1 : -1;
+                pc_add_candidate_c(read, pt->ord, &pt->id, &b->synset_id,
+                                   b->base_eff_mu, b->witnesses, lang_agree);
+            }
+        }
+    }
+
+    MemoryContextSwitchTo(old);
+    MemoryContextDelete(tmp);
+}
+
+typedef struct PcSingleMassCtx
+{
+    HTAB   *syn_h;
+    PcCand *cands;
+} PcSingleMassCtx;
+
+static void
+pc_single_mass_add(PcSingleMassCtx *ctx, const hash128_t *id,
+                   const hash128_t *tid, int64 rating, int64 rd)
+{
+    PcSynEntry *me = (PcSynEntry *) hash_search(ctx->syn_h, id, HASH_FIND, NULL);
+    double      rk = 0.0;
+    double      mass;
+
+    if (me == NULL)
+        return;
+    if (!laplace_relation_rank_resolve_c(*tid, &rk) || rk == 0.0)
+        return;
+    mass = rk * (double) ((__int128) rating - 2 * (__int128) rd);
+    for (int i = 0; i < me->n_idx; i++)
+        ctx->cands[me->idx[i]].total_mass += mass;
+}
+
+static void
+pc_single_mass_fwd_cb(const LaplaceConsensusRow *crow, void *vctx)
+{
+    pc_single_mass_add((PcSingleMassCtx *) vctx, &crow->subject,
+                       &crow->type, crow->rating, crow->rd);
+}
+
+static void
+pc_single_mass_rev_cb(const LaplaceConsensusRow *crow, void *vctx)
+{
+    if (crow->object_is_null)
+        return;
+    pc_single_mass_add((PcSingleMassCtx *) vctx, &crow->object,
+                       &crow->type, crow->rating, crow->rd);
+}
+
+typedef struct PcLemmaCtx
+{
+    HTAB          *tok_h;
+    HTAB          *namer_h;
+    MemoryContext  work;
+    Datum         *nw_datums;
+    PcTypeEntry  **nw_owner;
+    int            n_nw;
+} PcLemmaCtx;
+
+static void
+pc_lemma_row_cb(const LaplaceConsensusRow *crow, void *vctx)
+{
+    PcLemmaCtx *ctx = (PcLemmaCtx *) vctx;
+    PcTokEntry *tk;
+
+    if (crow->object_is_null)
+        return;
+    tk = (PcTokEntry *) hash_search(ctx->tok_h, &crow->object, HASH_FIND, NULL);
+    if (tk == NULL)
+        return;
+    for (int i = 0; i < ctx->n_nw; i++)
+    {
+        bytea *nb = DatumGetByteaPP(ctx->nw_datums[i]);
+        if (memcmp(VARDATA_ANY(nb), &crow->subject, 16) == 0)
+            pc_type_add_namers(ctx->nw_owner[i], tk, ctx->namer_h, ctx->work);
+    }
+}
+
+static void
+pc_rel_fwd_cb(const LaplaceConsensusRow *crow, void *vctx)
+{
+    pc_credit_relation_mass_c((PcEdgeRead *) vctx, &crow->subject,
+                              &crow->type, crow->rating, crow->rd);
+}
+
+static void
+pc_rel_rev_cb(const LaplaceConsensusRow *crow, void *vctx)
+{
+    if (crow->object_is_null || memcmp(&crow->subject, &crow->object, 16) == 0)
+        return;
+    pc_credit_relation_mass_c((PcEdgeRead *) vctx, &crow->object,
+                              &crow->type, crow->rating, crow->rd);
+}
 
 Datum
 pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
@@ -40,16 +418,12 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     Datum         *syn_datums = NULL;
     int            n_syn = 0;
     ArrayType     *syn_arr;
-    bool           spi_top = false;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     prompt = PG_GETARG_TEXT_PP(0);
 
     InitMaterializedSRF(fcinfo, 0);
-
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "prompt_coherence: SPI_connect failed");
 
     work = AllocSetContextCreate(CurrentMemoryContext, "prompt_coherence",
                                  ALLOCSET_DEFAULT_SIZES);
@@ -86,19 +460,14 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
     /* One complete candidate set; the row arena does not own retained candidates. */
     {
-        Oid types[] = {TEXTOID};
-        Datum args[] = {PointerGetDatum(prompt)};
         PcCandidateRead read = {syn_h, tok_h, cands, n_cand, cap_cand, work};
-        laplace_spi_stream(ensure_pc_plan(&pc_cand_plan,
-            laplace_sql_query_text("prompt.coherence_candidates"), 1, types, "pc_cand"),
-            1, types, args, NULL, pc_receive_candidate, &read);
+        pc_load_candidates_c(prompt, &read);
         cands = read.cands; n_cand = read.count; cap_cand = read.capacity;
     }
 
     if (n_cand == 0)
     {
         MemoryContextDelete(work);
-        laplace_spi_finish(spi_top);
         return (Datum) 0;
     }
 
@@ -144,56 +513,27 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
         if (!multi_tok)
         {
-            Oid   argtypes[1] = { BYTEAARRAYOID };
-            Datum args[1] = { PointerGetDatum(syn_arr) };
-            int   rc = SPI_execute_plan(
-                ensure_pc_plan(
-                    &pc_single_mass_plan,
-                    "SELECT m.id, sum(m.mass)::float8 FROM ("
-                    "  SELECT c.subject_id AS id, "
-                    "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
-                    "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
-                    "  FROM laplace.consensus c WHERE c.subject_id = ANY($1) GROUP BY c.subject_id "
-                    "  UNION ALL "
-                    "  SELECT c.object_id AS id, "
-                    "         sum(COALESCE(consensus.relation_rank(c.type_id), 0.0) "
-                    "             * (consensus.eff_mu(c.rating, c.rd)::float8)) AS mass "
-                    "  FROM laplace.consensus c WHERE c.object_id = ANY($1) GROUP BY c.object_id "
-                    "  UNION ALL "
-                    "  SELECT e.subject_id AS id, "
-                    "         sum(COALESCE(consensus.relation_rank(e.type_id), 0.0) "
-                    "             * (consensus.eff_mu(e.rating, e.rd)::float8)) AS mass "
-                    "  FROM consensus.edges_raw_batch($1::bytea[], 'both', NULL, 128, true, 'edge_rank') e "
-                    "  WHERE e.type_id IS NOT NULL "
-                    "  GROUP BY e.subject_id"
-                    ") m GROUP BY m.id",
-                    1, argtypes, "pc_single_mass"),
-                args, NULL, true, 0);
+            PcSingleMassCtx    sctx = { syn_h, cands };
+            LaplaceEdgeRawRow *raw_rows;
+            int                n_raw = 0;
 
-            if (rc == SPI_OK_SELECT)
+            laplace_consensus_candidates_stored(syn_arr, NULL, NULL,
+                                                pc_single_mass_fwd_cb, &sctx);
+            laplace_consensus_candidates_stored(NULL, syn_arr, NULL,
+                                                pc_single_mass_rev_cb, &sctx);
+
+            raw_rows = laplace_edges_raw_batch_c(syn_arr, "both", NULL,
+                                                 true, 128, true, "edge_rank", &n_raw);
+            for (int ri = 0; ri < n_raw; ri++)
             {
-                for (uint64 r = 0; r < SPI_processed; r++)
-                {
-                    HeapTuple   tup = SPI_tuptable->vals[r];
-                    TupleDesc   td = SPI_tuptable->tupdesc;
-                    bool        isnull;
-                    bytea      *id = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-                    double      mass;
-                    PcSynEntry *me;
-
-                    if (isnull || VARSIZE_ANY_EXHDR(id) != 16)
-                        continue;
-                    mass = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull));
-                    if (isnull)
-                        continue;
-                    me = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(id), HASH_FIND, NULL);
-                    if (me == NULL)
-                        continue;
-                    for (int i = 0; i < me->n_idx; i++)
-                        cands[me->idx[i]].total_mass += mass;
-                }
-                SPI_freetuptable(SPI_tuptable);
+                const LaplaceEdgeRawRow *er = &raw_rows[ri];
+                if (er->type_null)
+                    continue;
+                pc_single_mass_add(&sctx, &er->subject_id, &er->type_id,
+                                   er->rating, er->rd);
             }
+            if (raw_rows != NULL)
+                pfree(raw_rows);
             goto emit_winners;
         }
     }
@@ -348,53 +688,21 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
         if (n_nw > 0)
         {
-            Oid        argtypes[1] = { BYTEAARRAYOID };
-            Datum      args[1];
+            hash128_t  is_lemma_tid;
             ArrayType *nw_arr;
-            int        rc;
 
             old = MemoryContextSwitchTo(work);
             nw_arr = construct_array(nw_datums, n_nw, BYTEAOID, -1, false, TYPALIGN_INT);
             MemoryContextSwitchTo(old);
 
-            args[0] = PointerGetDatum(nw_arr);
-            rc = SPI_execute_plan(
-                ensure_pc_plan(
-                    &pc_lemma_plan,
-                    "SELECT l.subject_id, l.object_id FROM laplace.consensus l "
-                    "WHERE l.subject_id = ANY($1) "
-                    "  AND l.type_id = laplace.relation_type_id('IS_LEMMA_OF')",
-                    1, argtypes, "pc_lemma"),
-                args, NULL, true, 0);
-            if (rc == SPI_OK_SELECT)
+            if (laplace_relation_type_id("IS_LEMMA_OF", &is_lemma_tid) == 0)
             {
-                for (uint64 r = 0; r < SPI_processed; r++)
-                {
-                    HeapTuple tup = SPI_tuptable->vals[r];
-                    TupleDesc td = SPI_tuptable->tupdesc;
-                    bool      isnull;
-                    bytea    *lemma, *form;
-                    PcTokEntry *tk;
+                ArrayType *lemma_type_arr = hash128_array_from_ids(&is_lemma_tid, 1);
+                PcLemmaCtx lctx = { tok_h, namer_h, work, nw_datums, nw_owner, n_nw };
 
-                    lemma = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-                    if (isnull || VARSIZE_ANY_EXHDR(lemma) != 16) continue;
-                    form = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
-                    if (isnull || VARSIZE_ANY_EXHDR(form) != 16) continue;
-
-                    tk = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(form), HASH_FIND, NULL);
-                    if (tk == NULL)
-                        continue;
-                    for (int i = 0; i < n_nw; i++)
-                    {
-                        bytea *nb = DatumGetByteaPP(nw_datums[i]);
-
-                        if (memcmp(VARDATA_ANY(nb), VARDATA_ANY(lemma), 16) == 0)
-                        {
-                            pc_type_add_namers(nw_owner[i], tk, namer_h, work);
-                        }
-                    }
-                }
-                SPI_freetuptable(SPI_tuptable);
+                laplace_consensus_candidates_stored(nw_arr, NULL, lemma_type_arr,
+                                                    pc_lemma_row_cb, &lctx);
+                pfree(lemma_type_arr);
             }
         }
     }
@@ -435,21 +743,49 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
         if (n_td > 0)
         {
-            Oid        argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
-            Datum      args[3];
-            ArrayType *type_arr;
+            ArrayType         *type_arr;
+            ArrayType         *sym_types;
+            PcEdgeRead         read = {syn_h, type_h, NULL, cands};
+            LaplaceEdgeRawRow *raw_out, *raw_in;
+            int                n_out = 0, n_in = 0;
 
             old = MemoryContextSwitchTo(work);
             type_arr = construct_array(td_arr, n_td, BYTEAOID, -1, false, TYPALIGN_INT);
             MemoryContextSwitchTo(old);
 
-            args[0] = PointerGetDatum(syn_arr);
-            args[1] = PointerGetDatum(type_arr);
-            args[2] = PointerGetDatum(laplace_symmetric_relation_types());
-            PcEdgeRead read = {syn_h, type_h, NULL, cands};
-            laplace_spi_stream(ensure_pc_plan(&pc_rel_plan,
-                laplace_sql_query_text("prompt.coherence_relation_mass"), 3, argtypes, "pc_rel"),
-                3, argtypes, args, NULL, pc_receive_relation_mass, &read);
+            sym_types = laplace_symmetric_relation_types();
+
+            laplace_consensus_candidates_stored(syn_arr, NULL, type_arr,
+                                                pc_rel_fwd_cb, &read);
+            laplace_consensus_candidates_stored(NULL, syn_arr, sym_types,
+                                                pc_rel_rev_cb, &read);
+
+            raw_out = laplace_edges_raw_batch_c(syn_arr, "out", type_arr,
+                                                true, 64, true, "edge_rank", &n_out);
+            for (int ri = 0; ri < n_out; ri++)
+            {
+                const LaplaceEdgeRawRow *er = &raw_out[ri];
+                if (er->type_null)
+                    continue;
+                pc_credit_relation_mass_c(&read, &er->subject_id, &er->type_id,
+                                          er->rating, er->rd);
+            }
+            if (raw_out != NULL)
+                pfree(raw_out);
+
+            raw_in = laplace_edges_raw_batch_c(syn_arr, "in", sym_types,
+                                               true, 64, true, "edge_rank", &n_in);
+            for (int ri = 0; ri < n_in; ri++)
+            {
+                const LaplaceEdgeRawRow *er = &raw_in[ri];
+                if (er->type_null || er->neighbour_null ||
+                    memcmp(&er->neighbour_id, &er->subject_id, 16) == 0)
+                    continue;
+                pc_credit_relation_mass_c(&read, &er->subject_id, &er->type_id,
+                                          er->rating, er->rd);
+            }
+            if (raw_in != NULL)
+                pfree(raw_in);
         }
     }
 
@@ -571,6 +907,5 @@ emit_winners:
     }
 
     MemoryContextDelete(work);
-    laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

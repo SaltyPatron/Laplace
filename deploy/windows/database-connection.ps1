@@ -23,6 +23,13 @@ function New-LaplaceWindowsDatabaseConnection {
     if([int]$Database['port'] -lt 1 -or [int]$Database['port'] -gt 65535 -or [int]$Database['pool_max'] -lt 1){
         throw 'Invalid PostgreSQL port or connection budget.'
     }
+    $hasPoolMin=$null -ne $Database['pool_min'] -and '' -ne "$($Database['pool_min'])"
+    if($hasPoolMin){
+        $poolMin=[int]$Database['pool_min']
+        if($poolMin -lt 0 -or $poolMin -gt [int]$Database['pool_max']){
+            throw 'Invalid PostgreSQL minimum connection pool size.'
+        }
+    }
     $trust=[string]$Database['root_certificate']
     if(-not [IO.Path]::IsPathFullyQualified($trust) -or -not(Test-Path -LiteralPath $trust -PathType Leaf)){
         throw 'The selected PostgreSQL trust certificate must be an existing absolute file.'
@@ -30,6 +37,9 @@ function New-LaplaceWindowsDatabaseConnection {
     $connection=[Data.Common.DbConnectionStringBuilder]::new()
     foreach($pair in ([ordered]@{Host=$hostName;Port=[string]$Database['port'];Database=$databaseName;Username=$role;'SSL Mode'='VerifyFull';'Root Certificate'=$trust;'Maximum Pool Size'=[string]$Database['pool_max']}).GetEnumerator()){
         $connection[$pair.Key]=$pair.Value
+    }
+    if($hasPoolMin){
+        $connection['Minimum Pool Size']=[string][int]$Database['pool_min']
     }
     switch($authentication){
         'sspi' {

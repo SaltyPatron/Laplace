@@ -92,11 +92,17 @@ if not exist "%SUB_DIR%\laplace_substrate.control" (
   exit /b 1
 )
 
+del /q "%DEPLOY%\share\extension\laplace*--*--*.sql" 2>nul
+
 copy /y "%GEOM_DIR%\laplace_geom.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
 for %%F in ("%GEOM_DIR%\laplace_geom--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%GEOM_DIR%\laplace_geom.reconcile.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%GEOM_DIR%\laplace_geom.verify-storage.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 copy /y "%SUB_DIR%\laplace_substrate.control" "%DEPLOY%\share\extension\" >nul || exit /b 1
 for %%F in ("%SUB_DIR%\laplace_substrate--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%SUB_DIR%\laplace_substrate.reconcile.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%SUB_DIR%\laplace_substrate.verify-storage.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 rem Retain the stable alias for predecessor bindings. Current functions use the
 rem content-addressed module so long-lived backends load the matching generation.
@@ -110,6 +116,8 @@ if not exist "%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace--*.sql" (
   exit /b 1
 )
 for %%F in ("%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace--*.sql") do copy /y "%%F" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace.reconcile.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
+copy /y "%LAPLACE_PG_EXTENSION_BUILD%\extension\laplace.verify-storage.sql" "%DEPLOY%\share\extension\" >nul || exit /b 1
 
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1

@@ -119,6 +119,55 @@ public abstract class BillingStoreContractTests
     }
 
     [SkippableFact]
+    public async Task Royalties_RecordBatchAndReadByTenantSourceAndOwner()
+    {
+        RequireStore();
+        var payer = $"t-pay-{Guid.NewGuid():N}";
+        var owner = $"t-own-{Guid.NewGuid():N}";
+        await PrepareTenantAsync(payer);
+        await PrepareTenantAsync(owner);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var q1 = NewQuote(payer, "synthesis") with { QuoteId = $"q_{Guid.NewGuid():N}", CreatedAt = now.AddMinutes(-3) };
+            var q2 = NewQuote(payer, "synthesis") with { QuoteId = $"q_{Guid.NewGuid():N}", CreatedAt = now.AddMinutes(-2) };
+            await Quotes.PutAsync(q1, CancellationToken.None);
+            await Quotes.PutAsync(q2, CancellationToken.None);
+
+            var srcA = Guid.NewGuid().ToString("n");
+            var srcB = Guid.NewGuid().ToString("n");
+            await Ledger.RecordRoyaltiesAsync(
+            [
+                new BillingRoyaltyRecord(q1.QuoteId, payer, "synthesis", srcA, owner, 7000, 14, 12, 3.5, now.AddMinutes(-2)),
+                new BillingRoyaltyRecord(q2.QuoteId, payer, "synthesis", srcB, null, 3000, 6, 4, 1.25, now.AddMinutes(-1)),
+            ], CancellationToken.None);
+
+            var byPayer = await Ledger.GetRoyaltiesByTenantAsync(payer, CancellationToken.None);
+            Assert.Equal(2, byPayer.Count);
+            Assert.Equal(q2.QuoteId, byPayer[0].QuoteId);
+            Assert.Null(byPayer[0].SourceOwnerTenant);
+            Assert.Equal(q1.QuoteId, byPayer[1].QuoteId);
+            Assert.Equal(owner, byPayer[1].SourceOwnerTenant);
+
+            var byOwner = await Ledger.GetRoyaltiesByTenantAsync(owner, CancellationToken.None);
+            var owned = Assert.Single(byOwner);
+            Assert.Equal(srcA, owned.SourceIdHex);
+            Assert.Equal(7000, owned.ShareBp);
+            Assert.Equal(12, owned.HitCount);
+            Assert.Equal(3.5, owned.TotalWeight, 6);
+
+            var bySource = await Ledger.GetRoyaltiesBySourceAsync(srcA.ToUpperInvariant(), CancellationToken.None);
+            var sourced = Assert.Single(bySource);
+            Assert.Equal(q1.QuoteId, sourced.QuoteId);
+        }
+        finally
+        {
+            await CleanupTenantAsync(owner);
+            await CleanupTenantAsync(payer);
+        }
+    }
+
+    [SkippableFact]
     public async Task Entitlements_ActivateConsumeExhaustDeactivate()
     {
         RequireStore();

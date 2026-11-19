@@ -58,7 +58,7 @@ BEGIN
 END
 $$;
 
-CREATE TRIGGER ingest_run_touch
+CREATE OR REPLACE TRIGGER ingest_run_touch
 BEFORE UPDATE ON @extschema@.ingest_run_journal
 FOR EACH ROW
 EXECUTE FUNCTION ops.ingest_run_touch();
@@ -79,12 +79,12 @@ BEGIN
 END
 $$;
 
-CREATE TRIGGER ingest_file_touch_run_insert
+CREATE OR REPLACE TRIGGER ingest_file_touch_run_insert
 AFTER INSERT ON @extschema@.ingest_file_journal
 REFERENCING NEW TABLE AS changed_files
 FOR EACH STATEMENT
 EXECUTE FUNCTION ops.ingest_file_touch_run();
-CREATE TRIGGER ingest_file_touch_run_update
+CREATE OR REPLACE TRIGGER ingest_file_touch_run_update
 AFTER UPDATE ON @extschema@.ingest_file_journal
 REFERENCING NEW TABLE AS changed_files
 FOR EACH STATEMENT

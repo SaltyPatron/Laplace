@@ -104,8 +104,8 @@ public sealed partial class StagedSourceWriter : IDisposable
             for (Hash128[] frontier = Frontier(stage); frontier.Length != 0; frontier = Frontier(stage))
             {
                 ct.ThrowIfCancellationRequested();
-                await using var probe = NpgsqlCatalog.Command(connection, transaction,
-                    "write.canonical_recorded", frontier);
+                await using var probe = await NpgsqlCatalog.PreparedCommandAsync(connection, transaction,
+                    "write.canonical_recorded", ct, frontier);
                 var present = (bool[]?)await probe.ExecuteScalarAsync(ct)
                     ?? throw new InvalidDataException("Canonical presence probe returned no bitmap.");
                 if (present.Length != frontier.Length)

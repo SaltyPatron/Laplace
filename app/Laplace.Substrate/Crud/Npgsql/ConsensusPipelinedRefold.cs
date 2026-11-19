@@ -53,6 +53,7 @@ public sealed partial class ConsensusAccumulatingWriter
                 await using var command = NpgsqlCatalog.Command(connection, transaction,
                     epoch ? "consensus.deposit_mask_epoch" : "consensus.deposit_mask", entities, types);
                 command.CommandTimeout = 0;
+                await command.PrepareAsync(ct).ConfigureAwait(false);
                 updated += (long)(
                     await command.ExecuteScalarAsync(ct).ConfigureAwait(false)
                     ?? 0L);

@@ -9,7 +9,7 @@ BEGIN
     IF to_regclass('public.attestation') IS NULL THEN
         RETURN NULL;
     END IF;
-    EXECUTE 'SELECT count(*) FROM public.attestation' INTO measured;
+    EXECUTE 'SELECT public.laplace_attestation_count()' INTO measured;
     RETURN measured;
 END $$;
 

@@ -17,6 +17,7 @@ DECLARE
     spec record;
     required text;
     objects text;
+    obj_name text;
 BEGIN
     IF to_regnamespace('laplace') IS NULL THEN
         RETURN;
@@ -35,9 +36,25 @@ BEGIN
             SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
             INTO objects FROM pg_class c
             WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind IN ('r','p','v','m','f')
-              AND NOT has_table_privilege(spec.rolname, c.oid, required);
+              AND NOT COALESCE(has_table_privilege(spec.rolname, c.oid, required), true);
             IF objects IS NOT NULL THEN
-                EXECUTE format('GRANT %s ON TABLE %s TO %I', required, objects, spec.rolname);
+                BEGIN
+                    EXECUTE format('GRANT %s ON TABLE %s TO %I', required, objects, spec.rolname);
+                EXCEPTION WHEN undefined_table THEN
+                    FOR obj_name IN
+                        SELECT format('%I.%I', 'laplace', c.relname)
+                        FROM pg_class c
+                        WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+                          AND NOT COALESCE(has_table_privilege(spec.rolname, c.oid, required), true)
+                        ORDER BY c.oid
+                    LOOP
+                        BEGIN
+                            EXECUTE format('GRANT %s ON TABLE %s TO %I', required, obj_name, spec.rolname);
+                        EXCEPTION WHEN undefined_table THEN
+                            NULL;
+                        END;
+                    END LOOP;
+                END;
             END IF;
         END LOOP;
         SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
@@ -47,9 +64,18 @@ BEGIN
         IF objects IS NOT NULL THEN
             EXECUTE format('GRANT USAGE ON SEQUENCE %s TO %I', objects, spec.rolname);
         END IF;
+        SELECT string_agg(format('%I.%I(%s)', 'laplace', p.proname,
+                                pg_get_function_identity_arguments(p.oid)), ', ' ORDER BY p.oid)
+        INTO objects FROM pg_proc p
+        WHERE p.pronamespace = 'laplace'::regnamespace AND p.prokind IN ('f','a','w')
+          AND NOT has_function_privilege(spec.rolname, p.oid, 'EXECUTE');
+        IF objects IS NOT NULL THEN
+            EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', objects, spec.rolname);
+        END IF;
         EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT %s ON TABLES TO %I',
             array_to_string(spec.privileges, ','), spec.rolname);
         EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT USAGE ON SEQUENCES TO %I', spec.rolname);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT EXECUTE ON FUNCTIONS TO %I', spec.rolname);
     END LOOP;
 END $$;
 
@@ -63,19 +89,28 @@ DECLARE
     canonical_tables oid[];
     required text;
     objects text;
+    obj_name text;
 BEGIN
     -- Scope public write access to the canonical Native substrate tables and their
     -- partitions. A witness is a source trunk id, not a table: the persistent tables are
     -- exactly entity, physicality, attestation and consensus (laplace.sql.in).
     -- Other public extension tables retain their existing read-only grants.
-    WITH RECURSIVE substrate(oid) AS (
-        SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname IN ('entity','physicality','attestation','consensus')
-          AND c.relkind IN ('r','p')
+    SELECT ARRAY(
+        SELECT c.oid
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('entity', 'physicality', 'attestation', 'consensus')
+          AND c.relkind IN ('r', 'p')
         UNION
-        SELECT i.inhrelid FROM pg_inherits i JOIN substrate s ON s.oid=i.inhparent
-    )
-    SELECT array_agg(oid) INTO canonical_tables FROM substrate;
+        SELECT pt.relid
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN LATERAL pg_partition_tree(c.oid) pt
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('entity', 'physicality', 'attestation', 'consensus')
+          AND c.relkind = 'p'
+    ) INTO canonical_tables;
     FOR candidate IN
         SELECT rolname FROM pg_roles
         WHERE rolname = 'laplace_runtime'
@@ -97,11 +132,26 @@ BEGIN
             IF NOT pg_has_role(candidate,'pg_signal_backend','MEMBER') THEN
                 EXECUTE format('GRANT pg_signal_backend TO %I',candidate);
             END IF;
-            IF to_regnamespace('stage') IS NOT NULL AND NOT has_schema_privilege(candidate,'stage','CREATE') THEN
-                EXECUTE format('GRANT CREATE ON SCHEMA stage TO %I',candidate);
-            END IF;
-            IF to_regnamespace('stage') IS NOT NULL AND NOT has_schema_privilege(candidate,'stage','USAGE') THEN
-                EXECUTE format('GRANT USAGE ON SCHEMA stage TO %I',candidate);
+            IF to_regnamespace('stage') IS NOT NULL THEN
+                IF NOT has_schema_privilege(candidate,'stage','CREATE') THEN
+                    EXECUTE format('GRANT CREATE ON SCHEMA stage TO %I',candidate);
+                END IF;
+                IF NOT has_schema_privilege(candidate,'stage','USAGE') THEN
+                    EXECUTE format('GRANT USAGE ON SCHEMA stage TO %I',candidate);
+                END IF;
+                -- Engine pg_contract creates per-run stage.lp_* tables (LIKE stage.entity /
+                -- physicality / attestation), which requires SELECT on those 3 permanent template tables.
+                FOREACH required IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','MAINTAIN'] LOOP
+                    SELECT string_agg(format('stage.%I',c.relname),', ' ORDER BY c.oid)
+                    INTO objects FROM pg_class c
+                    WHERE c.relnamespace='stage'::regnamespace
+                      AND c.relname IN ('entity','physicality','attestation')
+                      AND c.relkind='r'
+                      AND NOT COALESCE(has_table_privilege(candidate,c.oid,required), true);
+                    IF objects IS NOT NULL THEN
+                        EXECUTE format('GRANT %s ON TABLE %s TO %I',required,objects,candidate);
+                    END IF;
+                END LOOP;
             END IF;
         END IF;
         IF NOT has_database_privilege(candidate,current_database(),'CONNECT') THEN
@@ -123,9 +173,28 @@ BEGIN
                   AND (required='SELECT' OR (NOT reader AND
                        (namespace.nspname<>'public' OR c.oid=ANY(canonical_tables))))
                   AND CASE WHEN c.relkind IN ('r','p','v','m','f')
-                      THEN NOT has_table_privilege(candidate,c.oid,required) ELSE false END;
+                      THEN NOT COALESCE(has_table_privilege(candidate,c.oid,required), true) ELSE false END;
                 IF objects IS NOT NULL THEN
-                    EXECUTE format('GRANT %s ON TABLE %s TO %I',required,objects,candidate);
+                    BEGIN
+                        EXECUTE format('GRANT %s ON TABLE %s TO %I',required,objects,candidate);
+                    EXCEPTION WHEN undefined_table THEN
+                        FOR obj_name IN
+                            SELECT format('%I.%I',namespace.nspname,c.relname)
+                            FROM pg_class c
+                            WHERE c.relnamespace=namespace.oid AND c.relkind IN ('r','p','v','m','f')
+                              AND (required='SELECT' OR (NOT reader AND
+                                   (namespace.nspname<>'public' OR c.oid=ANY(canonical_tables))))
+                              AND CASE WHEN c.relkind IN ('r','p','v','m','f')
+                                  THEN NOT COALESCE(has_table_privilege(candidate,c.oid,required), true) ELSE false END
+                            ORDER BY c.oid
+                        LOOP
+                            BEGIN
+                                EXECUTE format('GRANT %s ON TABLE %s TO %I',required,obj_name,candidate);
+                            EXCEPTION WHEN undefined_table THEN
+                                NULL;
+                            END;
+                        END LOOP;
+                    END;
                 END IF;
             END LOOP;
             FOREACH required IN ARRAY ARRAY['USAGE','SELECT'] LOOP

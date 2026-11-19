@@ -12,9 +12,12 @@ function Assert([bool]$Condition,[string]$Message){if(-not $Condition){throw $Me
 try {
     $env:LAPLACE_MACHINE_ENV="$work/machine.env"
     '# isolated configuration fixture' | Set-Content $env:LAPLACE_MACHINE_ENV
-    $env:LAPLACE_WORK="$work/work";$env:LAPLACE_PGDATA="$work/pgdata"
+    $env:LAPLACE_WORK="$work/work";$env:LAPLACE_PGDATA="$work/pgdata";$env:LAPLACE_DEPLOY="$work/deploy"
     $env:LAPLACE_PG_SERVICE_ACCOUNT=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $env:TEST_EVENTS="$work/events.txt";$env:TEST_DATA=$env:LAPLACE_PGDATA
+    $null=New-Item -ItemType Directory -Path "$work/deploy/share/extension" -Force
+    '-- reconcile fixture' | Set-Content "$work/deploy/share/extension/laplace_substrate.reconcile.sql"
+    "SELECT 'fixture_verify_storage';" | Set-Content "$work/deploy/share/extension/laplace_substrate.verify-storage.sql"
     'runtime fixture' | Set-Content "$work/site/web/releases/abc1234/migrations/Laplace.Migrations.dll"
     $null=New-Item -ItemType Directory -Path "$work/site/web/releases/abc1234/migrations/db/schema"
     $grantsFile="$work/site/web/releases/abc1234/migrations/db/schema/20_substrate_grants.sql"
@@ -42,8 +45,11 @@ elseif($sql -like 'SELECT count(*) FROM pg_roles*'){'1'}
 elseif($sql -like 'SELECT count(*) FROM pg_available_extensions*'){if($env:TEST_EXTENSION_MISSING -eq '1'){'0'}else{'1'}}
 elseif($sql -like 'SELECT nspname*'){'public';'laplace'}
 elseif($sql -like 'SELECT count(*) FROM pg_database*'){if($env:TEST_STALE_EXTENSION){'1'}else{'0'}}
+elseif($sql -like '*fixture_verify_storage*'){if($env:TEST_COMPATIBLE_EXTENSION -eq '1'){'ok'}else{'incompatible'}}
+elseif($sql -match "pg_extension_update_paths\('([^']+)'\)"){if($Matches[1] -eq 'laplace_substrate' -and $env:TEST_COMPATIBLE_EXTENSION -eq '1' -and (Test-Path -LiteralPath "$env:LAPLACE_DEPLOY/share/extension/laplace_substrate--old--new.sql")){'1'}else{'0'}}
 elseif($sql -like "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'*" -and $env:TEST_STALE_EXTENSION -and
-    -not (Select-String -LiteralPath $env:TEST_EVENTS -SimpleMatch 'migration:nuke' -Quiet)){'old'}
+    -not (Select-String -LiteralPath $env:TEST_EVENTS -SimpleMatch 'migration:nuke' -Quiet) -and
+    -not (Select-String -LiteralPath $env:TEST_EVENTS -SimpleMatch 'ALTER EXTENSION laplace_substrate UPDATE' -Quiet)){'old'}
 elseif($sql -like 'SELECT extversion FROM pg_extension*' -or $sql -like 'SELECT default_version FROM pg_available_extensions*'){if($env:TEST_STALE_EXTENSION){'new'}}
 '@ | Set-Content "$work/psql.ps1"
     function global:dotnet {
@@ -103,12 +109,26 @@ elseif($sql -like 'SELECT extversion FROM pg_extension*' -or $sql -like 'SELECT 
         Write-Host "PASS $($case[0]) $($case[1]): scoped commands, runtime grants, environment restoration"
     }
     '' | Set-Content $env:TEST_EVENTS
-    $env:TEST_STALE_EXTENSION='1'
-    try{& $command @invoke -Database substrate -Operation migrate}finally{Remove-Item Env:TEST_STALE_EXTENSION}
+    $env:TEST_STALE_EXTENSION='1';$env:TEST_COMPATIBLE_EXTENSION='1'
+    try{& $command @invoke -Database substrate -Operation migrate}finally{Remove-Item Env:TEST_STALE_EXTENSION,Env:TEST_COMPATIBLE_EXTENSION -ErrorAction SilentlyContinue}
     $events=Get-Content $env:TEST_EVENTS
-    Assert ((($events | Where-Object {$_ -like 'migration:*'}) -join ',') -ceq 'migration:nuke,migration:substrate-status') 'A substrate carrying another extension version was not recreated.'
-    Assert (@($events | Where-Object {$_ -like 'sql:*ALTER EXTENSION*'}).Count -eq 0) 'A content-hash extension was updated in place.'
-    Write-Host 'PASS substrate migrate recreates a database whose extension version changed'
+    Assert ((($events | Where-Object {$_ -like 'migration:*'}) -join ',') -ceq 'migration:substrate-up,migration:substrate-status') 'A compatible substrate update recreated the database instead of updating in place.'
+    Assert (@($events | Where-Object {$_ -like "*ALTER EXTENSION laplace_substrate UPDATE TO 'new'*"}).Count -eq 1) 'A compatible substrate update did not run ALTER EXTENSION UPDATE.'
+    Assert (-not (Test-Path -LiteralPath "$work/deploy/share/extension/laplace_substrate--old--new.sql")) 'Temporary extension transition script was left on disk.'
+    Write-Host 'PASS substrate migrate updates compatible extension changes in place without nuke'
+    '' | Set-Content $env:TEST_EVENTS
+    $env:TEST_STALE_EXTENSION='1';$failed=$false;$err=''
+    try{& $command @invoke -Database substrate -Operation migrate}catch{$failed=$true;$err="$_"}finally{Remove-Item Env:TEST_STALE_EXTENSION -ErrorAction SilentlyContinue}
+    Assert ($failed -and $err -like '*recreate -Yes*') 'Incompatible storage change did not refuse with recreate -Yes instructions.'
+    Assert (@(Get-Content $env:TEST_EVENTS | Where-Object {$_ -like 'migration:*'}).Count -eq 0) 'Incompatible storage change nuked without explicit opt-in.'
+    Write-Host 'PASS incompatible storage change refuses without LAPLACE_SUBSTRATE_RECREATE'
+    '' | Set-Content $env:TEST_EVENTS
+    $env:TEST_STALE_EXTENSION='1';$env:LAPLACE_SUBSTRATE_RECREATE='version'
+    try{& $command @invoke -Database substrate -Operation migrate}finally{Remove-Item Env:TEST_STALE_EXTENSION,Env:LAPLACE_SUBSTRATE_RECREATE -ErrorAction SilentlyContinue}
+    $events=Get-Content $env:TEST_EVENTS
+    Assert ((($events | Where-Object {$_ -like 'migration:*'}) -join ',') -ceq 'migration:nuke,migration:substrate-status') 'Explicit opt-in for incompatible storage did not recreate the substrate.'
+    Assert (@($events | Where-Object {$_ -like 'sql:*ALTER EXTENSION*'}).Count -eq 0) 'An incompatible extension was updated in place.'
+    Write-Host 'PASS incompatible storage change recreates only when LAPLACE_SUBSTRATE_RECREATE opts in'
     '' | Set-Content $env:TEST_EVENTS
     $env:GITHUB_ACTIONS='true';Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue
     & $command @invoke -Database application -Operation recreate

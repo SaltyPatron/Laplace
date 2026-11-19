@@ -339,7 +339,8 @@ internal sealed partial class SubstrateTools : IMcpTools
     // exists so no client composes SQL strings, so it does not compose one itself.
     private (string, bool) Infer(JsonObject? args)
     {
-        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "converse.infer",
+        using var conn = _dbReadOnly.OpenConnection();
+        using var cmd = NpgsqlCatalog.PreparedCommand(conn, null, "converse.infer",
             Req(args, "prompt"), Int(args, "limit", 8));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
@@ -357,7 +358,8 @@ internal sealed partial class SubstrateTools : IMcpTools
     // same hole wearing a schema.
     private (string, bool) SenseAudit(JsonObject? args)
     {
-        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "lexical.sense_audit",
+        using var conn = _dbReadOnly.OpenConnection();
+        using var cmd = NpgsqlCatalog.PreparedCommand(conn, null, "lexical.sense_audit",
             Req(args, "term"), Int(args, "limit", 64));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
@@ -376,7 +378,8 @@ internal sealed partial class SubstrateTools : IMcpTools
 
     private (string, bool) PromptLanguage(JsonObject? args)
     {
-        using var cmd = NpgsqlCatalog.Command(_dbReadOnly, "converse.prompt_language", Req(args, "prompt"));
+        using var conn = _dbReadOnly.OpenConnection();
+        using var cmd = NpgsqlCatalog.PreparedCommand(conn, null, "converse.prompt_language", Req(args, "prompt"));
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
         while (rd.Read())

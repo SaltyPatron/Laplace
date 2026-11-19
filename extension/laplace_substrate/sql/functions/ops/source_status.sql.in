@@ -67,7 +67,10 @@ rolled AS (
                 ELSE COALESCE(at.evidence, ev.evidence_approx, 0) END AS evidence_approx,
            -- Entities are source-independent; a source's content presence is
            -- its attestation presence.
-           CASE WHEN to_regclass('public.entity') IS NOT NULL THEN ev.source_id IS NOT NULL
+           CASE WHEN to_regclass('public.entity') IS NOT NULL
+                THEN (ev.source_id IS NOT NULL
+                      OR (octet_length(i.source_id) = 16
+                          AND COALESCE((public.laplace_present_mask(ARRAY[public.blake3_from_bytea(i.source_id)]))[1], false)))
                 ELSE COALESCE(at.evidence, ev.evidence_approx, 0) > 0 END AS has_entities,
            COALESCE(jr.source_name,ev.source)                       AS journal_name,
            jr.status                                               AS last_run_status,
@@ -87,7 +90,7 @@ rolled AS (
 ), rendered AS MATERIALIZED (
     SELECT CASE WHEN to_regclass('public.entity') IS NOT NULL
                 THEN array_agg(COALESCE(journal_name,encode(source_id,'hex')) ORDER BY rn)
-                ELSE ARRAY(SELECT lp_l.content FROM unnest((array_agg(source_id ORDER BY rn))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove((array_agg(source_id ORDER BY rn))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n) END AS labels
+                ELSE public.laplace_label_array((array_agg(source_id ORDER BY rn))::bytea[], false) END AS labels
     FROM rolled_numbered
 ),
 matched AS (

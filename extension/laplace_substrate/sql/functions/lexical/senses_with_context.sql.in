@@ -126,15 +126,16 @@ BEGIN ATOMIC
           ON ce.subject_id = n.node_id
          AND ce.type_id = ANY (b.types)
     ),
+    sent_hits AS MATERIALIZED (
+        SELECT public.blake3_send(c.entity) AS gid, sum(c.run_length::numeric) AS hits
+        FROM public.laplace_constituents(ARRAY(SELECT DISTINCT public.blake3_from_bytea(gid) FROM own_sent WHERE gid IS NOT NULL)) c
+        WHERE public.blake3_send(c.child) IN (SELECT id FROM ctx)
+        GROUP BY c.entity
+    ),
     lane_usage AS (
-        SELECT os.sid, sum(os.w) AS boost
+        SELECT os.sid, sum(os.w * sh.hits) AS boost
         FROM own_sent os
-        CROSS JOIN LATERAL (
-            SELECT public.blake3_send(v.id) AS entity_id, v.ord
-            FROM public.laplace_physicalities(ARRAY[public.blake3_from_bytea(os.gid)]) h
-            CROSS JOIN LATERAL unnest(public.laplace_parts(h.path)) WITH ORDINALITY AS v(id, ord)
-        ) u
-        WHERE u.entity_id IN (SELECT id FROM ctx)
+        JOIN sent_hits sh ON sh.gid = os.gid
         GROUP BY os.sid
     ),
     -- FRAME: shared frame between a context sense and the candidate.

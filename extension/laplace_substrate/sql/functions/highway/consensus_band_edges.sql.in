@@ -39,5 +39,5 @@ CREATE OR REPLACE FUNCTION consensus.band_edges(
         rd            bigint,
         witness_count bigint,
         eff_mu        bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_band_edges'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_band_edges'
     LANGUAGE C STABLE;

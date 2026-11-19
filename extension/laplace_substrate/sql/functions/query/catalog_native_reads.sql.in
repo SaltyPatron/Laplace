@@ -1,0 +1,114 @@
+CREATE OR REPLACE FUNCTION consensus.native_edges_raw_claims(p_subjects bytea[], p_types bytea[], p_direction smallint)
+RETURNS TABLE(subject_id bytea, direction text, type_id bytea, neighbour_id bytea, rating bigint, rd bigint, volatility bigint, witness_count bigint, relation_id bytea, entity bytea)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_edges_raw_claims'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_consensus_cells(p_subjects bytea[], p_objects bytea[], p_types bytea[], p_or_mode boolean)
+RETURNS TABLE(subj_id bytea, type_id bytea, obj_id bytea, rating bigint, rd bigint, volatility bigint, witnesses bigint, entity bytea)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_consensus_cells'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_classification_values(p_keys bytea[], p_bank text)
+RETURNS TABLE(subject_id bytea, value_id bytea, rating bigint, rd bigint, volatility bigint, matches bigint, claim_id bytea)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_classification_values'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_claim_witness_counts(p_claims bytea[])
+RETURNS TABLE(ordinal bigint, witnesses bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_claim_witness_counts'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_membership_any(p_keys bytea[], p_required bytea[], p_limit bigint)
+RETURNS TABLE(entity bytea, path @extschema:postgis@.geometry)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_membership_any'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_membership_all(p_keys bytea[], p_required bytea[], p_limit bigint)
+RETURNS TABLE(entity bytea, path @extschema:postgis@.geometry)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_membership_all'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_observation_cells(p_s bytea[], p_r bytea[], p_o bytea[], p_sources bytea[])
+RETURNS TABLE(claim bytea, s bytea, r bytea, o bytea, source bytea, context bytea, outcome smallint, occurrences bigint, qualifier_mask bytea, score double precision, tokens bigint, ordinal bigint, trust double precision, dependence_root bytea, calculation boolean, "position" integer)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_observation_cells'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.native_observation_bindings(p_operands bytea[], p_sources bytea[], p_types bytea[], p_roles integer)
+RETURNS TABLE(claim bytea, s bytea, r bytea, o bytea, source bytea, context bytea, outcome smallint, occurrences bigint, qualifier_mask bytea, score double precision, tokens bigint, ordinal bigint, trust double precision, dependence_root bytea, calculation boolean, "position" integer)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_native_observation_bindings'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION generation.metric_vertices_native(p_ids bytea[], p_include_curves boolean)
+RETURNS TABLE(id bytea, x double precision, y double precision, z double precision, m double precision, curve_ewkb bytea)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_generation_metric_vertices'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION generation.path_plane_step_native(p_frontier bytea[], p_relations text[], p_reverse boolean, p_sources bytea[])
+RETURNS TABLE(frontier_id bytea, next_id bytea, weight double precision, claim_id bytea, start_id bytea, predicate_id bytea, object_id bytea, rating double precision, deviation double precision)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_generation_path_plane_step'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION ops.leaders_native_page(p_bands int4[], p_sel_bands int4[], p_surfaces text[], p_limit bigint)
+RETURNS TABLE(band int4, claim_id bytea, parts jsonb, confidence double precision, witnesses bigint, trajectory text)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_leaders_native_page'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.band_edges_by_types(p_types bytea[], p_min_eff_mu bigint, p_limit bigint)
+RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, rating bigint, rd bigint, witness_count bigint, eff_mu bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_band_edges_by_types'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.couple_topics_native(p_x bytea, p_y bytea)
+RETURNS TABLE(x_id bytea, y_id bytea, x_label text, y_label text)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_couple_topics_native'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION structural.neighbors_of_native(p_id bytea, p_limit int4)
+RETURNS TABLE(id_hex text, label text, geodesic double precision, frechet double precision, x double precision, y double precision, z double precision, m double precision, radius double precision)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_structural_neighbors_of'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION structural.nearest_neighbors_4d_native(p_text text, p_limit int4)
+RETURNS TABLE(label text, geodesic double precision, frechet double precision)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_nearest_neighbors_4d'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION structural.explore_anchor_neighbors_native(p_x float8, p_y float8, p_z float8, p_m float8, p_wkt text, p_geo_limit int4, p_shape_scan int4, p_max_frechet float8)
+RETURNS TABLE(axis text, id_hex text, label text, tier smallint, geodesic float8, frechet float8)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_anchor_neighbors'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION consensus.walk_branches_rendered_native(p_text text, p_hops int4, p_fan int4)
+RETURNS TABLE(hops int4, chain text[], relations text[], id_text text, label text, eff_mu numeric, weight numeric, witnesses bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_branches_rendered'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.declared_paths_native(p_roots bytea[], p_program jsonb, p_cap int4)
+RETURNS TABLE(root_idx int4, program_idx int4, path_idx bigint, depth int4, claim bytea, entity bytea, type_label text, fact text, eff_mu numeric, witnesses bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_query_declared_paths'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.declared_definitions_native(p_word bytea)
+RETURNS TABLE(entity_id bytea, label text, rating bigint, witnesses bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_recall_declared_definitions'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.lexicon_relations_native(p_ids bytea[], p_criteria text[])
+RETURNS TABLE(id bytea, canonical text, inverse boolean, descriptive boolean, untyped boolean)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_query_lexicon_relations'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.lexicon_descriptions_native(p_ids bytea[])
+RETURNS TABLE(id bytea, content text, is_identifier boolean)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_query_lexicon_descriptions'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.lexicon_field_native(p_ids bytea[])
+RETURNS TABLE(round int4, occurrence int4, anchor bytea, anchor_label text, entity bytea, entity_label text, route smallint, via bytea, rel bytea, rel_label text, rating double precision, rd double precision, volatility double precision, matches bigint, witnesses bigint, tier smallint, distance double precision, outbound boolean, origins int4[], targets int4[], binding_claims bytea[], anchors int4[], textual boolean, reading_origins int4[])
+AS 'EXECUTION_LIBRARY', 'pg_laplace_query_lexicon_field'
+LANGUAGE C STABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION converse.response_field_native(p_ids bytea[], p_fan int4, p_keep int4)
+RETURNS TABLE(round int4, occurrence int4, anchor bytea, anchor_label text, entity bytea, entity_label text, route smallint, via bytea, rel bytea, rel_label text, rating double precision, rd double precision, volatility double precision, matches bigint, witnesses bigint, tier smallint, distance double precision, outbound boolean, origins int4[], targets int4[], binding_claims bytea[], anchors int4[], textual boolean, reading_origins int4[])
+AS 'EXECUTION_LIBRARY', 'pg_laplace_query_response_field'
+LANGUAGE C STABLE PARALLEL SAFE;

@@ -292,58 +292,65 @@ internal sealed partial class SubstrateTools : IMcpTools
         var meaningLimit = Int(args, "meaning_limit", 10);
         var rows = new List<JsonObject>(texts.Count);
 
-        for (var i = 0; i < texts.Count; i++)
+        NpgsqlConnection? meaningConn = includeMeaning ? _dbReadOnly.OpenConnection() : null;
+        try
         {
-            var text = texts[i];
-            var trace = WorkspaceCodeIndex.ComputeTrace(text);
-            var row = new JsonObject
+            for (var i = 0; i < texts.Count; i++)
             {
-                ["index"] = i,
-                ["input"] = text,
-                ["entity_id"] = trace.RootIdHex,
-                ["embedding"] = new JsonArray(
-                    JsonValue.Create(Math.Round(trace.Cx, 8)),
-                    JsonValue.Create(Math.Round(trace.Cy, 8)),
-                    JsonValue.Create(Math.Round(trace.Cz, 8)),
-                    JsonValue.Create(Math.Round(trace.Cm, 8)),
-                    JsonValue.Create(Math.Round(trace.Radius, 8))),
-                ["vertices"] = Math.Max(1, trace.Trajectory.Length / 4),
-                ["words"] = trace.WordIds.Count,
-                ["nodes"] = trace.NodeCount,
-            };
-
-            if (includeMeaning)
-            {
-                try
+                var text = texts[i];
+                var trace = WorkspaceCodeIndex.ComputeTrace(text);
+                var row = new JsonObject
                 {
-                    using var conn = _dbReadOnly.OpenConnection();
-                    var constituentTerms = WorkspaceCodeIndex.ExtractContentWords(text);
-                    var lookupRows = NpgsqlSubstrateReads.EmbeddingLookupAsync(
-                            conn, text, meaningLimit, includeMeaning: true, default,
-                            constituentTerms: constituentTerms)
-                        .GetAwaiter().GetResult();
-                    var anchor = lookupRows.FirstOrDefault(static r => r.Kind == 0);
-                    row["witnessed_in_substrate"] = anchor.EntityId is not null;
-                    var meaningArr = new JsonArray();
-                    foreach (var m in lookupRows.Where(static r => r.Kind == 1))
+                    ["index"] = i,
+                    ["input"] = text,
+                    ["entity_id"] = trace.RootIdHex,
+                    ["embedding"] = new JsonArray(
+                        JsonValue.Create(Math.Round(trace.Cx, 8)),
+                        JsonValue.Create(Math.Round(trace.Cy, 8)),
+                        JsonValue.Create(Math.Round(trace.Cz, 8)),
+                        JsonValue.Create(Math.Round(trace.Cm, 8)),
+                        JsonValue.Create(Math.Round(trace.Radius, 8))),
+                    ["vertices"] = Math.Max(1, trace.Trajectory.Length / 4),
+                    ["words"] = trace.WordIds.Count,
+                    ["nodes"] = trace.NodeCount,
+                };
+
+                if (meaningConn is not null)
+                {
+                    try
                     {
-                        meaningArr.Add(new JsonObject
+                        var constituentTerms = WorkspaceCodeIndex.ExtractContentWords(text);
+                        var lookupRows = NpgsqlSubstrateReads.EmbeddingLookupAsync(
+                                meaningConn, text, meaningLimit, includeMeaning: true, default,
+                                constituentTerms: constituentTerms)
+                            .GetAwaiter().GetResult();
+                        var anchor = lookupRows.FirstOrDefault(static r => r.Kind == 0);
+                        row["witnessed_in_substrate"] = anchor.EntityId is not null;
+                        var meaningArr = new JsonArray();
+                        foreach (var m in lookupRows.Where(static r => r.Kind == 1))
                         {
-                            ["relation"] = m.Relation,
-                            ["object"] = m.ObjectLabel,
-                            ["eff_mu"] = m.EffMu is { } mu ? (double)mu : null,
-                            ["witnesses"] = m.Witnesses,
-                        });
+                            meaningArr.Add(new JsonObject
+                            {
+                                ["relation"] = m.Relation,
+                                ["object"] = m.ObjectLabel,
+                                ["eff_mu"] = m.EffMu is { } mu ? (double)mu : null,
+                                ["witnesses"] = m.Witnesses,
+                            });
+                        }
+                        row["meaning"] = meaningArr;
                     }
-                    row["meaning"] = meaningArr;
+                    catch (NpgsqlException ex)
+                    {
+                        throw new NpgsqlException("Requested embedding meaning lookup failed; no complete result is available.", ex);
+                    }
                 }
-                catch (NpgsqlException ex)
-                {
-                    throw new NpgsqlException("Requested embedding meaning lookup failed; no complete result is available.", ex);
-                }
-            }
 
-            rows.Add(row);
+                rows.Add(row);
+            }
+        }
+        finally
+        {
+            meaningConn?.Dispose();
         }
 
         return JsonRows(rows);

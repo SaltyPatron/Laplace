@@ -347,10 +347,21 @@ set(EXT_SQL_MODULES
 )
 
 set(EXT_BUILT_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}--${EXT_VERSION}.sql)
+set(EXT_RECONCILE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.reconcile.sql)
+set(EXT_VERIFY_STORAGE_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.verify-storage.sql)
 set(EXT_TMP_SQL ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.tmp)
 
+set(_geom_verify_sql "SELECT 'ok';\n")
+set(_geom_verify_existing "")
+if(EXISTS "${EXT_VERIFY_STORAGE_SQL}")
+    file(READ "${EXT_VERIFY_STORAGE_SQL}" _geom_verify_existing)
+endif()
+if(NOT _geom_verify_existing STREQUAL "${_geom_verify_sql}")
+    file(WRITE "${EXT_VERIFY_STORAGE_SQL}" "${_geom_verify_sql}")
+endif()
+
 add_custom_command(
-    OUTPUT  ${EXT_BUILT_SQL}
+    OUTPUT  ${EXT_BUILT_SQL} ${EXT_RECONCILE_SQL}
     DEPENDS ${EXT_SQL_MODULES}
             ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -364,12 +375,13 @@ add_custom_command(
             | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
             | perl -lpe \"s'\@extschema\@\\\\.''g\" \
             > ${EXT_BUILT_SQL}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXT_BUILT_SQL} ${EXT_RECONCILE_SQL}
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL}
     COMMENT "Preprocessing ${EXT_NAME} .sql.in modules → ${EXT_NAME}--${EXT_VERSION}.sql"
     VERBATIM
 )
 
-add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL})
+add_custom_target(${EXT_NAME}_sql ALL DEPENDS ${EXT_BUILT_SQL} ${EXT_RECONCILE_SQL} ${EXT_VERIFY_STORAGE_SQL})
 add_dependencies(${EXT_NAME} ${EXT_NAME}_sql)
 
 if(NOT WIN32)
@@ -381,6 +393,8 @@ install(TARGETS ${EXT_NAME}
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
     ${EXT_BUILT_SQL}
+    ${EXT_RECONCILE_SQL}
+    ${EXT_VERIFY_STORAGE_SQL}
     DESTINATION ${LAPLACE_EXT_SHAREDIR}
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )

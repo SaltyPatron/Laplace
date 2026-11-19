@@ -284,28 +284,30 @@ internal static partial class IngestCommands
         // partially-indexed database gets whatever is missing.
         Console.WriteLine("ensuring physicalities indexes (CREATE IF NOT EXISTS) ...");
         var sw = Stopwatch.StartNew();
-        await SecondaryIndexPolicy.EnsureIndexesAsync(ds, SchemaPhysIndexDefs, CancellationToken.None);
+        await SecondaryIndexPolicy.EnsureCatalogIndexesAsync(ds, PhysIndexCatalogKeys, CancellationToken.None);
         sw.Stop();
         Console.WriteLine($"physicalities secondary indexes ensured in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
     }
 
     // The physicalities secondary index set declared by
-    // extension/laplace_substrate/sql/indexes/*.sql.in, which is the authority. This
-    // recovery command writes exactly this list to a live database, so it must match the
-    // extension. The Hilbert btree serves Hilbert-locality equality joins (e.g.
-    // structural.anagrams_of) under a primary key of (id).
-    private static readonly string[] SchemaPhysIndexDefs =
+    // extension/laplace_substrate/sql/indexes/physicalities_*.sql.in, which is the
+    // authority. This recovery command writes all 13 declarations to a live database.
+    private static readonly string[] PhysIndexCatalogKeys =
     [
-        SqlCatalog.Get("maintenance.physicalities_entity_btree").Text,
-        SqlCatalog.Get("maintenance.physicalities_type_btree").Text,
-        SqlCatalog.Get("maintenance.physicalities_coord_gist").Text,
-        SqlCatalog.Get("maintenance.physicalities_direction_gist").Text,
-        SqlCatalog.Get("maintenance.physicalities_hilbert_btree").Text,
-        SqlCatalog.Get("maintenance.physicalities_observed_brin").Text,
-        SqlCatalog.Get("maintenance.physicalities_traj_probe").Text,
-        SqlCatalog.Get("maintenance.physicalities_traj_first_id_btree").Text,
-        SqlCatalog.Get("maintenance.physicalities_constituents_gin").Text,
+        "maintenance.physicalities_entity_btree",
+        "maintenance.physicalities_type_btree",
+        "maintenance.physicalities_coord_gist",
+        "maintenance.physicalities_direction_gist",
+        "maintenance.physicalities_hilbert_btree",
+        "maintenance.physicalities_observed_brin",
+        "maintenance.physicalities_traj_probe",
+        "maintenance.physicalities_traj_first_id_btree",
+        "maintenance.physicalities_constituents_gin",
+        "maintenance.physicalities_projection_constituents_gin",
+        "maintenance.physicalities_parse_constituents_gin",
+        "maintenance.physicalities_descriptor_constituents_gin",
+        "maintenance.physicalities_set_constituents_gin",
     ];
 
     private static async Task RegisterDynamicCanonicalsAsync(

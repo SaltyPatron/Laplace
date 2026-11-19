@@ -297,33 +297,14 @@ pg_laplace_glicko2_accumulate_period(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(pg_laplace_intent_preflight);
 
-static const char*
-present_ordinals_sql(const char* table)
-{
-    if (strcmp(table, "entities") == 0)
-        return "SELECT idx FROM laplace.entities_present_ordinals($1)";
-    if (strcmp(table, "physicalities") == 0)
-        return "SELECT idx FROM laplace.physicalities_present_ordinals($1)";
-    if (strcmp(table, "attestations") == 0)
-        return "SELECT idx FROM laplace.attestations_present_ordinals($1)";
-    ereport(ERROR,
-        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-         errmsg("intent_preflight: unknown table \"%s\"", table)));
-    return NULL;
-}
-
 static bytea*
 build_exist_bitmap(ArrayType* ids_array, const char* table)
 {
-    int         candidate_count;
-    int         bitmap_bytes;
-    bytea*      result;
-    uint8*      bm;
-    Oid         argtypes[1];
-    Datum       args[1];
-    int         spi_rc;
-    uint64      i;
-    const char* sql;
+    int    candidate_count;
+    int    bitmap_bytes;
+    bytea* result;
+    uint8* bm;
+    int    rc;
 
     if (ARR_NDIM(ids_array) > 1)
         ereport(ERROR,
@@ -364,38 +345,25 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
     memset(VARDATA(result), 0, bitmap_bytes);
     bm = (uint8*) VARDATA(result);
 
-    if (SPI_connect() != SPI_OK_CONNECT)
-        ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("intent_preflight: SPI_connect failed")));
-
-    argtypes[0] = BYTEAARRAYOID;
-    args[0]     = PointerGetDatum(ids_array);
-    sql         = present_ordinals_sql(table);
-
-    spi_rc = SPI_execute_with_args(sql, 1, argtypes, args, NULL, true, 0);
-    if (spi_rc != SPI_OK_SELECT)
+    if (strcmp(table, "entities") == 0)
+        rc = laplace_entities_present_bitmap(ids_array, bm, candidate_count);
+    else if (strcmp(table, "physicalities") == 0)
+        rc = laplace_physicalities_present_bitmap(ids_array, bm, candidate_count);
+    else if (strcmp(table, "attestations") == 0)
+        rc = laplace_attestations_present_bitmap(ids_array, bm, candidate_count);
+    else
     {
-        SPI_finish();
         ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-             errmsg("intent_preflight: SPI query on %s failed (rc=%d)", table, spi_rc)));
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("intent_preflight: unknown table \"%s\"", table)));
+        rc = SPI_ERROR_ARGUMENT;
     }
 
-    for (i = 0; i < SPI_processed; i++)
-    {
-        bool  isnull;
-        Datum d = SPI_getbinval(SPI_tuptable->vals[i],
-                                SPI_tuptable->tupdesc, 1, &isnull);
-        if (!isnull)
-        {
-            int pos = DatumGetInt32(d);
-            if (pos >= 0 && pos < candidate_count)
-                bm[pos >> 3] |= (uint8)(1u << (pos & 7u));
-        }
-    }
+    if (rc != SPI_OK_SELECT)
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("intent_preflight: presence probe on %s failed (rc=%d)", table, rc)));
 
-    SPI_finish();
     return result;
 }
 

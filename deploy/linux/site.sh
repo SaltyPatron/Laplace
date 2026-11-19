@@ -359,12 +359,16 @@ phase_migrate() {
   [[ "$(sql -c "SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'laplace' AND c.relname = 'entities'")" == p ]] \
     || fail "laplace.entities is not the partitioned generation: the extension installed predates the schema"
 }
-# laplace_geom and laplace_substrate have no upgrade path: their version is a content hash, and a database that
-# carries another version is recreated, never updated in place. So is one whose Native laplace extension has no
-# update script to the available version (Laplace-postgres ships none before release).
+# Compatible extension updates reconcile replaceable SQL/C bindings in place via
+# storage-stamped reconcile scripts; only incompatible storage DDL invokes
+# recreate_substrate.
 phase_extensions() {
   need_pg
   say "extensions in $LAPLACE_DBNAME"
+  local pg_sharedir ext_dir transition candidate
+  pg_sharedir="$("$LAPLACE_PG_PREFIX/bin/pg_config" --sharedir)/extension"
+  rm -f "$EXT_SHARE/extension"/laplace*--*--*.sql
+  if [[ -w "$pg_sharedir" ]]; then rm -f "$pg_sharedir"/laplace*--*--*.sql; fi
   local ext avail installed module stale=()
   for ext in laplace laplace_geom laplace_substrate; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
@@ -373,14 +377,35 @@ phase_extensions() {
     if [[ -z "$installed" ]]; then installed="none yet: the migrations make it at $avail"
     else
       if [[ "$installed" != "$avail" ]]; then
-        if [[ "$ext" != laplace || "$(sql -c "SELECT count(*) FROM pg_extension_update_paths('laplace') WHERE source = '$installed' AND target = '$avail' AND path IS NOT NULL")" != 1 ]]; then
+        ext_dir='' transition=''
+        for candidate in "$EXT_SHARE/extension" "$pg_sharedir"; do
+          if [[ -f "$candidate/$ext.reconcile.sql" && -f "$candidate/$ext.verify-storage.sql" ]]; then
+            ext_dir="$candidate"; break
+          fi
+        done
+        if [[ -n "$ext_dir" ]] && [[ "$(sql -f "$ext_dir/$ext.verify-storage.sql" 2>/dev/null || true)" == ok ]]; then
+          transition="$ext_dir/${ext}--${installed}--${avail}.sql"
+          cp -f "$ext_dir/$ext.reconcile.sql" "$transition"
+        fi
+        if [[ "$(sql -c "SELECT count(*) FROM pg_extension_update_paths('$ext') WHERE source = '$installed' AND target = '$avail' AND path IS NOT NULL")" != 1 ]]; then
+          [[ -z "$transition" ]] || rm -f "$transition"
           stale+=("$ext $installed -> $avail"); continue
         fi
-        PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null
-        installed="$installed -> $avail"
+        if ! PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >/dev/null; then
+          [[ -z "$transition" ]] || rm -f "$transition"
+          return 1
+        fi
+        [[ -z "$transition" ]] || rm -f "$transition"
+        installed="$installed -> $avail (in place)"
       fi
       if [[ "$ext" == laplace ]]; then
-        module="$(sed -nE "s/^module_pathname[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$EXT_SHARE/extension/laplace.control" | head -1)"
+        module=''
+        for candidate in "$EXT_SHARE/extension/laplace.control" "$pg_sharedir/laplace.control"; do
+          if [[ -f "$candidate" ]]; then
+            module="$(sed -nE "s/^module_pathname[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$candidate" | head -1)"
+            [[ -z "$module" ]] || break
+          fi
+        done
         [[ -n "$module" ]] || fail "laplace.control has no module_pathname"
         PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" sql \
           -c "CREATE OR REPLACE FUNCTION public.laplace_restore_function_bindings() RETURNS void LANGUAGE c AS '$module', 'laplace_restore_function_bindings'" \

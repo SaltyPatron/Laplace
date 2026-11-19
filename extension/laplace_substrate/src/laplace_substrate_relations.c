@@ -1,20 +1,23 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "funcapi.h"
-#include "executor/spi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/hsearch.h"
 #include "access/htup_details.h"
+#include "access/xact.h"
 #include "catalog/pg_type.h"
+#include "miscadmin.h"
 #include "nodes/execnodes.h"
+#include "storage/proc.h"
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "laplace/core/qualifier_law.h"
+#include "consensus_scan.h"
+#include "relations_internal.h"
 #include "spi_common.h"
-#include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_relation_type_resolve);
 
@@ -91,36 +94,71 @@ pg_relation_is_symmetric(PG_FUNCTION_ARGS)
 /* Per-backend memo for rank resolution of a type the manifest does not carry.
  * Such a type inherits the rank of its nearest manifest ancestor along the
  * strongest IS_A consensus chain; the memo keeps that chain walk off every row
- * of a ranked read. Resolution depends on the manifest and IS_A standing, which
- * are treated as fixed for a backend's lifetime like the perfcache. Not-found is
- * memoized too. */
+ * of a ranked read. Resolution depends on the manifest and IS_A standing, so
+ * resolved hits stay cached per backend while negative misses are scoped to
+ * the current (lxid, cid) command so subsequent mutations re-probe cleanly. */
 typedef struct RankMemoEntry
 {
-    hash128_t key;
-    double    rank;
-    bool      has_rank;
+    hash128_t          key;
+    double             rank;
+    bool               has_rank;
+    LocalTransactionId lxid;
+    CommandId          cid;
 } RankMemoEntry;
 
-static HTAB      *rank_resolve_memo = NULL;
-static SPIPlanPtr rank_resolve_plan = NULL;
-static hash128_t  rank_is_a_id;
-static bool       rank_is_a_ready = false;
-
-PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
-
-Datum
-pg_relation_rank_resolved(PG_FUNCTION_ARGS)
+typedef struct RankResolveBest
 {
-    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
-    hash128_t orig_id = datum_to_hash128(PointerGetDatum(type_ba));
-    hash128_t cur_id  = orig_id;
-    const laplace_relation_def_t* def = NULL;
-    RankMemoEntry *memo;
-    bool      memo_found;
-    bool      spi_top = false;
+    hash128_t           object;
+    laplace_standing128 mu;
+    bool                has;
+} RankResolveBest;
+
+static HTAB     *rank_resolve_memo = NULL;
+static hash128_t rank_is_a_id;
+static bool      rank_is_a_ready = false;
+
+static void
+rank_resolve_consume(const LaplaceConsensusRow *row, void *ctx)
+{
+    RankResolveBest    *best = (RankResolveBest *) ctx;
+    laplace_standing128 mu;
+
+    if (row->object_is_null)
+        return;
+    mu = (laplace_standing128) row->rating - 2 * (laplace_standing128) row->rd;
+    if (!best->has || mu > best->mu ||
+        (mu == best->mu && memcmp(&row->object, &best->object, sizeof(hash128_t)) < 0))
+    {
+        best->object = row->object;
+        best->mu     = mu;
+        best->has    = true;
+    }
+}
+
+bool
+laplace_relation_rank_resolve_c(hash128_t orig_id, double *out_rank)
+{
+    hash128_t                      cur_id = orig_id;
+    const laplace_relation_def_t  *def = NULL;
+    RankMemoEntry                 *memo;
+    bool                           memo_found;
+    LocalTransactionId             cur_lxid;
+    CommandId                      cur_cid;
+    ArrayType                     *isa_arr;
+    double                         resolved_rank = 0.0;
+    bool                           found = false;
+    HTAB                          *visited;
+    HASHCTL                        vctl;
 
     if (laplace_relation_lookup(&cur_id, &def) == 0 && def != NULL)
-        PG_RETURN_FLOAT8(def->rank);
+    {
+        if (out_rank != NULL)
+            *out_rank = def->rank;
+        return true;
+    }
+
+    cur_lxid = (MyProc != NULL) ? MyProc->vxid.lxid : InvalidLocalTransactionId;
+    cur_cid  = GetCurrentCommandId(false);
 
     if (rank_resolve_memo == NULL)
     {
@@ -138,90 +176,94 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
     if (memo_found)
     {
         if (memo->has_rank)
-            PG_RETURN_FLOAT8(memo->rank);
-        PG_RETURN_NULL();
+        {
+            if (out_rank != NULL)
+                *out_rank = memo->rank;
+            return true;
+        }
+        if (cur_lxid != InvalidLocalTransactionId &&
+            memo->lxid == cur_lxid &&
+            memo->cid == cur_cid)
+            return false;
     }
 
     if (!rank_is_a_ready)
     {
         if (laplace_relation_resolve_surface("IS_A", &rank_is_a_id, NULL, NULL, NULL, NULL) < 0)
-            PG_RETURN_NULL();
+            return false;
         rank_is_a_ready = true;
     }
 
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        PG_RETURN_NULL();
+    isa_arr = hash128_array_from_ids(&rank_is_a_id, 1);
+    memset(&vctl, 0, sizeof(vctl));
+    vctl.keysize   = sizeof(hash128_t);
+    vctl.entrysize = sizeof(hash128_t);
+    vctl.hcxt      = CurrentMemoryContext;
+    visited = hash_create("relation_rank_resolved visited", 8,
+                          &vctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
-    if (rank_resolve_plan == NULL)
-    {
-        Oid argtypes[2] = { BYTEAOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT object_id FROM laplace.consensus "
-            "WHERE subject_id = $1 "
-            "  AND type_id = $2 "
-            "ORDER BY consensus.eff_mu(rating, rd) DESC LIMIT 1",
-            2, argtypes, CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL || SPI_keepplan(plan) != 0)
-        {
-            laplace_spi_finish(spi_top);
-            PG_RETURN_NULL();
-        }
-        rank_resolve_plan = plan;
-    }
-
-    double out_rank = 0.0;
-    bool   found    = false;
-    HTAB  *visited;
-    {
-        HASHCTL ctl;
-
-        memset(&ctl, 0, sizeof(ctl));
-        ctl.keysize = sizeof(hash128_t);
-        ctl.entrysize = sizeof(hash128_t);
-        visited = hash_create("relation_rank_resolved visited", 1,
-                              &ctl, HASH_ELEM | HASH_BLOBS);
-    }
     while (!found)
     {
-        Datum  args[2] = { hash128_to_datum(&cur_id), hash128_to_datum(&rank_is_a_id) };
-        bool   isnull;
-        bool   seen;
+        bool            seen;
+        ArrayType      *subj_arr;
+        RankResolveBest best;
 
+        CHECK_FOR_INTERRUPTS();
         (void) hash_search(visited, &cur_id, HASH_ENTER, &seen);
         if (seen)
             break;
 
-        int rc = SPI_execute_plan(rank_resolve_plan, args, NULL, true, 1);
-        if (rc != SPI_OK_SELECT || SPI_processed == 0)
+        best.has = false;
+        best.mu  = 0;
+        memset(&best.object, 0, sizeof(best.object));
+
+        subj_arr = hash128_array_from_ids(&cur_id, 1);
+        laplace_consensus_candidates_stored(subj_arr, NULL, isa_arr,
+                                            rank_resolve_consume, &best);
+        pfree(subj_arr);
+
+        if (!best.has)
             break;
 
-        Datum pd = SPI_getbinval(SPI_tuptable->vals[0],
-                                 SPI_tuptable->tupdesc, 1, &isnull);
-        if (isnull)
-            break;
-
-        hash128_t parent_id = datum_to_hash128(pd);
-        const laplace_relation_def_t* pdef = NULL;
-        if (laplace_relation_lookup(&parent_id, &pdef) == 0 && pdef != NULL)
         {
-            out_rank = pdef->rank;
-            found    = true;
-        }
-        else
-        {
-            cur_id = parent_id;
+            const laplace_relation_def_t *pdef = NULL;
+            if (laplace_relation_lookup(&best.object, &pdef) == 0 && pdef != NULL)
+            {
+                resolved_rank = pdef->rank;
+                found         = true;
+            }
+            else
+            {
+                cur_id = best.object;
+            }
         }
     }
-    hash_destroy(visited);
 
-    laplace_spi_finish(spi_top);
+    hash_destroy(visited);
+    pfree(isa_arr);
 
     memo = (RankMemoEntry *) hash_search(rank_resolve_memo, &orig_id,
                                          HASH_ENTER, &memo_found);
-    memo->rank     = out_rank;
+    memo->rank     = resolved_rank;
     memo->has_rank = found;
+    memo->lxid     = cur_lxid;
+    memo->cid      = cur_cid;
 
-    if (found)
+    if (found && out_rank != NULL)
+        *out_rank = resolved_rank;
+    return found;
+}
+
+PG_FUNCTION_INFO_V1(pg_relation_rank_resolved);
+
+Datum
+pg_relation_rank_resolved(PG_FUNCTION_ARGS)
+{
+    bytea    *type_ba  = PG_GETARG_BYTEA_PP(0);
+    hash128_t orig_id  = datum_to_hash128(PointerGetDatum(type_ba));
+    double    out_rank = 0.0;
+
+    if (laplace_relation_rank_resolve_c(orig_id, &out_rank))
         PG_RETURN_FLOAT8(out_rank);
     PG_RETURN_NULL();
 }

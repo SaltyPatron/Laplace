@@ -20,9 +20,14 @@
 
 #include "postgres.h"
 
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "executor/tuptable.h"
+#include "fmgr.h"
+#include "nodes/makefuncs.h"
+#include "nodes/pg_list.h"
+#include "parser/parse_func.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgrprotos.h"
@@ -197,126 +202,74 @@ spi_common_ensure_plan(SPIPlanPtr *slot, const char *sql, int nargs, Oid *argtyp
 }
 
 static inline Datum
+spi_invoke_public_label(const char *funcname, Oid arg0_type, Datum arg0, bool null_if_hex)
+{
+    Oid      argtypes[2] = { arg0_type, BOOLOID };
+    List    *names;
+    Oid      fn_oid;
+    FmgrInfo flinfo;
+    LOCAL_FCINFO(fcinfo, 2);
+    Datum    res;
+
+    if (arg0 == (Datum) 0)
+        return (Datum) 0;
+    names = list_make2(makeString(pstrdup("public")), makeString(pstrdup(funcname)));
+    fn_oid = LookupFuncName(names, 2, argtypes, false);
+    list_free_deep(names);
+    fmgr_info(fn_oid, &flinfo);
+    InitFunctionCallInfoData(*fcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
+    fcinfo->args[0].value = arg0;
+    fcinfo->args[0].isnull = false;
+    fcinfo->args[1].value = BoolGetDatum(null_if_hex);
+    fcinfo->args[1].isnull = false;
+    res = FunctionCallInvoke(fcinfo);
+    if (fcinfo->isnull)
+        return (Datum) 0;
+    return res;
+}
+
+static inline Datum
 spi_realize(Datum id, Datum lang)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid     argtypes[2] = { BYTEAOID, BYTEAOID };
-    Datum   args[2] = { id, lang };
-    char    nulls[3] = "  ";
-    bool    isnull;
-    int     rc;
-
-    if (lang == (Datum) 0)
-        nulls[1] = 'n';
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 2, argtypes),
-        args, nulls, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    (void) lang;
+    return spi_invoke_public_label("laplace_label_text", BYTEAOID, id, false);
 }
 
 /* Batch form of spi_realize. ids_arr is a bytea[] ArrayType Datum; returns the
- * text[] Datum from realize.batch, or 0 on empty/NULL. Caller owns any
+ * text[] Datum from laplace_label_array, or 0 on empty/NULL. Caller owns any
  * deconstruct_array / DatumGetArrayTypePCopy. */
 static inline Datum
 spi_realize_batch(Datum ids_arr, Datum lang)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid     argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-    Datum   args[2] = { ids_arr, lang };
-    char    nulls[3] = "  ";
-    bool    isnull;
-    int     rc;
-    Datum   d;
-
-    if (lang == (Datum) 0)
-        nulls[1] = 'n';
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT ARRAY(SELECT lp_l.content FROM unnest(($1)::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(($1)::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)", 2, argtypes),
-        args, nulls, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        return (Datum) 0;
-    return d;
+    (void) lang;
+    return spi_invoke_public_label("laplace_label_array", BYTEAARRAYOID, ids_arr, false);
 }
 
 static inline Datum
 spi_label(Datum id)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
-        args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    return spi_invoke_public_label("laplace_label_text", BYTEAOID, id, false);
 }
 
 static inline Datum
 spi_type_label(Datum type_id)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { type_id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT (SELECT lp_l.content FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
-        args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    return spi_invoke_public_label("laplace_label_text", BYTEAOID, type_id, false);
 }
+
+extern Datum laplace_word_language_c(Datum word);
+extern int   laplace_fetch_synset_ids_c(Datum word, Datum **out_ids, int *out_n);
 
 static inline Datum
 spi_word_language(Datum word)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { word };
-    bool  isnull;
-    int   rc;
-    Datum d;
-
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT converse.word_language($1)", 1, argtypes),
-        args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    
-
-
-
-    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        return (Datum) 0;
-    return copy_bytea_datum(d);
+    return laplace_word_language_c(word);
 }
 
 static inline Datum
 spi_render_text(Datum id)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { id };
-    bool  isnull;
-    int   rc;
-
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT (SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM public.laplace_labels(array_remove(ARRAY[($1)::bytea],NULL)::public.blake3[]) lp_l)", 1, argtypes),
-        args, NULL, true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return (Datum) 0;
-    return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    return spi_invoke_public_label("laplace_label_text", BYTEAOID, id, true);
 }
 
 
@@ -343,39 +296,7 @@ spi_emit_all_rows(ReturnSetInfo *rsinfo)
 static inline int
 spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
 {
-    static SPIPlanPtr plan = NULL;
-    Oid   argtypes[1] = { BYTEAOID };
-    Datum args[1] = { word };
-    int   rc;
-
-    *out_ids = NULL;
-    *out_n = 0;
-    rc = SPI_execute_plan(
-        spi_common_ensure_plan(&plan, "SELECT sn.synset_id FROM lexical.senses($1) sn", 1, argtypes),
-        args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "laplace_substrate: senses query failed: %s",
-             SPI_result_code_string(rc));
-    if (SPI_processed == 0)
-        return 0;
-    if (SPI_processed > (uint64) INT_MAX ||
-        SPI_processed > (uint64) (MaxAllocSize / sizeof(Datum)))
-        ereport(ERROR,
-                (errmsg("laplace_substrate: sense frontier exceeds PostgreSQL allocation capacity"),
-                 errdetail("Requested %llu sense ids.",
-                           (unsigned long long) SPI_processed)));
-    *out_ids = (Datum *) palloc(sizeof(Datum) * (Size) SPI_processed);
-    int valid = 0;
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        bool  isnull;
-        Datum d = SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull);
-
-        if (!isnull && d != (Datum) 0)
-            (*out_ids)[valid++] = copy_bytea_datum(d);
-    }
-    *out_n = valid;
-    return *out_n;
+    return laplace_fetch_synset_ids_c(word, out_ids, out_n);
 }
 
 #endif                          

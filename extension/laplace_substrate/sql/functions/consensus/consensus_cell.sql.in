@@ -47,6 +47,8 @@ BEGIN ATOMIC
     JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
     LEFT JOIN laplace.consensus c
       ON c.id = public.blake3_send(public.laplace_compose(array_remove(ARRAY[s.sid, p_type, o.oid]::public.blake3[], NULL)))
+     AND c.type_id = p_type
+     AND c.subject_id = s.sid
     ORDER BY s.ord;
 END;
 

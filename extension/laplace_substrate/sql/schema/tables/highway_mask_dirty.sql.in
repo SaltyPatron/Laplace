@@ -6,7 +6,11 @@
 CREATE TABLE IF NOT EXISTS highway_mask_dirty (
     id bytea PRIMARY KEY
 );
-ALTER TABLE laplace.highway_mask_dirty SET LOGGED;
+DO $$ BEGIN
+    IF (SELECT relpersistence FROM pg_class WHERE oid = 'laplace.highway_mask_dirty'::regclass) <> 'p' THEN
+        ALTER TABLE laplace.highway_mask_dirty SET LOGGED;
+    END IF;
+END $$;
 
 -- Exact (entity, relation type) deposits not yet applied to highway_mask, kept
 -- when the relation registry cannot resolve a bit so they are applied later

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
@@ -15,8 +16,15 @@ public static partial class SqlCatalog
     private static partial IntPtr ParametersPointer(string name);
 
     private static readonly Lazy<IReadOnlyDictionary<string, NativeSqlQuery>> EmbeddedFallback = new(LoadEmbeddedCatalog);
+    private static readonly ConcurrentDictionary<string, NativeSqlQuery> Cache = new(StringComparer.Ordinal);
 
     public static NativeSqlQuery Get(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return Cache.GetOrAdd(name, static key => ResolveUncached(key));
+    }
+
+    private static NativeSqlQuery ResolveUncached(string name)
     {
         try
         {
@@ -25,7 +33,7 @@ public static partial class SqlCatalog
             // New statements can use that declared contract with the unchanged
             // installed native ABI; unknown names still fail explicitly.
             if (text is null) {
-                if (EmbeddedFallback.Value.TryGetValue(name,out var embedded)) return embedded;
+                if (EmbeddedFallback.Value.TryGetValue(name, out var embedded)) return embedded;
                 throw new ArgumentException($"Unknown native SQL query '{name}'.", nameof(name));
             }
             var parameters = Marshal.PtrToStringUTF8(ParametersPointer(name))

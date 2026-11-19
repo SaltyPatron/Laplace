@@ -334,6 +334,8 @@ public static class NpgsqlRead
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
+            if (cmd.Parameters.Count > 0 && !sql.Contains(';', StringComparison.Ordinal))
+                await cmd.PrepareAsync(ct).ConfigureAwait(false);
 
             return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }

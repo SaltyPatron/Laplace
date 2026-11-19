@@ -76,7 +76,15 @@ END $$;
 
 -- Parent-level column stats target (applies when ANALYZE samples the hierarchy
 -- into parent stats; per-leaf targets are set at leaf creation above).
-ALTER TABLE physicalities ALTER COLUMN coord      SET STATISTICS 0;
-ALTER TABLE physicalities ALTER COLUMN trajectory SET STATISTICS 0;
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = (current_schema() || '.physicalities')::regclass
+          AND attname IN ('coord', 'trajectory')
+          AND attstattarget IS DISTINCT FROM 0
+    ) THEN
+        ALTER TABLE physicalities ALTER COLUMN coord SET STATISTICS 0, ALTER COLUMN trajectory SET STATISTICS 0;
+    END IF;
+END $$;
 
 SELECT pg_extension_config_dump('physicalities', '');

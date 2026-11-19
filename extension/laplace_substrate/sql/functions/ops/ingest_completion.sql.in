@@ -19,9 +19,14 @@ BEGIN
         )
         SELECT EXISTS (
             SELECT FROM latest j
-            JOIN public.physicality p ON p.entity::text = encode(j.source_id, 'hex')
+            JOIN LATERAL public.laplace_physicalities(
+                CASE WHEN j.source_id IS NOT NULL AND octet_length(j.source_id) = 16
+                     THEN ARRAY[public.blake3_from_bytea(j.source_id)]
+                     ELSE '{}'::public.blake3[] END
+            ) p ON true
             WHERE j.status = 'ok'
-              AND EXISTS (SELECT 1 FROM public.attestation a WHERE a.witness = p.entity)
+              AND ((j.attestations_measured AND j.attestations = 0)
+                   OR EXISTS (SELECT 1 FROM public.laplace_witness_trust(ARRAY[p.entity])))
               AND j.ended_at IS NOT NULL
               AND j.files_total > 0 AND j.files_done = j.files_total
         )

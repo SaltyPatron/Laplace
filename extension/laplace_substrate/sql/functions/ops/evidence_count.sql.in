@@ -9,7 +9,7 @@ BEGIN
         IF p_type IS NULL AND p_object IS NULL THEN
             IF p_source IS NULL THEN RETURN ops.attestation_count(); END IF;
             IF to_regclass('public.attestation') IS NULL THEN RETURN NULL; END IF;
-            EXECUTE 'SELECT count(DISTINCT claim) FROM public.attestation WHERE witness=public.blake3_from_bytea($1)'
+            EXECUTE 'SELECT public.laplace_attestation_count(public.blake3_from_bytea($1))'
                 INTO measured USING p_source;
             RETURN coalesce(measured, 0);
         END IF;

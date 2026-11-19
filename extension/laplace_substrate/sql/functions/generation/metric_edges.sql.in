@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION generation.metric_edges(
+    p_vocab  bytea[],
+    p_metric text,
+    p_k      integer,
+    p_probe  integer)
+RETURNS TABLE(subject_id bytea, object_id bytea, d double precision)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_metric_edges'
+LANGUAGE C STABLE PARALLEL SAFE;

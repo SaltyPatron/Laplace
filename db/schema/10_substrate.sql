@@ -129,7 +129,7 @@ BEGIN
     END IF;
     EXECUTE format(
         'ALTER FOREIGN TABLE ops.chess_drops_ft OPTIONS (SET filename %L)',
-        rtrim(p_dir, '/') || '/laplace-chess-drops.csv');
+        rtrim(p_dir, E'/\\') || '/laplace-chess-drops.csv');
     RETURN format('repointed chess_drops at %s', p_dir);
 END;
 $$;

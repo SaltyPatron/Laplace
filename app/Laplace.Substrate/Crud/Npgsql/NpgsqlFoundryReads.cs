@@ -35,7 +35,7 @@ public static class NpgsqlFoundryReads
         ValidateSourceScope(sources);
         if(sources is {Length:0})return Array.Empty<PathEdgeRow>();
         await using var connection=await ds.OpenConnectionAsync();
-        await using var command=NpgsqlCatalog.Command(connection,null,"generation.path_plane",roots,stepsJson,fanout,cap,visibleOnly,(object?)sources??DBNull.Value);
+        await using var command=await NpgsqlCatalog.PreparedCommandAsync(connection,null,"generation.path_plane",CancellationToken.None,roots,stepsJson,fanout,cap,visibleOnly,(object?)sources??DBNull.Value);
         command.CommandTimeout=600;
         await using var reader=await command.ExecuteReaderAsync();
         var rows=new List<PathEdgeRow>();
@@ -47,7 +47,7 @@ public static class NpgsqlFoundryReads
     public static async Task<IReadOnlyList<OrderedSequenceRow>> ExportSequencesAsync(NpgsqlDataSource ds,byte[][] vocab,int limit,int contextLength,byte[][]? sources=null)
     {
         await using var connection=await ds.OpenConnectionAsync();
-        await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_sequences",vocab,limit,contextLength,(object?)sources??DBNull.Value);
+        await using var command=await NpgsqlCatalog.PreparedCommandAsync(connection,null,"generation.export_sequences",CancellationToken.None,vocab,limit,contextLength,(object?)sources??DBNull.Value);
         command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync();var rows=new List<OrderedSequenceRow>();
         while(await reader.ReadAsync())rows.Add(new((byte[])reader[0],(byte[])reader[1],reader.GetFieldValue<byte[][]>(2)));
         return rows;
@@ -58,7 +58,8 @@ public static class NpgsqlFoundryReads
     {
         ValidateSourceScope(sources);
         if(sources is {Length:0})return Array.Empty<SourceAttributionRow>();
-        await using var connection=await ds.OpenConnectionAsync();await using var command=NpgsqlCatalog.Command(connection,null,"generation.export_source_attribution",claims,(object?)sources??DBNull.Value);
+        await using var connection=await ds.OpenConnectionAsync();
+        await using var command=await NpgsqlCatalog.PreparedCommandAsync(connection,null,"generation.export_source_attribution",CancellationToken.None,claims,(object?)sources??DBNull.Value);
         command.CommandTimeout=600;await using var reader=await command.ExecuteReaderAsync();var rows=new List<SourceAttributionRow>();
         while(await reader.ReadAsync())rows.Add(new((byte[])reader[0],reader.GetInt64(1),reader.GetInt64(2),reader.GetDouble(3),reader.GetInt32(4)));
         return rows;
@@ -304,6 +305,21 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, string source, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("foundry.source_ids"),
             static r => (byte[])r[0], p => p.AddWithValue("s", source), ct: ct, label: "source_ids");
+
+    public static Task<IReadOnlyList<(string RequestedName, byte[] Id)>> SourceIdsBatchAsync(
+        NpgsqlDataSource ds, IReadOnlyList<string> names, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        var arr = names as string[] ?? names.ToArray();
+        return NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("foundry.source_ids_batch"),
+            static r => (r.GetString(0), (byte[])r[1]),
+            p => p.Add(new NpgsqlParameter
+            {
+                ParameterName = "names",
+                Value = arr,
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+            }), ct: ct, label: "source_ids_batch");
+    }
 
     /// <summary>
     /// Realized surfaces of the inputs that resolve to a word entity; unresolved inputs are

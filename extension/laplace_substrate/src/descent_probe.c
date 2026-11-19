@@ -19,6 +19,8 @@
 #include "utils/rls.h"
 
 #include "perfcache_native.h"
+#include "spi_common.h"
+#include "spi_nested.h"
 
 static inline void
 bitmap_set(uint8_t *bm, int pos)
@@ -30,10 +32,61 @@ static int
 spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
                           uint8_t *bm, int candidate_count)
 {
-    int spi_rc = SPI_execute_with_args(sql, narg, argtypes, args, NULL, true, 0);
+    static struct
+    {
+        const char *sql;
+        int         narg;
+        SPIPlanPtr  plan;
+    } cache[16];
+    static int  n_cached = 0;
+    SPIPlanPtr  plan = NULL;
+    SPIPlanPtr  transient_plan = NULL;
+    bool        need_finish = false;
+    int         spi_rc;
+
+    if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
+        return SPI_ERROR_CONNECT;
+
+    for (int i = 0; i < n_cached; i++)
+    {
+        if (cache[i].narg == narg &&
+            (cache[i].sql == sql || strcmp(cache[i].sql, sql) == 0))
+        {
+            plan = cache[i].plan;
+            break;
+        }
+    }
+
+    if (plan == NULL)
+    {
+        if (n_cached < (int) lengthof(cache))
+        {
+            plan = spi_common_ensure_plan(&cache[n_cached].plan, sql, narg, argtypes);
+            cache[n_cached].sql = sql;
+            cache[n_cached].narg = narg;
+            n_cached++;
+        }
+        else
+        {
+            transient_plan = SPI_prepare_cursor(sql, narg, argtypes, CURSOR_OPT_PARALLEL_OK);
+            if (transient_plan == NULL)
+            {
+                laplace_spi_finish(need_finish);
+                return SPI_ERROR_OPUNKNOWN;
+            }
+            plan = transient_plan;
+        }
+    }
+
+    spi_rc = SPI_execute_plan(plan, args, NULL, true, 0);
+    if (transient_plan != NULL)
+        SPI_freeplan(transient_plan);
 
     if (spi_rc != SPI_OK_SELECT)
+    {
+        laplace_spi_finish(need_finish);
         return spi_rc;
+    }
 
     for (uint64 i = 0; i < SPI_processed; i++)
     {
@@ -48,6 +101,7 @@ spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
                 bitmap_set(bm, pos);
         }
     }
+    laplace_spi_finish(need_finish);
     return SPI_OK_SELECT;
 }
 

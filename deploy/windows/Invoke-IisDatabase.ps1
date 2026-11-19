@@ -76,6 +76,41 @@ function Query([string]$Sql,[string]$Name='postgres'){
     if($LASTEXITCODE){throw ($result -join "`n")}
     ($result -join "`n").Trim()
 }
+function Get-SubstrateExtensionDirectory {
+    $deployRoot=if($env:LAPLACE_DEPLOY){$env:LAPLACE_DEPLOY}elseif($env:LAPLACE_DATA_ROOT){Join-Path $env:LAPLACE_DATA_ROOT 'deploy'}else{''}
+    if(-not $deployRoot){return ''}
+    Join-Path $deployRoot 'share/extension'
+}
+$tempTransitionScripts=[Collections.Generic.List[string]]::new()
+function Clear-TemporaryTransitionScripts {
+    foreach($path in $tempTransitionScripts){
+        if($path -and (Test-Path -LiteralPath $path -PathType Leaf)){
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $tempTransitionScripts.Clear()
+}
+function PrepareInPlaceExtensionUpdates {
+    if($Database -ne 'substrate' -or $Operation -notin 'migrate','repair'){return}
+    if((Query "SELECT count(*) FROM pg_database WHERE datname='$selected';") -ne '1'){return}
+    $extDir=Get-SubstrateExtensionDirectory
+    if(-not $extDir -or -not (Test-Path -LiteralPath $extDir -PathType Container)){return}
+    Get-ChildItem -LiteralPath $extDir -Filter 'laplace*--*--*.sql' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+        $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
+        $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
+        if(-not $installed -or -not $avail -or $installed -ceq $avail){continue}
+        $reconcile=Join-Path $extDir "$ext.reconcile.sql"
+        $verify=Join-Path $extDir "$ext.verify-storage.sql"
+        if((Test-Path -LiteralPath $reconcile -PathType Leaf) -and (Test-Path -LiteralPath $verify -PathType Leaf)){
+            if((Query ([IO.File]::ReadAllText($verify)) $selected) -ceq 'ok'){
+                $transition=Join-Path $extDir "$ext--$installed--$avail.sql"
+                Copy-Item -LiteralPath $reconcile -Destination $transition -Force
+                $tempTransitionScripts.Add($transition)
+            }
+        }
+    }
+}
 # Each extension of the selected substrate whose installed version cannot reach the available one in place.
 function ExtensionDrift {
     if($Database -ne 'substrate' -or $Operation -notin 'migrate','repair'){return}
@@ -84,7 +119,7 @@ function ExtensionDrift {
         $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
         $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
         if(-not $installed -or -not $avail -or $installed -ceq $avail){continue}
-        if($ext -eq 'laplace' -and (Query "SELECT count(*) FROM pg_extension_update_paths('laplace') WHERE source='$installed' AND target='$avail' AND path IS NOT NULL;" $selected) -eq '1'){continue}
+        if((Query "SELECT count(*) FROM pg_extension_update_paths('$ext') WHERE source='$installed' AND target='$avail' AND path IS NOT NULL;" $selected) -eq '1'){continue}
         "$ext $installed -> $avail"
     }
 }
@@ -178,21 +213,47 @@ try {
             }
         }
     }
-    # laplace_geom and laplace_substrate have no upgrade path (their version is a content hash), and Native's laplace
-    # has none where Laplace-postgres ships no update script: a substrate database carrying another version is
-    # recreated (nuke: a replacement made with a fresh CREATE EXTENSION and the declared substrate schema, carrying
-    # the database's settings and grants), never updated in place. Only the substrate: the access declaration keeps
-    # the application in a database of its own.
+    # Compatible extension updates upgrade in place via verified reconcile scripts;
+    # only incompatible storage DDL requires an explicit recreate opt-in.
+    PrepareInPlaceExtensionUpdates
     $stale=@(ExtensionDrift)
     $prefix=if($Database -eq 'application'){'app-'}else{'substrate-'}
     switch($Operation){
         status { Migrate ($prefix+'status') }
         {$_ -in 'migrate','repair' -and $stale} {
-            Write-Host "Recreating substrate database $selected (extensions have no upgrade path): $($stale -join ', ')"
+            Clear-TemporaryTransitionScripts
+            if($env:LAPLACE_SUBSTRATE_RECREATE -notin @('version','version-including-application')){
+                throw "Substrate storage schema changed ($($stale -join ', ')) and has no in-place upgrade path; recreate deliberately with: laplace-ops db substrate recreate -Yes"
+            }
+            Write-Host "Recreating substrate database $selected (incompatible storage schema): $($stale -join ', ')"
             $receipt.recreated_for=$stale
             Migrate 'nuke'
         }
-        {$_ -in 'migrate','repair' -and -not $stale} { Migrate ($prefix+'up') }
+        {$_ -in 'migrate','repair' -and -not $stale} {
+            if($Database -eq 'substrate' -and (Query "SELECT count(*) FROM pg_database WHERE datname='$selected';") -eq '1'){
+                $extDir=Get-SubstrateExtensionDirectory
+                foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+                    $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
+                    $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
+                    if($installed -and $avail -and $installed -cne $avail){
+                        Write-Host "Upgrading extension $ext from $installed to $avail in $selected (in place)"
+                        $null=Query "SET lock_timeout = '20s'; ALTER EXTENSION $ext UPDATE TO '$avail';" $selected
+                    }
+                    if($ext -eq 'laplace' -and $installed -and $extDir){
+                        $controlPath=Join-Path $extDir 'laplace.control'
+                        if(Test-Path -LiteralPath $controlPath -PathType Leaf){
+                            $controlText=[IO.File]::ReadAllText($controlPath)
+                            if($controlText -match "module_pathname\s*=\s*'([^']+)'"){
+                                $moduleLit=$Matches[1].Replace("'","''")
+                                $null=Query "SET lock_timeout = '20s'; CREATE OR REPLACE FUNCTION public.laplace_restore_function_bindings() RETURNS void LANGUAGE c AS '$moduleLit', 'laplace_restore_function_bindings'; SELECT public.laplace_restore_function_bindings();" $selected
+                            }
+                        }
+                    }
+                }
+                Clear-TemporaryTransitionScripts
+            }
+            Migrate ($prefix+'up')
+        }
         remigrate {
             Migrate $(if($Database -eq 'application'){'app-reset'}else{'reset'})
             Migrate ($prefix+'up')
@@ -270,6 +331,7 @@ try {
     $receipt.error=$_.Exception.Message
     throw
 }finally{
+    Clear-TemporaryTransitionScripts
     if($lock){$lock.Dispose()}
     $receipt.finished_utc=[DateTime]::UtcNow.ToString('o')
     $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $receiptRoot 'receipt.json') -Encoding utf8

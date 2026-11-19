@@ -102,7 +102,7 @@ SQL_QUERY("language.tags", "text[]",
     "WHERE k.subject_id=n.id AND k.type_id=rel.scope)),"
     "tags AS (SELECT id FROM lang UNION SELECT c.object_id FROM laplace.consensus c JOIN lang l "
     "ON c.subject_id=l.id,rel WHERE c.type_id=rel.ext AND c.object_id IS NOT NULL) "
-    "SELECT t FROM unnest(ARRAY(SELECT NULLIF(lp_l.content,lp_l.entity::text) FROM unnest(((SELECT array_agg(id) FROM tags))::bytea[]) WITH ORDINALITY lp_u(x,n) LEFT JOIN (SELECT DISTINCT ON (lp_d.entity) lp_d.entity,lp_d.content FROM public.laplace_labels(array_remove(((SELECT array_agg(id) FROM tags))::bytea[],NULL)::public.blake3[]) lp_d) lp_l ON lp_l.entity=lp_u.x::public.blake3 ORDER BY lp_u.n)) t WHERE t IS NOT NULL")
+    "SELECT t FROM unnest(public.laplace_label_array(((SELECT array_agg(id) FROM tags))::bytea[], true)) t WHERE t IS NOT NULL")
 
 /* Physical partition metadata used by the active COPY writer. */
 SQL_QUERY("write.partition_leaves", "",
@@ -244,6 +244,32 @@ SQL_QUERY("owner.grant_administrator", "uuid,text",
     "ON CONFLICT(user_id) DO UPDATE SET role=excluded.role,updated_at=now() RETURNING user_id) "
     "INSERT INTO app.platform_role_events(user_id,actor,previous_role,role) "
     "SELECT user_id,'installation-owner',$2,'administrator' FROM granted")
+SQL_QUERY("owner.find_bindings_batch", "text[],text[],text[]",
+    "SELECT u.ord::int4, e.user_id, r.role "
+    "FROM unnest($1,$2,$3) WITH ORDINALITY AS u(provider,issuer,subject,ord) "
+    "LEFT JOIN app.external_identities e ON e.provider=u.provider AND e.issuer=u.issuer AND e.subject=u.subject "
+    "LEFT JOIN app.platform_roles r ON r.user_id=e.user_id "
+    "ORDER BY u.ord")
+SQL_QUERY("owner.grant_administrators_batch", "uuid[],text[]",
+    "WITH input AS (SELECT u.user_id, u.prev_role FROM unnest($1,$2) AS u(user_id,prev_role)), "
+    "granted AS (INSERT INTO app.platform_roles(user_id,role) "
+    "SELECT user_id,'administrator' FROM input "
+    "ON CONFLICT(user_id) DO UPDATE SET role=excluded.role,updated_at=now() RETURNING user_id) "
+    "INSERT INTO app.platform_role_events(user_id,actor,previous_role,role) "
+    "SELECT g.user_id,'installation-owner',i.prev_role,'administrator' "
+    "FROM granted g JOIN input i USING(user_id)")
+SQL_QUERY("owner.is_owner_batch", "uuid,text[],text[],text[]",
+    "SELECT EXISTS("
+    "SELECT 1 FROM unnest($2,$3,$4) AS u(provider,issuer,subject) "
+    "JOIN app.external_identities e ON e.user_id=$1 AND e.provider=u.provider AND e.issuer=u.issuer AND e.subject=u.subject"
+    ") OR EXISTS("
+    "SELECT 1 FROM app.platform_role_events WHERE user_id=$1 AND actor='installation-owner' AND role='administrator'"
+    ")")
+SQL_QUERY("owner.list_owner_users_batch", "text[],text[],text[]",
+    "SELECT e.user_id FROM unnest($1,$2,$3) AS u(provider,issuer,subject) "
+    "JOIN app.external_identities e ON e.provider=u.provider AND e.issuer=u.issuer AND e.subject=u.subject "
+    "UNION "
+    "SELECT user_id FROM app.platform_role_events WHERE actor='installation-owner' AND role='administrator'")
 SQL_QUERY("identity.put_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz",
     "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,created_at,last_seen_at,expires_at,revoked_at) "
     "VALUES($1,$2,$3,$4,$5,$6,$7,NULL) ON CONFLICT(session_id) DO UPDATE SET ticket=EXCLUDED.ticket, "
@@ -300,16 +326,23 @@ SQL_QUERY("billing.record_usage", "text,text,text,int4,int8,timestamptz",
 SQL_QUERY("billing.usage_by_tenant", "text",
     "SELECT quote_id,tenant,service_id,units,amount_cents,executed_at "
     "FROM app.billing_usage WHERE tenant=$1 ORDER BY executed_at DESC,id DESC")
-SQL_QUERY("billing.record_royalty", "text,text,text,text,int4,int8,int8,timestamptz",
-    "INSERT INTO app.billing_royalties(quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at) "
-    "VALUES($1,$2,$3,$4,$5,$6,$7,$8) "
+SQL_QUERY("billing.record_royalty", "text,text,text,text,text,int4,int8,int8,float8,timestamptz",
+    "INSERT INTO app.billing_royalties(quote_id,payer_tenant,service_id,source_id,source_owner_tenant,share_bp,royalty_cents,hit_count,total_weight,executed_at) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) "
     "ON CONFLICT(quote_id,source_id) DO UPDATE SET "
-    "share_bp=EXCLUDED.share_bp,gross_amount_cents=EXCLUDED.gross_amount_cents,royalty_cents=EXCLUDED.royalty_cents,executed_at=EXCLUDED.executed_at")
+    "payer_tenant=EXCLUDED.payer_tenant,service_id=EXCLUDED.service_id,source_owner_tenant=EXCLUDED.source_owner_tenant,"
+    "share_bp=EXCLUDED.share_bp,royalty_cents=EXCLUDED.royalty_cents,hit_count=EXCLUDED.hit_count,total_weight=EXCLUDED.total_weight,executed_at=EXCLUDED.executed_at")
+SQL_QUERY("billing.record_royalties_batch", "text[],text[],text[],text[],text[],int4[],int8[],int8[],float8[],timestamptz[]",
+    "INSERT INTO app.billing_royalties(quote_id,payer_tenant,service_id,source_id,source_owner_tenant,share_bp,royalty_cents,hit_count,total_weight,executed_at) "
+    "SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[],$6::int4[],$7::int8[],$8::int8[],$9::float8[],$10::timestamptz[]) "
+    "ON CONFLICT(quote_id,source_id) DO UPDATE SET "
+    "payer_tenant=EXCLUDED.payer_tenant,service_id=EXCLUDED.service_id,source_owner_tenant=EXCLUDED.source_owner_tenant,"
+    "share_bp=EXCLUDED.share_bp,royalty_cents=EXCLUDED.royalty_cents,hit_count=EXCLUDED.hit_count,total_weight=EXCLUDED.total_weight,executed_at=EXCLUDED.executed_at")
 SQL_QUERY("billing.royalties_by_tenant", "text",
-    "SELECT quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at "
-    "FROM app.billing_royalties WHERE payer_tenant=$1 ORDER BY executed_at DESC,id DESC")
+    "SELECT quote_id,payer_tenant,service_id,source_id,source_owner_tenant,share_bp,royalty_cents,hit_count,total_weight,executed_at "
+    "FROM app.billing_royalties WHERE payer_tenant=$1 OR source_owner_tenant=$1 ORDER BY executed_at DESC,id DESC")
 SQL_QUERY("billing.royalties_by_source", "text",
-    "SELECT quote_id,payer_tenant,source_id,service_id,share_bp,gross_amount_cents,royalty_cents,executed_at "
+    "SELECT quote_id,payer_tenant,service_id,source_id,source_owner_tenant,share_bp,royalty_cents,hit_count,total_weight,executed_at "
     "FROM app.billing_royalties WHERE source_id=$1 ORDER BY executed_at DESC,id DESC")
 SQL_QUERY("billing.get_stripe_price", "text",
     "SELECT stripe_price_id FROM app.stripe_price_map WHERE lookup_key=$1")
@@ -352,7 +385,7 @@ SQL_QUERY("access.events", "",
     "coalesce(person.email,person.display_name),coalesce(actor.email,actor.display_name) "
     "FROM app.platform_role_events e "
     "LEFT JOIN app.users person ON person.user_id=e.user_id "
-    "LEFT JOIN app.users actor ON actor.user_id::text=e.actor "
+    "LEFT JOIN app.users actor ON actor.user_id = CASE WHEN e.actor ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN e.actor::uuid END "
     "ORDER BY e.event_id DESC LIMIT 50")
 SQL_QUERY("access.lock_roles", "",
     "LOCK TABLE app.platform_roles IN SHARE ROW EXCLUSIVE MODE")

@@ -45,45 +45,35 @@ public sealed class SecondaryIndexPolicy
 
 
     public async Task<bool> SecondaryIndexesPresentAsync(string table, CancellationToken ct = default)
-
     {
-
         RequireSafeTable(table);
-
         await using var conn = await _ds.OpenConnectionAsync(ct);
-
-        await using var cmd = NpgsqlCatalog.Command(conn, null, "maintenance.secondary_indexes_present", table);
-
+        await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(conn, null, "maintenance.secondary_indexes_present", ct, table);
         var r = await cmd.ExecuteScalarAsync(ct);
-
         return r is bool b && b;
-
     }
 
-
+    public static Task EnsureCatalogIndexesAsync(
+        NpgsqlDataSource ds, IReadOnlyList<string> catalogQueryNames, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(catalogQueryNames);
+        var defs = catalogQueryNames.Select(static k => Laplace.Engine.Core.SqlCatalog.Get(k).Text).ToArray();
+        return EnsureIndexesAsync(ds, defs, ct);
+    }
 
     public static async Task EnsureIndexesAsync(
-
         NpgsqlDataSource ds, IReadOnlyList<string> indexDefs, CancellationToken ct)
-
     {
-
         var defs = DedupeIndexDefs(indexDefs);
-
         await using var conn = await ds.OpenConnectionAsync(ct);
-
         await using var tx = await conn.BeginTransactionAsync(ct);
-
         try
-
         {
-
-            await using (var t = NpgsqlCatalog.Command(conn, tx, "maintenance.index_settings",
+            await using (var t = await NpgsqlCatalog.PreparedCommandAsync(conn, tx, "maintenance.index_settings", ct,
                 (Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20).ToString(System.Globalization.CultureInfo.InvariantCulture) + "MB",
                 Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers.ToString(System.Globalization.CultureInfo.InvariantCulture)))
             {
                 await t.ExecuteNonQueryAsync(ct);
-
             }
 
             foreach (var def in defs)

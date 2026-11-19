@@ -26,6 +26,7 @@ public static class NpgsqlConsensusByIds
             AddIds(parameters, edgeIds);
             AddType(parameters, relationType);
         });
+        cmd.Prepare();
         using var reader = cmd.ExecuteReader();
         var map = new Dictionary<Hash128, Row>(edgeIds.Count);
         while (reader.Read())
@@ -51,6 +52,7 @@ public static class NpgsqlConsensusByIds
             AddIds(parameters, secondIds);
             AddType(parameters, secondRelationType);
         });
+        cmd.Prepare();
         using var reader = cmd.ExecuteReader();
         var first = new Dictionary<Hash128, Row>(firstIds.Count);
         var second = new Dictionary<Hash128, Row>(secondIds.Count);
@@ -86,6 +88,7 @@ public static class NpgsqlConsensusByIds
             AddIds(parameters, thirdIds);
             AddType(parameters, thirdRelationType);
         });
+        cmd.Prepare();
         using var reader = cmd.ExecuteReader();
         var first = new Dictionary<Hash128, Row>(firstIds.Count);
         var second = new Dictionary<Hash128, Row>(secondIds.Count);
@@ -114,6 +117,7 @@ public static class NpgsqlConsensusByIds
             AddIds(parameters, edgeIds);
             AddType(parameters, relationType);
         });
+        await cmd.PrepareAsync(ct).ConfigureAwait(false);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var map = new Dictionary<Hash128, Row>(edgeIds.Count);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

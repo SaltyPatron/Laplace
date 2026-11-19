@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
@@ -79,6 +80,18 @@ public static class InstalledOpInvoker
         return timeoutSeconds;
     }
 
+    private const int MaxApiCatalogCacheEntries = 4096;
+    private static readonly ConcurrentDictionary<(string ConnectionString, string Name), NpgsqlSubstrateReads.ApiCatalogRow[]> ApiCatalogCache = new();
+
+    private static void CacheCatalogOverloads(
+        string connectionString, string name, NpgsqlSubstrateReads.ApiCatalogRow[] overloads)
+    {
+        if (overloads.Length == 0) return;
+        if (ApiCatalogCache.Count >= MaxApiCatalogCacheEntries)
+            ApiCatalogCache.Clear();
+        ApiCatalogCache[(connectionString, name)] = overloads;
+    }
+
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
     /// with declared-type casts, and return rows. Callers pass a read-only data
@@ -99,87 +112,104 @@ public static class InstalledOpInvoker
         var rowsToFetch = (long)rowCap + 1L;
         var keys = args?.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
 
-        var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(db, name, ct)
-            .ConfigureAwait(false);
-        var overloads = catalog.Where(r => r.Name == name).ToArray();
-        if (overloads.Length == 0)
+        NpgsqlConnection? connection = null;
+        try
         {
-            var err = catalog.Count == 0
-                ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try ops.api('<shorter substring>')"
-                : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct())}";
-            return new OpResult([], null, err);
-        }
-
-        var candidates = overloads
-            .Select(o => (Row: o, Params: ParseSignature(o.Args)))
-            .Where(c => keys.All(k => c.Params.Any(p => p.Name == k))
-                        && c.Params.All(p => p.Optional || keys.Contains(p.Name)))
-            .ToArray();
-
-        if (candidates.Length == 0)
-            return new OpResult([], null,
-                $"'{name}' has no overload matching arguments [{string.Join(", ", keys)}]. Signatures: "
-                + string.Join(" | ", overloads.Select(o => $"{name}({o.Args})")));
-        if (candidates.Length > 1)
-            return new OpResult([], null,
-                $"'{name}' is ambiguous for arguments [{string.Join(", ", keys)}] — name more of them. Signatures: "
-                + string.Join(" | ", candidates.Select(c => $"{name}({c.Row.Args})")));
-
-        var chosen = candidates[0].Params;
-        if (chosen.Any(p => p.Name.Length == 0) && keys.Count > 0)
-            return new OpResult([], null,
-                $"'{name}' has unnamed parameters and cannot be called by name: {name}({candidates[0].Row.Args})");
-
-        var bound = new List<(string Name, string Type, NpgsqlParameter Parameter)>();
-        foreach (var p in chosen.Where(p => keys.Contains(p.Name)))
-        {
-            var slot = $"a{bound.Count}";
-            bound.Add((p.Name, p.Type,
-                BindArg(slot, CoerceForDeclaredType(OpValue(args![p.Name]), p.Type))));
-        }
-
-        var isProcedure = string.Equals(candidates[0].Row.Kind, "procedure", StringComparison.Ordinal);
-        // A procedure is CALLed and returns no result set; SELECT ... FROM it is a
-        // parse error. LIMIT rowCap + 1 on the function path so truncation is observable.
-        await using var cmd = NpgsqlCatalog.InstalledOperationCommand(
-            db, isProcedure, QualifiedCatalogName(name), bound, rowsToFetch);
-        // Positive values are exact caller policy. Zero means run until completion
-        // or cancellation — required for maintenance procedures whose duration is
-        // a property of live relation size, not a constant in this client.
-        cmd.CommandTimeout = RequestedCommandTimeout(commandTimeoutSeconds);
-        if (isProcedure)
-        {
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            // A procedure's progress is in the server log (RAISE LOG), readable as
-            // SQL through ops.app_log. Returning an empty row set would read as
-            // "ran, found nothing"; this states that it ran.
-            return new OpResult(
-                [new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["called"] = name,
-                    ["kind"] = "procedure",
-                    ["returns_rows"] = false,
-                    ["progress"] = "RAISE LOG output — read it back through ops.app_log",
-                }],
-                null, null);
-        }
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        var rows = new List<IReadOnlyDictionary<string, object?>>();
-        int? truncatedAt = null;
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            if (rows.Count >= rowCap)
+            var cacheKey = (db.ConnectionString, name);
+            if (!ApiCatalogCache.TryGetValue(cacheKey, out var overloads))
             {
-                truncatedAt = rowCap;
-                break;
+                connection = await db.OpenConnectionAsync(ct).ConfigureAwait(false);
+                var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(connection, name, ct)
+                    .ConfigureAwait(false);
+                overloads = catalog.Where(r => r.Name == name).ToArray();
+                if (overloads.Length == 0)
+                {
+                    var err = catalog.Count == 0
+                        ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try ops.api('<shorter substring>')"
+                        : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct())}";
+                    return new OpResult([], null, err);
+                }
+                CacheCatalogOverloads(db.ConnectionString, name, overloads);
             }
-            var row = new Dictionary<string, object?>(StringComparer.Ordinal);
-            for (var i = 0; i < reader.FieldCount; i++)
-                row[reader.GetName(i)] = Normalize(reader.GetValue(i));
-            rows.Add(row);
+
+            var candidates = overloads
+                .Select(o => (Row: o, Params: ParseSignature(o.Args)))
+                .Where(c => keys.All(k => c.Params.Any(p => p.Name == k))
+                            && c.Params.All(p => p.Optional || keys.Contains(p.Name)))
+                .ToArray();
+
+            if (candidates.Length == 0)
+                return new OpResult([], null,
+                    $"'{name}' has no overload matching arguments [{string.Join(", ", keys)}]. Signatures: "
+                    + string.Join(" | ", overloads.Select(o => $"{name}({o.Args})")));
+            if (candidates.Length > 1)
+                return new OpResult([], null,
+                    $"'{name}' is ambiguous for arguments [{string.Join(", ", keys)}] — name more of them. Signatures: "
+                    + string.Join(" | ", candidates.Select(c => $"{name}({c.Row.Args})")));
+
+            var chosen = candidates[0].Params;
+            if (chosen.Any(p => p.Name.Length == 0) && keys.Count > 0)
+                return new OpResult([], null,
+                    $"'{name}' has unnamed parameters and cannot be called by name: {name}({candidates[0].Row.Args})");
+
+            var bound = new List<(string Name, string Type, NpgsqlParameter Parameter)>();
+            foreach (var p in chosen.Where(p => keys.Contains(p.Name)))
+            {
+                var slot = $"a{bound.Count}";
+                bound.Add((p.Name, p.Type,
+                    BindArg(slot, CoerceForDeclaredType(OpValue(args![p.Name]), p.Type))));
+            }
+
+            connection ??= await db.OpenConnectionAsync(ct).ConfigureAwait(false);
+            var isProcedure = string.Equals(candidates[0].Row.Kind, "procedure", StringComparison.Ordinal);
+            // A procedure is CALLed and returns no result set; SELECT ... FROM it is a
+            // parse error. LIMIT rowCap + 1 on the function path so truncation is observable.
+            await using var cmd = NpgsqlCatalog.InstalledOperationCommand(
+                connection, null, isProcedure, QualifiedCatalogName(name), bound, rowsToFetch);
+            // Positive values are exact caller policy. Zero means run until completion
+            // or cancellation — required for maintenance procedures whose duration is
+            // a property of live relation size, not a constant in this client.
+            cmd.CommandTimeout = RequestedCommandTimeout(commandTimeoutSeconds);
+            await cmd.PrepareAsync(ct).ConfigureAwait(false);
+            if (isProcedure)
+            {
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                // A procedure's progress is in the server log (RAISE LOG), readable as
+                // SQL through ops.app_log. Returning an empty row set would read as
+                // "ran, found nothing"; this states that it ran.
+                return new OpResult(
+                    [new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["called"] = name,
+                        ["kind"] = "procedure",
+                        ["returns_rows"] = false,
+                        ["progress"] = "RAISE LOG output — read it back through ops.app_log",
+                    }],
+                    null, null);
+            }
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var rows = new List<IReadOnlyDictionary<string, object?>>();
+            int? truncatedAt = null;
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (rows.Count >= rowCap)
+                {
+                    truncatedAt = rowCap;
+                    break;
+                }
+                var row = new Dictionary<string, object?>(StringComparer.Ordinal);
+                for (var i = 0; i < reader.FieldCount; i++)
+                    row[reader.GetName(i)] = Normalize(reader.GetValue(i));
+                rows.Add(row);
+            }
+            return new OpResult(rows, truncatedAt, null);
         }
-        return new OpResult(rows, truncatedAt, null);
+        finally
+        {
+            if (connection is not null)
+                await connection.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     public static List<OpParam> ParseSignature(string? argsText)

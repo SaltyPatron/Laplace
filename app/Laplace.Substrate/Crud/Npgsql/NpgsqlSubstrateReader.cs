@@ -168,7 +168,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
                 layers[i] = key.Layer;
                 digests[i] = key.Digest?.ToBytes();
             }
-            await using var cmd = NpgsqlCatalog.Command(conn, null, "ingest.completed_units", witnesses, units, layers, digests);
+            await using var cmd = await NpgsqlCatalog.PreparedCommandAsync(
+                conn, null, "ingest.completed_units", ct, witnesses, units, layers, digests).ConfigureAwait(false);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await r.ReadAsync(ct).ConfigureAwait(false))
                 done.Add(keys[offset + (int)(r.GetInt64(0) - 1)]);
