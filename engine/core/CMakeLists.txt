@@ -231,7 +231,7 @@ endif()
 set_source_files_properties(src/hash128.c src/text_identity.c src/native_text_tree.c src/unicode_properties.c src/staged_load.cpp PROPERTIES
     INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include")
 set_source_files_properties(src/codepoint_table.c PROPERTIES
-    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src")
+    INCLUDE_DIRECTORIES "${LAPLACE_NATIVE}/include;${LAPLACE_NATIVE}/src/core")
 
 find_package(ZLIB REQUIRED)
 find_package(LibXml2 REQUIRED)

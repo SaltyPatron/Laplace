@@ -76,8 +76,8 @@ set(LAPLACE_EXTERNAL "${LAPLACE_EXTERNAL}"
 # Laplace-Native's lp_id_compose, compiled from its checkout into laplace_core, never a copy of it (Laplace#1885).
 # LAPLACE_NATIVE (laplace.env's, the desktop's machine environment) names the checkout; else the external tree's link.
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/LaplaceNativeSource.cmake")
-if(NOT EXISTS "${LAPLACE_NATIVE}/src/identity.c" OR NOT EXISTS "${LAPLACE_NATIVE}/include/laplace/laplace.h")
-    message(FATAL_ERROR "Laplace-Native not found at '${LAPLACE_NATIVE}' (src/identity.c, include/laplace/laplace.h). "
+if(NOT EXISTS "${LAPLACE_NATIVE}/src/core/identity.c" OR NOT EXISTS "${LAPLACE_NATIVE}/include/laplace/laplace.h")
+    message(FATAL_ERROR "Laplace-Native not found at '${LAPLACE_NATIVE}' (src/core/identity.c, include/laplace/laplace.h). "
                         "Set LAPLACE_NATIVE to a Laplace-Native checkout, or link it as \${LAPLACE_EXTERNAL}/laplace-native.")
 endif()
 
