@@ -857,7 +857,7 @@ pg_laplace_band_leaders(PG_FUNCTION_ARGS)
         bool            l_nulls[1] = { false };
         HASHCTL         hctl;
         HTAB           *label_map;
-        LabelCollectCtx lctx;
+        LabelCollectCtx lctx = { CurrentMemoryContext, NULL };
         Datum           entity_fallback = CStringGetTextDatum("Entity");
 
         for (Size i = 0; i < count; ++i)
@@ -872,6 +872,7 @@ pg_laplace_band_leaders(PG_FUNCTION_ARGS)
         hctl.hcxt      = CurrentMemoryContext;
         label_map = hash_create("band leaders labels", Max((int) count * 2, 16), &hctl,
                                 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        lctx.caller = CurrentMemoryContext;
         lctx.map = label_map;
 
         b3_arr = laplace_pub_blake3_array(id_list, (int) (2 * count));

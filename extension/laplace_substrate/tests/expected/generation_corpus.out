@@ -442,7 +442,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: hidden vocabulary candidate multiplier/cap returned';
     END IF;
     IF pg_get_functiondef('generation.corpus_word_vocab(integer,integer)'::regprocedure)
-           NOT LIKE '%laplace_labels(%' THEN
+           NOT LIKE '%laplace_label_array(%' THEN
         RAISE EXCEPTION 'FAIL: corpus vocabulary no longer uses set-based ranked render pages';
     END IF;
     IF EXISTS (SELECT 1 FROM generation.corpus_word_vocab(0, NULL))
