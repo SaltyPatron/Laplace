@@ -111,7 +111,6 @@ functions/inspect/attestation_unary_response.sql.in
 functions/inspect/attestation_unary_response_type.sql.in
 functions/relation/relation_in_family.sql.in
 functions/consensus/subjects_of_type.sql.in
-functions/relation/relation_family_members.sql.in
 functions/ops/evidence_count.sql.in
 functions/ops/entity_evidence_count.sql.in
 functions/ops/consensus_count.sql.in
@@ -154,7 +153,6 @@ functions/converse/recall_intent.sql.in
 functions/converse/query_shapes.sql.in
 functions/converse/resolve_topic.sql.in
 functions/converse/recall.sql.in
-functions/converse/non_kin_assoc_types.sql.in
 functions/converse/converse_facts.sql.in
 functions/converse/converse_about.sql.in
 functions/converse/converse.sql.in
@@ -251,8 +249,6 @@ functions/taxonomy/retrieve_grounded.sql.in
 functions/taxonomy/top_synset.sql.in
 functions/taxonomy/synset_gloss.sql.in
 functions/taxonomy/consensus_taxonomy_edges.sql.in
-functions/taxonomy/translation_sources.sql.in
-functions/contrast/consensus_subject_edges.sql.in
 functions/contrast/physicality_count.sql.in
 functions/variant/walk_completes_floor.sql.in
 functions/variant/session_last_resolved.sql.in

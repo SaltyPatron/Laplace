@@ -1,6 +1,6 @@
-using Native=Laplace.Engine.Synthesis.NativeInterop;
-
 namespace Laplace.Decomposers.Model;
+
+using Native = Laplace.Engine.Synthesis.NativeInterop;
 
 internal static class FoundryBasis
 {

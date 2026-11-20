@@ -14,6 +14,8 @@
 #include "catalog/pg_type.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "tcop/dest.h"
+#include "utils/acl.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -21,12 +23,15 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/rls.h"
 #include "utils/snapmgr.h"
 
 #include "observation_read.h"
 #include "public_direct.h"
 #include "spi_common.h"
+#include "spi_nested.h"
 #include "laplace/core/qualifier_law.h"
+#include "laplace/core/sql_catalog.h"
 #include "laplace_pg/executor.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_observation_bindings);
@@ -862,6 +867,224 @@ obs_scan_legacy_attestations(Oid relid,
     }
 }
 
+typedef struct LegacyObsReceiver
+{
+    DestReceiver       receiver;
+    MemoryContext      work_ctx;
+    const ObsDispatch *dispatch;
+} LegacyObsReceiver;
+
+static SPIPlanPtr legacy_obs_plan = NULL;
+static SPIPlanPtr legacy_obs_cell_plan = NULL;
+
+static void
+legacy_observation_startup(DestReceiver *destination, int operation, TupleDesc descriptor)
+{
+    static const Oid types[9] = {
+        BYTEAOID, BYTEAOID, BYTEAOID, BYTEAOID,
+        BYTEAOID, BYTEAOID, INT2OID, INT8OID, BYTEAOID
+    };
+
+    (void) destination;
+    if (operation != CMD_SELECT || descriptor->natts != 9)
+        elog(ERROR, "observation bindings: invalid result shape");
+    for (int i = 0; i < 9; ++i)
+        if (TupleDescAttr(descriptor, i)->atttypid != types[i])
+            elog(ERROR, "observation bindings: invalid result column type");
+}
+
+static void
+legacy_observation_shutdown(DestReceiver *destination)
+{
+    (void) destination;
+}
+
+static bool
+receive_legacy_observation(TupleTableSlot *slot, DestReceiver *destination)
+{
+    LegacyObsReceiver *receiver = (LegacyObsReceiver *) destination;
+    LaplaceObservation row;
+    hash128_t         *ids[6];
+    bool               nulls[9];
+    Datum              values[9];
+    MemoryContext      prev;
+
+    MemSet(&row, 0, sizeof(row));
+    ids[0] = &row.id;
+    ids[1] = &row.subject;
+    ids[2] = &row.type;
+    ids[3] = &row.object;
+    ids[4] = &row.source;
+    ids[5] = &row.context;
+
+    for (int i = 0; i < 9; ++i)
+        values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+    if (nulls[0] || nulls[1] || nulls[2] || nulls[6] || nulls[7])
+        elog(ERROR, "observation bindings: missing witness identity or outcome");
+    for (int i = 0; i < 6; ++i)
+        if (!nulls[i])
+            read_id(values[i], ids[i]);
+
+    row.object_null = nulls[3];
+    row.source_null = nulls[4];
+    row.context_null = nulls[5];
+    row.outcome = DatumGetInt16(values[6]);
+    row.occurrences = DatumGetInt64(values[7]);
+    row.native = false;
+    row.dependence_null = true;
+    row.score = (double) row.outcome / 2.0;
+    row.tokens = row.occurrences;
+
+    if (!nulls[8])
+    {
+        bytea *mask = DatumGetByteaPP(values[8]);
+        if (VARSIZE_ANY_EXHDR(mask) != sizeof(row.qualifiers))
+            elog(ERROR, "observation bindings: qualifier masks must be 32 bytes");
+        memcpy(row.qualifiers, VARDATA_ANY(mask), sizeof(row.qualifiers));
+    }
+
+    prev = MemoryContextSwitchTo(receiver->work_ctx);
+    dispatch_observation(receiver->dispatch, &row);
+    MemoryContextSwitchTo(prev);
+    CHECK_FOR_INTERRUPTS();
+    return true;
+}
+
+static void
+obs_scan_legacy_attestations_spi(MemoryContext work,
+                                 const hash128_t *unique, int unique_count,
+                                 ArrayType *sources, ArrayType *types, int roles,
+                                 const LaplaceObservationCell *cells, int cell_count,
+                                 const ObsDispatch *dispatch)
+{
+    ParamListInfo    params;
+    Oid              param_types[4];
+    SPIPlanPtr      *plan;
+    const char      *query_name;
+    MemoryContext    before_spi;
+    bool             spi_top = false;
+    LegacyObsReceiver receiver = {
+        .receiver = {
+            receive_legacy_observation,
+            legacy_observation_startup,
+            legacy_observation_shutdown,
+            legacy_observation_shutdown,
+            DestNone
+        },
+        .work_ctx = work,
+        .dispatch = dispatch
+    };
+    SPIExecuteOptions options = {
+        .params = NULL,
+        .read_only = true,
+        .must_return_tuples = true,
+        .dest = &receiver.receiver
+    };
+    int              result;
+
+    params = makeParamList(4);
+    for (int i = 0; i < 4; ++i)
+        params->params[i].pflags = PARAM_FLAG_CONST;
+
+    if (cells != NULL)
+    {
+        HASHCTL          cell_ctl;
+        HTAB            *seen;
+        ArrayBuildState *subjects = NULL, *relations = NULL, *objects = NULL;
+
+        MemSet(&cell_ctl, 0, sizeof(cell_ctl));
+        cell_ctl.keysize = cell_ctl.entrysize = sizeof(LaplaceObservationCell);
+        cell_ctl.hcxt = work;
+        seen = hash_create("obs spi exact cells", Max(cell_count, 1),
+                           &cell_ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        for (int i = 0; i < cell_count; ++i)
+        {
+            bool found = false;
+            hash_search(seen, &cells[i], HASH_ENTER, &found);
+            if (found)
+                continue;
+            subjects = accumArrayResult(subjects, hash128_to_datum(&cells[i].subject),
+                                        false, BYTEAOID, work);
+            relations = accumArrayResult(relations, hash128_to_datum(&cells[i].type),
+                                         false, BYTEAOID, work);
+            objects = accumArrayResult(objects, hash128_to_datum(&cells[i].object),
+                                       false, BYTEAOID, work);
+        }
+        if (subjects == NULL)
+            return;
+
+        params->params[0].value = makeArrayResult(subjects, work);
+        params->params[1].value = makeArrayResult(relations, work);
+        params->params[2].value = makeArrayResult(objects, work);
+        params->params[3].value = sources ? PointerGetDatum(sources) : (Datum) 0;
+        for (int i = 0; i < 3; ++i)
+        {
+            params->params[i].isnull = false;
+            params->params[i].ptype = BYTEAARRAYOID;
+        }
+        params->params[3].isnull = (sources == NULL);
+        params->params[3].ptype = BYTEAARRAYOID;
+
+        param_types[0] = BYTEAARRAYOID;
+        param_types[1] = BYTEAARRAYOID;
+        param_types[2] = BYTEAARRAYOID;
+        param_types[3] = BYTEAARRAYOID;
+        plan = &legacy_obs_cell_plan;
+        query_name = "evidence.observation_cells";
+    }
+    else
+    {
+        Datum     *ud = (Datum *) palloc(sizeof(Datum) * (Size) unique_count);
+        ArrayType *u_arr;
+
+        for (int i = 0; i < unique_count; ++i)
+            ud[i] = hash128_to_datum(&unique[i]);
+        u_arr = construct_array(ud, unique_count, BYTEAOID, -1, false, TYPALIGN_INT);
+
+        params->params[0].value = PointerGetDatum(u_arr);
+        params->params[0].isnull = false;
+        params->params[0].ptype = BYTEAARRAYOID;
+        params->params[1].value = sources ? PointerGetDatum(sources) : (Datum) 0;
+        params->params[1].isnull = (sources == NULL);
+        params->params[1].ptype = BYTEAARRAYOID;
+        params->params[2].value = types ? PointerGetDatum(types) : (Datum) 0;
+        params->params[2].isnull = (types == NULL);
+        params->params[2].ptype = BYTEAARRAYOID;
+        params->params[3].value = Int32GetDatum(roles);
+        params->params[3].isnull = false;
+        params->params[3].ptype = INT4OID;
+
+        param_types[0] = BYTEAARRAYOID;
+        param_types[1] = BYTEAARRAYOID;
+        param_types[2] = BYTEAARRAYOID;
+        param_types[3] = INT4OID;
+        plan = &legacy_obs_plan;
+        query_name = "evidence.observation_bindings";
+    }
+
+    options.params = params;
+    before_spi = CurrentMemoryContext;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "observation bindings: SPI_connect failed");
+
+    if (!*plan)
+    {
+        const char *query = laplace_sql_query_text(query_name);
+        if (!query)
+            elog(ERROR, "observation bindings: required static query is unavailable");
+        *plan = SPI_prepare_cursor(query, 4, param_types, CURSOR_OPT_PARALLEL_OK);
+        if (!*plan || SPI_keepplan(*plan) != 0)
+            elog(ERROR, "observation bindings: preparing static read failed");
+    }
+
+    result = SPI_execute_plan_extended(*plan, &options);
+    if (result != SPI_OK_SELECT && result != SPI_OK_UTILITY)
+        elog(ERROR, "observation bindings: read failed: %s", SPI_result_code_string(result));
+
+    laplace_spi_finish(spi_top);
+    MemoryContextSwitchTo(before_spi);
+}
+
 static void
 observation_read(ArrayType *operands, ArrayType *sources,
                  ArrayType *types, int roles,
@@ -924,34 +1147,55 @@ observation_read(ArrayType *operands, ArrayType *sources,
         Oid ns = get_namespace_oid("laplace", true);
         Oid att_rel = OidIsValid(ns) ? get_relname_relid("attestations", ns) : InvalidOid;
 
-        if (OidIsValid(att_rel) && obs_rel_has_live_rows(att_rel))
+        if (OidIsValid(att_rel))
         {
-            HTAB *op_set = hash_create("obs op set", Max(unique_count, 16), &ctl,
-                                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-            HTAB *src_set = sources ? obs_build_id_set(work, "obs src set", sources) : NULL;
-            HTAB *type_set = types ? obs_build_id_set(work, "obs type set", types) : NULL;
-            HTAB *cell_set = NULL;
+            AclResult acl = pg_class_aclcheck(att_rel, GetUserId(), ACL_SELECT);
+            if (acl != ACLCHECK_OK)
+                aclcheck_error(acl, OBJECT_TABLE, "laplace.attestations");
 
-            for (int i = 0; i < unique_count; i++)
+            if (obs_rel_has_live_rows(att_rel))
             {
-                bool f = false;
-                (void) hash_search(op_set, &unique[i], HASH_ENTER, &f);
-            }
-            if (cells != NULL)
-            {
-                HASHCTL cctl = { 0 };
-                cctl.keysize = cctl.entrysize = sizeof(LaplaceObservationCell);
-                cctl.hcxt = work;
-                cell_set = hash_create("obs exact cells", Max(cell_count, 16), &cctl,
-                                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-                for (int i = 0; i < cell_count; i++)
+                Relation rel = table_open(att_rel, AccessShareLock);
+                bool     use_spi = (rel->rd_rules != NULL ||
+                                    check_enable_rls(att_rel, InvalidOid, true) == RLS_ENABLED);
+                table_close(rel, AccessShareLock);
+
+                if (use_spi)
                 {
-                    bool f = false;
-                    (void) hash_search(cell_set, &cells[i], HASH_ENTER, &f);
+                    obs_scan_legacy_attestations_spi(work, unique, unique_count,
+                                                     sources, types, roles,
+                                                     cells, cell_count, &dispatch);
+                }
+                else
+                {
+                    HTAB *op_set = hash_create("obs op set", Max(unique_count, 16), &ctl,
+                                               HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+                    HTAB *src_set = sources ? obs_build_id_set(work, "obs src set", sources) : NULL;
+                    HTAB *type_set = types ? obs_build_id_set(work, "obs type set", types) : NULL;
+                    HTAB *cell_set = NULL;
+
+                    for (int i = 0; i < unique_count; i++)
+                    {
+                        bool f = false;
+                        (void) hash_search(op_set, &unique[i], HASH_ENTER, &f);
+                    }
+                    if (cells != NULL)
+                    {
+                        HASHCTL cctl = { 0 };
+                        cctl.keysize = cctl.entrysize = sizeof(LaplaceObservationCell);
+                        cctl.hcxt = work;
+                        cell_set = hash_create("obs exact cells", Max(cell_count, 16), &cctl,
+                                               HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+                        for (int i = 0; i < cell_count; i++)
+                        {
+                            bool f = false;
+                            (void) hash_search(cell_set, &cells[i], HASH_ENTER, &f);
+                        }
+                    }
+                    obs_scan_legacy_attestations(att_rel, op_set, src_set, type_set,
+                                                 cell_set, roles, &dispatch);
                 }
             }
-            obs_scan_legacy_attestations(att_rel, op_set, src_set, type_set,
-                                         cell_set, roles, &dispatch);
         }
 
         if (cells != NULL)

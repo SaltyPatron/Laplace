@@ -6,7 +6,6 @@
     "g12_string_sql_bodies": {},
     "g13_string_op_on_surface": {},
     "g14_case_fold": {
-      "extension/laplace_substrate/sql/functions/converse/converse_facts.sql.in::initcap": 4,
       "extension/laplace_substrate/sql/functions/converse/resolve_topic.sql.in::lower": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
     },
@@ -96,8 +95,6 @@
       "app/Laplace.Substrate/Abstractions/SourceVocabularyBootstrap.cs::HAS_VERSION": 1
     },
     "g3_sql_vocabulary_literalism": {
-      "extension/laplace_substrate/sql/functions/converse/forward_pass.sql.in::IS_SENSE_OF": 2,
-      "extension/laplace_substrate/sql/functions/converse/word_language.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/corpus/corpus_whitespace_vocab_indices.sql.in::GC": 1,
       "extension/laplace_substrate/sql/functions/generation/entity_highway_masks.sql.in::IS_A": 1,
       "extension/laplace_substrate/sql/functions/generation/foundry_vocab.sql.in::DERIVATIONALLY_RELATED": 1,
@@ -117,7 +114,6 @@
       "extension/laplace_substrate/sql/functions/identity/is_language.sql.in::HAS_LANGUAGE_SCOPE": 1,
       "extension/laplace_substrate/sql/functions/lexical/define.sql.in::HAS_DEFINITION": 1,
       "extension/laplace_substrate/sql/functions/lexical/define_with_context.sql.in::HAS_DEFINITION": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/link/concept_members.sql.in::EVOKES_FRAME": 1,
       "extension/laplace_substrate/sql/functions/link/concept_members.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/link/concept_members.sql.in::IS_SYNONYM_OF": 1,
@@ -151,7 +147,6 @@
       "extension/laplace_substrate/sql/functions/structural/model_recipes.sql.in::ENCODES": 1,
       "extension/laplace_substrate/sql/functions/taxonomy/retrieve_grounded.sql.in::HAS_DEFINITION": 1,
       "extension/laplace_substrate/sql/functions/taxonomy/taxonomy_tree.sql.in::IS_A": 1,
-      "extension/laplace_substrate/sql/functions/taxonomy/translation_sources.sql.in::IS_TRANSLATION_OF": 1,
       "extension/laplace_substrate/sql/functions/variant/walk_completes_floor.sql.in::COMPLETES_TO": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::HAS_DEFINITION": 1,
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1

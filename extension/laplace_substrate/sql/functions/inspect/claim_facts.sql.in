@@ -1,9 +1,3 @@
-CREATE OR REPLACE FUNCTION ops.claim_label(p_id @extschema:laplace@.blake3) RETURNS text
-LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
- SELECT content FROM @extschema:laplace@.laplace_labels(ARRAY[p_id]);
-END;
-
 CREATE OR REPLACE FUNCTION ops.claim_facts(p_subject bytea,p_limit integer,p_inbound boolean)
 RETURNS TABLE(claim @extschema:laplace@.blake3,predicate @extschema:laplace@.blake3,object @extschema:laplace@.blake3,type text,fact text,
  eff_mu numeric,rating double precision,deviation double precision,volatility double precision)

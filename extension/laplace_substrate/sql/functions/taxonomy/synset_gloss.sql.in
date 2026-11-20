@@ -4,11 +4,6 @@
 -- the control file pins schema = 'laplace' with relocatable = false, so that
 -- placeholder has exactly one possible expansion. Real schema names, written out.
 
-CREATE OR REPLACE FUNCTION taxonomy.synset_gloss_batch(p_synsets bytea[])
-    RETURNS text[]
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_synset_gloss_batch'
-    LANGUAGE C STABLE PARALLEL SAFE;
-
 CREATE OR REPLACE FUNCTION taxonomy.synset_gloss(p_synset bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE

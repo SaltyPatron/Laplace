@@ -2,8 +2,10 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
-using Native=Laplace.Engine.Synthesis.NativeInterop;
+
 namespace Laplace.Decomposers.Model;
+
+using Native = Laplace.Engine.Synthesis.NativeInterop;
 
 /// <summary>Bulk source/codec orchestration. Tensor construction and layer execution
 /// stay inside liblaplace_synthesis; no managed inference or matrix mathematics.</summary>

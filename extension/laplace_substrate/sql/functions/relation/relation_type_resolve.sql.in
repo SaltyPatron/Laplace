@@ -29,7 +29,3 @@ BEGIN ATOMIC
     LEFT JOIN native nl ON nl.entity = public.blake3_from_bytea(i.id)
     ORDER BY i.n;
 END;
-
-CREATE OR REPLACE FUNCTION consensus.relation_surfaces(p_ids bytea[])
-RETURNS TABLE(surface_id bytea,canonical_id bytea,canonical text,inverse boolean,qualifier_bit smallint)
-AS 'MODULE_PATHNAME','pg_relation_surfaces' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

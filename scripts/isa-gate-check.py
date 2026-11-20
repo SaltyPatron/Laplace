@@ -41,6 +41,7 @@ from isa_gate_rules import (  # noqa: F401
     G14_EXEMPT_PREFIXES,
     G15_UNQUALIFIED_DDL,
     MANIFEST,
+    PUB_CALL_REF,
     ROOT,
     SET_SEARCH_PATH,
     UNQUALIFIED_REF,
@@ -368,6 +369,10 @@ def scan_g4_dead_canonical() -> Counter[str]:
                     continue
             calls[name] += 1
         for match in AGGREGATE_FUNC_REF.finditer(text):
+            name = match.group(1).lower()
+            if name in defined and rel != defined[name]:
+                calls[name] += 1
+        for match in PUB_CALL_REF.finditer(text):
             name = match.group(1).lower()
             if name in defined and rel != defined[name]:
                 calls[name] += 1

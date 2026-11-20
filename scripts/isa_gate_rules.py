@@ -41,6 +41,10 @@ AGGREGATE_FUNC_REF = re.compile(
     r"(?:(?:[A-Za-z_][A-Za-z0-9_]*|@extschema@)\.)?([A-Za-z_][A-Za-z0-9_]*)\b",
     re.IGNORECASE,
 )
+# C callers invoking registered PostgreSQL functions by name via public_direct.h.
+PUB_CALL_REF = re.compile(
+    r'\blaplace_pub_call(?:_srf)?\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z_][A-Za-z0-9_]*)"'
+)
 
 G1_FORMULA = re.compile(
     r"\b(?P<rating>(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:p_)?rating)"

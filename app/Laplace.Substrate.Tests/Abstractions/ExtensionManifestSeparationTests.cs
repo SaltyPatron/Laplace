@@ -15,9 +15,9 @@ public sealed class ExtensionManifestSeparationTests
         {
             var sql = Path.Combine(Root, "extension", extension, "sql");
             Assert.False(File.Exists(Path.Combine(sql, "manifest.upgrade")),
-                $"{extension} has no upgrade path; a changed version recreates the substrate database");
+                $"{extension} reconciles in place via .reconcile.sql without numbered manifest.upgrade chains");
             Assert.False(File.Exists(Path.Combine(sql, extension + "_upgrade.sql.in")),
-                $"{extension} has no upgrade path; a changed version recreates the substrate database");
+                $"{extension} reconciles in place via .reconcile.sql without _upgrade.sql.in chains");
         }
 
         var install = Read("extension", "laplace_substrate", "sql", "manifest.install");
@@ -34,8 +34,9 @@ public sealed class ExtensionManifestSeparationTests
             "physicalities_entity_btree.sql.in");
         var floor = Read("scripts", "check-substrate-floor.sh");
 
+        Assert.Contains("ON laplace.physicalities", entityIndex);
         Assert.Contains("(entity_id, id)", entityIndex);
-        Assert.DoesNotContain("IF NOT EXISTS", entityIndex);
+        Assert.Contains("CREATE INDEX IF NOT EXISTS", entityIndex);
         Assert.Contains("ops.index_health()", floor);
         Assert.DoesNotContain("pg_index", floor);
     }

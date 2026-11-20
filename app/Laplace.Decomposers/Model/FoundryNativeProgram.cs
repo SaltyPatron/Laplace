@@ -5,8 +5,10 @@ using System.Security.Cryptography;
 using Laplace.SubstrateCRUD.Npgsql;
 using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
-using Native=Laplace.Engine.Synthesis.NativeInterop;
+
 namespace Laplace.Decomposers.Model;
+
+using Native = Laplace.Engine.Synthesis.NativeInterop;
 internal static partial class FoundryNativeProgramHost
 {
     public static unsafe Task<int> WriteAsync(RecipeDescriptor desc,string outputPath,string tokenizerDir,

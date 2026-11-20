@@ -437,7 +437,15 @@ endfunction()
 
 string(CONCAT _substrate_finalize_script
     "file(READ \"\${SRC}\" _s)\n"
-    "string(APPEND _s \"\\nCOMMENT ON TABLE laplace.entities IS 'laplace-substrate-storage:${EXT_STORAGE_VERSION}';\\n\")\n"
+    "string(APPEND _s \"\\nDROP FUNCTION IF EXISTS converse.consensus_subject_edges(bytea);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS converse.non_kin_assoc_types();\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS ops.claim_label(public.blake3);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS consensus.relation_surfaces(bytea[]);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS taxonomy._bubble_domain_scores(bytea[], bytea[]);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS taxonomy.synset_gloss_batch(bytea[]);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS taxonomy.translation_sources(bytea);\\n\")\n"
+    "string(APPEND _s \"DROP FUNCTION IF EXISTS consensus.relation_family_members(text);\\n\")\n"
+    "string(APPEND _s \"COMMENT ON TABLE laplace.entities IS 'laplace-substrate-storage:${EXT_STORAGE_VERSION}';\\n\")\n"
     "file(WRITE \"\${DST_SQL}\" \"\${_s}\")\n"
     "file(WRITE \"\${DST_RECONCILE}\" \"\${_s}\")\n")
 _laplace_write_if_changed("${_finalize_substrate_cmake}" "${_substrate_finalize_script}")
