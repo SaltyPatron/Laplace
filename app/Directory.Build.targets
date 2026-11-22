@@ -147,23 +147,29 @@
     </ItemGroup>
 
     <ItemGroup Condition="'$(_FirmwareSourceDir)' != '' And Exists('$(_FirmwareSourceDir)')">
-      <None Include="$(_FirmwareSourceDir)/*.firmware"
+      <_LaplaceFirmwareFile Include="$(_FirmwareSourceDir)/*.firmware" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_LaplaceFirmwareFile)' != ''">
+      <None Include="@(_LaplaceFirmwareFile)"
             Link="share/laplace/firmware/%(Filename)%(Extension)"
-            CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(_ManifestSourceDir)' != '' And Exists('$(_ManifestSourceDir)')">
-      <None Include="$(_ManifestSourceDir)/**/*"
+      <_LaplaceManifestFile Include="$(_ManifestSourceDir)/**/*" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_LaplaceManifestFile)' != ''">
+      <None Include="@(_LaplaceManifestFile)"
             Link="share/laplace/manifest/%(RecursiveDir)%(Filename)%(Extension)"
-            CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(_RecipesSourceDir)' != '' And Exists('$(_RecipesSourceDir)')">
-      <None Include="$(_RecipesSourceDir)/**/*"
+      <_LaplaceRecipeFile Include="$(_RecipesSourceDir)/**/*.recipe;$(_RecipesSourceDir)/**/*.format;$(_RecipesSourceDir)/**/*.LICENSE;$(_RecipesSourceDir)/**/source;$(_RecipesSourceDir)/order;$(_RecipesSourceDir)/vocabularies/*.tsv" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_LaplaceRecipeFile)' != ''">
+      <None Include="@(_LaplaceRecipeFile)"
             Link="share/laplace/recipes/%(RecursiveDir)%(Filename)%(Extension)"
-            CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
