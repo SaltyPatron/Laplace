@@ -24,8 +24,7 @@ MAX_FILES = 20000
 MAX_MANIFEST = 16 * 1024 * 1024
 MAX_PROC_BYTES = 8 * 1024 * 1024
 REQUIRED = ("Laplace.Endpoints.OpenAICompat.dll", "Laplace.Core.dll",
-            "Laplace.Chess.dll", "liblaplace_core.so", "liblaplace_dynamics.so",
-            "liblaplace_synthesis.so", "liblaplace_syzygy.so")
+            "Laplace.Chess.dll", "liblaplace.so", "liblaplace_engine_abi.so")
 MAPPED = REQUIRED[:4]
 UCI_REQUIRED = ("laplace-uci", "laplace-uci.dll", "laplace-uci.deps.json",
                 "laplace-uci.runtimeconfig.json", "Laplace.Core.dll", "Laplace.Chess.dll",
@@ -175,10 +174,13 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
         matches = re.findall(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$", cache, re.MULTILINE)
         if len(matches) != 1 or Path(matches[0]).resolve(strict=True) != repo_root:
             raise ValueError("API native build belongs to another source checkout")
-        # This is the exact Directory.Build.props Linux publication set, including
-        # SONAME aliases and Syzygy. Compare dereferenced build bytes, not install RPATHs.
-        for component in ("core", "dynamics", "synthesis"):
-            for path in sorted((native_build / component).glob("*.so*")):
+        engine_name = re.compile(r"liblaplace(?:_engine_abi)?\.so(?:\..+)?$")
+        search_dirs = [directory for directory in (native_build, native_build / "native", native_build / "lib")
+                       if directory.is_dir()]
+        for directory in search_dirs:
+            for path in sorted(directory.glob("liblaplace*.so*")):
+                if not engine_name.fullmatch(path.name):
+                    continue
                 if path.name in native:
                     raise ValueError("duplicate native publication filename")
                 expected = fact(path)
@@ -190,14 +192,16 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
         for name in REQUIRED[3:]:
             if name not in native:
                 raise ValueError("selected native build omitted " + name)
-        engine_name = re.compile(r"liblaplace_(?:core|dynamics|synthesis|syzygy)\.so(?:\..+)?$")
         published = {name for name in rows if engine_name.fullmatch(name)}
         expected_engine = {name for name in native if engine_name.fullmatch(name)}
         if published != expected_engine:
             raise ValueError("API native publication set differs from build")
     elif native_installed is not None:
         native_installed = Path(native_installed).resolve(strict=True)
-        for path in sorted(native_installed.glob("liblaplace_*.so*")):
+        engine_name = re.compile(r"liblaplace(?:_engine_abi)?\.so(?:\..+)?$")
+        for path in sorted(native_installed.glob("liblaplace*.so*")):
+            if not engine_name.fullmatch(path.name):
+                continue
             if path.name in native:
                 raise ValueError("duplicate installed native publication filename")
             expected = fact(path)
@@ -209,7 +213,6 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
         for name in REQUIRED[3:]:
             if name not in native:
                 raise ValueError("installed native closure omitted " + name)
-        engine_name = re.compile(r"liblaplace_(?:core|dynamics|synthesis|syzygy)\.so(?:\..+)?$")
         published = {name for name in rows if engine_name.fullmatch(name)}
         expected_engine = {name for name in native if engine_name.fullmatch(name)}
         if published != expected_engine:
@@ -338,8 +341,8 @@ def verify(directory, manifest, base, timeout_seconds):
     last = installed(directory, manifest)
     if first != last:
         raise ValueError("API payload changed during verification")
-    # Byte verification includes dynamics/synthesis/Syzygy even when readiness
-    # and typed operations leave these lazy libraries unloaded.
+    # Byte verification includes liblaplace_engine_abi even when readiness
+    # and typed operations leave lazy native modules unloaded.
     return {"schema": "laplace.api-payload-verification/v1", "status": "passed",
             "has_data": has_data, "product_ready": product_ready,
             "boot_id": acceptance.boot_id(),

@@ -829,8 +829,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         (self.stage / "wwwroot").mkdir()
         (self.stage / "wwwroot/index.html").write_text('<div id="root"></div>')
         for name in self.api.REQUIRED[3:]:
-            component = "dynamics" if "dynamics" in name else "synthesis" if "synthesis" in name else "core"
-            path = self.build / "engine" / component / name
+            path = self.build / "engine" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes((self.stage / name).read_bytes())
 
@@ -841,8 +840,8 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         manifest = self.seal()
         self.assertEqual("selected-build", manifest["provenance"])
         self.assertEqual(set(self.api.REQUIRED[3:]), set(manifest["native_sources"]))
-        source = self.build / "engine/core/liblaplace_core.so.0"
-        source.symlink_to("liblaplace_core.so")
+        source = self.build / "engine/liblaplace.so.0"
+        source.symlink_to("liblaplace.so")
         with self.assertRaisesRegex(ValueError, "native bytes differ"):
             self.seal()
         (self.stage / source.name).write_bytes(source.read_bytes())
@@ -859,7 +858,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         cache.write_text("CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root) + "\n")
         (self.stage / "libThirdParty.so").write_bytes(b"normal package dependency")
         self.seal()
-        (self.stage / "liblaplace_core.so.999").write_bytes(b"stale engine alias")
+        (self.stage / "liblaplace.so.999").write_bytes(b"stale engine alias")
         with self.assertRaisesRegex(ValueError, "publication set"):
             self.seal()
 
@@ -870,7 +869,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bytes differ"):
             self.api.installed(self.stage, manifest)
         (self.stage / "Laplace.Core.dll").unlink()
-        (self.stage / "Laplace.Core.dll").symlink_to(self.build / "engine/core/liblaplace_core.so")
+        (self.stage / "Laplace.Core.dll").symlink_to(self.build / "engine/liblaplace.so")
         with self.assertRaisesRegex(ValueError, "escapes"):
             self.api.installed(self.stage, manifest)
         manifest["files"]["../outside"] = dict(next(iter(manifest["files"].values())))
@@ -957,10 +956,10 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         native_root.mkdir(parents=True)
         for name in self.api.REQUIRED[3:]:
             (native_root / name).write_bytes(("authoritative-prefix:" + name).encode())
-        versioned_core = native_root / "liblaplace_core.so.1"
-        versioned_core.write_bytes(b"authoritative-prefix:liblaplace_core.so.1")
-        (native_root / "liblaplace_core.so").unlink()
-        (native_root / "liblaplace_core.so").symlink_to(versioned_core.name)
+        versioned_core = native_root / "liblaplace.so.1"
+        versioned_core.write_bytes(b"authoritative-prefix:liblaplace.so.1")
+        (native_root / "liblaplace.so").unlink()
+        (native_root / "liblaplace.so").symlink_to(versioned_core.name)
         (app / "laplace-api.env").write_text("private configuration")
         (app / "managed-services").mkdir()
         (app / "managed-services/unit").write_text("preserved")
@@ -1005,8 +1004,7 @@ class UciOnlyDeploymentTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="uci-publication-contract-", dir=os.environ["TMPDIR"])
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        for leaf in ("scripts", "deploy/linux", "tools", "build/engine/core",
-                     "build/engine/dynamics", "build/engine/synthesis", "new-uci",
+        for leaf in ("scripts", "deploy/linux", "tools", "build/engine", "new-uci",
                      "installed/logs", "installed/mcp-runtime"):
             (self.root / leaf).mkdir(parents=True, exist_ok=True)
         self.app, self.stage = self.root / "installed", self.root / "new-uci"
@@ -1026,8 +1024,7 @@ class UciOnlyDeploymentTests(unittest.TestCase):
         for name in self.api.UCI_REQUIRED:
             (self.stage / name).write_bytes(("controlled-payload:" + name).encode())
         for name in self.api.REQUIRED[3:]:
-            part = "dynamics" if "dynamics" in name else "synthesis" if "synthesis" in name else "core"
-            target = self.root / "build/engine" / part / name
+            target = self.root / "build/engine" / name
             target.write_bytes((self.stage / name).read_bytes())
         (self.root / "build/CMakeCache.txt").write_text(
             "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root) + "\n")
@@ -1181,7 +1178,7 @@ for line in sys.stdin:
         failed = self.deploy(UCI_FAIL_BUILD="1")
         self.assertEqual(47, failed.returncode, failed.stdout + failed.stderr)
         self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
-        (self.stage / "liblaplace_core.so").write_bytes(b"stale build copy")
+        (self.stage / "liblaplace.so").write_bytes(b"stale build copy")
         stale = self.deploy()
         self.assertNotEqual(0, stale.returncode)
         self.assertIn("published native bytes differ", stale.stderr)

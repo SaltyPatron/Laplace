@@ -91,6 +91,18 @@
       <_PerfcacheCandidate Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/laplace/tier0.bin')">$(_ResolvedEnginePackageDir)/share/laplace</_PerfcacheCandidate>
       <_PerfcacheCandidate Condition="'$(_PerfcacheCandidate)' == '' And '$(LAPLACE_WORK)' != '' And Exists('$(LAPLACE_WORK)/tier0/tier0.bin')">$(LAPLACE_WORK)/tier0</_PerfcacheCandidate>
       <_PerfcacheCandidate Condition="'$(_PerfcacheCandidate)' == '' And '$(LAPLACE_DATA_ROOT)' != '' And Exists('$(LAPLACE_DATA_ROOT)/share/laplace/tier0.bin')">$(LAPLACE_DATA_ROOT)/share/laplace</_PerfcacheCandidate>
+
+      <_FirmwareSourceDir Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/laplace/firmware')">$(_ResolvedEnginePackageDir)/share/laplace/firmware</_FirmwareSourceDir>
+      <_FirmwareSourceDir Condition="'$(_FirmwareSourceDir)' == '' And '$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/firmware')">$(_ResolvedEnginePackageDir)/share/firmware</_FirmwareSourceDir>
+      <_FirmwareSourceDir Condition="'$(_FirmwareSourceDir)' == '' And Exists('$(LaplaceRepoRoot)/../Laplace-Engine/firmware')">$([System.IO.Path]::GetFullPath('$(LaplaceRepoRoot)/../Laplace-Engine/firmware'))</_FirmwareSourceDir>
+
+      <_ManifestSourceDir Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/laplace/manifest')">$(_ResolvedEnginePackageDir)/share/laplace/manifest</_ManifestSourceDir>
+      <_ManifestSourceDir Condition="'$(_ManifestSourceDir)' == '' And '$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/manifest')">$(_ResolvedEnginePackageDir)/share/manifest</_ManifestSourceDir>
+      <_ManifestSourceDir Condition="'$(_ManifestSourceDir)' == '' And Exists('$(LaplaceRepoRoot)/../Laplace-Native/manifest')">$([System.IO.Path]::GetFullPath('$(LaplaceRepoRoot)/../Laplace-Native/manifest'))</_ManifestSourceDir>
+
+      <_RecipesSourceDir Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/laplace/recipes')">$(_ResolvedEnginePackageDir)/share/laplace/recipes</_RecipesSourceDir>
+      <_RecipesSourceDir Condition="'$(_RecipesSourceDir)' == '' And '$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/share/recipes')">$(_ResolvedEnginePackageDir)/share/recipes</_RecipesSourceDir>
+      <_RecipesSourceDir Condition="'$(_RecipesSourceDir)' == '' And Exists('$(LaplaceRepoRoot)/../Laplace-Engine/recipes')">$([System.IO.Path]::GetFullPath('$(LaplaceRepoRoot)/../Laplace-Engine/recipes'))</_RecipesSourceDir>
     </PropertyGroup>
 
     <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
@@ -131,6 +143,27 @@
     <ItemGroup Condition="'@(_LaplacePerfcacheFile)' != ''">
       <None Include="@(_LaplacePerfcacheFile)"
             Link="share/laplace/%(Filename)%(Extension)"
+            CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(_FirmwareSourceDir)' != '' And Exists('$(_FirmwareSourceDir)')">
+      <None Include="$(_FirmwareSourceDir)/*.firmware"
+            Link="share/laplace/firmware/%(Filename)%(Extension)"
+            CopyToOutputDirectory="PreserveNewest"
+            CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(_ManifestSourceDir)' != '' And Exists('$(_ManifestSourceDir)')">
+      <None Include="$(_ManifestSourceDir)/**/*"
+            Link="share/laplace/manifest/%(RecursiveDir)%(Filename)%(Extension)"
+            CopyToOutputDirectory="PreserveNewest"
+            CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(_RecipesSourceDir)' != '' And Exists('$(_RecipesSourceDir)')">
+      <None Include="$(_RecipesSourceDir)/**/*"
+            Link="share/laplace/recipes/%(RecursiveDir)%(Filename)%(Extension)"
+            CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>

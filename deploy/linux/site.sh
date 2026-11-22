@@ -208,14 +208,14 @@ phase_build() {
     -DLAPLACE_DEPS_LWGEOM_PREFIX="$SITE_WORK/deps/pgsql-18" \
     -DLAPLACE_INSTALL_STAGED=ON \
     -DLAPLACE_UCD_PATH="$ucd" \
-    -DLAPLACE_TIER0="$SITE_BUILD/engine/core/perfcache/tier0.bin" \
+    -DLAPLACE_TIER0="${LAPLACE_INSTALL_PREFIX}/share/laplace/tier0.bin" \
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" 8>&-
-  LD_LIBRARY_PATH="$SITE_BUILD/engine/core:$SITE_BUILD/engine/dynamics:$SITE_BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build "$SITE_BUILD" --target all laplace_t0_perfcache laplace_highway_perfcache laplace_modality_number_perfcache laplace_vocabulary_perfcache 8>&-
-  [[ -s "$SITE_BUILD/engine/core/perfcache/tier0.bin" ]] || fail "tier-0 perf-cache not produced"
-  [[ -s "$SITE_BUILD/engine/core/perfcache/highway.bin" ]] || fail "highway perf-cache not produced"
+  LD_LIBRARY_PATH="$SITE_BUILD:$LAPLACE_INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}" \
+    cmake --build "$SITE_BUILD" --target all 8>&-
+  [[ -s "$SITE_BUILD/share/laplace/tier0.bin" || -s "$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.bin" ]] || fail "tier-0 perf-cache not produced"
+  [[ -s "$SITE_BUILD/share/laplace/highway.bin" || -s "$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin" ]] || fail "highway perf-cache not produced"
 }
 
 # ------------------------------------------------------------------------------------------------ install
@@ -301,25 +301,11 @@ phase_database() {
   sql -d postgres \
     -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET dynamic_library_path = '$EXT_LIBDIR:\$libdir'" \
     -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET extension_control_path = '$EXT_SHARE:\$system'" \
-    -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET session_preload_libraries = 'laplace_substrate'" >/dev/null
-  # session_preload_libraries: laplace_execution_<hash>.so resolves laplace_substrate's symbols (dlopen RTLD_GLOBAL),
-  # so the substrate is loaded first in every session of this database. The monorepo's own hosts put it in the
-  # cluster's shared_preload_libraries; here the cluster is Operations' and the setting stays this database's.
-  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f q declared=()
-  for g in perfcache_path:tier0 highway_perfcache_path:highway \
-           vocabulary_perfcache_path:laplace_vocabulary_perfcache; do
-    f="$dir/${g#*:}.bin"
-    declared+=("laplace_substrate.${g%%:*}")
-    [[ -s "$f" ]] || fail "laplace_substrate.${g%%:*}: missing installed cache $f"
-    q="$(sql -d postgres -c "SELECT setting FROM pg_file_settings WHERE name = 'laplace_substrate.${g%%:*}' AND applied ORDER BY seqno DESC LIMIT 1")"
-    [[ "$q" == "$f" ]] || sql -d postgres -c "ALTER SYSTEM SET laplace_substrate.${g%%:*} = '$f'" >/dev/null
-    echo "  laplace_substrate.${g%%:*} = $f"
-  done
-  # The declared set is the whole set: a laplace_substrate setting an earlier site wrote and this one no longer declares
-  # (laplace_substrate.chess_position_perfcache_path) is reset, or every session warns that its reserved prefix rejects it.
+    -c "ALTER DATABASE \"$LAPLACE_DBNAME\" RESET session_preload_libraries" >/dev/null
+  # Clear any stale laplace_substrate.* settings an earlier site wrote so sessions never warn on reserved prefixes.
+  local dir="$LAPLACE_INSTALL_PREFIX/share/laplace" g f q
   while IFS= read -r q; do
     [[ -n "$q" ]] || continue
-    [[ " ${declared[*]} " == *" $q "* ]] && continue
     sql -d postgres -c "ALTER SYSTEM RESET \"$q\"" >/dev/null
     echo "  $q reset: no longer declared"
   done < <(sql -d postgres -c "SELECT DISTINCT name FROM pg_file_settings WHERE name LIKE 'laplace\\_substrate.%' AND sourcefile LIKE '%postgresql.auto.conf'")
@@ -370,7 +356,7 @@ phase_extensions() {
   rm -f "$EXT_SHARE/extension"/laplace*--*--*.sql
   if [[ -w "$pg_sharedir" ]]; then rm -f "$pg_sharedir"/laplace*--*--*.sql; fi
   local ext avail installed module stale=()
-  for ext in laplace laplace_geom laplace_substrate; do
+  for ext in laplace; do
     avail="$(sql -c "SELECT default_version FROM pg_available_extensions WHERE name = '$ext'")"
     installed="$(sql -c "SELECT extversion FROM pg_extension WHERE extname = '$ext'")"
     [[ -n "$avail" ]] || fail "$ext is not available to $LAPLACE_DBNAME (extension_control_path)"
@@ -472,8 +458,8 @@ phase_app() {
   # it together in every API, CLI, MCP and chess payload sent to another host.
   cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/*.so* "$stage/app/"
   local f
-  for f in core dynamics synthesis syzygy; do
-    [[ -f "$stage/app/liblaplace_$f.so" ]] || fail "native runtime not staged: liblaplace_$f.so"
+  for f in liblaplace.so liblaplace_engine_abi.so; do
+    [[ -f "$stage/app/$f" ]] || fail "native runtime not staged: $f"
   done
   local zstd_library
   zstd_library=$(python3 "$ROOT/scripts/install-zstd.py" --build-dir "$SITE_BUILD/zstd")
@@ -503,11 +489,13 @@ phase_app() {
   # Each entry point can compose identities during assembly initialization,
   # before its host reads environment files. Ship its canonical floor alongside
   # the native libraries; the promotion bundle deduplicates identical files.
-  local component cache
+  local component cache cache_src
   for component in . cli mcp-runtime uci lichess-runtime; do
     mkdir -p "$stage/app/$component/share/laplace"
     for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin; do
-      cp "$SITE_BUILD/engine/core/perfcache/$cache" "$stage/app/$component/share/laplace/"
+      cache_src="$SITE_BUILD/share/laplace/$cache"
+      [[ -f "$cache_src" ]] || cache_src="$LAPLACE_INSTALL_PREFIX/share/laplace/$cache"
+      cp "$cache_src" "$stage/app/$component/share/laplace/"
     done
   done
   mkdir -p "$stage/app/cli/third-party-licenses"
@@ -875,7 +863,7 @@ phase_seed() {
   local cli="$SITE_WORK/cli"
   dotnet_app publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release --no-self-contained -o "$cli" -v minimal --nologo
   # the CLI runs on the installed native closure (ingest-source.sh compares the two byte for byte)
-  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace_*.so* "$cli/"
+  cp -fL "$LAPLACE_INSTALL_PREFIX"/lib/liblaplace*.so* "$cli/"
   mkdir -p "$SITE_WORK/scratch" "$SITE_WORK/ingest-logs/ops"
   # shellcheck disable=SC2086
   INGEST="$LAPLACE_DATA" \

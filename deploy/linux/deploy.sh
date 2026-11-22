@@ -369,10 +369,8 @@ if [[ "$API_ONLY" -eq 1 ]]; then
   native_args=(--native-build "$LAPLACE_ENGINE_BUILD")
   if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
     native_root="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
-    rm -f "$STAGE"/liblaplace_core.so* "$STAGE"/liblaplace_dynamics.so* \
-      "$STAGE"/liblaplace_synthesis.so* "$STAGE"/liblaplace_syzygy.so*
-    cp -aL "$native_root"/liblaplace_core.so* "$native_root"/liblaplace_dynamics.so* \
-      "$native_root"/liblaplace_synthesis.so* "$native_root"/liblaplace_syzygy.so* "$STAGE/"
+    rm -f "$STAGE"/liblaplace.so* "$STAGE"/liblaplace_engine_abi.so*
+    cp -aL "$native_root"/liblaplace.so* "$native_root"/liblaplace_engine_abi.so* "$STAGE/"
     native_args=(--native-installed "$native_root")
     echo "==> preserve authoritative prefix native closure for managed-only publication"
   fi
@@ -458,10 +456,8 @@ fi
 if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
   native_root="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
   for managed_stage in "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"; do
-    rm -f "$managed_stage"/liblaplace_core.so* "$managed_stage"/liblaplace_dynamics.so* \
-      "$managed_stage"/liblaplace_synthesis.so* "$managed_stage"/liblaplace_syzygy.so*
-    cp -aL "$native_root"/liblaplace_core.so* "$native_root"/liblaplace_dynamics.so* \
-      "$native_root"/liblaplace_synthesis.so* "$native_root"/liblaplace_syzygy.so* "$managed_stage/"
+    rm -f "$managed_stage"/liblaplace.so* "$managed_stage"/liblaplace_engine_abi.so*
+    cp -aL "$native_root"/liblaplace.so* "$native_root"/liblaplace_engine_abi.so* "$managed_stage/"
   done
   echo "==> preserve authoritative prefix native closure across managed application publication"
 fi

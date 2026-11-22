@@ -28,7 +28,7 @@ class RuntimeGuardTests(unittest.TestCase):
                          "extension_functions": "fixture-functions", "database": "fixture",
                          "postmaster_started": "fixture-start", "declared_schema": True,
                          "database_oid": 16384, "system_identifier": "9223372036854775807",
-                         "extensions": {"laplace_geom": "fixture", "laplace_substrate": "fixture"},
+                         "extensions": {"laplace": "fixture"},
                          "roms": {}}
         self.write(self.root / "build/CMakeCache.txt",
                    "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root) + "\n"
@@ -44,28 +44,18 @@ class RuntimeGuardTests(unittest.TestCase):
             installed_form = "installed-form:" + installed
             self.write(self.staged / installed, installed_form)
             self.write(self.prefix / installed, installed_form)
-        self.execution_name = "laplace_execution_0123456789abcdef"
-        self.execution_artifact = f"lib/postgresql/18/{self.execution_name}.so"
-        self.execution_manifest = "share/postgresql/18/extension/laplace_execution_module.txt"
-        for target in (self.staged, self.prefix):
-            self.write(target / self.execution_artifact, "installed execution module")
-            self.write(target / self.execution_manifest, self.execution_name + "\n")
-        for name in ("laplace_geom", "laplace_substrate"):
-            for path in (self.root / "build/extension" / name / f"{name}.control",
+        for name in ("laplace",):
+            for path in (self.root / "build/extension" / f"{name}.control",
                          self.prefix / "share/postgresql/18/extension" / f"{name}.control"):
                 self.write(path, "default_version = 'fixture'\n")
         for setting, filename in guard.ROMS.items():
             path = self.prefix / "share/laplace" / filename
             self.database["roms"][setting] = str(path)
             self.write(path, filename)
-            self.write(self.root / "build/engine/core/perfcache" / filename, filename)
-        for filename in ("laplace_modality_number_perfcache.bin",):
-            self.write(self.prefix / "share/laplace" / filename, filename)
-            self.write(self.root / "build/engine/core/perfcache" / filename, filename)
+            self.write(self.root / "build/share/laplace" / filename, filename)
         self.database["native_mappings"] = [
             self.native_mapping(self.prefix / relative)
-            for relative in ("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
-                             "lib/postgresql/18/laplace_substrate.so")]
+            for relative in ("lib/liblaplace.so", "lib/postgresql/18/laplace.so")]
 
     def native_mapping(self, path, *, start=4096):
         details = path.stat()
@@ -87,11 +77,11 @@ class RuntimeGuardTests(unittest.TestCase):
 
     def test_exact_installed_runtime_passes_even_when_build_elf_bytes_differ(self):
         self.assertNotEqual(
-            guard.digest(self.root / "build/engine/core/liblaplace_core.so"),
-            guard.digest(self.prefix / "lib/liblaplace_core.so"),
+            guard.digest(self.root / "build/liblaplace.so"),
+            guard.digest(self.prefix / "lib/liblaplace.so"),
         )
         state = self.snapshot()
-        self.assertEqual(13, len(state["artifacts"]))
+        self.assertEqual(6, len(state["artifacts"]))
         self.assertEqual(3, state["format"])
         self.assertEqual(guard.build_identity(self.root, self.prefix), state["build"])
         self.assertNotIn("native_fingerprint", state)
@@ -182,11 +172,10 @@ class RuntimeGuardTests(unittest.TestCase):
         before = self.snapshot()
         self.database["native_mappings"] = [
             self.native_mapping(self.prefix / relative, start=131072)
-            for relative in ("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
-                             "lib/postgresql/18/laplace_substrate.so")]
+            for relative in ("lib/liblaplace.so", "lib/postgresql/18/laplace.so")]
         after = self.snapshot()
         self.assertTrue(guard.compatible(before, after))
-        self.assertEqual(3, len(after["database"]["native_mappings"]))
+        self.assertEqual(2, len(after["database"]["native_mappings"]))
         self.assertIsInstance(self.database["native_mappings"], list)
 
     def test_deleted_preload_mapping_is_rejected_even_when_installed_bytes_match(self):
@@ -195,7 +184,7 @@ class RuntimeGuardTests(unittest.TestCase):
             self.snapshot()
 
     def test_replaced_inode_is_rejected_without_relying_on_deleted_suffix(self):
-        path = self.prefix / "lib/liblaplace_core.so"
+        path = self.prefix / "lib/liblaplace.so"
         replacement = path.with_name("replacement.so")
         replacement.write_bytes(path.read_bytes())
         replacement.replace(path)
@@ -205,13 +194,13 @@ class RuntimeGuardTests(unittest.TestCase):
         self.snapshot()
 
     def test_unselected_native_generation_is_rejected_even_with_matching_bytes(self):
-        other = self.prefix / "lib/postgresql/18/laplace_execution_fedcba9876543210.so"
-        other.write_bytes((self.prefix / self.execution_artifact).read_bytes())
+        other = self.prefix / "lib/postgresql/18/laplace_fedcba98765432100123.so"
+        other.write_bytes((self.prefix / "lib/postgresql/18/laplace.so").read_bytes())
         self.database["native_mappings"].append(self.native_mapping(other))
         with self.assertRaisesRegex(ValueError, "unselected native library"):
             self.snapshot()
-        self.database["native_mappings"][-1] = self.native_mapping(self.prefix / self.execution_artifact)
-        self.assertIn(self.execution_artifact, self.snapshot()["database"]["native_mappings"])
+        self.database["native_mappings"][-1] = self.native_mapping(self.prefix / "lib/liblaplace_engine_abi.so")
+        self.assertIn("lib/liblaplace_engine_abi.so", self.snapshot()["database"]["native_mappings"])
 
     def test_missing_nonexecuting_or_malformed_backend_mappings_are_rejected(self):
         original = list(self.database["native_mappings"])
@@ -235,7 +224,7 @@ class RuntimeGuardTests(unittest.TestCase):
 
 
     def test_explicit_preload_scope_accepts_only_its_required_mappings(self):
-        core = "lib/liblaplace_core.so"
+        core = "lib/liblaplace.so"
         database = {"native_mappings": [self.native_mapping(self.prefix / core)]}
         hashes = {relative: "fixture" for relative in guard.MODULES.values()}
         result = guard.mapped_native_identities(self.prefix, database, hashes, required=(core,))
@@ -309,36 +298,12 @@ class RuntimeGuardTests(unittest.TestCase):
                 self.snapshot()
 
     def test_missing_native_artifact_fails(self):
-        (self.prefix / "lib/liblaplace_core.so").unlink()
+        (self.prefix / "lib/liblaplace.so").unlink()
         with self.assertRaisesRegex(ValueError, "artifact missing"):
             self.snapshot()
 
-    def test_execution_module_and_manifest_drift_are_detected(self):
-        for artifact in (self.execution_artifact, self.execution_manifest):
-            with self.subTest(artifact=artifact):
-                path = self.prefix / artifact
-                original = path.read_bytes()
-                path.write_bytes(b"stale execution artifact")
-                with self.assertRaisesRegex(ValueError, "tested installed form"):
-                    self.snapshot()
-                path.unlink()
-                with self.assertRaisesRegex(ValueError, "artifact missing"):
-                    self.snapshot()
-                path.write_bytes(original)
-
-    def test_staged_execution_manifest_is_required_and_validated(self):
-        path = self.staged / self.execution_manifest
-        original = path.read_bytes()
-        path.unlink()
-        with self.assertRaisesRegex(ValueError, "one execution module manifest"):
-            self.snapshot()
-        path.write_text("unversioned-module")
-        with self.assertRaisesRegex(ValueError, "invalid native execution module identity"):
-            self.snapshot()
-        path.write_bytes(original)
-
     def test_staged_install_must_contain_every_declared_native_artifact(self):
-        (self.staged / "lib/liblaplace_core.so").unlink()
+        (self.staged / "lib/liblaplace.so").unlink()
         with self.assertRaisesRegex(ValueError, "CMake install omitted"):
             self.snapshot()
 
@@ -353,23 +318,23 @@ class RuntimeGuardTests(unittest.TestCase):
             observed["cwd"] = kwargs["cwd"]
             observed["destdir"] = kwargs["env"]["DESTDIR"]
             stage = Path(observed["destdir"]) / self.prefix.resolve().relative_to("/")
-            self.write(stage / "lib/liblaplace_core.so", "fixture")
+            self.write(stage / "lib/liblaplace.so", "fixture")
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with patch.object(guard.subprocess, "run", side_effect=fake_run):
             with guard.staged_install(self.root, self.prefix) as staged:
-                self.assertTrue((staged / "lib/liblaplace_core.so").is_file())
+                self.assertTrue((staged / "lib/liblaplace.so").is_file())
                 self.assertNotEqual(self.prefix.resolve(), staged.resolve())
         self.assertEqual(["cmake", "--install", str(self.root.resolve() / "build")], observed["argv"])
         self.assertEqual(self.root.resolve(), observed["cwd"])
         self.assertEqual("unchanged", live_marker.read_text())
 
     def test_live_or_installed_sql_version_drift_fails(self):
-        self.database["extensions"]["laplace_substrate"] = "old"
+        self.database["extensions"]["laplace"] = "old"
         with self.assertRaisesRegex(ValueError, "SQL version"):
             self.snapshot()
-        self.database["extensions"]["laplace_substrate"] = "fixture"
-        self.write(self.prefix / "share/postgresql/18/extension/laplace_geom.control",
+        self.database["extensions"]["laplace"] = "fixture"
+        self.write(self.prefix / "share/postgresql/18/extension/laplace.control",
                    "default_version = 'old'\n")
         with self.assertRaisesRegex(ValueError, "SQL version"):
             self.snapshot()
@@ -397,7 +362,7 @@ class RuntimeGuardTests(unittest.TestCase):
 
     def test_each_scope_preserves_every_other_runtime_field(self):
         paths = [
-            ("build", "cacheSha256"), ("artifacts", self.execution_artifact),
+            ("build", "cacheSha256"), ("artifacts", "lib/liblaplace_engine_abi.so"),
             ("database", "database"), ("database", "server_version"),
             ("database", "postmaster_started"), ("database", "extension_functions"),
             ("database", "extensions"), ("database", "declared_schema"),
@@ -421,11 +386,11 @@ class RuntimeGuardTests(unittest.TestCase):
 
     def test_each_scope_rejects_native_drift_and_invalid_journal_observation(self):
         self.database["running_ingests"] = 2
-        path = self.prefix / self.execution_artifact
+        path = self.prefix / "lib/liblaplace_engine_abi.so"
         original = path.read_bytes()
         for purpose in ("publication", "recording"):
             with self.subTest(purpose=purpose):
-                path.write_bytes(b"changed execution module")
+                path.write_bytes(b"changed native module")
                 with self.assertRaisesRegex(ValueError, "tested installed form"):
                     self.snapshot(purpose=purpose)
                 path.write_bytes(original)

@@ -22,47 +22,43 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 FORMAT = 3
 MODULES = {
-    "engine/core/liblaplace_core.so": "lib/liblaplace_core.so",
-    "engine/dynamics/liblaplace_dynamics.so": "lib/liblaplace_dynamics.so",
-    "engine/synthesis/liblaplace_synthesis.so": "lib/liblaplace_synthesis.so",
-    "extension/laplace_geom/laplace_geom.so": "lib/postgresql/18/laplace_geom.so",
-    "extension/laplace_substrate/laplace_substrate.so": "lib/postgresql/18/laplace_substrate.so",
+    "liblaplace.so": "lib/liblaplace.so",
+    "liblaplace_engine_abi.so": "lib/liblaplace_engine_abi.so",
+    "laplace.so": "lib/postgresql/18/laplace.so",
 }
 ROMS = {
-    "laplace_substrate.perfcache_path": "laplace_t0_perfcache.bin",
-    "laplace_substrate.highway_perfcache_path": "laplace_highway_perfcache.bin",
-    "laplace_substrate.vocabulary_perfcache_path": "laplace_vocabulary_perfcache.bin",
+    "laplace.tier0": "tier0.bin",
+    "laplace.flags": "tier0.flags",
+    "laplace.highway": "highway.bin",
 }
 SQL = """
 BEGIN READ ONLY;
 WITH loaded AS MATERIALIZED (
- SELECT public.laplace_geom_version() AS geom,
-        laplace.laplace_substrate_version() AS substrate
+ SELECT public.laplace_version() AS version
 )
 SELECT json_build_object(
  'native_mappings',(SELECT json_agg(line)
      FROM regexp_split_to_table(
-       CASE WHEN loaded.geom IS NOT NULL AND loaded.substrate IS NOT NULL
+       CASE WHEN loaded.version IS NOT NULL
             THEN pg_read_file('/proc/self/maps') END, chr(10)) AS line
-     WHERE line ~ '/(liblaplace_(core|dynamics|synthesis)[.]so([.][0-9]+)*|laplace_(geom|substrate)[.]so|laplace_execution_[0-9a-f]{16}[.]so)( [(]deleted[)])?$'),
+     WHERE line ~ '/(liblaplace(?:_engine_abi)?[.]so([.][0-9]+)*|laplace(?:_[0-9a-f]{20})?[.]so)( [(]deleted[)])?$'),
  'database',current_database(),
  'database_oid',(SELECT oid::bigint FROM pg_catalog.pg_database WHERE datname=current_database()),
  'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system()),
  'server_version',current_setting('server_version_num'),
  'postmaster_started',pg_postmaster_start_time(),
  'extensions',(SELECT json_object_agg(extname,extversion) FROM pg_extension
-     WHERE extname IN ('laplace_geom','laplace_substrate')),
+     WHERE extname = 'laplace'),
  'declared_schema',(to_regclass('ops.pg_log') IS NOT NULL AND to_regprocedure('ops.repoint_pg_log()') IS NOT NULL
      AND to_regclass('public.attestation') IS NOT NULL AND to_regclass('public.consensus') IS NOT NULL),
  'running_ingests',(SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'),
  'roms',(SELECT json_object_agg(name,setting) FROM pg_settings
-     WHERE name IN ('laplace_substrate.perfcache_path','laplace_substrate.highway_perfcache_path',
-                   'laplace_substrate.vocabulary_perfcache_path')),
+     WHERE name IN ('laplace.tier0','laplace.flags','laplace.highway')),
  'extension_functions',(SELECT md5(string_agg(pg_get_functiondef(p.oid),E'\\n' ORDER BY p.oid))
      FROM pg_proc p JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
        AND d.refclassid='pg_extension'::regclass AND d.deptype='e'
      JOIN pg_extension e ON e.oid=d.refobjid
-     WHERE e.extname IN ('laplace_geom','laplace_substrate') AND p.prokind='f'))
+     WHERE e.extname = 'laplace' AND p.prokind='f'))
 FROM loaded;
 ROLLBACK;
 """
@@ -164,16 +160,7 @@ def installed_native_hashes(root, prefix):
     """Prove live native files equal the installed form of the tested build."""
     hashes = {}
     with staged_install(root, prefix) as expected_prefix:
-        # Locate the manifest in the configured staged extension share directory.
-        manifests = list(expected_prefix.rglob("laplace_execution_module.txt"))
-        if len(manifests) != 1:
-            raise ValueError("tested install must contain one execution module manifest")
-        name = manifests[0].read_text().strip()
-        if not re.fullmatch(r"laplace_execution_[0-9a-f]{16}", name):
-            raise ValueError("invalid native execution module identity")
-        installed_paths = [*MODULES.values(), f"lib/postgresql/18/{name}.so",
-                           str(manifests[0].relative_to(expected_prefix))]
-        for installed in installed_paths:
+        for installed in MODULES.values():
             expected = expected_prefix / installed
             actual = prefix / installed
             if not expected.is_file():
@@ -200,8 +187,7 @@ def mapped_native_identities(prefix, database, hashes, *, required=None):
     Before SQL upgrade, that owner may supply only the configured preload modules
     as required; an explicitly empty set permits an initially unloaded postmaster.
     """
-    required = set(("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
-                    "lib/postgresql/18/laplace_substrate.so") if required is None else required)
+    required = set(("lib/liblaplace.so", "lib/postgresql/18/laplace.so") if required is None else required)
     rows = database.get("native_mappings")
     if not isinstance(rows, list) or (not rows and required) or len(rows) > 4096:
         raise ValueError("running PostgreSQL native mappings are missing or exceed their bound")
@@ -287,8 +273,15 @@ def snapshot(root, prefix, database, *, purpose="publication"):
 
     hashes = installed_native_hashes(root, prefix)
     mapped = mapped_native_identities(prefix, database, hashes)
-    for name in ("laplace_geom", "laplace_substrate"):
-        built = control_version(build / "extension" / name / f"{name}.control")
+    for name in ("laplace",):
+        built_control = next(
+            (candidate for candidate in (
+                build / "extension" / f"{name}.control",
+                build / "extension" / name / f"{name}.control",
+            ) if candidate.is_file()),
+            build / "extension" / f"{name}.control",
+        )
+        built = control_version(built_control)
         installed = control_version(prefix / "share/postgresql/18/extension" / f"{name}.control")
         if built != installed or built != database["extensions"].get(name):
             raise ValueError(f"{name} SQL version differs; use the full database pipeline")
@@ -297,14 +290,9 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         if not path.is_absolute() or not path.resolve().is_relative_to(prefix.resolve()):
             raise ValueError(f"unverified installed ROM path: {setting}")
         actual = digest(path)
-        if digest(build / "engine/core/perfcache" / filename) != actual:
+        if digest(build / "share/laplace" / filename) != actual:
             raise ValueError(f"installed ROM differs from tested build: {filename}")
         hashes[setting] = actual
-    for filename in ("laplace_modality_number_perfcache.bin",):
-        actual = digest(prefix / "share/laplace" / filename)
-        if digest(build / "engine/core/perfcache" / filename) != actual:
-            raise ValueError(f"installed ROM differs from tested build: {filename}")
-        hashes[filename] = actual
     if build_identity(root, prefix) != identity:
         raise ValueError("configured native build changed during runtime observation")
     state = {"format": FORMAT, "build": identity, "artifacts": hashes,
@@ -332,13 +320,7 @@ def installed_runtime_snapshot(root, prefix, database):
     if not any((root / "db/schema").glob("*.sql")) or database["declared_schema"] is not True:
         raise ValueError("the declared schema (db/schema) is not applied; use the full database pipeline")
 
-    manifest = prefix / "share/postgresql/18/extension/laplace_execution_module.txt"
-    execution = manifest.read_text().strip()
-    if not re.fullmatch(r"laplace_execution_[0-9a-f]{16}", execution):
-        raise ValueError("invalid installed native execution module identity")
-    installed_paths = [*MODULES.values(), "lib/liblaplace_syzygy.so",
-                       f"lib/postgresql/18/{execution}.so",
-                       str(manifest.relative_to(prefix))]
+    installed_paths = [*MODULES.values()]
     hashes = {}
     for relative in installed_paths:
         path = prefix / relative
@@ -347,7 +329,7 @@ def installed_runtime_snapshot(root, prefix, database):
         hashes[relative] = digest(path)
 
     mapped = mapped_native_identities(prefix, database, hashes)
-    for name in ("laplace_geom", "laplace_substrate"):
+    for name in ("laplace",):
         installed = control_version(prefix / "share/postgresql/18/extension" / f"{name}.control")
         if installed != database["extensions"].get(name):
             raise ValueError(f"{name} installed SQL version differs from the database")
@@ -356,8 +338,6 @@ def installed_runtime_snapshot(root, prefix, database):
         if not path.is_absolute() or not path.resolve().is_relative_to(prefix.resolve()):
             raise ValueError(f"unverified installed ROM path: {setting}")
         hashes[setting] = digest(path)
-    for filename in ("laplace_modality_number_perfcache.bin",):
-        hashes[filename] = digest(prefix / "share/laplace" / filename)
 
     state = {"format": FORMAT, "scope": "installed-runtime", "artifacts": hashes,
              "database": copy.deepcopy(database)}

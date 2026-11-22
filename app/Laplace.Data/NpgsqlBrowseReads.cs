@@ -41,17 +41,19 @@ public static class NpgsqlBrowseReads
                 WHERE e.tier IS NOT NULL
             ),
             holders AS (
-                SELECT h.entity AS id, h.tier, $1[1] AS matched_raw, 'member'::text AS match_kind,
+                SELECT DISTINCT ON (h.entity)
+                       h.entity AS id, h.tier, $1[1] AS matched_raw, 'member'::text AS match_kind,
                        h.rating::numeric, h.deviation::numeric,
                        public.laplace_confidence(h.rating, h.deviation, 2)::numeric AS eff_mu,
                        h.matches AS witnesses
                 FROM public.laplace_holders_with_standings(
                     ARRAY(SELECT public.blake3_from_bytea(m) FROM unnest($1::bytea[]) AS m),
                     ARRAY(SELECT public.blake3_from_bytea(m) FROM unnest($1::bytea[]) AS m),
-                    false, (-1)::smallint, greatest($5::bigint, 256), 3::smallint) h
+                    true, (-1)::smallint, greatest($5::bigint, 256), 3::smallint) h
                 WHERE cardinality($1::bytea[]) > 0
                   AND NOT h.hub
                   AND h.entity <> public.blake3_from_bytea($2)
+                ORDER BY h.entity
             ),
             combined AS (
                 SELECT * FROM direct

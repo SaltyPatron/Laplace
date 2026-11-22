@@ -366,8 +366,7 @@ def catalog_closure(catalog, laplace_native):
     require(catalog.is_file() and os.access(catalog, os.X_OK), "native PGN verifier executable is missing")
     result = {str(catalog): digest(catalog)}
     for name in ("Laplace.Chess.dll", "Laplace.Core.dll",
-                 "liblaplace_core.so", "liblaplace_dynamics.so",
-                 "liblaplace_synthesis.so", "liblaplace_syzygy.so"):
+                 "liblaplace.so", "liblaplace_engine_abi.so"):
         actual, expected = catalog.parent / name, laplace_native.parent / name
         require(actual.is_file() and expected.is_file() and digest(actual) == digest(expected),
                 "PGN verifier closure differs from the installed game engine")

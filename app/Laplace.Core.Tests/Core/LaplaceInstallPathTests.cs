@@ -144,4 +144,19 @@ public sealed class LaplaceInstallPathTests : IDisposable
         Environment.SetEnvironmentVariable("LAPLACE_MODELS", Path.Combine(_root, "missing-models"));
         Assert.Throws<DirectoryNotFoundException>(() => LaplaceInstall.ResolveModelsRoot());
     }
+
+    [Fact]
+    public void FormatLibpqConnInfoNormalizesSslModeAndQuotesPaths()
+    {
+        var conn = LaplaceEngineRuntime.FormatLibpqConnInfo(
+            @"Host=HART-DESKTOP;Port=5432;Database=laplace;Username=laplace_desktop_db;SSL Mode=VerifyFull;Root Certificate=E:\Data\My Certs\postgres-root.crt");
+
+        Assert.Contains("host=HART-DESKTOP", conn);
+        Assert.Contains("port=5432", conn);
+        Assert.Contains("dbname=laplace", conn);
+        Assert.Contains("user=laplace_desktop_db", conn);
+        Assert.Contains("sslmode=verify-full", conn);
+        Assert.Contains("sslrootcert='E:/Data/My Certs/postgres-root.crt'", conn);
+        Assert.DoesNotContain("VerifyFull", conn);
+    }
 }

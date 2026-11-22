@@ -426,8 +426,67 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
     private nint _handle;
     private bool _disposed;
 
+    private static readonly delegate* unmanaged[Cdecl]<byte*, byte*, int> s_putenv = ResolvePutEnv();
+
+    private static delegate* unmanaged[Cdecl]<byte*, byte*, int> ResolvePutEnv()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        if (NativeLibrary.TryLoad("ucrtbase.dll", out var lib)
+            && NativeLibrary.TryGetExport(lib, "_putenv_s", out var addr))
+        {
+            return (delegate* unmanaged[Cdecl]<byte*, byte*, int>)addr;
+        }
+        return null;
+    }
+
+    private static void SyncNativeEnv(string name, string value)
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)))
+            Environment.SetEnvironmentVariable(name, value);
+        if (s_putenv != null)
+        {
+            byte[] nameBytes = Encoding.UTF8.GetBytes(name + '\0');
+            byte[] valBytes = Encoding.UTF8.GetBytes(value + '\0');
+            fixed (byte* pName = nameBytes)
+            fixed (byte* pVal = valBytes)
+            {
+                _ = s_putenv(pName, pVal);
+            }
+        }
+    }
+
+    private static void EnsureBundledNativeEnvironment()
+    {
+        string baseDir = AppContext.BaseDirectory;
+        (string EnvName, string Candidate, bool IsDir)[] entries =
+        [
+            ("LAPLACE_TIER0", Path.Combine(baseDir, "share", "laplace", "tier0.bin"), false),
+            ("LAPLACE_FLAGS", Path.Combine(baseDir, "share", "laplace", "tier0.flags"), false),
+            ("LAPLACE_HIGHWAY", Path.Combine(baseDir, "share", "laplace", "highway.bin"), false),
+            ("LAPLACE_FIRMWARE", Path.Combine(baseDir, "share", "laplace", "firmware", "program.firmware"), false),
+            ("LAPLACE_MANIFEST", Path.Combine(baseDir, "share", "laplace", "manifest"), true),
+            ("LAPLACE_RECIPES", Path.Combine(baseDir, "share", "laplace", "recipes"), true),
+            ("LAPLACE_GRAMMARS", Path.Combine(baseDir, "grammars"), true),
+        ];
+
+        foreach (var (envName, candidate, isDir) in entries)
+        {
+            var existing = LaplaceInstall.TryGetProcessOrMachineSetting(envName);
+            if (!string.IsNullOrWhiteSpace(existing))
+            {
+                SyncNativeEnv(envName, existing);
+                continue;
+            }
+
+            if (isDir ? Directory.Exists(candidate) : File.Exists(candidate))
+                SyncNativeEnv(envName, candidate);
+        }
+    }
+
     public LaplaceEngineRuntime(string? conninfo = null)
     {
+        EnsureBundledNativeEnvironment();
+
         var effectiveConn = string.IsNullOrWhiteSpace(conninfo)
             ? ResolveLibpqConnInfo()
             : conninfo.Trim();
@@ -449,28 +508,75 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
         }
     }
 
+    internal static string NormalizeLibpqSslMode(string raw) => raw.Trim().ToLowerInvariant() switch
+    {
+        "verifyfull" or "verify-full" => "verify-full",
+        "verifyca" or "verify-ca" => "verify-ca",
+        "require" => "require",
+        "prefer" => "prefer",
+        "allow" => "allow",
+        "disable" => "disable",
+        var other => other,
+    };
+
+    internal static string QuoteLibpqValue(string val, bool normalizeSlashes = false)
+    {
+        string normalized = normalizeSlashes ? val.Replace('\\', '/') : val;
+        foreach (char ch in normalized)
+        {
+            if (char.IsWhiteSpace(ch) || ch is '\'' or '\\' or ':' or ';')
+                return "'" + normalized.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        }
+        return normalized;
+    }
+
+    internal static string FormatLibpqConnInfo(string npgsql)
+    {
+        var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsql };
+        var parts = new List<string>();
+        string? Get(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (csb.TryGetValue(key, out var v) && v is not null)
+                {
+                    var text = v.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(text))
+                        return text;
+                }
+            }
+            return null;
+        }
+
+        void Add(string libpqKey, string? value, bool normalizeSlashes = false)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                parts.Add($"{libpqKey}={QuoteLibpqValue(value, normalizeSlashes)}");
+        }
+
+        Add("host", Get("Host"));
+        Add("port", Get("Port"));
+        Add("dbname", Get("Database"));
+        Add("user", Get("Username", "User ID"));
+        Add("password", Get("Password"));
+        var sslMode = Get("SSL Mode", "SslMode");
+        if (!string.IsNullOrWhiteSpace(sslMode))
+            Add("sslmode", NormalizeLibpqSslMode(sslMode));
+        Add("sslrootcert", Get("Root Certificate"), normalizeSlashes: true);
+        Add("sslcert", Get("SSL Certificate"), normalizeSlashes: true);
+        Add("sslkey", Get("SSL Key"), normalizeSlashes: true);
+        Add("passfile", Get("Passfile"), normalizeSlashes: true);
+        Add("require_auth", Get("Require Auth"));
+        return string.Join(' ', parts);
+    }
+
     public static string ResolveLibpqConnInfo()
     {
         var env = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_CONNINFO");
         if (!string.IsNullOrWhiteSpace(env))
             return env.Trim();
 
-        var npgsql = LaplaceInstall.PostgresConnectionString();
-        var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsql };
-        var parts = new List<string>();
-        void AddIf(string npgsqlKey, string libpqKey)
-        {
-            if (csb.TryGetValue(npgsqlKey, out var v) && v is not null && !string.IsNullOrWhiteSpace(v.ToString()))
-                parts.Add($"{libpqKey}={v}");
-        }
-        AddIf("Host", "host");
-        AddIf("Port", "port");
-        AddIf("Database", "dbname");
-        AddIf("Username", "user");
-        AddIf("Password", "password");
-        AddIf("SSL Mode", "sslmode");
-        AddIf("Root Certificate", "sslrootcert");
-        return string.Join(' ', parts);
+        return FormatLibpqConnInfo(LaplaceInstall.PostgresConnectionString());
     }
 
     public EngineTurnResponse Turn(EngineTurnRequest request)

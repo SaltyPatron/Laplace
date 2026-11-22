@@ -32,13 +32,12 @@ class ApiPayloadTests(unittest.TestCase):
         self.installed.mkdir()
         names = (
             "Laplace.Endpoints.OpenAICompat.dll", "Laplace.Core.dll", "Laplace.Chess.dll",
-            "liblaplace_core.so", "liblaplace_dynamics.so",
-            "liblaplace_synthesis.so", "liblaplace_syzygy.so",
+            "liblaplace.so", "liblaplace_engine_abi.so",
         )
         for name in names:
             body = ("api publication fixture: " + name).encode()
             (self.stage / name).write_bytes(body)
-            if name.startswith("liblaplace_"):
+            if name.startswith("liblaplace"):
                 (self.installed / name).write_bytes(body)
         (self.stage / "wwwroot/index.html").write_text("<html></html>", encoding="utf-8")
 
@@ -48,12 +47,11 @@ class ApiPayloadTests(unittest.TestCase):
         self.assertEqual(manifest["native_installed"], str(self.installed.resolve()))
         self.assertEqual(
             set(manifest["native_sources"]),
-            {"liblaplace_core.so", "liblaplace_dynamics.so",
-             "liblaplace_synthesis.so", "liblaplace_syzygy.so"},
+            {"liblaplace.so", "liblaplace_engine_abi.so"},
         )
 
     def test_managed_only_payload_rejects_native_byte_drift(self):
-        (self.stage / "liblaplace_core.so").write_bytes(b"different")
+        (self.stage / "liblaplace.so").write_bytes(b"different")
         with self.assertRaisesRegex(ValueError, "differ from installed closure"):
             payload.seal(self.stage, native_installed=self.installed)
 
@@ -67,8 +65,7 @@ class UciPayloadTests(unittest.TestCase):
         self.chess = assembly("Laplace.Chess")
         self.names = (self.uci, self.uci + ".dll", self.uci + ".deps.json",
                       self.uci + ".runtimeconfig.json", self.core + ".dll", self.chess + ".dll",
-                      "liblaplace_core.so", "liblaplace_dynamics.so",
-                      "liblaplace_synthesis.so", "liblaplace_syzygy.so")
+                      "liblaplace.so", "liblaplace_engine_abi.so")
         for name in self.names:
             (self.path / name).write_bytes(("isolated publication fixture: " + name).encode())
 
@@ -87,7 +84,7 @@ class UciPayloadTests(unittest.TestCase):
             payload.seal_uci(self.path)
 
     def test_missing_native_closure_is_rejected(self):
-        (self.path / "liblaplace_syzygy.so").unlink()
+        (self.path / "liblaplace_engine_abi.so").unlink()
         with self.assertRaisesRegex(ValueError, "API payload omitted"):
             payload.seal_uci(self.path)
 
@@ -105,8 +102,7 @@ class UciPayloadTests(unittest.TestCase):
         catalog.write_bytes(b"isolated catalog apphost")
         catalog.chmod(0o755)
         for name in (self.core + ".dll", self.chess + ".dll",
-                     "liblaplace_core.so", "liblaplace_dynamics.so",
-                     "liblaplace_synthesis.so", "liblaplace_syzygy.so"):
+                     "liblaplace.so", "liblaplace_engine_abi.so"):
             (directory / name).write_bytes((self.path / name).read_bytes())
         return catalog
 
@@ -118,7 +114,7 @@ class UciPayloadTests(unittest.TestCase):
 
     def test_catalog_still_rejects_different_native_bytes(self):
         catalog = self.catalog()
-        (catalog.parent / "liblaplace_core.so").write_bytes(b"different native generation")
+        (catalog.parent / "liblaplace.so").write_bytes(b"different native generation")
         with self.assertRaisesRegex(ValueError, "closure differs"):
             gui.catalog_closure(catalog, self.path / (self.uci + ".native"))
 
