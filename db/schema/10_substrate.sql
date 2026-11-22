@@ -221,8 +221,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION ops.substrate_counts()
     RETURNS TABLE(metric text, value bigint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
+    LANGUAGE sql STABLE AS $counts_fn$
     WITH targets(metric, relid, ordinal) AS (
         SELECT 'entities(ESTIMATE)'::text, to_regclass('public.entity'), 1
         UNION ALL
@@ -247,12 +246,11 @@ BEGIN ATOMIC
         UNION ALL SELECT 'attestations(MEASURED)', ops.attestation_count(), 3
     )
     SELECT metric, value FROM totals ORDER BY ordinal;
-END;
+$counts_fn$;
 
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text, kind text)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
+    LANGUAGE sql STABLE PARALLEL SAFE AS $api_fn$
     SELECT CASE WHEN n.nspname = 'public' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END AS name,
            pg_get_function_arguments(p.oid) AS args,
@@ -282,4 +280,4 @@ BEGIN ATOMIC
            OR p.proname ILIKE '%'||p_like||'%'
            OR (n.nspname || '.' || p.proname) ILIKE '%'||p_like||'%')
     ORDER BY 1, 2;
-END;
+$api_fn$;
