@@ -120,7 +120,14 @@
     </ItemGroup>
 
     <ItemGroup Condition="'$(_PerfcacheCandidate)' != '' And Exists('$(_PerfcacheCandidate)/tier0.bin')">
-      <None Include="$(_PerfcacheCandidate)/tier0.bin;$(_PerfcacheCandidate)/tier0.flags;$(_PerfcacheCandidate)/tier0.flags.layout;$(_PerfcacheCandidate)/highway.bin"
+      <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.bin" Condition="Exists('$(_PerfcacheCandidate)/tier0.bin')" />
+      <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.flags" Condition="Exists('$(_PerfcacheCandidate)/tier0.flags')" />
+      <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.flags.layout" Condition="Exists('$(_PerfcacheCandidate)/tier0.flags.layout')" />
+      <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/highway.bin" Condition="Exists('$(_PerfcacheCandidate)/highway.bin')" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'@(_LaplacePerfcacheFile)' != ''">
+      <None Include="@(_LaplacePerfcacheFile)"
             Link="share/laplace/%(Filename)%(Extension)"
             CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
