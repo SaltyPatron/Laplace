@@ -106,7 +106,7 @@ try {
         throw "Native identity library is missing alongside engine ABI: $nativeDll"
     }
     $nativeHandle = [LaplacePackageNativeAbi]::Load($nativeDll)
-    foreach ($export in 'lp_text_id', 'lp_id_compose') {
+    foreach ($export in 'lp_id_codepoint', 'lp_id_compose', 'lp_coord_centroid', 'lp_tier0_codepoint') {
         if (-not [LaplacePackageNativeAbi]::HasExport($nativeHandle, $export)) {
             throw "Native library export is missing: $export in $nativeDll. Rebuild Laplace-Native before packaging."
         }

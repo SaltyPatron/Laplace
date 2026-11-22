@@ -18,8 +18,10 @@ try {
         $directory=Join-Path $work $kind
         $null=New-Item -ItemType Directory -Path $directory
         @'
-__declspec(dllexport) int lp_text_id(const char *s, unsigned long long n, void *out) { (void)s; (void)n; (void)out; return 0; }
+__declspec(dllexport) int lp_id_codepoint(unsigned int cp, void *out) { (void)cp; (void)out; return 0; }
 __declspec(dllexport) int lp_id_compose(const void *ids, unsigned long long n, void *out) { (void)ids; (void)n; (void)out; return 0; }
+__declspec(dllexport) int lp_coord_centroid(const void *coords, unsigned long long n, void *out) { (void)coords; (void)n; (void)out; return 0; }
+__declspec(dllexport) int lp_tier0_codepoint(unsigned int cp, void *out) { (void)cp; (void)out; return 0; }
 '@ | Set-Content -LiteralPath (Join-Path $directory 'laplace_native_stub.c') -Encoding utf8
         $turnExport = if ($kind -eq 'incomplete') { '' } else { '__declspec(dllexport) int lp_engine_turn(void *h, const void *req, void *out) { (void)h; (void)req; (void)out; return 0; }' }
         $versionMarker = if ($kind -eq 'stale') { 'stale-cli-abi' } else { 'current-abi' }
