@@ -53,14 +53,14 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Theory]
-    [InlineData("e4", "b17034a030605a7b729131993c5ca42d")]
-    [InlineData("e4 e5 Nf3 Nc6", "2559928d51a3fa236734fbb1a71ac18b")]
-    [InlineData("Nf3 Nc6 e4 e5", "eda2a5d7bf07835788bac9def6f122f5")]
+    [InlineData("e4", "aa9a24415d37db0497aa2bf1f8e99f8e")]
+    [InlineData("e4 e5 Nf3 Nc6", "193e5b5676f2c6fbec93eb4070dafba3")]
+    [InlineData("Nf3 Nc6 e4 e5", "6271dcd6936759e26540d38a5cb99e7d")]
     // e5 beside d5: the en passant square d6 is capturable, so it is in the position.
-    [InlineData("e4 a6 e5 d5", "0597f55a22171c49d3c144ed95e019c3")]
+    [InlineData("e4 a6 e5 d5", "5fce7d0b28094d3c4c9e41d2c6cdbd90")]
     // White has castled, Black has not: the masks are 0 and 137.
-    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6", "bd4dc4877779bb570ebebe65c5b474dc")]
-    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6 Re1 O-O", "78b2c74d8df5a0d64473fe5f79f6cc5f")]
+    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6", "a94bc1ab79b97c852a250fa0166b0cec")]
+    [InlineData("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O Nf6 Re1 O-O", "cdbe2059c4113476f296a37298bc1d2a")]
     public void Lines_AreTheEnginesRecords(string movetext, string engineLineId)
         => Assert.Equal(engineLineId, EngineHeldHex(Line(movetext)));
 
@@ -76,18 +76,18 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Fact]
-    public void ShortCastling_IsMovedAsTheKingOntoItsOwnRook()
+    public void ShortCastling_TransitionIsPureBeforeAfterPositionPair()
     {
         var board = Board.FromFen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
         var castle = MoveGen.Legal(board).Single(m => m.IsKingSideCastle);
-        // [K, e1, h1]
+        var next = board.Clone();
+        MoveApply.Make(next, castle);
         var expected = ChessEngineIdentity.Compose(new[]
         {
-            ChessEngineIdentity.Codepoint('K'),
-            ChessEngineIdentity.Square(4, 0),
-            ChessEngineIdentity.Square(7, 0),
+            ChessEngineIdentity.PositionId(board),
+            ChessEngineIdentity.PositionId(next),
         });
-        Assert.Equal(expected, ChessEngineIdentity.MoveId(board, castle));
+        Assert.Equal(expected, ChessEngineIdentity.TransitionId(ChessEngineIdentity.PositionId(board), ChessEngineIdentity.PositionId(next)));
     }
 
     [Fact]
@@ -103,18 +103,16 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Fact]
-    public void PromotionMove_CarriesThePromotedPieceInTheMoversCase()
+    public void UnderpromotionTransitions_ReachDistinctAfterPositions()
     {
         var board = Board.FromFen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1");
         var queen = MoveGen.Legal(board).Single(m => m.IsPromotion && Board.TypeOf(m.Promotion) == Piece.WQueen);
-        var expected = ChessEngineIdentity.Compose(new[]
-        {
-            ChessEngineIdentity.Codepoint('P'),
-            ChessEngineIdentity.Square(0, 6),
-            ChessEngineIdentity.Square(0, 7),
-            ChessEngineIdentity.Codepoint('Q'),
-        });
-        Assert.Equal(expected, ChessEngineIdentity.MoveId(board, queen));
+        var knight = MoveGen.Legal(board).Single(m => m.IsPromotion && Board.TypeOf(m.Promotion) == Piece.WKnight);
+        var nextQ = board.Clone(); MoveApply.Make(nextQ, queen);
+        var nextN = board.Clone(); MoveApply.Make(nextN, knight);
+        Assert.NotEqual(
+            ChessEngineIdentity.TransitionId(ChessEngineIdentity.PositionId(board), ChessEngineIdentity.PositionId(nextQ)),
+            ChessEngineIdentity.TransitionId(ChessEngineIdentity.PositionId(board), ChessEngineIdentity.PositionId(nextN)));
     }
 
     [Fact]
@@ -133,17 +131,18 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Fact]
-    public void CrazyhouseDropMove_UsesAtSignComposition()
+    public void CrazyhouseDropTransition_DepletesHandAndPlacesPiece()
     {
         var board = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[P] w KQkq - 0 1", ChessVariants.Crazyhouse);
         var drop = MoveGen.Legal(board).First(m => m.IsDrop && Board.TypeOf(m.Promotion) == Piece.WPawn && m.To == Board.Sq(4, 3));
+        var next = board.Clone();
+        MoveApply.Make(next, drop);
         var expected = ChessEngineIdentity.Compose(new[]
         {
-            ChessEngineIdentity.Codepoint('P'),
-            ChessEngineIdentity.Codepoint('@'),
-            ChessEngineIdentity.Square(4, 3),
+            ChessEngineIdentity.PositionId(board),
+            ChessEngineIdentity.PositionId(next),
         });
-        Assert.Equal(expected, ChessEngineIdentity.MoveId(board, drop));
+        Assert.Equal(expected, ChessEngineIdentity.TransitionId(ChessEngineIdentity.PositionId(board), ChessEngineIdentity.PositionId(next)));
     }
 
     [Fact]

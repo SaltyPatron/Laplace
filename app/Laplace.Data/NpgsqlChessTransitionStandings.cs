@@ -5,7 +5,7 @@ using NpgsqlTypes;
 namespace Laplace.Data;
 
 /// <summary>
-/// Standing of each [position, move, position] transition claim read via <c>public.laplace_standings</c>.
+/// Standing of each [position before, position after] transition claim read via <c>public.laplace_standings</c>.
 /// </summary>
 public static class NpgsqlChessTransitionStandings
 {

@@ -41,7 +41,6 @@ public sealed class SubstrateRootBiasTests
             MoveApply.Make(next, move);
             return ChessEngineIdentity.TransitionId(
                 ChessEngineIdentity.PositionId(fixture.Board),
-                ChessEngineIdentity.MoveId(fixture.Board, move),
                 ChessEngineIdentity.PositionId(next));
         }).ToArray();
         Assert.Equal(expected, asked);
@@ -104,7 +103,6 @@ public sealed class SubstrateRootBiasTests
         MoveApply.Make(next, moves[dropIndex]);
         var dropClaim = ChessEngineIdentity.TransitionId(
             ChessEngineIdentity.PositionId(board),
-            ChessEngineIdentity.MoveId(board, moves[dropIndex]),
             ChessEngineIdentity.PositionId(next));
 
         var bias = Bias(ids => Present(ids, dropClaim, +10));

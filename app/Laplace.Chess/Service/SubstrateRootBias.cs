@@ -153,8 +153,7 @@ public sealed class SubstrateRootBias : IRootBias
         {
             var next = root.Clone();
             MoveApply.Make(next, moves[i]);
-            claims[i] = ChessEngineIdentity.TransitionId(
-                rootId, ChessEngineIdentity.MoveId(root, moves[i]), ChessEngineIdentity.PositionId(next));
+            claims[i] = ChessEngineIdentity.TransitionId(rootId, ChessEngineIdentity.PositionId(next));
         }
         return claims;
     }

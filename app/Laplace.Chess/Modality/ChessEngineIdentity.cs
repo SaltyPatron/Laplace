@@ -15,8 +15,8 @@ namespace Laplace.Modality.Chess;
 ///                                                   the king's file (its centre bit) and the file of each rook
 ///                                                   it may castle with; a side that cannot castle is 0
 ///   position   [board, side, castling, ep (, hand)? (, promoted)? (, checks)?]
-///   move       [piece, from, to(, promoted)] or drop [piece, @, to]; castling is [king, king_sq, rook_sq]
-///   transition [position, move, position]           the claim a played game attests, scored by the result
+///   transition [position before, position after]    the claim a played game attests, scored by the result
+///   line       [P0, P1, ..., Pn]                    pure board-state trajectory; a line of no moves is P0
 /// </summary>
 public static class ChessEngineIdentity
 {
@@ -172,56 +172,20 @@ public static class ChessEngineIdentity
         return nhand;
     }
 
-    /// <summary>The move's id, byte-identical to <c>id_move</c>: [piece, from, to(, promo)] or drop [piece, @, to].</summary>
-    public static Hash128 MoveId(Board before, ChessMove move)
+    /// <summary>[position before, position after]: the claim a played game attests.</summary>
+    public static Hash128 TransitionId(Hash128 before, Hash128 after)
     {
-        bool white = before.WhiteToMove;
-        Span<Hash128> k = stackalloc Hash128[4];
-        if (move.IsDrop)
-        {
-            Piece type = Board.TypeOf(move.Promotion);
-            Piece colored = white ? type : (Piece)(-(sbyte)type);
-            k[0] = Codepoint(Board.PieceToChar(colored));
-            k[1] = Codepoint('@');
-            k[2] = Square(Board.FileOf(move.To), Board.RankOf(move.To));
-            return Compose(k[..3]);
-        }
-
-        Piece moving = before.Squares[move.From];
-        int toSquare = move.To;
-        if (move.IsCastle)
-        {
-            // The king onto its own rook: a Chess960 castling is never a king's step.
-            toSquare = Board.Sq(before.CastleRookFile(white, move.IsKingSideCastle), Board.RankOf(move.From));
-        }
-
-        k[0] = Codepoint(Board.PieceToChar(moving));
-        k[1] = Square(Board.FileOf(move.From), Board.RankOf(move.From));
-        k[2] = Square(Board.FileOf(toSquare), Board.RankOf(toSquare));
-        int count = 3;
-        if (move.IsPromotion)
-        {
-            char letter = Board.PieceToChar(Board.TypeOf(move.Promotion));
-            k[3] = Codepoint(white ? letter : char.ToLowerInvariant(letter));
-            count = 4;
-        }
-        return Compose(k[..count]);
-    }
-
-    /// <summary>[position before, move, position after]: the claim a played game attests.</summary>
-    public static Hash128 TransitionId(Hash128 before, Hash128 move, Hash128 after)
-    {
-        Span<Hash128> k = stackalloc Hash128[3];
-        k[0] = before; k[1] = move; k[2] = after;
+        Span<Hash128> k = stackalloc Hash128[2];
+        k[0] = before; k[1] = after;
         return Compose(k);
     }
 
-    /// <summary>The trajectory [P0, M0, P1, ..., Pn] of a line; a line of no moves is its start position.</summary>
+    /// <summary>The pure board-state trajectory [P0, P1, ..., Pn] of a line; a line of no moves is its start position.</summary>
     public static Hash128 LineId(ReadOnlySpan<Hash128> trajectory) => Compose(trajectory);
 
     /// <summary>
-    /// Replays <paramref name="moves"/> from <paramref name="start"/> and returns the line's trajectory
-    /// [P0, M0, P1, ..., Pn] over Engine-identity ids.
+    /// Replays <paramref name="moves"/> from <paramref name="start"/> and returns the line's pure state trajectory
+    /// [P0, P1, ..., Pn] over Engine-identity ids.
     /// </summary>
     public static Hash128[] Trajectory(Board start, IEnumerable<ChessMove> moves)
     {
@@ -229,7 +193,6 @@ public static class ChessEngineIdentity
         var ids = new List<Hash128> { PositionId(board) };
         foreach (var move in moves)
         {
-            ids.Add(MoveId(board, move));
             MoveApply.Make(board, move);
             ids.Add(PositionId(board));
         }

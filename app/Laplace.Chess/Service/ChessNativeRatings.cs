@@ -8,7 +8,7 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// The turn engine's view of the Native substrate for chess: a position is the Engine's position id
-/// (<see cref="ChessEngineIdentity"/>), a move played from it is the [position, move, position] claim a
+/// (<see cref="ChessEngineIdentity"/>), a move played from it is the [position before, position after] claim a
 /// recorded game attests, and that claim's rating is its Native standing (<c>public.laplace_standings</c>),
 /// shrunk toward the neutral prior by the games folded into it. A claim no game attested is unrated.
 /// </summary>
@@ -23,11 +23,11 @@ public sealed class ChessNativeRatings(NpgsqlDataSource ds) : IContentAddresser,
         return ChessEngineIdentity.TryPositionId(Board.FromFen(fen), out var id) ? id : Hash128.Zero;
     }
 
-    /// <summary>The claim a move is: [position, move, position], or zero where the rules have no Engine identity.</summary>
+    /// <summary>The claim a move is: [position before, position after], or zero where the rules have no Engine identity.</summary>
     public static Hash128 Claim(ChessState state, ChessMove move, ChessState next)
         => ChessEngineIdentity.TryPositionId(state.Board, out var before)
            && ChessEngineIdentity.TryPositionId(next.Board, out var after)
-            ? ChessEngineIdentity.TransitionId(before, ChessEngineIdentity.MoveId(state.Board, move), after)
+            ? ChessEngineIdentity.TransitionId(before, after)
             : Hash128.Zero;
 
     public async Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default)
