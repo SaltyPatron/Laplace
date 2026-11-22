@@ -83,7 +83,7 @@ if(-not $apiKey -and -not $operatorToken){throw 'Authenticated publication verif
 $manifest=Test-IisPackage $Package
 if($manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Invalid package revision.'}
 foreach($component in @('','cli','uci')) {
-    & "$PSScriptRoot/Test-NativeSqlCatalog.ps1" -Library (Join-Path (Join-Path $Package $component) 'laplace_core.dll')
+    & "$PSScriptRoot/Test-NativeSqlCatalog.ps1" -Library (Join-Path (Join-Path $Package $component) 'laplace_engine_abi.dll')
 }
 $web=Join-Path $c.directory 'web';$target=Join-Path $web ('releases/'+$manifest.revision)
 $lock=[IO.File]::Open((Join-Path $web '.publication.lock'),'OpenOrCreate','ReadWrite','None')

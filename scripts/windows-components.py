@@ -136,6 +136,7 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
         "LAPLACE_DEPENDENCY_LIBXML2_PREFIX": ("bin/libxml2.dll",),
         "ICU_ROOT": ("bin64/icu*78.dll",),
         "LAPLACE_DEPENDENCY_ZSTD_PREFIX": ("bin/zstd.dll",),
+        "LAPLACE_PG_DIR": ("bin/libpq.dll", "bin/libcrypto-*.dll", "bin/libssl-*.dll"),
     }
     for variable, patterns in runtime_patterns.items():
         directory = os.environ.get(variable)

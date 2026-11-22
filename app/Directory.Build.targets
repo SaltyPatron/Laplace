@@ -66,6 +66,8 @@
       <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace.exe" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace.exe')" />
       <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace.pdb" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace.pdb')" />
       <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libpq.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />
+      <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libcrypto-*.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />
+      <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libssl-*.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(OS)' != 'Windows_NT'">

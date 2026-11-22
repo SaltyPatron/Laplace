@@ -1,4 +1,4 @@
-#requires -Version 7
+﻿#requires -Version 7
 [CmdletBinding()]
 param(
   [string]$RepoRoot      = (Resolve-Path "$PSScriptRoot\..\.."),
@@ -72,10 +72,11 @@ $wwwroot = Join-Path $stage "wwwroot"
 if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
 New-Item -ItemType Directory $wwwroot | Out-Null
 Copy-Item "$RepoRoot\web\dist\*" $wwwroot -Recurse -Force
+$nativeBuild = if ($env:LAPLACE_NATIVE_BUILD) { $env:LAPLACE_NATIVE_BUILD } else { Join-Path (Split-Path -Parent (Split-Path -Parent $engineBuild)) 'Laplace-Native\icx-release' }
 $natives = @(
-  "$engineBuild\core\laplace_core.dll",
-  "$engineBuild\dynamics\laplace_dynamics.dll",
-  "$engineBuild\synthesis\laplace_synthesis.dll"
+  "$nativeBuild\laplace.dll",
+  "$engineBuild\laplace_engine_abi.dll",
+  "$engineBuild\laplace.exe"
 )
 foreach ($n in $natives) {
   if (-not (Test-Path $n)) { throw "native dep missing: $n — run scripts\win\build-engine.cmd first" }

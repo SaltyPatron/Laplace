@@ -185,19 +185,32 @@ function Test-IisCacheClosure([string]$Path) {
         }
     }
 }
+function Test-IisNativeClosure([string]$Path) {
+    foreach($name in 'laplace.dll','laplace_engine_abi.dll','laplace.exe') {
+        $expected=$null
+        foreach($component in @('','cli','uci')) {
+            $file=Join-Path (Join-Path $Path $component) $name
+            if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Incomplete IIS native runtime: $file"}
+            $digest=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+            if($expected -and $digest -ne $expected){throw "Native runtime binary differs between application components: $name ($component)"}
+            $expected=$digest
+        }
+    }
+}
 function Test-IisPackage([string]$Path) {
     Test-IisCacheClosure $Path
+    Test-IisNativeClosure $Path
     foreach($file in 'migrations/Laplace.Migrations.dll','migrations/Laplace.Migrations.deps.json','migrations/Laplace.Migrations.runtimeconfig.json') {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS migration runtime: $file"}
     }
     if(-not @(Get-ChildItem -LiteralPath (Join-Path $Path 'migrations/db/schema') -Filter '*.sql' -File -ErrorAction SilentlyContinue).Count){throw 'The IIS migration runtime has no declared schema (db/schema).'}
-    foreach($file in @('Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','Laplace.Endpoints.OpenAICompat.runtimeconfig.json','wwwroot/index.html','laplace_core.dll','laplace_dynamics.dll','laplace_synthesis.dll','laplace_syzygy.dll','cli/Laplace.Cli.exe')) {
+    foreach($file in @('Laplace.Endpoints.OpenAICompat.exe','Laplace.Endpoints.OpenAICompat.dll','Laplace.Endpoints.OpenAICompat.runtimeconfig.json','wwwroot/index.html','laplace.dll','laplace_engine_abi.dll','laplace.exe','cli/Laplace.Cli.exe')) {
         if(-not(Test-Path -LiteralPath (Join-Path $Path $file) -PathType Leaf)){throw "Incomplete IIS package: $file"}
     }
     $manifest=Get-Content (Join-Path $Path 'iis-package.json') -Raw | ConvertFrom-Json
     if(-not $manifest.files -or $manifest.revision -notmatch '^[a-f0-9]{7,64}$'){throw 'Incomplete package manifest.'}
     if($manifest.components -contains 'uci'){
-        foreach($file in 'laplace-uci.exe','laplace-uci.dll','laplace-uci.deps.json','laplace-uci.runtimeconfig.json','laplace_core.dll','laplace_syzygy.dll','laplace_dynamics.dll','laplace_synthesis.dll','stockfish-profiles.json','lc0-profiles.json','chess-ladder-release.json','cutechess-release.json','stockfish-release.json','zstd-release.json'){
+        foreach($file in 'laplace-uci.exe','laplace-uci.dll','laplace-uci.deps.json','laplace-uci.runtimeconfig.json','laplace.dll','laplace_engine_abi.dll','laplace.exe','stockfish-profiles.json','lc0-profiles.json','chess-ladder-release.json','cutechess-release.json','stockfish-release.json','zstd-release.json'){
             if(-not(Test-Path -LiteralPath (Join-Path $Path ('uci/'+$file)) -PathType Leaf)){throw "Incomplete IIS chess runtime: uci/$file"}
         }
     }

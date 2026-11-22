@@ -89,7 +89,7 @@ class Components(unittest.TestCase):
                     self.assertEqual(self.root / "property", COMPONENTS.documentation_root(root))
 
     def test_native_abi_change_invalidates_managed_consumers(self):
-        library = self.native / "core/laplace_core.dll"
+        library = self.native / "laplace_engine_abi.dll"
         library.parent.mkdir(parents=True)
         library.write_bytes(b"native ABI one")
         before = self.inputs("api")
