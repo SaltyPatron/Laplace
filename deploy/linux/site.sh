@@ -342,8 +342,8 @@ phase_migrate() {
   need_pg
   say "migrate $LAPLACE_DBNAME"
   migrations up   # the declared schema is applied in full on every deploy
-  [[ "$(sql -c "SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'laplace' AND c.relname = 'entities'")" == p ]] \
-    || fail "laplace.entities is not the partitioned generation: the extension installed predates the schema"
+  [[ "$(sql -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'p' AND ((n.nspname = 'public' AND c.relname = 'entity') OR (n.nspname = 'laplace' AND c.relname = 'entities'))")" -ge 1 ]] \
+    || fail "partitioned entity storage is missing: the extension installed predates the schema"
 }
 # Compatible extension updates reconcile replaceable SQL/C bindings in place via
 # storage-stamped reconcile scripts; only incompatible storage DDL invokes
@@ -733,10 +733,15 @@ verify_cli_package() {
     LAPLACE_PERFCACHE_BIN="$cli/share/laplace/tier0.bin" \
     LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
     "$cli/Laplace.Cli" decompose Laplace) || return $?
-  local engine="$cli/native/recipe-engine/bin/laplace" estate="$cli/native/recipe-engine/share/laplace" program
+  local engine="$cli/laplace" estate="$cli/share/laplace" gdir="$cli/grammars" program
+  if [[ ! -x "$engine" ]]; then
+    engine="$cli/native/recipe-engine/bin/laplace"
+    estate="$cli/native/recipe-engine/share/laplace"
+    gdir="$(dirname "$engine")/grammars"
+  fi
   [[ -x "$engine" && -s "$estate/firmware/program.firmware" ]] || { echo "CLI Native query compiler is missing" >&2; return 1; }
   program=$(env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \
-    LD_LIBRARY_PATH="$cli" LAPLACE_RECIPES="$estate/recipes" LAPLACE_GRAMMARS="$(dirname "$engine")/grammars" \
+    LD_LIBRARY_PATH="$cli" LAPLACE_RECIPES="$estate/recipes" LAPLACE_GRAMMARS="$gdir" \
     LAPLACE_TIER0="$cli/share/laplace/tier0.bin" LAPLACE_HIGHWAY="$cli/share/laplace/highway.bin" \
     "$engine" firmware --operation pull --firmware "$estate/firmware/program.firmware") || return 1
   [[ -n "$program" ]] || { echo "Native query compiler returned no declarations" >&2; return 1; }
