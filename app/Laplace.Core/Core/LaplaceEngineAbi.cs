@@ -457,6 +457,10 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
 
     private static void EnsureBundledNativeEnvironment()
     {
+        SyncNativeEnv("OMP_NUM_THREADS", "1");
+        SyncNativeEnv("MKL_NUM_THREADS", "1");
+        SyncNativeEnv("KMP_BLOCKTIME", "0");
+
         if (OperatingSystem.IsWindows())
         {
             var laplaceOut = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_OUT");
