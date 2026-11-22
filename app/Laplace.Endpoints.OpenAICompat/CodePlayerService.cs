@@ -107,48 +107,85 @@ internal sealed class CodePlayerService
         // If caller provided code/path/verify_cmd directly, run native C OODA repair loop directly inside lp_engine_turn.
         if (!string.IsNullOrWhiteSpace(verifyCmd) || !string.IsNullOrWhiteSpace(codePath) || !string.IsNullOrWhiteSpace(codeText))
         {
-            var oodaReq = new EngineTurnRequest(
-                FirmwarePath: null,
-                ModelName: "coding",
-                Prompt: enrichedPrompt,
-                Messages: null,
-                SystemPrompt: null,
-                User: effUser,
-                Session: effSession,
-                ReadOnly: authority is { AllowWrite: false },
-                MaxTokens: (int)(envelope?.max_tokens_out ?? 0),
-                Temperature: 0.0,
-                StopSequences: null,
-                Seed: 0,
-                Authority: authority,
-                Envelope: envelope,
-                CodePath: codePath,
-                CodeText: codeText,
-                CodeLang: modality,
-                VerifyCommand: verifyCmd,
-                OodaRounds: attempts,
-                WriteFile: false);
+            string? effectivePath = codePath;
+            string? effectiveCodeText = codeText;
+            string? effectiveVerify = verifyCmd;
+            string? tempDir = null;
+            bool writeFile = false;
 
-            var abi = await Task.Run(() => engine.Turn(oodaReq), ct).ConfigureAwait(false);
-            string codeOut = !string.IsNullOrWhiteSpace(abi.PatchedCode) ? abi.PatchedCode : (abi.Text ?? string.Empty);
-            string? respId = abi.ResponseId == Hash128.Zero ? null : abi.ResponseId.ToHex();
-            bool verified = abi.OodaVerified && abi.StatusCode == 0;
-            var receipt = new AttemptReceipt(
-                Attempt: Math.Max(1, abi.OodaRoundsRun),
-                CandidateId: respId ?? "",
-                Verified: verified,
-                Tool: string.IsNullOrWhiteSpace(verifyCmd) ? "laplace-ooda" : verifyCmd,
-                ToolAvailable: !abi.OodaUnverified,
-                TimedOut: false,
-                ExitCode: abi.StatusCode,
-                Stdout: verified ? (abi.Text ?? string.Empty) : string.Empty,
-                Stderr: verified ? string.Empty : (string.IsNullOrWhiteSpace(abi.Error) ? (abi.Text ?? string.Empty) : abi.Error));
+            if (string.IsNullOrWhiteSpace(effectivePath) && !string.IsNullOrWhiteSpace(effectiveCodeText))
+            {
+                tempDir = Path.Combine(Path.GetTempPath(), "laplace-ooda", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                effectivePath = Path.Combine(tempDir, CodeToolchain.CandidateFileName(effectiveCodeText, modality) ?? "candidate.c");
+                await File.WriteAllTextAsync(effectivePath, effectiveCodeText, new UTF8Encoding(false), ct).ConfigureAwait(false);
+                effectiveCodeText = null;
+                writeFile = true;
+            }
 
-            string? failKind = verified
-                ? null
-                : abi.OodaUnverified ? "toolchain_unavailable" : "code_verification_failed";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(effectiveVerify)
+                    && !string.IsNullOrWhiteSpace(effectivePath)
+                    && CodeToolchain.TryBuildOodaVerifyCommand(effectivePath, modality, out var autoCmd))
+                {
+                    effectiveVerify = autoCmd;
+                }
 
-            return new Result(modality, codeOut, respId, verified, failKind, [receipt], abi, envelopePreset);
+                var oodaReq = new EngineTurnRequest(
+                    FirmwarePath: null,
+                    ModelName: "coding",
+                    Prompt: enrichedPrompt,
+                    Messages: null,
+                    SystemPrompt: null,
+                    User: effUser,
+                    Session: effSession,
+                    ReadOnly: authority is { AllowWrite: false },
+                    MaxTokens: (int)(envelope?.max_tokens_out ?? 0),
+                    Temperature: 0.0,
+                    StopSequences: null,
+                    Seed: 0,
+                    Authority: authority,
+                    Envelope: envelope,
+                    CodePath: effectivePath,
+                    CodeText: effectiveCodeText,
+                    CodeLang: modality,
+                    VerifyCommand: effectiveVerify,
+                    OodaRounds: attempts,
+                    WriteFile: writeFile);
+
+                var abi = await Task.Run(() => engine.Turn(oodaReq), ct).ConfigureAwait(false);
+                string codeOut = !string.IsNullOrWhiteSpace(abi.PatchedCode) ? abi.PatchedCode : (abi.Text ?? string.Empty);
+                string? respId = abi.ResponseId == Hash128.Zero ? null : abi.ResponseId.ToHex();
+                bool verified = abi.OodaVerified && abi.StatusCode == 0;
+                var receipt = new AttemptReceipt(
+                    Attempt: Math.Max(1, abi.OodaRoundsRun),
+                    CandidateId: respId ?? "",
+                    Verified: verified,
+                    Tool: string.IsNullOrWhiteSpace(effectiveVerify) ? "laplace-ooda" : effectiveVerify,
+                    ToolAvailable: !abi.OodaUnverified,
+                    TimedOut: false,
+                    ExitCode: abi.StatusCode,
+                    Stdout: verified ? (abi.Text ?? string.Empty) : string.Empty,
+                    Stderr: verified ? string.Empty : (string.IsNullOrWhiteSpace(abi.Error) ? (abi.Text ?? string.Empty) : abi.Error));
+
+                string? failKind = verified
+                    ? null
+                    : abi.OodaUnverified ? "toolchain_unavailable" : "code_verification_failed";
+
+                return new Result(modality, codeOut, respId, verified, failKind, [receipt], abi, envelopePreset);
+            }
+            finally
+            {
+                if (tempDir is not null)
+                {
+                    try { Directory.Delete(tempDir, recursive: true); }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    {
+                        Laplace.Ops.LaplaceLogging.LogWarning(typeof(CodePlayerService), cleanupFailure, "OODA temp cleanup failed.");
+                    }
+                }
+            }
         }
 
         // Standard iterative forward-pass + Tree-sitter + external toolchain verification loop.

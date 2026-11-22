@@ -143,11 +143,52 @@ internal static partial class CodeToolchain
     internal static string? CandidateFileName(string source, string modality)
         => modality == "json" ? "candidate.json" : ResolveInvocation(source, modality)?.FileName;
 
+    private static string? ResolveWindowsIcx()
+    {
+        const string path = @"C:\Program Files (x86)\Intel\oneAPI\compiler\latest\bin\icx.exe";
+        return OperatingSystem.IsWindows() && File.Exists(path) ? path : null;
+    }
+
+    private static string? ResolveWindowsPy()
+    {
+        const string path = @"C:\Windows\py.exe";
+        return OperatingSystem.IsWindows() && File.Exists(path) ? path : null;
+    }
+
+    internal static bool TryBuildOodaVerifyCommand(string filePath, string modality, out string verifyCmd)
+    {
+        string p = filePath.Replace('\\', '/');
+        verifyCmd = modality switch
+        {
+            "c" => ResolveWindowsIcx() is { } icx
+                ? $"\"{icx.Replace('\\', '/')}\" /clang:-std=c17 /clang:-Wall /clang:-Wextra /clang:-Werror=return-type /clang:-fsyntax-only \"{p}\""
+                : $"cc -std=c17 -Wall -Wextra -Werror=return-type -fsyntax-only \"{p}\"",
+            "cpp" => ResolveWindowsIcx() is { } icxCpp
+                ? $"\"{icxCpp.Replace('\\', '/')}\" /clang:-x /clang:c++ /clang:-std=c++20 /clang:-Wall /clang:-Wextra /clang:-Werror=return-type /clang:-fsyntax-only \"{p}\""
+                : $"c++ -std=c++20 -Wall -Wextra -Werror=return-type -fsyntax-only \"{p}\"",
+            "python" => ResolveWindowsPy() is { } py
+                ? $"\"{py.Replace('\\', '/')}\" -3 -I -m py_compile \"{p}\""
+                : $"python3 -I -m py_compile \"{p}\"",
+            "javascript" => $"node --check \"{p}\"",
+            "bash" => $"bash -n \"{p}\"",
+            "rust" => $"rustc --edition=2021 --crate-type=lib \"{p}\" -o \"{p}.rlib\"",
+            "go" => $"go tool compile \"{p}\"",
+            _ => "",
+        };
+        return verifyCmd.Length > 0;
+    }
+
     private static Invocation? ResolveInvocation(string source, string modality) => modality switch
     {
-        "python" => new("python3", "candidate.py", ["-I", "-m", "py_compile", "candidate.py"]),
-        "c" => new("cc", "candidate.c", ["-std=c17", "-Wall", "-Wextra", "-c", "candidate.c", "-o", "candidate.o"]),
-        "cpp" => new("c++", "candidate.cpp", ["-std=c++20", "-Wall", "-Wextra", "-c", "candidate.cpp", "-o", "candidate.o"]),
+        "python" => ResolveWindowsPy() is { } py
+            ? new(py, "candidate.py", ["-3", "-I", "-m", "py_compile", "candidate.py"])
+            : new("python3", "candidate.py", ["-I", "-m", "py_compile", "candidate.py"]),
+        "c" => ResolveWindowsIcx() is { } icx
+            ? new(icx, "candidate.c", ["/clang:-std=c17", "/clang:-Wall", "/clang:-Wextra", "/clang:-Werror=return-type", "/clang:-fsyntax-only", "candidate.c"])
+            : new("cc", "candidate.c", ["-std=c17", "-Wall", "-Wextra", "-c", "candidate.c", "-o", "candidate.o"]),
+        "cpp" => ResolveWindowsIcx() is { } icxCpp
+            ? new(icxCpp, "candidate.cpp", ["/clang:-x", "/clang:c++", "/clang:-std=c++20", "/clang:-Wall", "/clang:-Wextra", "/clang:-Werror=return-type", "/clang:-fsyntax-only", "candidate.cpp"])
+            : new("c++", "candidate.cpp", ["-std=c++20", "-Wall", "-Wextra", "-c", "candidate.cpp", "-o", "candidate.o"]),
         "javascript" => new("node", "candidate.js", ["--check", "candidate.js"]),
         "typescript" => new("npx", "candidate.ts", ["--no-install", "tsc", "--pretty", "false", "--noEmit", "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext", "candidate.ts"]),
         "rust" => new("rustc", "candidate.rs", ["--edition=2021", "--crate-type=lib", "candidate.rs", "-o", "candidate.rlib"]),
