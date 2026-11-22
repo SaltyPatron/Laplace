@@ -150,7 +150,17 @@ public static unsafe class CodepointPerfcache
         }
     }
 
-    public static string ReceiptHex => Convert.ToHexStringLower(Receipt.ToBytes());
+    public static string ReceiptHex
+    {
+        get
+        {
+            if (!_ready || _recs == null)
+                throw new InvalidOperationException("codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            byte* digest = stackalloc byte[32];
+            LaplaceNative.lp_tier0_fingerprint(_recs, digest);
+            return Convert.ToHexStringLower(new ReadOnlySpan<byte>(digest, 32));
+        }
+    }
 
     public static bool TryLookupCodepoint(Hash128 id, out uint codepoint)
     {

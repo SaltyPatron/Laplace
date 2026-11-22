@@ -131,7 +131,6 @@
     <ItemGroup Condition="'@(_LaplacePerfcacheFile)' != ''">
       <None Include="@(_LaplacePerfcacheFile)"
             Link="share/laplace/%(Filename)%(Extension)"
-            CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
