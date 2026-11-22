@@ -439,9 +439,9 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
         return null;
     }
 
-    private static void SyncNativeEnv(string name, string value)
+    private static void SyncNativeEnv(string name, string value, bool overwrite = false)
     {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)))
+        if (overwrite || string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)))
             Environment.SetEnvironmentVariable(name, value);
         if (s_putenv != null)
         {
@@ -457,6 +457,18 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
 
     private static void EnsureBundledNativeEnvironment()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            var laplaceOut = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_OUT");
+            if (!string.IsNullOrWhiteSpace(laplaceOut) && Directory.Exists(laplaceOut))
+            {
+                var writableTmp = Path.Combine(laplaceOut, "tmp");
+                Directory.CreateDirectory(writableTmp);
+                SyncNativeEnv("TMP", writableTmp, overwrite: true);
+                SyncNativeEnv("TEMP", writableTmp, overwrite: true);
+            }
+        }
+
         string baseDir = AppContext.BaseDirectory;
         (string EnvName, string Candidate, bool IsDir)[] entries =
         [

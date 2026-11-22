@@ -115,7 +115,11 @@ internal sealed class CodePlayerService
 
             if (string.IsNullOrWhiteSpace(effectivePath) && !string.IsNullOrWhiteSpace(effectiveCodeText))
             {
-                tempDir = Path.Combine(Path.GetTempPath(), "laplace-ooda", Guid.NewGuid().ToString("N"));
+                var laplaceOut = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_OUT");
+                string workRoot = !string.IsNullOrWhiteSpace(laplaceOut) && Directory.Exists(laplaceOut)
+                    ? Path.Combine(laplaceOut, "tmp")
+                    : Path.GetTempPath();
+                tempDir = Path.Combine(workRoot, "laplace-ooda", Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempDir);
                 effectivePath = Path.Combine(tempDir, CodeToolchain.CandidateFileName(effectiveCodeText, modality) ?? "candidate.c");
                 await File.WriteAllTextAsync(effectivePath, effectiveCodeText, new UTF8Encoding(false), ct).ConfigureAwait(false);
