@@ -1,49 +1,38 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using Laplace.Native;
+
 namespace Laplace.Engine.Core;
 
-/// <summary>
-/// Governed witness trust classes (engine/manifest/trust_classes.toml), resolved through
-/// the native trust-class law. A class's id is the content id of its label; its prior
-/// seeds the standing of every claim a witness of that class makes. An undeclared class
-/// is a defect at its call site, never a default prior.
-/// </summary>
-public static class TrustClassRegistry
+public static unsafe class TrustClassRegistry
 {
     public static Hash128 Id(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        unsafe
-        {
-            Hash128 id;
-            if (NativeInterop.TrustClassIdNative(name, &id) != 0)
-                throw new ArgumentException(
-                    $"trust class '{name}' is not declared in engine/manifest/trust_classes.toml",
-                    nameof(name));
-            return id;
-        }
+        _ = Prior(name);
+        return Hash128.Text(name);
     }
 
     public static double Prior(Hash128 trustClassId)
     {
-        unsafe
-        {
-            double prior;
-            if (NativeInterop.TrustClassPriorNative(&trustClassId, &prior) != 0)
-                throw new InvalidOperationException(
-                    $"No governed witness prior is registered for trust class {trustClassId}.");
-            return prior;
-        }
+        void* text = NativeTextIdentity.ThreadContext();
+        lp_id nid = trustClassId.ToNative();
+        lp_trust_class* tc = LaplaceNative.lp_trust_class_for_id(text, &nid);
+        if (tc == null)
+            throw new InvalidOperationException($"No governed witness prior is registered for trust class {trustClassId}.");
+        return tc->prior;
     }
 
     public static double Prior(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        unsafe
+        byte[] utf8 = Encoding.UTF8.GetBytes(name + '\0');
+        fixed (byte* p = utf8)
         {
-            double prior;
-            if (NativeInterop.TrustClassPriorByNameNative(name, &prior) != 0)
-                throw new InvalidOperationException(
-                    $"trust class '{name}' is not declared in engine/manifest/trust_classes.toml");
-            return prior;
+            lp_trust_class* tc = LaplaceNative.lp_trust_class_named(p);
+            if (tc == null)
+                throw new InvalidOperationException($"trust class '{name}' is not declared in manifest/trust_classes.toml");
+            return tc->prior;
         }
     }
 }

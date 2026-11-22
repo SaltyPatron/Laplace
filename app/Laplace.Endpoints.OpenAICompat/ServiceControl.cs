@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 using System.ServiceProcess;
 using System.Text.Json.Nodes;
 using Laplace.Endpoints.OpenAICompat.Auth;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;

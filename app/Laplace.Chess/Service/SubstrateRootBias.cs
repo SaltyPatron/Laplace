@@ -1,10 +1,10 @@
 using global::Npgsql;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 

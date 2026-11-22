@@ -1,20 +1,19 @@
+using System.Diagnostics;
 using System.Text;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ops;
 
 namespace Laplace.Chess.Service;
 
+internal sealed record ChessNativeWitnessRequest(string? Witness, string TrustClass, string Path);
+
 /// <summary>
 /// Records a game Laplace played (a play session, a Lichess game, a lab match, a self-play game) the way
-/// every game is recorded: as one PGN file the Engine reads, stated by the runtime witness Laplace at
-/// AppDerived (Laplace-Engine <c>laplace witness</c>; the witness is the trunk [Laplace, the file's trunk]).
+/// every game is recorded: as one PGN file the Engine reads via native <c>laplace witness</c> at
+/// AppDerived (the witness is the trunk [Laplace, the file's trunk]).
 /// The Engine composes the record [line, tags, layer], attests each [position, move, position] with the
 /// result scored for the side that moved, and folds the standings; nothing here composes an identity or
-/// writes a row. A game is admitted after it ends (Sequence 27.9).
-///
-/// Each game is its own file under the laplace-chess source's root (<c>$LAPLACE_DATA/Games/Chess/laplace</c>,
-/// or <c>LAPLACE_CHESS_GAMES</c>), named by the BLAKE3 of its text, so recording the same game again states
-/// the same file under the same lineage and adds no second voice.
+/// writes a substrate row. A game is admitted after it ends (Sequence 27.9).
 /// </summary>
 public sealed class ChessGameRecorder
 {
@@ -26,17 +25,19 @@ public sealed class ChessGameRecorder
 
     private readonly string _connectionString;
     private readonly string _directory;
-    private readonly Func<NativeRecipeRequest, Stream, Stream, CancellationToken, Task<int>> _execute;
+    private readonly Func<ChessNativeWitnessRequest, Stream, Stream, CancellationToken, Task<int>> _execute;
 
     public ChessGameRecorder(string connectionString, string? directory = null)
-        : this(connectionString, directory, static (request, output, error, ct)
-            => NativeRecipeExecution.Configured().ExecuteAsync(request, output, error, ct))
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        _connectionString = connectionString;
+        _directory = directory ?? GamesDirectory();
+        _execute = ExecuteNativeCliAsync;
     }
 
     internal ChessGameRecorder(
         string connectionString, string? directory,
-        Func<NativeRecipeRequest, Stream, Stream, CancellationToken, Task<int>> execute)
+        Func<ChessNativeWitnessRequest, Stream, Stream, CancellationToken, Task<int>> execute)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _connectionString = connectionString;
@@ -81,15 +82,147 @@ public sealed class ChessGameRecorder
     public async Task IngestFileAsync(string? witness, string path, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var request = new NativeRecipeRequest(NativeRecipeMode.Ingest, null, [path],
-            ConnectionInfo: NativeRecipeExecution.ConnectionInfoFromNpgsql(_connectionString),
-            ExpandPrerequisites: false,
-            Witness: witness is null ? null : new NativeRuntimeWitness(witness, TrustClass));
+        var request = new ChessNativeWitnessRequest(witness, TrustClass, path);
         using var output = new MemoryStream();
         using var error = new MemoryStream();
         int code = await _execute(request, output, error, ct).ConfigureAwait(false);
         if (code != 0)
             throw new InvalidOperationException($"The Engine did not record {path} ({code}): {Tail(error)}");
+    }
+
+    private async Task<int> ExecuteNativeCliAsync(
+        ChessNativeWitnessRequest request, Stream output, Stream error, CancellationToken ct)
+    {
+        string exe = ResolveNativeBinary()
+            ?? throw new InvalidOperationException(
+                "Native C engine executable ('laplace') not found; set LAPLACE_ENGINE_EXE or LAPLACE_BUILD.");
+
+        string connInfo = ToLibpqConnInfo(_connectionString);
+        var psi = new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        string fullPath = Path.GetFullPath(request.Path);
+        string rootDir = Path.GetDirectoryName(fullPath) ?? _directory;
+        if (!string.IsNullOrWhiteSpace(request.Witness))
+        {
+            psi.ArgumentList.Add("witness");
+            psi.ArgumentList.Add("-d");
+            psi.ArgumentList.Add(connInfo);
+            psi.ArgumentList.Add("--as");
+            psi.ArgumentList.Add(request.Witness);
+            psi.ArgumentList.Add("--class");
+            psi.ArgumentList.Add(request.TrustClass);
+            psi.ArgumentList.Add("--lineage");
+            psi.ArgumentList.Add(request.Witness);
+            psi.ArgumentList.Add("--root");
+            psi.ArgumentList.Add(rootDir);
+            psi.ArgumentList.Add(fullPath);
+        }
+        else
+        {
+            psi.ArgumentList.Add("ingest");
+            psi.ArgumentList.Add("-d");
+            psi.ArgumentList.Add(connInfo);
+            psi.ArgumentList.Add(fullPath);
+        }
+
+        using var proc = CapturedProcess.Start(psi);
+        CapturedProcess.Result res;
+        try
+        {
+            res = await proc.Completion.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await proc.TerminateAsync().ConfigureAwait(false);
+            throw;
+        }
+        if (!string.IsNullOrEmpty(res.Stdout))
+        {
+            var outBytes = Encoding.UTF8.GetBytes(res.Stdout);
+            await output.WriteAsync(outBytes, ct).ConfigureAwait(false);
+        }
+        if (!string.IsNullOrEmpty(res.Stderr))
+        {
+            var errBytes = Encoding.UTF8.GetBytes(res.Stderr);
+            await error.WriteAsync(errBytes, ct).ConfigureAwait(false);
+        }
+        return res.ExitCode;
+    }
+
+    internal static string ToLibpqConnInfo(string npgsqlConn)
+    {
+        var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsqlConn };
+        var parts = new List<string>();
+        void AddIf(string npgsqlKey, string libpqKey)
+        {
+            if (csb.TryGetValue(npgsqlKey, out var v) && v is not null && !string.IsNullOrWhiteSpace(v.ToString()))
+                parts.Add($"{libpqKey}={v}");
+        }
+        AddIf("Host", "host");
+        AddIf("Port", "port");
+        AddIf("Database", "dbname");
+        AddIf("Username", "user");
+        AddIf("Password", "password");
+        AddIf("SSL Mode", "sslmode");
+        AddIf("Root Certificate", "sslrootcert");
+        return parts.Count > 0 ? string.Join(' ', parts) : LaplaceEngineRuntime.ResolveLibpqConnInfo();
+    }
+
+    internal static string? ResolveNativeBinary()
+    {
+        var explicitExe = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_ENGINE_EXE")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_ENGINE_BIN");
+        var exeName = OperatingSystem.IsWindows() ? "laplace.exe" : "laplace";
+        if (!string.IsNullOrWhiteSpace(explicitExe))
+            return File.Exists(explicitExe.Trim()) ? Path.GetFullPath(explicitExe.Trim()) : null;
+
+        foreach (var probe in new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, exeName),
+            Path.Combine(AppContext.BaseDirectory, "bin", exeName),
+        })
+            if (File.Exists(probe)) return Path.GetFullPath(probe);
+
+        var prefix = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_INSTALL_PREFIX");
+        if (!string.IsNullOrWhiteSpace(prefix))
+        {
+            var installed = Path.Combine(prefix.Trim(), "bin", exeName);
+            if (File.Exists(installed)) return Path.GetFullPath(installed);
+        }
+
+        var declaredBuild = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_BUILD");
+        if (!string.IsNullOrWhiteSpace(declaredBuild))
+        {
+            foreach (var sub in new[]
+            {
+                Path.Combine("Laplace-Engine", "icx-release", exeName),
+                Path.Combine("Laplace-Engine", "icx-release", "src", exeName),
+            })
+            {
+                var candidate = Path.Combine(declaredBuild.Trim(), sub);
+                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+        }
+
+        if (LaplaceInstall.TryDefaultBuildRoot(out var buildRoot))
+        {
+            foreach (var sub in new[]
+            {
+                Path.Combine("Laplace-Engine", "icx-release", exeName),
+                Path.Combine("icx-release", exeName),
+                Path.Combine("engine", exeName),
+            })
+            {
+                var candidate = Path.Combine(buildRoot, sub);
+                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+        }
+
+        return null;
     }
 
     private static string Tail(MemoryStream error)

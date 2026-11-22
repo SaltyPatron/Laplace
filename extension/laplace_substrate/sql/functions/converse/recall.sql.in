@@ -1,4 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.recall(p_prompt text, p_context bytea DEFAULT NULL)
-    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
-    LANGUAGE C STABLE
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_recall';

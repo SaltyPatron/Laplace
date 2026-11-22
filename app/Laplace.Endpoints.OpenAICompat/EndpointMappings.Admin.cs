@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 using Laplace.Agents;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;

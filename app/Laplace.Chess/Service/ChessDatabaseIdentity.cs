@@ -1,5 +1,5 @@
 using global::Npgsql;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 
 namespace Laplace.Chess.Service;
 

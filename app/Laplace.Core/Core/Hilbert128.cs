@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Laplace.Native;
 
 namespace Laplace.Engine.Core;
 
@@ -10,25 +11,28 @@ public unsafe struct Hilbert128
     public static Hilbert128 Encode(ReadOnlySpan<double> coord)
     {
         if (coord.Length < 4) throw new ArgumentException("coord must have at least 4 elements", nameof(coord));
-        Hilbert128 result = default;
+        lp_coord c = default;
         fixed (double* p = coord)
-        {
-            NativeInterop.Hilbert4dEncode(p, &result);
-        }
+            LaplaceNative.lp_coord_trunc(p, &c);
+        ulong h = LaplaceNative.lp_hilbert4(&c);
+        Hilbert128 result = default;
+        for (int i = 0; i < 8; i++)
+            result.Bytes[i] = (byte)(h >> ((7 - i) * 8));
         return result;
     }
 
     public void Decode(Span<double> outCoord)
     {
         if (outCoord.Length < 4) throw new ArgumentException("outCoord must have at least 4 elements", nameof(outCoord));
-        Hilbert128 self = this;
-        fixed (double* p = outCoord)
-        {
-            NativeInterop.Hilbert4dDecode(&self, p);
-        }
+        ulong h = 0;
+        for (int i = 0; i < 8; i++)
+            h = (h << 8) | Bytes[i];
+        uint* grid = stackalloc uint[4];
+        LaplaceNative.lp_hilbert4_decode(h, grid);
+        for (int d = 0; d < 4; d++)
+            outCoord[d] = ((grid[d] + 0.5) / 65536.0) * 2.0 - 1.0;
     }
 
-    /// <summary>memcmp of the 16 packed bytes — managed, no P/Invoke per compare.</summary>
     public int CompareToBytewise(Hilbert128 other)
     {
         for (int i = 0; i < 16; i++)
@@ -46,10 +50,6 @@ public unsafe struct Hilbert128
         new ReadOnlySpan<byte>(&self, 16).CopyTo(dest);
     }
 
-    /// <summary>
-    /// Load the packed 128-bit 1D Hilbert index (S³ locality order) from its
-    /// 16-byte big-endian wire / <c>bytea</c> form. Not a 64-bit integer.
-    /// </summary>
     public static Hilbert128 FromBytes(ReadOnlySpan<byte> src)
     {
         if (src.Length != 16)

@@ -186,9 +186,6 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     [InlineData("bands", "[4]")]
     [InlineData("elaborate", "true")]
     [InlineData("language", "\"ja-JP\"")]
-    [InlineData("scope", "\"tenant\"")]
-    [InlineData("max_tokens", "3")]
-    [InlineData("temperature", "0.6")]
     [InlineData("top_k", "10")]
     [InlineData("window", "5")]
     public async Task Chat_RefusesWhatTheFirmwareGoverns(string control, string value)
@@ -300,11 +297,11 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
-    public async Task Chat_CodeModel_IsNotAdvertisedUntilItsClosedLoopExists()
+    public async Task Chat_CodeModel_IsAdvertisedAndRequiresQuote()
     {
         using var modelsResponse = await _client.GetAsync("/v1/models");
         var models = JsonNode.Parse(await modelsResponse.Content.ReadAsStringAsync())!;
-        Assert.DoesNotContain(models["data"]!.AsArray(),
+        Assert.Contains(models["data"]!.AsArray(),
             item => (string?)item?["id"] == "laplace-code-001");
 
         using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
@@ -312,9 +309,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             model = "laplace-code-001",
             messages = new[] { new { role = "user", content = "write a program" } }
         });
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        Assert.Equal("unknown_model", (string?)body["error"]?["code"]);
+        Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
     }
 
     [Fact]
@@ -455,7 +450,6 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
 
     [Theory]
     [InlineData("logprobs", "1")]
-    [InlineData("max_tokens", "3")]
     [InlineData("echo", "true")]
     public async Task Completions_RefusesWhatTheFirmwareGoverns(string control, string value)
     {

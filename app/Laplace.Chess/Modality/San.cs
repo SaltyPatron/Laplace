@@ -4,7 +4,7 @@ public static class San
 {
     public static ChessMove? Resolve(Board b, IReadOnlyList<ChessMove> legal, string san)
     {
-        if (!b.Rules.IsStandard)
+        if (!b.Rules.IsStandard && NativeChessRules.Supports(b.Rules))
         {
             var move = NativeChessRules.Resolve(b, san);
             return move is { } m && legal.Contains(m) ? m : null;
@@ -32,7 +32,7 @@ public static class San
     /// </summary>
     public static ChessMove? Resolve(Board b, string san, List<ChessMove> scratch)
     {
-        if (!b.Rules.IsStandard) return NativeChessRules.Resolve(b, san);
+        if (!b.Rules.IsStandard && NativeChessRules.Supports(b.Rules)) return NativeChessRules.Resolve(b, san);
         if (string.IsNullOrWhiteSpace(san)) return null;
         string t = Strip(san.Trim());
         if (t.Length == 0) return null;

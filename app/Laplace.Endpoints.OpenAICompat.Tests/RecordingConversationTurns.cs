@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Laplace.Decomposers.Abstractions;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;

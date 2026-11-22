@@ -1,4 +1,5 @@
 import type { ClaimLeaderRow, QueryResult } from '../../query/types';
+import { inspectUnicodeFacets } from './tier0Flags';
 import type { BrowseHit } from './types';
 
 export interface KnowledgeResult {
@@ -8,6 +9,9 @@ export interface KnowledgeResult {
   entityId?: string;
   topicId?: string;
   tier?: number;
+  generalCategory?: string | null;
+  script?: string | null;
+  salience?: number | null;
   methods: string[];
   observations: { method: string; standing?: number | null; witnesses?: number | null }[];
   claim?: ClaimLeaderRow;
@@ -28,10 +32,27 @@ export async function keyedAnswers(result: QueryResult): Promise<KnowledgeAnswer
 /** Identical replies share a row; every method's measurements remain separate. */
 export function collectKnowledge(hits: BrowseHit[], answers: KnowledgeAnswers[]): KnowledgeResult[] {
   const rows = new Map<string, KnowledgeResult>();
-  for (const hit of hits) rows.set('entity:' + hit.id_hex, {
-    key: 'entity:' + hit.id_hex, entityId: hit.id_hex, text: hit.label, kind: hit.type || 'entity', tier: hit.tier,
-    methods: [hit.match_kind], observations: [{ method: hit.match_kind, standing: hit.eff_mu, witnesses: hit.witnesses }],
-  });
+  for (const hit of hits) {
+    const unicode = inspectUnicodeFacets({
+      text: hit.label,
+      tier: hit.tier,
+      flags: hit.flags,
+      generalCategory: hit.general_category,
+      script: hit.script,
+    });
+    rows.set('entity:' + hit.id_hex, {
+      key: 'entity:' + hit.id_hex,
+      entityId: hit.id_hex,
+      text: hit.label,
+      kind: hit.type || 'entity',
+      tier: hit.tier,
+      generalCategory: unicode.generalCategory,
+      script: unicode.script,
+      salience: hit.salience ?? null,
+      methods: [hit.match_kind],
+      observations: [{ method: hit.match_kind, standing: hit.eff_mu, witnesses: hit.witnesses }],
+    });
+  }
   for (const result of answers) for (const [index, answer] of result.rows.entries()) {
     if (!answer.reply.trim()) continue;
     // Replies are text, not canonical entity IDs. A topic's identity must not

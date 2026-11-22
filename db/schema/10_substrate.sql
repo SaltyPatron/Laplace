@@ -10,18 +10,14 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- This extension owns the fixed-width blake3 type and canonical public tables.
 CREATE EXTENSION IF NOT EXISTS laplace WITH SCHEMA public;
 
-CREATE EXTENSION IF NOT EXISTS laplace_geom;
-
-CREATE EXTENSION IF NOT EXISTS laplace_substrate;
-
 -- Per-statement execution and planning time. The library is loaded through
--- shared_preload_libraries (CpuTopologyCommands.EmitPgTuning) next to laplace_substrate,
+-- shared_preload_libraries (CpuTopologyCommands.EmitPgTuning) next to laplace,
 -- whose perfcache blobs are mapped at preload; loading it requires a postmaster restart.
 -- The extension can be created before that restart; the view then returns no rows.
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- =============================================================================
--- Ops CSV Logs & Chess Drops Foreign Tables (file_fdw)
+-- Ops CSV Logs, Substrate Counts & API Catalog
 -- =============================================================================
 
 CREATE SCHEMA IF NOT EXISTS ops;
@@ -100,7 +96,74 @@ BEGIN
     END LOOP;
 END $$;
 
--- ops.repoint_app_log(text) and ops.app_log() are owned by the versioned substrate extension.
+CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_role text, p_dir text)
+    RETURNS text LANGUAGE plpgsql AS $repoint_role$
+BEGIN
+    IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
+        RAISE EXCEPTION 'Unknown application log role: %', p_role;
+    END IF;
+    IF p_dir IS NULL OR btrim(p_dir) = '' THEN
+        RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
+    END IF;
+    EXECUTE format('ALTER FOREIGN TABLE ops.%I OPTIONS (SET filename %L)',
+        'app_log_' || p_role, rtrim(replace(p_dir, chr(92), '/'), '/') || '/laplace-' || p_role || '.csv');
+    RETURN format('repointed %s log at %s', p_role, p_dir);
+END $repoint_role$;
+
+CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
+    RETURNS text LANGUAGE plpgsql AS $repoint$
+DECLARE r text; n int := 0;
+BEGIN
+    IF p_dir IS NULL OR btrim(p_dir) = '' THEN
+        RAISE EXCEPTION 'ops.repoint_app_log: a log directory is required';
+    END IF;
+    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
+        PERFORM ops.repoint_app_log(r, p_dir);
+        n := n + 1;
+    END LOOP;
+    RETURN format('repointed %s role tables at %s', n, p_dir);
+END $repoint$;
+
+CREATE OR REPLACE FUNCTION ops.app_log(p_role text, p_since timestamptz DEFAULT NULL,
+    p_contains text DEFAULT NULL, p_limit integer DEFAULT 200)
+    RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
+                  category text, message text, detail text)
+    LANGUAGE plpgsql STABLE AS $source_logs$
+BEGIN
+    IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
+        RAISE EXCEPTION 'Unknown application log role: %', p_role USING ERRCODE='22023';
+    END IF;
+    IF p_limit IS NULL OR p_limit < 0 THEN
+        RAISE EXCEPTION 'Application log limit must be zero or positive' USING ERRCODE='22023';
+    END IF;
+    RETURN QUERY EXECUTE format(
+        'SELECT log_time,application_name,error_severity,category,message,detail FROM ops.%I
+         WHERE ($1 IS NULL OR log_time >= $1)
+           AND ($2 IS NULL OR strpos(message,$2) > 0 OR strpos(detail,$2) > 0)
+         ORDER BY log_time DESC LIMIT $3', 'app_log_' || p_role)
+        USING p_since, p_contains, p_limit;
+END $source_logs$;
+
+CREATE OR REPLACE FUNCTION ops.app_log()
+    RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
+                  category text, message text, detail text)
+    LANGUAGE plpgsql STABLE AS $logs$
+DECLARE r text; available integer := 0;
+BEGIN
+    FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
+        BEGIN
+            RETURN QUERY EXECUTE 'SELECT log_time,application_name,error_severity,category,message,detail FROM ops.'
+                || quote_ident('app_log_' || r);
+            available := available + 1;
+        EXCEPTION WHEN undefined_file OR undefined_table THEN
+            RAISE WARNING 'Application log for role % is unavailable [%]: %', r, SQLSTATE, SQLERRM;
+        END;
+    END LOOP;
+    IF available = 0 THEN
+        RAISE EXCEPTION USING ERRCODE='55000',
+            MESSAGE='No application log source is readable. Configure its log directory and PostgreSQL file access.';
+    END IF;
+END $logs$;
 
 -- ops.chess_drops exposes laplace-chess-drops.csv (LaplaceInstall.OpsLogDirectory), one row
 -- per CHESS_DROPPED reason written by ChessDropLedger, through the ops_log_files server.
@@ -134,5 +197,89 @@ BEGIN
 END;
 $$;
 
--- ops.chess_drops() is owned by the versioned substrate extension.
+CREATE OR REPLACE FUNCTION ops.chess_drops()
+    RETURNS TABLE(log_time timestamptz, source_name text, reason text, dropped bigint,
+                  kept bigint, seen bigint, drop_pct double precision)
+    LANGUAGE plpgsql STABLE AS $drops$
+BEGIN
+    RETURN QUERY SELECT f.log_time, f.source_name, f.reason, f.dropped, f.kept, f.seen, f.drop_pct
+        FROM ops.chess_drops_ft f;
+EXCEPTION WHEN undefined_file OR undefined_table THEN
+    RAISE WARNING 'Chess drop log is unavailable [%]: %', SQLSTATE, SQLERRM;
+END $drops$;
 
+CREATE OR REPLACE FUNCTION ops.attestation_count()
+RETURNS bigint LANGUAGE plpgsql STABLE AS $$
+DECLARE measured bigint;
+BEGIN
+    IF to_regclass('public.attestation') IS NULL THEN
+        RETURN NULL;
+    END IF;
+    EXECUTE 'SELECT public.laplace_attestation_count()' INTO measured;
+    RETURN measured;
+END $$;
+
+CREATE OR REPLACE FUNCTION ops.substrate_counts()
+    RETURNS TABLE(metric text, value bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH targets(metric, relid, ordinal) AS (
+        SELECT 'entities(ESTIMATE)'::text, to_regclass('public.entity'), 1
+        UNION ALL
+        SELECT 'physicalities(ESTIMATE)', to_regclass('public.physicality'), 2
+        UNION ALL
+        SELECT 'consensus(ESTIMATE)', to_regclass('public.consensus'), 4
+    ), estimates AS (
+        SELECT t.metric, COALESCE(sum(CASE
+            WHEN s.n_live_tup > 0 OR s.n_tup_ins > 0 OR s.n_tup_upd > 0 OR s.n_tup_del > 0
+              OR GREATEST(s.last_analyze, s.last_autoanalyze, s.last_vacuum, s.last_autovacuum) IS NOT NULL
+            THEN s.n_live_tup
+            ELSE GREATEST(c.reltuples, 0)::bigint
+        END), 0)::bigint AS value, t.ordinal
+        FROM targets t
+        LEFT JOIN LATERAL pg_partition_tree(t.relid) p ON true
+        JOIN pg_class c ON c.oid = COALESCE(p.relid, t.relid)
+        LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
+        WHERE p.isleaf OR p.relid IS NULL
+        GROUP BY t.metric, t.ordinal
+    ), totals AS (
+        SELECT * FROM estimates
+        UNION ALL SELECT 'attestations(MEASURED)', ops.attestation_count(), 3
+    )
+    SELECT metric, value FROM totals ORDER BY ordinal;
+END;
+
+CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
+    RETURNS TABLE(name text, args text, returns text, kind text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT CASE WHEN n.nspname = 'public' THEN p.proname::text
+                ELSE n.nspname || '.' || p.proname END AS name,
+           pg_get_function_arguments(p.oid) AS args,
+           pg_get_function_result(p.oid) AS returns,
+           CASE p.prokind WHEN 'p' THEN 'procedure'
+                          ELSE 'function' END AS kind
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE p.prokind IN ('f', 'p')
+      AND p.prorettype NOT IN (
+          'internal'::regtype,
+          'trigger'::regtype,
+          'event_trigger'::regtype,
+          'fdw_handler'::regtype,
+          'index_am_handler'::regtype,
+          'table_am_handler'::regtype,
+          'tsm_handler'::regtype,
+          'language_handler'::regtype
+      )
+      AND NOT ('internal'::regtype = ANY (p.proargtypes))
+      AND p.proname NOT LIKE '\_%' ESCAPE '\'
+      AND (
+            n.nspname = 'ops'
+            OR (n.nspname = 'public' AND (p.proname LIKE 'laplace\_%' ESCAPE '\' OR p.proname LIKE 'blake3%' ESCAPE '\'))
+          )
+      AND (p_like IS NULL
+           OR p.proname ILIKE '%'||p_like||'%'
+           OR (n.nspname || '.' || p.proname) ILIKE '%'||p_like||'%')
+    ORDER BY 1, 2;
+END;

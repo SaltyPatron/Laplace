@@ -76,6 +76,8 @@ public static class LaplaceInstall
 
     public static string EndpointBaseUrl => $"http://127.0.0.1:{EndpointPort}";
 
+    public static bool TryFindRepoRoot(out string root) => TryRepoRoot(out root);
+
     public static bool TryRepoRoot(out string root)
     {
         var dir = AppContext.BaseDirectory;
@@ -105,7 +107,7 @@ public static class LaplaceInstall
     // distinguish that output from the checkout whose path is stamped at build time.
     private static bool IsSourceRoot(string directory) =>
         File.Exists(Path.Combine(directory, "app", "Laplace.slnx"))
-        && File.Exists(Path.Combine(directory, "engine", "CMakeLists.txt"));
+        && Directory.Exists(Path.Combine(directory, "db", "schema"));
 
     /// <summary>
     /// The application's own database: accounts, sessions, API keys, billing, the <c>app</c> schema.

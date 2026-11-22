@@ -1,5 +1,0 @@
--- One ordered standing range per exact relation and direction, so native
--- COUPLE seeks plane by plane: a populous plane's tail is never scanned and a
--- sparse plane is never lost to a global top-K.
-CREATE INDEX IF NOT EXISTS consensus_subject_type_eff_mu_btree ON consensus (subject_id, type_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS consensus_object_type_eff_mu_btree ON consensus (object_id, type_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;

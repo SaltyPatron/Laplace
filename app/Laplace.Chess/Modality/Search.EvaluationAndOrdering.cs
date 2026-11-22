@@ -143,7 +143,7 @@ public sealed partial class Search
             int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
                            + (_activePositionEvaluator?.Evaluate(b) ?? 0);
             if (_continuations is not null
-                && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var seeded))
+                && _continuations.TryGet(ChessEngineIdentity.PositionId(b), out var seeded))
                 standPat += seeded.LeafNudge(standPat);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
@@ -171,7 +171,7 @@ public sealed partial class Search
         {
             bool resetRepetition = ResetsRepetition(b, m);
             var undo = MoveApply.MakeWithUndo(b, m);
-            Hash128 childId = ChessPositionIdentity.PositionId(b);
+            Hash128 childId = ChessEngineIdentity.PositionId(b);
             _repetitionHistory.Add(childId);
             int childRepetitionStart = resetRepetition
                 ? _repetitionHistory.Count - 1

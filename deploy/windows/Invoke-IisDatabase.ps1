@@ -96,7 +96,7 @@ function PrepareInPlaceExtensionUpdates {
     $extDir=Get-SubstrateExtensionDirectory
     if(-not $extDir -or -not (Test-Path -LiteralPath $extDir -PathType Container)){return}
     Get-ChildItem -LiteralPath $extDir -Filter 'laplace*--*--*.sql' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+    foreach($ext in @('laplace')){
         $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
         $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
         if(-not $installed -or -not $avail -or $installed -ceq $avail){continue}
@@ -115,7 +115,7 @@ function PrepareInPlaceExtensionUpdates {
 function ExtensionDrift {
     if($Database -ne 'substrate' -or $Operation -notin 'migrate','repair'){return}
     if((Query "SELECT count(*) FROM pg_database WHERE datname='$selected';") -ne '1'){return}
-    foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+    foreach($ext in @('laplace')){
         $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
         $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
         if(-not $installed -or -not $avail -or $installed -ceq $avail){continue}
@@ -208,7 +208,7 @@ try {
             if((Query "SELECT count(*) FROM pg_roles WHERE rolname='$requiredRole';") -ne '1'){throw "Declared role $requiredRole is missing; configure the installation roles before database maintenance."}
         }
         if($Database -eq 'substrate'){
-            foreach($extension in 'postgis','laplace','laplace_geom','laplace_substrate','file_fdw','pg_stat_statements'){
+            foreach($extension in 'postgis','laplace','file_fdw','pg_stat_statements'){
                 if((Query "SELECT count(*) FROM pg_available_extensions WHERE name='$extension';") -ne '1'){throw "Required substrate extension $extension is unavailable in this PostgreSQL installation."}
             }
         }
@@ -232,7 +232,7 @@ try {
         {$_ -in 'migrate','repair' -and -not $stale} {
             if($Database -eq 'substrate' -and (Query "SELECT count(*) FROM pg_database WHERE datname='$selected';") -eq '1'){
                 $extDir=Get-SubstrateExtensionDirectory
-                foreach($ext in 'laplace','laplace_geom','laplace_substrate'){
+                foreach($ext in @('laplace')){
                     $installed=Query "SELECT extversion FROM pg_extension WHERE extname='$ext';" $selected
                     $avail=Query "SELECT default_version FROM pg_available_extensions WHERE name='$ext';" $selected
                     if($installed -and $avail -and $installed -cne $avail){
@@ -313,7 +313,7 @@ try {
             $null=Query "SET ROLE `"$role`"; SELECT 1 FROM app.billing_quotes LIMIT 1; SELECT 1 FROM app.users LIMIT 1; RESET ROLE;" $selected
         }else{
             Migrate 'substrate-status'
-            $null=Query "SET ROLE `"$role`"; SELECT EXISTS (SELECT FROM laplace.entities), EXISTS (SELECT FROM laplace.consensus); SELECT * FROM ops.substrate_counts(); SELECT public.blake3_send(public.laplace_text_id('the')); RESET ROLE;" $selected
+            $null=Query "SET ROLE `"$role`"; SELECT EXISTS (SELECT FROM public.entity), EXISTS (SELECT FROM public.consensus); SELECT * FROM ops.substrate_counts(); SELECT public.blake3_send(public.laplace_text_id('the')); RESET ROLE;" $selected
             $receipt.substrate_runtime_access_verified=$true
         }
     }

@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 

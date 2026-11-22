@@ -1,9 +1,16 @@
-using Laplace.Decomposers.Model;
 using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed record FoundryExportResult(string OutputPath, long Bytes, string Format);
+internal sealed record FoundryExportResult(
+    string OutputPath,
+    long Bytes,
+    string Format,
+    uint NVocab = 0,
+    uint NEdges = 0,
+    uint HiddenDim = 0,
+    ulong RawWeightBytesRetained = 0,
+    string Scheme = "laplace-blake3-v1");
 
 internal interface IFoundryExportService
 {
@@ -13,11 +20,20 @@ internal interface IFoundryExportService
         string? tokenizerDir,
         string format,
         string? filename,
-        CancellationToken ct);
+        CancellationToken ct,
+        EngineAuthorityScope? authority = null,
+        string? modelName = null,
+        uint maxVocab = 0,
+        uint hiddenDim = 0,
+        uint numLayers = 0,
+        uint numHeads = 0,
+        bool f16Weights = true);
 }
 
 /// <summary>
-/// Uses the same native construction and codecs as the operator CLI.
+/// Exports clean <c>laplace-blake3-v1</c> GGUF/SafeTensors checkpoints natively in-process
+/// via <see cref="ILaplaceEngineRuntime.MoldCheckpoint"/> (<c>lp_engine_mold_checkpoint</c>)
+/// with <c>raw_weight_bytes_retained = 0</c>.
 /// </summary>
 internal sealed class NativeFoundryExportService : IFoundryExportService
 {
@@ -25,6 +41,19 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
     internal static readonly HashSet<string> WritableFormats =
         new(StringComparer.OrdinalIgnoreCase) { "gguf", "safetensors" };
 
+    private readonly EngineRuntimeService _runtime;
+    private readonly IRecipeCompileService _recipes;
+
+    public NativeFoundryExportService() : this(new EngineRuntimeService(), new RecipeCompileService()) { }
+
+    public NativeFoundryExportService(ILaplaceEngineRuntime engine, IRecipeCompileService? recipes = null)
+        : this(new EngineRuntimeService(engine), recipes) { }
+
+    public NativeFoundryExportService(EngineRuntimeService runtime, IRecipeCompileService? recipes = null)
+    {
+        _runtime = runtime;
+        _recipes = recipes ?? new RecipeCompileService();
+    }
 
     public async Task<FoundryExportResult> ExportAsync(
         string? recipeJson,
@@ -32,9 +61,15 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
         string? tokenizerDir,
         string format,
         string? filename,
-        CancellationToken ct)
+        CancellationToken ct,
+        EngineAuthorityScope? authority = null,
+        string? modelName = null,
+        uint maxVocab = 0,
+        uint hiddenDim = 0,
+        uint numLayers = 0,
+        uint numHeads = 0,
+        bool f16Weights = true)
     {
-        // Only formats in WritableFormats are accepted; the default is gguf.
         string requested = (format ?? "").Trim();
         if (requested.Length == 0) requested = "gguf";
         if (!WritableFormats.Contains(requested))
@@ -45,45 +80,73 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
                 nameof(format));
         var ext = requested.ToLowerInvariant();
 
-        var workDir = Path.Combine(Path.GetTempPath(), $"laplace-export-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(workDir);
+        string effectiveModel = string.IsNullOrWhiteSpace(modelName) ? "laplace-molded" : modelName.Trim();
+        uint effHidden = hiddenDim;
+        uint effLayers = numLayers;
 
-        string recipePath;
-        var args = new List<string> { "substrate", "--format", ext };
+        if (!string.IsNullOrWhiteSpace(recipeJson))
+        {
+            var compiled = _recipes.Compile(recipeJson);
+            if (string.IsNullOrWhiteSpace(modelName))
+                effectiveModel = compiled.Name;
+            if (effHidden == 0 && uint.TryParse(compiled.HiddenSize, out var parsedHidden))
+                effHidden = parsedHidden;
+            if (effLayers == 0 && compiled.NumLayers > 0)
+                effLayers = (uint)compiled.NumLayers;
+        }
+        else if (string.IsNullOrWhiteSpace(recipeIdPrefix))
+        {
+            throw new ArgumentException("Field 'recipe' is required unless 'recipe_id_prefix' is set.");
+        }
 
-        if (!string.IsNullOrWhiteSpace(recipeIdPrefix))
-        {
-            if (string.IsNullOrWhiteSpace(tokenizerDir) || !Directory.Exists(tokenizerDir))
-                throw new ArgumentException("Field 'tokenizer_dir' is required when using 'recipe_id_prefix'.");
-            args.Add("--recipe-from");
-            args.Add(recipeIdPrefix.Trim());
-            args.Add("--tokenizer");
-            args.Add(Path.GetFullPath(tokenizerDir.Trim()));
-            recipePath = "";
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(recipeJson))
-                throw new ArgumentException("Field 'recipe' is required unless 'recipe_id_prefix' is set.");
-            recipePath = Path.Combine(workDir, "recipe.json");
-            await File.WriteAllTextAsync(recipePath, recipeJson.Trim(), ct);
-            args.Add(recipePath);
-        }
+        var engine = _runtime.Runtime
+            ?? throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(_runtime.Unavailable)
+                    ? "Native Laplace engine runtime is unavailable."
+                    : "Native Laplace engine runtime unavailable: " + _runtime.Unavailable);
 
         var outputName = string.IsNullOrWhiteSpace(filename) ? $"laplace-export.{ext}" : filename.Trim();
         if (Path.GetFileName(outputName) != outputName || outputName is "." or "..")
             throw new ArgumentException("filename must be a filename inside the export directory.", nameof(filename));
+
+        var workDir = Path.Combine(Path.GetTempPath(), $"laplace-export-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workDir);
         var outputPath = Path.Combine(workDir, outputName);
-        args.Add(outputPath);
+
+        var moldReq = new EngineMoldRequest(
+            OutPath: outputPath,
+            ModelName: effectiveModel,
+            Authority: authority,
+            MaxVocab: maxVocab,
+            HiddenDim: effHidden,
+            NLayers: effLayers,
+            NHeads: numHeads,
+            F16Weights: f16Weights);
 
         ct.ThrowIfCancellationRequested();
-        int status = await FoundrySynthesis.SynthesizeAsync(args.ToArray());
+        var res = await Task.Run(() => engine.MoldCheckpoint(moldReq), ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
-        if (status != 0) throw new InvalidOperationException($"Native model export failed (status {status}).");
-        if (!File.Exists(outputPath) && !Directory.Exists(outputPath))
-            throw new InvalidOperationException("Native model export produced no artifact.");
-        var bytes = File.Exists(outputPath) ? new FileInfo(outputPath).Length
-            : Directory.EnumerateFiles(outputPath, "*", SearchOption.AllDirectories).Sum(p => new FileInfo(p).Length);
-        return new FoundryExportResult(outputPath, bytes, ext);
+
+        if (res.StatusCode != 0)
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(res.Error) ? $"Native mold export failed (status {res.StatusCode})." : res.Error);
+
+        if (res.RawWeightBytesRetained != 0)
+            throw new InvalidOperationException(
+                $"Synthesis invariant violated: raw_weight_bytes_retained={res.RawWeightBytesRetained} (must be 0).");
+
+        if (!File.Exists(outputPath))
+            throw new InvalidOperationException("Native mold export produced no artifact.");
+
+        long bytes = new FileInfo(outputPath).Length;
+        return new FoundryExportResult(
+            OutputPath: outputPath,
+            Bytes: bytes,
+            Format: ext,
+            NVocab: res.NVocab,
+            NEdges: res.NEdges,
+            HiddenDim: res.HiddenDim,
+            RawWeightBytesRetained: res.RawWeightBytesRetained,
+            Scheme: "laplace-blake3-v1");
     }
 }

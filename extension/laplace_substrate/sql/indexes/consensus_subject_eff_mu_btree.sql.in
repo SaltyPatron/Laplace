@@ -1,8 +1,0 @@
--- consensus_subject: the subject star in standing order. Every star read
--- filters on subject_id; bounded reads take the top of it by the conservative
--- estimate (rating - 2*rd), and INCLUDE makes both full and top-k star reads
--- index-only. It subsumes consensus_subject_eff_mu_btree, which shares its
--- ordered prefix.
-CREATE INDEX IF NOT EXISTS consensus_subject
-    ON consensus (subject_id, ((rating - 2*rd)) DESC)
-    INCLUDE (object_id, rating, rd);

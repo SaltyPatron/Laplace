@@ -1,2 +1,0 @@
-#include "sqldefines.h"
-#include "generated/install_chain.sql.in"

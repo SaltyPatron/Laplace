@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.BillingPostgres;

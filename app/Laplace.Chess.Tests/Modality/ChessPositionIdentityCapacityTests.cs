@@ -4,8 +4,8 @@ using Xunit;
 namespace Laplace.Modality.Chess.Tests;
 
 /// <summary>
-/// The atom buffer is sized by the board (64 squares), not by legal chess (32 pieces):
-/// FillAtoms emits one atom per occupied square of whatever board it is given.
+/// Engine position identity handles boards with more occupied squares than legal chess (64 squares)
+/// as well as full variant state without fixed buffer overflows.
 /// </summary>
 public sealed class ChessPositionIdentityCapacityTests
 {
@@ -28,13 +28,18 @@ public sealed class ChessPositionIdentityCapacityTests
         var board = Board.FromFen(fen);
         Assert.Equal(occupied, Bitboards.Count(board.CopyBitboards().Occupied));
 
-        var id = ChessPositionIdentity.PositionId(board);
+        var id = ChessEngineIdentity.PositionId(board);
         Assert.NotEqual(default, id);
     }
 
     [Fact]
-    public void MaxAtoms_CoversHeaderPlusEverySquare()
+    public void PositionId_HandlesFullBoardWithVariantExtras()
     {
-        Assert.True(ChessPositionIdentity.MaxAtoms >= ChessPositionIdentity.MaxHeaderAtoms + 64 + 10 + 64);
+        var board = Board.FromFen(FullBoardFen, ChessVariants.Crazyhouse);
+        board.Promoted = ulong.MaxValue;
+        board.Pockets[0] = 64;
+        board.Checks[0] = 2;
+        board.Checks[1] = 1;
+        Assert.NotEqual(default, ChessEngineIdentity.PositionId(board));
     }
 }

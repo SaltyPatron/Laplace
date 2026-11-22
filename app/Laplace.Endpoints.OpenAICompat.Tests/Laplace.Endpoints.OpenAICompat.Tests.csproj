@@ -15,7 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Laplace.Data\Laplace.Data.csproj" />
     <ProjectReference Include="..\Laplace.Endpoints.OpenAICompat\Laplace.Endpoints.OpenAICompat.csproj" />
+    <ProjectReference Include="..\Laplace.Hosting\Laplace.Hosting.csproj" />
+    <ProjectReference Include="..\Laplace.Mcp\Laplace.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

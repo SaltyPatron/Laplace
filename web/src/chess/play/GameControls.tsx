@@ -13,24 +13,18 @@ export interface GameControlsProps {
   status: string;
   motifs: string[];
   err: string | null;
-  fen: string;
   autoReply: boolean;
   flip: boolean;
-  searchDepth: number;
-  useSubstrate: boolean;
-  recordToSubstrate: boolean;
   evalMode: boolean;
   onNewGame: () => void;
   onBotMove: () => void;
   onAutoReply: (v: boolean) => void;
   onFlip: (v: boolean) => void;
-  onDepth: (v: number) => void;
-  onSubstrate: (v: boolean) => void;
-  onRecordToSubstrate: (v: boolean) => void;
   onEvalMode: (v: boolean) => void;
 }
 
 export function GameControls(p: GameControlsProps) {
+  const hasFeedback = !!p.err || p.motifs.length > 0;
   return (
     <Panel className={styles.panel}>
       <div className={styles.statusBlock}>
@@ -45,35 +39,63 @@ export function GameControls(p: GameControlsProps) {
         >
           {p.statusText}
         </div>
-        <div className={styles.feedbackSlot} aria-live="polite">
-          {p.err ? (
-            <ErrorText role="alert">{p.err}</ErrorText>
-          ) : (
-            <div className={styles.motifs} aria-hidden={p.motifs.length === 0}>
-              {p.motifs.map((m) => (
-                <span key={m} className={styles.motifChip}>{MOTIF_LABEL[m] ?? m}</span>
-              ))}
-            </div>
-          )}
-        </div>
+        {hasFeedback && (
+          <div className={styles.feedbackSlot} aria-live="polite">
+            {p.err ? (
+              <ErrorText role="alert">{p.err}</ErrorText>
+            ) : (
+              <div className={styles.motifs}>
+                {p.motifs.map((m) => (
+                  <span key={m} className={styles.motifChip}>{MOTIF_LABEL[m] ?? m}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      <div className={shared.ctlRow}>
+      <div className={styles.actionRow}>
         <Button onClick={p.onNewGame}>New game</Button>
-        <Button onClick={p.onBotMove} disabled={p.busy || p.over}>Bot move</Button>
+        <Button variant="ghost" onClick={p.onBotMove} disabled={p.busy || p.over}>Bot move</Button>
+      </div>
+      <div className={styles.toggleRow}>
         <Checkbox
           id="auto-reply"
           checked={p.autoReply}
           onChange={(e) => p.onAutoReply(e.target.checked)}
-          label="bot auto-replies"
+          label="Auto-reply"
         />
         <Checkbox
           id="flip-board"
           checked={p.flip}
           onChange={(e) => p.onFlip(e.target.checked)}
-          label="flip"
+          label="Flip board"
+        />
+        <Checkbox
+          id="eval-mode"
+          checked={p.evalMode}
+          onChange={(e) => p.onEvalMode(e.target.checked)}
+          label="Eval mode"
         />
       </div>
-      <div className={shared.ctlRow}>
+    </Panel>
+  );
+}
+
+export interface EngineSettingsProps {
+  busy: boolean;
+  fen: string;
+  searchDepth: number;
+  useSubstrate: boolean;
+  recordToSubstrate: boolean;
+  onDepth: (v: number) => void;
+  onSubstrate: (v: boolean) => void;
+  onRecordToSubstrate: (v: boolean) => void;
+}
+
+export function EngineSettings(p: EngineSettingsProps) {
+  return (
+    <Panel title="Search &amp; Substrate">
+      <div className={styles.settingsStack}>
         <Field label="Search depth" layout="row" valueDisplay={String(p.searchDepth)}>
           <SliderField
             min={1}
@@ -87,27 +109,25 @@ export function GameControls(p: GameControlsProps) {
             label="Search depth"
           />
         </Field>
-        <Checkbox
-          id="substrate-bias"
-          checked={p.useSubstrate}
-          onChange={(e) => p.onSubstrate(e.target.checked)}
-          label="substrate root bias"
-        />
-        <Checkbox
-          id="record-substrate"
-          checked={p.recordToSubstrate}
-          onChange={(e) => p.onRecordToSubstrate(e.target.checked)}
-          label="record to substrate"
-        />
-        <Checkbox
-          id="eval-mode"
-          checked={p.evalMode}
-          onChange={(e) => p.onEvalMode(e.target.checked)}
-          label="eval mode"
-        />
+        <div className={shared.ctlRow}>
+          <Checkbox
+            id="substrate-bias"
+            checked={p.useSubstrate}
+            onChange={(e) => p.onSubstrate(e.target.checked)}
+            label="Substrate root bias"
+          />
+          <Checkbox
+            id="record-substrate"
+            checked={p.recordToSubstrate}
+            onChange={(e) => p.onRecordToSubstrate(e.target.checked)}
+            label="Record games to substrate"
+          />
+        </div>
+        <div className={styles.fenBox}>
+          <Muted>Current FEN</Muted>
+          <code className={styles.fen}>{p.fen}</code>
+        </div>
       </div>
-      <Muted>drag/click to move · ← → review · right-drag = arrow · right-click = mark</Muted>
-      <code className={styles.fen}>{p.fen}</code>
     </Panel>
   );
 }

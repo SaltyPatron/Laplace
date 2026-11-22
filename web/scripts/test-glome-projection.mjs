@@ -50,6 +50,12 @@ test('missing radius uses the coordinate norm and the origin remains the origin'
   const node = { x: 0.001, y: 0.002, z: 0.003, m: 0, radius: NaN };
   assert.ok(Math.abs(Math.hypot(...placementBallPos(node)) - 0.85 * Math.hypot(node.x, node.y, node.z, node.m)) < 1e-12);
 });
+test('[-1, 1]^4 hypercube corners and oversized inputs clamp cleanly into the S^3 shell', () => {
+  const corner = placementBallPos({ x: 1, y: 1, z: 1, m: 1, radius: NaN }, 0.4, -0.3);
+  assert.ok(Math.hypot(...corner) <= 0.85 + 1e-12);
+  const clamped = placementBallPos({ x: 5, y: -3, z: 2, m: -4, radius: 1 });
+  assert.ok(Math.hypot(...clamped) <= 0.85 + 1e-12);
+});
 test('packedDisplayPos unpacks IEEE-754 0x3fd mantissa-packed BLAKE3 slices into distinct 3D coordinates', () => {
   const makePackedDouble = (bits) => {
     const buf = new ArrayBuffer(8);

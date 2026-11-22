@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Data</RootNamespace>
+    <AssemblyName>Laplace.Data</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Data.Tests" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat.Tests" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.Mcp.Tests" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.Lichess.Tests" />
+    <InternalsVisibleTo Include="Laplace.Chess.Tests" />
+    <InternalsVisibleTo Include="Laplace.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
+  </ItemGroup>
+
+</Project>

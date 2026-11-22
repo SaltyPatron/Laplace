@@ -1,7 +1,7 @@
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -84,13 +84,33 @@ public sealed class SubstrateRootBiasTests
     [Fact]
     public void RulesWithNoEngineIdentityReadNothing()
     {
-        var board = Board.FromFen(ChessModality.StartFen, ChessVariants.Crazyhouse);
+        var board = Board.FromFen(ChessModality.StartFen, ChessVariants.Capablanca);
         int reads = 0;
         var bias = Bias(_ => { reads++; return Empty(); });
 
         Assert.All(bias.Bonus(board, MoveGen.Legal(board)), static cp => Assert.Equal(0, cp));
         Assert.Equal(0, reads);
         Assert.Equal(0, bias.RootReads);
+    }
+
+    [Fact]
+    public void CrazyhouseReadsCanonicalDropTransitions()
+    {
+        var board = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[P] w KQkq - 0 1", ChessVariants.Crazyhouse);
+        var moves = MoveGen.Legal(board);
+        var dropIndex = Enumerable.Range(0, moves.Count)
+            .First(i => moves[i].IsDrop && Board.TypeOf(moves[i].Promotion) == Piece.WPawn && moves[i].To == Board.Sq(4, 3));
+        var next = board.Clone();
+        MoveApply.Make(next, moves[dropIndex]);
+        var dropClaim = ChessEngineIdentity.TransitionId(
+            ChessEngineIdentity.PositionId(board),
+            ChessEngineIdentity.MoveId(board, moves[dropIndex]),
+            ChessEngineIdentity.PositionId(next));
+
+        var bias = Bias(ids => Present(ids, dropClaim, +10));
+        var bonus = bias.Bonus(board, moves);
+        Assert.Equal(80, bonus[dropIndex]);
+        Assert.Equal(1, bias.ExactTransitionSignals);
     }
 
     [Fact]

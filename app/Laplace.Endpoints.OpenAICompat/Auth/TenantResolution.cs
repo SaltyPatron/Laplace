@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;

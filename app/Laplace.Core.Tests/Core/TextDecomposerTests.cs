@@ -115,7 +115,7 @@ public class TextDecomposerTests
     {
         CodepointPerfcache.LoadDefault();
         byte[] source = "def multiply(a, b):\n    return a * b\n"u8.ToArray();
-        using var tree = IntentStage.BuildSourceContentTree(source);
+        using var tree = TextDecomposer.Run(source);
         Assert.NotNull(tree);
 
         Hash128 direct = Assert.IsType<Hash128>(TextDecomposer.SourceRootId(source));

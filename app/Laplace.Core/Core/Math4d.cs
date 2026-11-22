@@ -1,3 +1,5 @@
+using Laplace.Native;
+
 namespace Laplace.Engine.Core;
 
 public static unsafe class Math4d
@@ -5,36 +7,36 @@ public static unsafe class Math4d
     public static double[] Centroid(ReadOnlySpan<double> points)
     {
         var outv = new double[4];
-        nuint n = (nuint)(points.Length / 4);
+        int n = points.Length / 4;
         if (n == 0) return outv;
+
+        Span<lp_coord> coords = n <= 64 ? stackalloc lp_coord[n] : new lp_coord[n];
         fixed (double* p = points)
-        fixed (double* o = outv)
-            NativeInterop.Math4dCentroid(p, n, o);
+        fixed (lp_coord* pc = coords)
+        {
+            for (int i = 0; i < n; i++)
+                LaplaceNative.lp_coord_trunc(p + i * 4, pc + i);
+            lp_coord mean;
+            LaplaceNative.lp_coord_centroid(pc, (nuint)n, &mean);
+            for (int d = 0; d < 4; d++)
+                outv[d] = Math.ScaleB(mean.m[d], -53);
+        }
         return outv;
     }
 
-    /// <summary>
-    /// Intrinsic (Riemannian) barycentre on S3. Unlike Centroid, the result lies on the
-    /// sphere at norm 1 rather than inside the 4-ball, so it stays defined where the
-    /// Euclidean centroid is near the origin and its direction is float noise.
-    /// Permutation-invariant: all three internal accumulations run in a canonical
-    /// order, so a placement is reproducible under constituent reordering.
-    /// </summary>
-    public static double[] KarcherMean(
-        ReadOnlySpan<double> points, double tol = 1e-12, int maxIters = 64)
+    public static double[] KarcherMean(ReadOnlySpan<double> points, double tol = 1e-12, int maxIters = 64)
     {
+        _ = tol;
+        _ = maxIters;
         var outv = new double[4];
         nuint n = (nuint)(points.Length / 4);
         if (n == 0) return outv;
         fixed (double* p = points)
         fixed (double* o = outv)
-            NativeInterop.Math4dKarcherMean(p, n, null, tol, maxIters, o);
+            LaplaceNative.lp_karcher_mean4(p, n, o);
         return outv;
     }
 
-    /// <summary>
-    /// Discrete 4-D Fréchet distance between two trajectories P and Q (each packed as 4 doubles per vertex).
-    /// </summary>
     public static double Frechet(ReadOnlySpan<double> p, ReadOnlySpan<double> q)
     {
         nuint np = (nuint)(p.Length / 4);
@@ -42,12 +44,9 @@ public static unsafe class Math4d
         if (np == 0 || nq == 0) return double.PositiveInfinity;
         fixed (double* pp = p)
         fixed (double* pq = q)
-            return NativeInterop.Math4dFrechet(pp, np, pq, nq);
+            return LaplaceNative.lp_frechet4(pp, np, pq, nq);
     }
 
-    /// <summary>
-    /// Symmetric 4-D Hausdorff distance between two point sets A and B (each packed as 4 doubles per point).
-    /// </summary>
     public static double Hausdorff(ReadOnlySpan<double> a, ReadOnlySpan<double> b)
     {
         nuint na = (nuint)(a.Length / 4);
@@ -55,87 +54,60 @@ public static unsafe class Math4d
         if (na == 0 || nb == 0) return double.PositiveInfinity;
         fixed (double* pa = a)
         fixed (double* pb = b)
-            return NativeInterop.Math4dHausdorff(pa, na, pb, nb);
+            return LaplaceNative.lp_hausdorff4(pa, na, pb, nb);
     }
 
-    /// <summary>
-    /// Spherical linear interpolation (SLERP) along the shortest geodesic on unit S^3
-    /// from <paramref name="p0"/> (t = 0) to <paramref name="p1"/> (t = 1).
-    /// </summary>
+    public static double Dtw(ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
+        nuint na = (nuint)(a.Length / 4);
+        nuint nb = (nuint)(b.Length / 4);
+        if (na == 0 || nb == 0) return double.PositiveInfinity;
+        nuint steps = 0;
+        fixed (double* pa = a)
+        fixed (double* pb = b)
+            return LaplaceNative.lp_dtw4(pa, na, pb, nb, &steps);
+    }
+
+    public static nuint Edr(ReadOnlySpan<double> a, ReadOnlySpan<double> b, double eps)
+    {
+        nuint na = (nuint)(a.Length / 4);
+        nuint nb = (nuint)(b.Length / 4);
+        fixed (double* pa = a)
+        fixed (double* pb = b)
+            return LaplaceNative.lp_edr4(pa, na, pb, nb, eps);
+    }
+
+    public static double Distance(ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
+        if (a.Length < 4 || b.Length < 4) return double.PositiveInfinity;
+        fixed (double* pa = a)
+        fixed (double* pb = b)
+            return LaplaceNative.lp_distance4(pa, pb);
+    }
+
     public static void Slerp(ReadOnlySpan<double> p0, ReadOnlySpan<double> p1, double t, Span<double> out4)
     {
-        double x0 = p0[0], y0 = p0[1], z0 = p0[2], m0 = p0[3];
-        double x1 = p1[0], y1 = p1[1], z1 = p1[2], m1 = p1[3];
-
-        double r0 = Math.Sqrt(x0 * x0 + y0 * y0 + z0 * z0 + m0 * m0);
-        double r1 = Math.Sqrt(x1 * x1 + y1 * y1 + z1 * z1 + m1 * m1);
-        if (r0 > 1e-12) { x0 /= r0; y0 /= r0; z0 /= r0; m0 /= r0; }
-        if (r1 > 1e-12) { x1 /= r1; y1 /= r1; z1 /= r1; m1 /= r1; }
-
-        double cosTheta = Math.Clamp(x0 * x1 + y0 * y1 + z0 * z1 + m0 * m1, -1.0, 1.0);
-        double theta = Math.Acos(cosTheta);
-        double sinTheta = Math.Sin(theta);
-
-        double rx, ry, rz, rm;
-        if (sinTheta > 1e-7)
-        {
-            double s0 = Math.Sin((1.0 - t) * theta) / sinTheta;
-            double s1 = Math.Sin(t * theta) / sinTheta;
-            rx = s0 * x0 + s1 * x1;
-            ry = s0 * y0 + s1 * y1;
-            rz = s0 * z0 + s1 * z1;
-            rm = s0 * m0 + s1 * m1;
-        }
-        else
-        {
-            double s0 = 1.0 - t;
-            rx = s0 * x0 + t * x1;
-            ry = s0 * y0 + t * y1;
-            rz = s0 * z0 + t * z1;
-            rm = s0 * m0 + t * m1;
-        }
-
-        double nr = Math.Sqrt(rx * rx + ry * ry + rz * rz + rm * rm);
-        if (nr > 1e-12)
-        {
-            out4[0] = rx / nr;
-            out4[1] = ry / nr;
-            out4[2] = rz / nr;
-            out4[3] = rm / nr;
-        }
-        else
-        {
-            out4[0] = x1;
-            out4[1] = y1;
-            out4[2] = z1;
-            out4[3] = m1;
-        }
+        if (p0.Length < 4 || p1.Length < 4 || out4.Length < 4)
+            throw new ArgumentException("4D point spans must hold at least 4 doubles.");
+        fixed (double* a = p0)
+        fixed (double* b = p1)
+        fixed (double* o = out4)
+            LaplaceNative.lp_slerp4(a, b, t, o);
     }
 
-    /// <summary>
-    /// Euclidean chord distance on unit S^3 between two 4-D centroid vectors after projecting both onto unit S^3.
-    /// </summary>
     public static double UnitCentroidDistance(
         double x1, double y1, double z1, double m1,
         double x2, double y2, double z2, double m2)
     {
-        var r1 = Math.Sqrt(x1 * x1 + y1 * y1 + z1 * z1 + m1 * m1);
-        var r2 = Math.Sqrt(x2 * x2 + y2 * y2 + z2 * z2 + m2 * m2);
-        if (r1 > 1e-12) { x1 /= r1; y1 /= r1; z1 /= r1; m1 /= r1; }
-        if (r2 > 1e-12) { x2 /= r2; y2 /= r2; z2 /= r2; m2 /= r2; }
-        var dx = x1 - x2;
-        var dy = y1 - y2;
-        var dz = z1 - z2;
-        var dm = m1 - m2;
-        return Math.Sqrt(dx * dx + dy * dy + dz * dz + dm * dm);
+        Span<double> p1 = [x1, y1, z1, m1];
+        Span<double> p2 = [x2, y2, z2, m2];
+        double r1 = Math.Sqrt(x1 * x1 + y1 * y1 + z1 * z1 + m1 * m1);
+        double r2 = Math.Sqrt(x2 * x2 + y2 * y2 + z2 * z2 + m2 * m2);
+        if (r1 > 1e-12) for (int d = 0; d < 4; d++) p1[d] /= r1;
+        if (r2 > 1e-12) for (int d = 0; d < 4; d++) p2[d] /= r2;
+        return Distance(p1, p2);
     }
 
-    /// <summary>
-    /// Sub-trajectory aware 4-D discrete Fréchet distance from <paramref name="query"/> (m vertices)
-    /// into <paramref name="target"/> (n vertices). Evaluates full-curve Fréchet, contiguous
-    /// free-endpoint sub-trajectory Fréchet (when n &gt;= m), and monotonic core sub-trajectory
-    /// Fréchet (penalized by unmatched query fraction).
-    /// </summary>
     public static double SubTrajectoryFrechet(ReadOnlySpan<double> query, ReadOnlySpan<double> target)
     {
         int m = query.Length / 4;
@@ -316,5 +288,38 @@ public static unsafe class Math4d
         double dz = a[2] - b[2];
         double dm = a[3] - b[3];
         return Math.Sqrt(dx * dx + dy * dy + dz * dz + dm * dm);
+    }
+
+    public static int ComputeSparseEigenmap(
+        ReadOnlySpan<int> rows,
+        ReadOnlySpan<int> cols,
+        ReadOnlySpan<double> weights,
+        int nodeCount,
+        int dimensions,
+        Span<double> outputCoords)
+    {
+        if (nodeCount <= 0 || dimensions <= 0 || dimensions >= nodeCount)
+            return -1;
+        if (rows.Length != cols.Length || rows.Length != weights.Length)
+            return -1;
+        if (outputCoords.Length < checked(nodeCount * dimensions))
+            return -1;
+
+        var matrix = new double[checked(nodeCount * nodeCount)];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            int r = rows[i], c = cols[i];
+            if ((uint)r >= (uint)nodeCount || (uint)c >= (uint)nodeCount || r == c) continue;
+            double w = weights[i];
+            if (!double.IsFinite(w) || w <= 0.0) continue;
+            matrix[r * nodeCount + c] += w;
+            matrix[c * nodeCount + r] += w;
+        }
+
+        Span<double> lambda = dimensions <= 32 ? stackalloc double[dimensions] : new double[dimensions];
+        fixed (double* pW = matrix)
+        fixed (double* pY = outputCoords)
+        fixed (double* pL = lambda)
+            return LaplaceNative.lp_eigenmap(pW, (nuint)nodeCount, (nuint)dimensions, pY, pL);
     }
 }

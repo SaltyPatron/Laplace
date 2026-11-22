@@ -1,6 +1,0 @@
-CREATE OR REPLACE FUNCTION generation.foundry_crawl(
-        p_seeds bytea[], p_budget int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
-        p_rel_types bytea[] DEFAULT NULL)
-    RETURNS TABLE(entity_id bytea, weight bigint)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_foundry_crawl'
-    LANGUAGE C VOLATILE;

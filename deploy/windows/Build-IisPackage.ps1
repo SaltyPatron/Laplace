@@ -5,7 +5,6 @@ param([string]$Installation,[string]$EngineBuild,[string]$ManagedBuild,[switch]$
     [switch]$Plan,[switch]$Force,[string]$Receipt,[string]$ComponentSelection)
 $ErrorActionPreference='Stop'
 if($ComponentSelection){$Components=$ComponentSelection.Split(',');foreach($component in $Components){if($component -notin @('all','native','postgres','api','cli','uci','migrations','web')){throw "Unknown component: $component"}}}
-$requiresNative=@($Components | Where-Object {$_ -ne 'web'}).Count -gt 0
 . "$PSScriptRoot/../../scripts/win/machine-env.ps1"
 . "$PSScriptRoot/iis-runtime.ps1"
 if(-not $Installation){$Installation=$env:LAPLACE_IIS_INSTALLATION}
@@ -33,20 +32,11 @@ if(-not($env:VSCMD_VER -and $env:SETVARS_COMPLETED)) {
     if(-not(Test-Path -LiteralPath $developerShell -PathType Leaf)){throw "The configured developer shell is missing: $developerShell"}
     . $developerShell
 }
-if($requiresNative -and -not($env:VSCMD_VER -and $env:SETVARS_COMPLETED -and (Get-Command icx.exe -ErrorAction SilentlyContinue))){throw 'The native build requires the configured MSVC and oneAPI developer environment.'}
 . "$PSScriptRoot/../../scripts/win/laplace-paths.ps1"
 Import-LaplaceEnv
 if($EngineBuild){$env:LAPLACE_ENGINE_BUILD=[IO.Path]::GetFullPath($EngineBuild)}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $env:LAPLACE_ROOT=$repo
-$cache=Join-Path $env:LAPLACE_ENGINE_BUILD 'CMakeCache.txt'
-if($requiresNative -and (Test-Path -LiteralPath $cache)) {
-    $homeLine=Select-String -LiteralPath $cache -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$'
-    $configuredSource=if($homeLine){[IO.Path]::GetFullPath($homeLine.Matches[0].Groups[1].Value)}else{''}
-    if($configuredSource.TrimEnd('\','/') -ine (Join-Path $repo 'engine').TrimEnd('\','/')) {
-        throw "The native build directory belongs to another source tree: $configuredSource. Select this checkout's native build directory."
-    }
-}
 $revision=(& git -C $repo rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify the source revision.'}
 $selected=[Collections.Generic.HashSet[string]]::new([string[]]$Components)
@@ -80,41 +70,6 @@ if($Plan){
     Write-Host ('PostgreSQL extension installation: '+$selected.Contains('postgres'))
     if($Receipt){Write-IisAtomic $Receipt (Iis-Json $buildResult)}
     return
-}
-if($Publish -and $selected.Contains('postgres')){
-    $iisConfig=Read-IisInstallation $Installation
-    $accessPath=if($iisConfig.database_access_file){$iisConfig.database_access_file}else{Join-Path $env:LAPLACE_SRC 'Laplace-Operations/development/installation.json'}
-    if(-not(Test-Path -LiteralPath $accessPath -PathType Leaf)){throw "The declared local database access file is missing: $accessPath"}
-    $access=Get-Content -LiteralPath $accessPath -Raw | ConvertFrom-Json
-    if($access.authentication -ne 'sspi' -or $access.database_host -ine $env:COMPUTERNAME -or
-        $iisConfig.database.host -ine $access.database_host -or $iisConfig.database.port -ne $access.port -or
-        -not $access.admin_role -or -not(Test-Path -LiteralPath $access.root_certificate -PathType Leaf)){
-        throw 'Extension publication requires the declared local IIS database, Windows SSPI role and TLS root certificate.'
-    }
-    # Match database maintenance: inherited PGHOSTADDR/PGSERVICE/PGOPTIONS or
-    # password settings must not redirect the declared SSPI installation.
-    $savedPg=@{}
-    $pgNames=@(Get-ChildItem Env: | Where-Object {$_.Name -like 'PG*' -and $_.Name -ne 'PGBIN'} | ForEach-Object Name)+@(
-        'LAPLACE_PGHOST','LAPLACE_PGPORT','LAPLACE_PGUSER','PGSSLMODE','PGSSLROOTCERT','PGREQUIREAUTH','PGCONNECT_TIMEOUT')
-    foreach($name in $pgNames | Select-Object -Unique){
-        $savedPg[$name]=[Environment]::GetEnvironmentVariable($name)
-        if($name -notlike 'LAPLACE_*'){Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue}
-    }
-    try {
-        $env:LAPLACE_PGHOST=$access.database_host
-        $env:LAPLACE_PGPORT=[string]$access.port
-        $env:LAPLACE_PGUSER=$access.admin_role
-        $env:PGSSLMODE='verify-full';$env:PGSSLROOTCERT=$access.root_certificate
-        $env:PGREQUIREAUTH='sspi';$env:PGCONNECT_TIMEOUT='10'
-        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --check-connection
-        if($LASTEXITCODE){throw 'PostgreSQL extension connection preflight failed; installed extension files were not changed.'}
-        & (Join-Path $repo 'scripts/win/build-extensions.cmd')
-        if($LASTEXITCODE){throw 'PostgreSQL extension build failed; no application package was created.'}
-        & (Join-Path $repo 'scripts/win/install-extensions.cmd') --skip-build
-        if($LASTEXITCODE){throw 'PostgreSQL extension installation failed; no application package was created.'}
-    } finally {
-        foreach($name in $savedPg.Keys){[Environment]::SetEnvironmentVariable($name,$savedPg[$name])}
-    }
 }
 $published=Join-Path $run 'published'
 $base=$null

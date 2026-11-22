@@ -93,6 +93,29 @@
   .main { container: page / inline-size; position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; flex-direction: column; padding: var(--space-5) var(--page-gutter) var(--space-7); }
   .main > * { flex: 1; min-width: 0; }
 
+  /* Full-viewport interactive workspaces (such as /play) lock to the remaining viewport height
+     above compact screens so split-pane boards and sidebars size to the screen without page scroll. */
+  @media (min-width: 40rem) {
+    .shell:has([data-workspace-fill]) {
+      height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
+    .shell:has([data-workspace-fill]) .column {
+      height: 100dvh;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .shell:has([data-workspace-fill]) .main {
+      min-height: 0;
+      overflow: hidden;
+      padding: var(--space-3) var(--page-gutter);
+    }
+    .shell:has([data-workspace-fill]) .main > * {
+      min-height: 0;
+    }
+  }
+
   /* Medium: icon rail */
   @media (max-width: 64rem) {
     .shell { grid-template-columns: var(--rail-width-collapsed) minmax(0, 1fr); }

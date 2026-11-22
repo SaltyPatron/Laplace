@@ -1,5 +1,5 @@
 import { reportClientFailure } from '../diagnostics/client';
-import type { ForwardPassProof, ForwardTurnStep } from './forwardProof';
+import type { ForwardPassProof, ForwardTurnStep, WitnessShareReceipt, WorkCountersReceipt } from './forwardProof';
 import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type ErrorResponse, type PaymentRequiredResponse } from './client';
 
 
@@ -20,6 +20,9 @@ export interface ChatChunk {
     eff_mu?: number;
     witnesses?: number;
     step?: ForwardTurnStep;
+    top_salience?: number;
+    work?: WorkCountersReceipt;
+    witness_shares?: WitnessShareReceipt[];
     performance?: {
       substrate_ms: string | number;
       elapsed_ms: string | number;

@@ -12,7 +12,10 @@ public sealed record ExploreBrowseHit(
     [property: JsonPropertyName("rating")] decimal? Rating,
     [property: JsonPropertyName("rd")] decimal? Rd,
     [property: JsonPropertyName("eff_mu")] decimal? EffMu,
-    [property: JsonPropertyName("witnesses")] long Witnesses);
+    [property: JsonPropertyName("witnesses")] long Witnesses,
+    [property: JsonPropertyName("general_category"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? GeneralCategory = null,
+    [property: JsonPropertyName("script"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Script = null,
+    [property: JsonPropertyName("flags_hex"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FlagsHex = null);
 
 public sealed record ExploreBrowseReceipt(
     [property: JsonPropertyName("query_root_id_hex")] string QueryRootIdHex,

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;

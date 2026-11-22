@@ -1,5 +1,5 @@
 using Laplace.Api.Contracts;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 
 namespace Laplace.Endpoints.OpenAICompat;
 

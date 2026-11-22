@@ -139,7 +139,14 @@ internal sealed class StubFoundryExportService : IFoundryExportService
         string? tokenizerDir,
         string format,
         string? filename,
-        CancellationToken ct)
+        CancellationToken ct,
+        Laplace.Engine.Core.EngineAuthorityScope? authority = null,
+        string? modelName = null,
+        uint maxVocab = 0,
+        uint hiddenDim = 0,
+        uint numLayers = 0,
+        uint numHeads = 0,
+        bool f16Weights = true)
     {
         var path = Path.Combine(Path.GetTempPath(), $"laplace-stub-{Guid.NewGuid():N}.gguf");
         File.WriteAllBytes(path, [0x47, 0x47, 0x55, 0x46]); // GGUF magic stub

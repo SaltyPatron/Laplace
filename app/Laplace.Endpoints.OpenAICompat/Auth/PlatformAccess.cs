@@ -1,7 +1,7 @@
 using System.Security.Claims;
+using Laplace.Data;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;
 
@@ -42,7 +42,7 @@ internal static class PlatformPolicy
         if (name is "ops.app_log" or "ops.chess_drops") return Read;
         if (name is "ops.repoint_app_log" or "ops.repoint_chess_drops" or "ops.repoint_pg_log") return Maintain;
         if (name == "ops.ingest_run_close") return Ingest;
-        if (Laplace.SubstrateCRUD.Npgsql.InstalledOpInvoker.IsWritable(name)) return Maintain;
+        if (InstalledOpInvoker.IsWritable(name)) return Maintain;
         if (name.StartsWith("ops.ingest_", StringComparison.Ordinal) || name.StartsWith("ops.activity", StringComparison.Ordinal)) return Read;
         return null;
     }

@@ -40,6 +40,13 @@ export function GauntletSetupForm({
                 onValueChange={(v) => setSetup((s) => ({ ...s, conductor: v as Setup['conductor'] }))}
                 options={['fastchess', 'cutechess']} label="Match conductor" />
             </Field>
+            <Field label="Chess variant" help="Standard orthodox chess or Chess960 / Fischer Random starting setup." className={styles.wide}>
+              <SegmentedControl value={setup.variant}
+                onValueChange={(v) => setSetup((s) => ({ ...s, variant: v as Setup['variant'] }))}
+                options={['standard', 'chess960']}
+                optionLabels={{ standard: 'Standard', chess960: 'Chess960' }}
+                label="Chess variant" />
+            </Field>
             <Field
               label="Clock"
               help="Per-move seconds is watchable. Fixed depth is a matched limit applied to both engines, not unrestricted Stockfish search."

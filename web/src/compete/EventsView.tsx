@@ -85,13 +85,13 @@ function EventList() {
         )}
         {error && <ErrorText role="alert">{error}</ErrorText>}
       </Panel>
-      <Panel title="Your events">
+      <Panel title="Arena & events">
         <ReadStatus label="Your events" resource={events} />
         {events.data && events.data.competitions.length === 0 && <Muted>No events yet. Create one above and share its link.</Muted>}
         {events.data && events.data.competitions.length > 0 && (
           <TableScroll>
             <Table>
-              <thead><tr><Th scope="col">Event</Th><Th scope="col">Session</Th><Th scope="col">Format</Th><Th scope="col">Status</Th><Th scope="col" className={styles.number}>Entrants</Th></tr></thead>
+              <thead><tr><Th scope="col">Event</Th><Th scope="col">Session</Th><Th scope="col">Format</Th><Th scope="col">Status</Th><Th scope="col" className={styles.number}>Entrants</Th><Th scope="col">Leaderboard</Th></tr></thead>
               <tbody>
                 {events.data.competitions.map((event) => (
                   <tr key={event.id}>
@@ -100,6 +100,7 @@ function EventList() {
                     <Td>{formats.data?.formats.find((each) => each.id === event.format)?.title ?? event.format}</Td>
                     <Td>{event.status === 'registration' ? 'Registration open' : 'Under way'}</Td>
                     <Td className={styles.number}>{event.entrants}</Td>
+                    <Td><RouterLink to={`/events/${event.id}`}>Bracket &amp; standings</RouterLink></Td>
                   </tr>
                 ))}
               </tbody>

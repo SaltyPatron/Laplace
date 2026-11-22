@@ -1,9 +1,9 @@
 using global::Npgsql;
 using Laplace.Chess.Service;
 using Laplace.Chess.Service.Uci;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Uci.Backends;
 
@@ -27,6 +27,7 @@ public sealed class ManagedSearchBackend : IChessBackend
     private bool _searchStale = true;
     private string? _builtMode;
     private NpgsqlDataSource? _ds;
+    private LaplaceEngineRuntime? _nativeEngine;
     private ChessSearchProviders? _providers;
     private string? _positionFen;
     private string[] _positionMoves = [];
@@ -128,9 +129,43 @@ public sealed class ManagedSearchBackend : IChessBackend
         }
         else
             search.Reconfigure(null, null, null, null, null, continuations);
+        var nativeEngine = _substrateMode != "off" ? _nativeEngine : null;
+        bool useNative = nativeEngine is not null && !uciLimits.Infinite
+            && !string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_NATIVE"), "0", StringComparison.Ordinal);
         return (ct, emit) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (useNative && !ct.IsCancellationRequested && !ChessEngineService.HasImmediateMate(_modality, state))
+            {
+                try
+                {
+                    int nativeDepth = limits.MaxDepth < 64 ? limits.MaxDepth : 6;
+                    ulong nativeNodes = limits.MaxNodes < long.MaxValue ? (ulong)limits.MaxNodes : 200_000UL;
+                    ulong nativeWallUs = limits.MaxTimeMs < int.MaxValue ? (ulong)limits.MaxTimeMs * 1000UL : 250_000UL;
+                    var resp = nativeEngine!.ChessPlay(new EngineChessRequest(
+                        Fen: state.Board.ToFen(),
+                        Variant: state.Board.Rules.IsStandard ? null : state.Board.Rules.Law,
+                        MaxDepth: nativeDepth,
+                        QuiesceDepth: 4,
+                        MaxNodes: nativeNodes,
+                        MaxWallUs: nativeWallUs));
+                    if (resp.StatusCode == 0 && ChessEngineService.ResolveNativeMove(state.Board, resp.BestUci) is { } mv)
+                    {
+                        sw.Stop();
+                        string bestNative = mv.ToUci();
+                        long ms = Math.Max(1L, (long)(resp.WallUs / 1000));
+                        long nps = (long)(resp.NodesSearched * 1000.0 / ms);
+                        string line = $"info depth {resp.DepthReached} score cp {resp.ScoreCp} nodes {resp.NodesSearched} time {ms} nps {nps} pv {bestNative}";
+                        string infoLine = $"info string providers native={resp.Source} syzygy_wdl={resp.SyzygyWdl} from_syzygy={resp.FromSyzygy} db_probes={resp.DbProbes}";
+                        emit(line);
+                        emit(infoLine);
+                        return new ChessBackendResult(bestNative, [line, infoLine]);
+                    }
+                }
+                catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException)
+                {
+                }
+            }
             var result = search.Think(state, limits, ct, iteration =>
             {
                 var providers = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;
@@ -214,6 +249,8 @@ public sealed class ManagedSearchBackend : IChessBackend
                     var ds = LaplaceDataSource.Create(SubstrateAccess.Serving, basis);
                     using (ds.OpenConnection()) { } // fail fast while setup time is available
                     _ds = ds;
+                    try { _nativeEngine ??= new LaplaceEngineRuntime(ChessGameRecorder.ToLibpqConnInfo(ds.ConnectionString)); }
+                    catch (Exception) { _nativeEngine = null; }
                 }
                 _providers = new ChessSearchProviders(_ds);
             }

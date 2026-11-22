@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Globalization;
 using Laplace.Engine.Core.IO;
 
@@ -28,6 +29,12 @@ namespace Laplace.Chess.Service;
 /// </summary>
 internal static class ChessInput
 {
+    private static readonly Regex IdentifierPattern =
+        new(@"^[A-Za-z0-9._@-]{1,128}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    internal static bool IsValidIdentifier(string? value) =>
+        value is not null && IdentifierPattern.IsMatch(value);
+
     /// <summary>Extensions the PGN lane reads, including streaming Zstandard archives.</summary>
     internal static readonly string[] PgnExtensions = [".pgn", ".pgn.gz", ".pgn.zst", ".gz", ".zst", ".zip"];
 

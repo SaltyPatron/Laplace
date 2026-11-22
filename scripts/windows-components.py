@@ -35,10 +35,6 @@ PROJECTS = {
     "uci": "Laplace.Chess.Uci",
     "migrations": "Laplace.Migrations",
 }
-NATIVE_TARGETS = (
-    "laplace_core", "laplace_syzygy", "laplace_dynamics", "laplace_synthesis",
-    "laplace_t0_perfcache", "laplace_highway_perfcache",
-)
 SCHEMA = "laplace.component-artifact/v1"
 PUBLISH_OPTIONS = ("-c", "Release", "--no-self-contained", "--nologo", "-p:DefaultItemExcludes=wwwroot/**")
 
@@ -125,11 +121,12 @@ def managed_inputs(root: Path, name: str, native: Path, sdk: str) -> dict:
             continue
         payload.append((relative, digest(path) if path.is_file() else None))
     libraries = {}
-    for relative in ("core/laplace_core.dll", "core/laplace_syzygy.dll",
-                     "dynamics/laplace_dynamics.dll", "synthesis/laplace_synthesis.dll"):
-        libraries[relative] = digest(native / relative) if (native / relative).is_file() else None
-    libraries.update({"perfcache/" + key: value for key, value in files(native / "core/perfcache").items()
-                      if key.endswith((".bin", ".flags", ".layout"))})
+    for relative in ("laplace_engine_abi.dll", "laplace.exe"):
+        candidate = native / relative
+        libraries[relative] = digest(candidate) if candidate.is_file() else None
+    native_root = Path(os.environ.get("LAPLACE_BUILD") or native.parent.parent) / "Laplace-Native" / "icx-release"
+    native_dll = native_root / "laplace.dll"
+    libraries["laplace.dll"] = digest(native_dll) if native_dll.is_file() else None
     dependency_roots = []
     runtime_patterns = {
         "LAPLACE_ONEAPI": ("mkl/latest/bin/mkl_*.dll", "compiler/latest/bin/libmmd.dll",
@@ -218,13 +215,8 @@ def run(root: Path, build: Path, native: Path, store: Path, components: list[str
     sdk = (subprocess.run(["dotnet", "--version"], cwd=root, check=True, text=True, capture_output=True).stdout.strip()
            if any(name in PROJECTS for name in selected) else "")
     results = []
-    if any(name in PROJECTS or name == "native" for name in selected):
-        results.append({"component": "native", "action": "inspect", "targets": list(NATIVE_TARGETS)})
-        if not plan:
-            arguments = ["cmd.exe", "/d", "/c", str(root / "scripts/win/build-engine.cmd")]
-            if force:
-                arguments.append("--clean-first")
-            command([*arguments, *NATIVE_TARGETS], cwd=root)
+    if "native" in selected:
+        results.append({"component": "native", "action": "reuse", "targets": []})
     for name in PROJECTS:
         if name in selected:
             result = managed(root, name, build, native, store, sdk, plan=plan, force=force)

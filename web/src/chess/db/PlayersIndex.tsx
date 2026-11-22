@@ -44,8 +44,6 @@ export function PlayersIndex() {
     let stale = false;
     setData(null);
     setErr(null);
-    // The player read needs a search; without one the page only prompts for it.
-    if (!search) return () => { stale = true; };
     chessPlayers({ search, limit: PAGE, offset })
       .then((next) => { if (!stale) setData(next); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
@@ -110,79 +108,78 @@ export function PlayersIndex() {
         </LookupRow>
       </header>
 
-      {!search ? (
-        <Panel title="Find a player">
-          <div className={styles.emptyResult}>
-            <strong>Search for a player to see their recorded games.</strong>
-            <Muted>
-              Players are listed by the names their games were recorded under; there is no
-              roster to browse without a search.
-            </Muted>
-          </div>
-        </Panel>
-      ) : (
-        <Panel title={`Player matches for “${search}”`}>
-          <div className={styles.resultToolbar}>
-            <Muted aria-live="polite">
-              {data
+      <Panel title={search ? `Player matches for “${search}”` : 'Recorded players'}>
+        <div className={styles.resultToolbar}>
+          <Muted aria-live="polite">
+            {data
+              ? search
                 ? `${data.total.toLocaleString()} matching player${data.total === 1 ? '' : 's'}`
-                : err ? '' : 'Reading player index…'}
-            </Muted>
+                : `${data.total.toLocaleString()} recorded player${data.total === 1 ? '' : 's'}, most games first`
+              : err ? '' : 'Reading player index…'}
+          </Muted>
+        </div>
+
+        {err ? <ErrorText role="alert">Could not read players: {err}</ErrorText> : null}
+        {!err && data === null ? <LoadingText>Reading recorded players…</LoadingText> : null}
+        {data && data.players.length === 0 ? (
+          <div className={styles.emptyResult}>
+            {search ? (
+              <>
+                <strong>No recorded player matched “{search}”.</strong>
+                <Muted>Try the surname alone, or the name exactly as a game writes it.</Muted>
+              </>
+            ) : (
+              <>
+                <strong>No recorded player games are in the database yet.</strong>
+                <Muted>Ingest a PGN game collection or complete a game in Play to populate the player roster.</Muted>
+              </>
+            )}
           </div>
+        ) : null}
 
-          {err ? <ErrorText role="alert">Could not read players: {err}</ErrorText> : null}
-          {!err && data === null ? <LoadingText>Searching recorded games…</LoadingText> : null}
-          {data && data.players.length === 0 ? (
-            <div className={styles.emptyResult}>
-              <strong>No recorded player matched “{search}”.</strong>
-              <Muted>Try the surname alone, or the name exactly as a game writes it.</Muted>
-            </div>
-          ) : null}
-
-          {data && data.players.length > 0 ? (
-            <>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Player</Th>
-                    <Th>Games</Th>
+        {data && data.players.length > 0 ? (
+          <>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Player</Th>
+                  <Th>Games</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.players.map((player) => (
+                  <tr key={player.name}>
+                    <Td>
+                      <Link className={styles.playerLink} to={playerPath(player.name)}>
+                        {player.name}
+                      </Link>
+                    </Td>
+                    <Td title={player.games_complete ? undefined : 'at least this many games'}>
+                      {gamesText(player)}
+                    </Td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.players.map((player) => (
-                    <tr key={player.name}>
-                      <Td>
-                        <Link className={styles.playerLink} to={playerPath(player.name)}>
-                          {player.name}
-                        </Link>
-                      </Td>
-                      <Td title={player.games_complete ? undefined : 'at least this many games'}>
-                        {gamesText(player)}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+                ))}
+              </tbody>
+            </Table>
 
-              <div className={styles.pager}>
-                <Button variant="ghost" disabled={offset <= 0} onClick={() => movePage(offset - PAGE)}>
-                  ‹ Previous
-                </Button>
-                <Muted>
-                  {offset + 1}–{offset + data.players.length} of {data.total.toLocaleString()}
-                </Muted>
-                <Button
-                  variant="ghost"
-                  disabled={offset + data.players.length >= data.total}
-                  onClick={() => movePage(offset + PAGE)}
-                >
-                  Next ›
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </Panel>
-      )}
+            <div className={styles.pager}>
+              <Button variant="ghost" disabled={offset <= 0} onClick={() => movePage(offset - PAGE)}>
+                ‹ Previous
+              </Button>
+              <Muted>
+                {offset + 1}–{offset + data.players.length} of {data.total.toLocaleString()}
+              </Muted>
+              <Button
+                variant="ghost"
+                disabled={offset + data.players.length >= data.total}
+                onClick={() => movePage(offset + PAGE)}
+              >
+                Next ›
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </Panel>
     </Stack>
   );
 }

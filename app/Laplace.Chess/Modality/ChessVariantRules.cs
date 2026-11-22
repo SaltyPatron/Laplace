@@ -206,6 +206,14 @@ public static class ChessVariants
         return ChessVariantRules.Standard with { Law = law };
     }
 
+    /// <summary>Resolve a PGN/Lichess/UCI variant name using the fast in-memory table first and firmware second.</summary>
+    public static ChessVariantRules Resolve(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return Standard;
+        if (ByName(name) is { } preseeded) return preseeded;
+        return ByLaw(name) ?? Standard;
+    }
+
     /// <summary>Every pre-seeded rule set, for bootstrap and for narrowing.</summary>
     public static IReadOnlyList<(string Name, ChessVariantRules Rules)> Conventional =>
     [

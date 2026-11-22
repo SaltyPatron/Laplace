@@ -1,22 +1,15 @@
-/** Play view: composes game, board-interaction and training hooks into the board + sidebar layout. */
-import { Button, Modal } from '@ui';
+/** Play view: composes game, board-interaction and training hooks into the viewport-fitted board + tabbed sidebar layout. */
+import { useState } from 'react';
+import { Button, Modal, SegmentedControl } from '@ui';
 
 import { Board, parseBoard, whiteToMove } from './play/Board';
-
 import { MoveList } from './play/MoveList';
-
 import { MoveNav } from './play/MoveNav';
-
 import { EnginePanel } from './play/EnginePanel';
-
-import { GameControls } from './play/GameControls';
-
+import { EngineSettings, GameControls } from './play/GameControls';
 import { Sidebar } from './play/Sidebar';
-
 import { ExplorePanel } from './play/ExplorePanel';
-
 import { formatPositionEval, whiteCpToBarFraction } from './evalDisplay';
-
 import { sqRC } from './play/playTypes';
 import { useBoardInteraction } from './play/useBoardInteraction';
 import { usePlayGame } from './play/usePlayGame';
@@ -28,7 +21,16 @@ import styles from './ChessView.module.css';
 
 export type { SearchInfo } from './play/playTypes';
 
+const SIDE_TABS = ['play', 'explore', 'engine'] as const;
+type SideTab = (typeof SIDE_TABS)[number];
+const SIDE_TAB_LABELS: Readonly<Record<SideTab, string>> = {
+  play: 'Play & Moves',
+  explore: 'Explorer',
+  engine: 'Engine',
+};
+
 export function ChessView() {
+  const [sideTab, setSideTab] = useState<SideTab>('play');
   const { sel, setSel, marks, setMarks, userArrows, setUserArrows, drag, setDrag, rdrag, boardRef } = useBoardInteraction();
   const {
     viewPly, livePly, reviewing, fen, status, lastMove, liveFen, history,
@@ -165,8 +167,8 @@ export function ChessView() {
 
   return (
 
-    // The board and its panel lay out by the space the play area has, not the window width.
-    <div className={styles.frame}><div className={styles.layout}>
+    // The board and its panel lay out inside the viewport height, top-aligned without page overflow.
+    <div className={styles.frame} data-workspace-fill><div className={styles.layout}>
 
       <div className={styles.main}>
 
@@ -263,80 +265,81 @@ export function ChessView() {
 
       </div>
 
-
-
       <Sidebar className={styles.side}>
-
         <GameControls
-
           statusText={statusText} busy={busy} over={over && !reviewing} status={status}
-
-          motifs={reviewing ? [] : motifs} err={err} fen={fen}
-
-          autoReply={autoReply} flip={flip} searchDepth={searchDepth}
-
-          useSubstrate={useSubstrate} recordToSubstrate={recordToSubstrate} evalMode={evalMode}
-
+          motifs={reviewing ? [] : motifs} err={err}
+          autoReply={autoReply} flip={flip} evalMode={evalMode}
           onNewGame={() => void newGame()} onBotMove={() => void botMove(liveFen)}
-
-          onAutoReply={setAutoReply} onFlip={setFlip} onDepth={setSearchDepth}
-
-          onSubstrate={setUseSubstrate} onRecordToSubstrate={changeRecordToSubstrate} onEvalMode={setEvalMode}
-
+          onAutoReply={setAutoReply} onFlip={setFlip} onEvalMode={setEvalMode}
         />
 
-        <PositionOpenings fen={fen} />
-
-        <PositionTablebase fen={fen} />
-
-        <MoveList
-
-          topMoves={topMoves}
-
-          fen={fen}
-
-          history={history}
-
-          viewPly={viewPly}
-
-          onGoToPly={goToPly}
-
-          evalMode={evalMode}
-
-          search={search}
-
-          searchDepth={searchDepth}
-
-          searchPickUci={hintMove}
-
+        <SegmentedControl
+          value={sideTab}
+          onValueChange={(next) => setSideTab(next as SideTab)}
+          options={SIDE_TABS}
+          optionLabels={SIDE_TAB_LABELS}
+          label="Chess workspace panels"
+          className={styles.tabs}
         />
 
-        <ExplorePanel
+        <div className={styles.tabBody}>
+          {sideTab === 'play' && (
+            <>
+              <PositionOpenings fen={fen} />
+              <PositionTablebase fen={fen} />
+              <MoveList
+                topMoves={topMoves}
+                fen={fen}
+                history={history}
+                viewPly={viewPly}
+                onGoToPly={goToPly}
+                onPlayMove={!reviewing && !over && !busy ? (uci) => void applyUci(uci) : undefined}
+                evalMode={evalMode}
+                search={search}
+                searchDepth={searchDepth}
+                searchPickUci={hintMove}
+              />
+            </>
+          )}
 
-          fen={fen}
+          {sideTab === 'explore' && (
+            <>
+              <ExplorePanel
+                fen={fen}
+                onPlayMove={!reviewing && !over && !busy ? (uci) => void applyUci(uci) : undefined}
+              />
+              <PositionOpenings fen={fen} />
+              <PositionTablebase fen={fen} />
+            </>
+          )}
 
-          onPlayMove={!reviewing && !over ? (uci) => void applyUci(uci) : undefined}
-
-        />
-
-        <EnginePanel
-
-          train={train}
-          busy={trainBusy}
-          statusError={trainStatusError}
-          actionError={trainActionError}
-          onRefresh={() => void fetchTrain()}
-
-          knobs={knobs}
-
-          onKnobsChange={setKnobs}
-
-          onStart={() => void changeTraining('start')}
-
-          onStop={() => void changeTraining('stop')}
-
-        />
-
+          {sideTab === 'engine' && (
+            <>
+              <EngineSettings
+                busy={busy}
+                fen={fen}
+                searchDepth={searchDepth}
+                useSubstrate={useSubstrate}
+                recordToSubstrate={recordToSubstrate}
+                onDepth={setSearchDepth}
+                onSubstrate={setUseSubstrate}
+                onRecordToSubstrate={changeRecordToSubstrate}
+              />
+              <EnginePanel
+                train={train}
+                busy={trainBusy}
+                statusError={trainStatusError}
+                actionError={trainActionError}
+                onRefresh={() => void fetchTrain()}
+                knobs={knobs}
+                onKnobsChange={setKnobs}
+                onStart={() => void changeTraining('start')}
+                onStop={() => void changeTraining('stop')}
+              />
+            </>
+          )}
+        </div>
       </Sidebar>
 
     </div></div>

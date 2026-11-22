@@ -249,6 +249,8 @@ internal interface IBillingOrchestrator
     Task MarkConsumedAndRecordAsync(BillingQuote quote, CancellationToken ct);
     Task<IReadOnlyList<BillingRoyaltyRecord>> MarkConsumedAndRecordWithRoyaltiesAsync(
         BillingQuote quote, IReadOnlyList<RoyaltyAttributionShare> attributions, CancellationToken ct);
+    Task<IReadOnlyList<BillingRoyaltyRecord>> RecordRoyaltiesAsync(
+        BillingQuote quote, IReadOnlyList<RoyaltyAttributionShare> attributions, CancellationToken ct);
     Task<BillingQuote?> TryGetQuoteAsync(string quoteId, CancellationToken ct);
     IReadOnlyList<ServicePrice> ListCatalog();
     Task<IReadOnlyList<BillingUsageRecord>> GetUsageAsync(string tenant, CancellationToken ct);
@@ -460,12 +462,96 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             AmountCents: consumed.AmountCents,
             ExecutedAt: now), ct);
 
+        return await RecordRoyaltiesAsync(consumed, attributions, ct);
+    }
+
+    public async Task<IReadOnlyList<BillingRoyaltyRecord>> RecordRoyaltiesAsync(
+        BillingQuote quote, IReadOnlyList<RoyaltyAttributionShare> attributions, CancellationToken ct)
+    {
         if (attributions is null || attributions.Count == 0)
             return Array.Empty<BillingRoyaltyRecord>();
 
-        var royalties = ComputeRoyaltyShares(consumed, attributions, now);
-        await _ledger.RecordRoyaltiesAsync(royalties, ct);
+        var royalties = ComputeRoyaltyShares(quote, attributions, DateTimeOffset.UtcNow);
+        if (royalties.Count > 0)
+            await _ledger.RecordRoyaltiesAsync(royalties, ct);
         return royalties;
+    }
+
+    public static IReadOnlyList<RoyaltyAttributionShare> FromWitnessShares(
+        IReadOnlyList<Laplace.Engine.Core.EngineWitnessShare> shares)
+    {
+        if (shares is null || shares.Count == 0)
+            return Array.Empty<RoyaltyAttributionShare>();
+
+        var deduped = new Dictionary<string, (double Weight, ulong Games, int ShareBp, double Fisher)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in shares)
+        {
+            var hex = s.Witness.ToHex();
+            if (string.IsNullOrWhiteSpace(hex) || s.Witness == Laplace.Engine.Core.Hash128.Zero)
+                continue;
+            double trust = double.IsFinite(s.Trust) ? Math.Clamp(s.Trust, 0.0, 1.0) : 0.0;
+            double fisher = double.IsFinite(s.FisherInfo) && s.FisherInfo > 0.0 ? s.FisherInfo : 0.0;
+            double weight = fisher * trust;
+            if (deduped.TryGetValue(hex, out var prev))
+            {
+                deduped[hex] = (
+                    Weight: Math.Max(prev.Weight, weight),
+                    Games: Math.Max(prev.Games, s.Games),
+                    ShareBp: Math.Max(prev.ShareBp, s.ShareBasisPoints),
+                    Fisher: Math.Max(prev.Fisher, fisher));
+            }
+            else
+            {
+                deduped[hex] = (weight, s.Games, s.ShareBasisPoints, fisher);
+            }
+        }
+
+        if (deduped.Count == 0)
+            return Array.Empty<RoyaltyAttributionShare>();
+
+        var ordered = deduped
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .ToArray();
+
+        int suppliedBpSum = ordered.Sum(kv => Math.Max(0, kv.Value.ShareBp));
+        if (suppliedBpSum == 10000 && ordered.All(kv => kv.Value.ShareBp >= 0))
+        {
+            return ordered.Select(kv => new RoyaltyAttributionShare(
+                SourceIdHex: kv.Key,
+                ShareBp: kv.Value.ShareBp,
+                HitCount: (long)Math.Min(long.MaxValue, kv.Value.Games),
+                TotalWeight: kv.Value.Weight > 0 ? kv.Value.Weight : kv.Value.Fisher)).ToArray();
+        }
+
+        double totalWeight = ordered.Sum(kv => kv.Value.Weight);
+        if (totalWeight <= 0.0)
+            return Array.Empty<RoyaltyAttributionShare>();
+
+        var raw = new double[ordered.Length];
+        var bp = new int[ordered.Length];
+        int floorSum = 0;
+        for (int i = 0; i < ordered.Length; i++)
+        {
+            raw[i] = (ordered[i].Value.Weight * 10000.0) / totalWeight;
+            bp[i] = (int)Math.Floor(raw[i]);
+            floorSum += bp[i];
+        }
+        int rem = 10000 - floorSum;
+        if (rem > 0)
+        {
+            var remOrder = Enumerable.Range(0, ordered.Length)
+                .OrderByDescending(i => raw[i] - bp[i])
+                .ThenBy(i => ordered[i].Key, StringComparer.Ordinal)
+                .ToArray();
+            for (int k = 0; k < rem && k < remOrder.Length; k++)
+                bp[remOrder[k]]++;
+        }
+
+        return ordered.Select((kv, i) => new RoyaltyAttributionShare(
+            SourceIdHex: kv.Key,
+            ShareBp: bp[i],
+            HitCount: (long)Math.Min(long.MaxValue, kv.Value.Games),
+            TotalWeight: kv.Value.Weight)).ToArray();
     }
 
     /// <summary>
@@ -482,41 +568,56 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         if (attributions.Count == 0)
             return Array.Empty<BillingRoyaltyRecord>();
 
+        // Deduplicate causal witnesses/sources before normalizing into integer 10000 bp.
+        var unique = attributions
+            .Where(a => !string.IsNullOrWhiteSpace(a.SourceIdHex))
+            .GroupBy(a => a.SourceIdHex.ToLowerInvariant(), StringComparer.Ordinal)
+            .Select(g => new RoyaltyAttributionShare(
+                SourceIdHex: g.Key,
+                ShareBp: g.Sum(x => Math.Max(0, x.ShareBp)),
+                HitCount: g.Sum(x => Math.Max(0, x.HitCount)),
+                TotalWeight: g.Sum(x => x.TotalWeight > 0 ? x.TotalWeight : 0.0),
+                SourceOwnerTenant: g.Select(x => x.SourceOwnerTenant).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t))))
+            .OrderBy(a => a.SourceIdHex, StringComparer.Ordinal)
+            .ToArray();
+        if (unique.Length == 0)
+            return Array.Empty<BillingRoyaltyRecord>();
+
         // Normalize weights into basis points summing to 10000 if caller did not supply pre-normalized share_bp.
-        int suppliedBpSum = attributions.Sum(a => a.ShareBp);
-        int[] normalizedBp = new int[attributions.Count];
-        if (suppliedBpSum == 10000 && attributions.All(a => a.ShareBp >= 0))
+        int suppliedBpSum = unique.Sum(a => a.ShareBp);
+        int[] normalizedBp = new int[unique.Length];
+        if (suppliedBpSum == 10000 && unique.All(a => a.ShareBp >= 0))
         {
-            for (int i = 0; i < attributions.Count; i++)
-                normalizedBp[i] = attributions[i].ShareBp;
+            for (int i = 0; i < unique.Length; i++)
+                normalizedBp[i] = unique[i].ShareBp;
         }
         else
         {
-            double totalWeight = attributions.Sum(a => a.TotalWeight > 0 ? a.TotalWeight : Math.Max(1, a.HitCount));
-            if (totalWeight <= 0) totalWeight = attributions.Count;
-            var raw = new double[attributions.Count];
+            double totalWeight = unique.Sum(a => a.TotalWeight > 0 ? a.TotalWeight : Math.Max(1, a.HitCount));
+            if (totalWeight <= 0) totalWeight = unique.Length;
+            var raw = new double[unique.Length];
             int sumFloor = 0;
-            for (int i = 0; i < attributions.Count; i++)
+            for (int i = 0; i < unique.Length; i++)
             {
-                double w = attributions[i].TotalWeight > 0 ? attributions[i].TotalWeight : Math.Max(1, attributions[i].HitCount);
+                double w = unique[i].TotalWeight > 0 ? unique[i].TotalWeight : Math.Max(1, unique[i].HitCount);
                 raw[i] = (w * 10000.0) / totalWeight;
                 normalizedBp[i] = (int)Math.Floor(raw[i]);
                 sumFloor += normalizedBp[i];
             }
             int rem = 10000 - sumFloor;
-            var order = Enumerable.Range(0, attributions.Count)
+            var order = Enumerable.Range(0, unique.Length)
                 .OrderByDescending(i => raw[i] - normalizedBp[i])
-                .ThenBy(i => attributions[i].SourceIdHex, StringComparer.Ordinal)
+                .ThenBy(i => unique[i].SourceIdHex, StringComparer.Ordinal)
                 .ToArray();
             for (int k = 0; k < rem && k < order.Length; k++)
                 normalizedBp[order[k]]++;
         }
 
         long poolCents = (quote.AmountCents * Math.Clamp(seederPoolBp, 0, 10000)) / 10000L;
-        long[] cents = new long[attributions.Count];
+        long[] cents = new long[unique.Length];
         long centsSum = 0;
-        var centRems = new long[attributions.Count];
-        for (int i = 0; i < attributions.Count; i++)
+        var centRems = new long[unique.Length];
+        for (int i = 0; i < unique.Length; i++)
         {
             long num = poolCents * normalizedBp[i];
             cents[i] = num / 10000L;
@@ -526,24 +627,24 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         long centLeft = poolCents - centsSum;
         if (centLeft > 0)
         {
-            var centOrder = Enumerable.Range(0, attributions.Count)
+            var centOrder = Enumerable.Range(0, unique.Length)
                 .OrderByDescending(i => centRems[i])
                 .ThenByDescending(i => normalizedBp[i])
-                .ThenBy(i => attributions[i].SourceIdHex, StringComparer.Ordinal)
+                .ThenBy(i => unique[i].SourceIdHex, StringComparer.Ordinal)
                 .ToArray();
             for (int k = 0; k < centLeft && k < centOrder.Length; k++)
                 cents[centOrder[k]]++;
         }
 
-        var results = new BillingRoyaltyRecord[attributions.Count];
-        for (int i = 0; i < attributions.Count; i++)
+        var results = new BillingRoyaltyRecord[unique.Length];
+        for (int i = 0; i < unique.Length; i++)
         {
-            var a = attributions[i];
+            var a = unique[i];
             results[i] = new BillingRoyaltyRecord(
                 QuoteId: quote.QuoteId,
                 PayerTenant: quote.Tenant,
                 ServiceId: quote.ServiceId,
-                SourceIdHex: a.SourceIdHex.ToLowerInvariant(),
+                SourceIdHex: a.SourceIdHex,
                 SourceOwnerTenant: a.SourceOwnerTenant,
                 ShareBp: normalizedBp[i],
                 RoyaltyCents: cents[i],

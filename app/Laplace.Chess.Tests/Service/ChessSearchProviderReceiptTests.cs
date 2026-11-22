@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;

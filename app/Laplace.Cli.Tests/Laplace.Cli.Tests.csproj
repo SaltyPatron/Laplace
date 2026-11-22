@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Cli\Laplace.Cli.csproj" />
+    <ProjectReference Include="..\Laplace.Data\Laplace.Data.csproj" />
   </ItemGroup>
 
 </Project>

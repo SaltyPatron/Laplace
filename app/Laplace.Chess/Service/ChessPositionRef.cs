@@ -25,7 +25,7 @@ public static class ChessPositionRef
         int slashes = 0;
         foreach (char c in parts[0])
             if (c == '/') slashes++;
-        return slashes == 7;
+        return slashes is 7 or 8;
     }
 
     /// <summary>

@@ -1,8 +1,0 @@
-CREATE UNLOGGED TABLE IF NOT EXISTS converse.session_topics (
-    session_id  bytea       NOT NULL,
-    ord         integer     NOT NULL,
-    prompt      text        NOT NULL,
-    resolved_id bytea,
-    asked_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (session_id, ord)
-);

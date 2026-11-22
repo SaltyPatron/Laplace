@@ -24,12 +24,12 @@ public sealed class TopicResolveArchitectureGateTests
     [Fact]
     public void CombinedResolveAndLabel_IsOneCatalogOwnedServerStatement()
     {
-        var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.Resolve.cs");
-        var catalog = Read("engine/core/src/sql_catalog.def");
+        var text = Read("app/Laplace.Data/NpgsqlSubstrateReads.Resolve.cs");
+        var catalog = Read("app/Laplace.Core/Core/SqlCatalog.cs");
         Assert.Contains("SqlCatalog.Get(\"conversation.resolve_refs_with_labels\")", text);
         Assert.Contains("Hash128.Text(reference)", text);
         Assert.DoesNotContain("SELECT ", text);
-        Assert.Contains("SQL_QUERY(\"conversation.resolve_refs_with_labels\"", catalog);
+        Assert.Contains("[\"conversation.resolve_refs_with_labels\"]", catalog);
         Assert.Contains("FROM public.laplace_resolve_refs($1,$2)", catalog);
         Assert.DoesNotContain("OpenConnectionAsync", text);
     }
@@ -59,7 +59,7 @@ public sealed class TopicResolveArchitectureGateTests
     {
         var dir = new DirectoryInfo(Path.GetDirectoryName(thisFile)!);
         while (dir is not null &&
-               !(Directory.Exists(Path.Combine(dir.FullName, "engine"))
+               !(Directory.Exists(Path.Combine(dir.FullName, "db"))
                  && Directory.Exists(Path.Combine(dir.FullName, "app"))))
             dir = dir.Parent;
         return dir?.FullName

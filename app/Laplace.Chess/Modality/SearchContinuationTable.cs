@@ -4,7 +4,7 @@ namespace Laplace.Modality.Chess;
 
 /// <summary>
 /// Cache of witnessed continuations for one search. Keys are
-/// <see cref="ChessPositionIdentity"/> values, the same position identity the
+/// <see cref="ChessEngineIdentity"/> values, the same position identity the
 /// game already uses. The table does not mint a second identity.
 /// Seed it before <see cref="Search.Think"/> and do not mutate it during a search.
 /// Search uses <see cref="Entry.PreferredMove"/> to order interior nodes.
@@ -124,7 +124,7 @@ public sealed class SearchContinuationTable
     public void SeedWitnessedEvaluation(
         Board position, int centipawnsFromSideToMove, double witnesses = BlendPrior, bool amputateInterior = false)
     {
-        Hash128 id = ChessPositionIdentity.PositionId(position);
+        Hash128 id = ChessEngineIdentity.PositionId(position);
         double n = witnesses > 0d ? witnesses : BlendPrior;
         Entry current = _entries.GetValueOrDefault(id);
         _entries[id] = current with
@@ -156,7 +156,7 @@ public sealed class SearchContinuationTable
     public void SeedRetrogradeCheckpoint(
         Board position, ChessMove? bestMove, int wdl, int pliesToClose, bool isCheckmate = false)
     {
-        Hash128 id = ChessPositionIdentity.PositionId(position);
+        Hash128 id = ChessEngineIdentity.PositionId(position);
         int clampedWdl = Math.Clamp(wdl, 0, 4);
         int clampedPlies = Math.Max(0, pliesToClose);
         Entry current = _entries.GetValueOrDefault(id);
@@ -189,7 +189,7 @@ public sealed class SearchContinuationTable
         var board = start.Clone();
         foreach (var move in line)
         {
-            Hash128 id = ChessPositionIdentity.PositionId(board);
+            Hash128 id = ChessEngineIdentity.PositionId(board);
             Entry current = _entries.GetValueOrDefault(id);
             if (activeGame)
                 _entries[id] = current with { ActiveGameMove = move };

@@ -1,17 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Laplace.Api.Contracts;
-using Laplace.Decomposers.Abstractions;
-using Laplace.Ingestion;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Records a target-machine analysis as what the runtime witness MachineCostAnalyzer measured, at AppDerived (an
-/// application's evidence from its own operation: measured cost): one JSON file holding the calculation, its
-/// analyzer, artifact, target and execution count, and its result, read by the Engine's json recipe under the
-/// witness's trunk (laplace witness). The calculation is that file's trunk; the same calculation of the same
-/// artifact on the same target records nothing again. Nothing here composes an identity or writes a row.
+/// Records a target-machine analysis as what the runtime witness <c>MachineCostAnalyzer</c>
+/// measured at <c>AppDerived</c>: one canonical JSON artifact read by the C Engine's
+/// <c>laplace witness</c> under its runtime trunk.
 /// </summary>
 internal sealed class MachineCostWitnessService
 {
@@ -19,7 +16,7 @@ internal sealed class MachineCostWitnessService
     private const string TrustClass = "AppDerived";
     private const string CalculationSchema = "laplace.machine-cost-calculation/v1";
     private const string WitnessSchema = "laplace.machine-cost-witness/v1";
-    private readonly Lazy<RuntimeWitnessRecorder> _recorder = new(RuntimeWitnessRecorder.Installed);
+
     private static readonly JsonSerializerOptions CanonicalJson = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -117,20 +114,27 @@ internal sealed class MachineCostWitnessService
             receipt.Assumptions);
 
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(new { calculation, result = witness }, CanonicalJson);
+        string calculationId = Hash128.Blake3(json).ToHex();
+        string witnessId = Hash128.Text(AnalyzerName).ToHex();
+
+        var workDir = Path.Combine(Path.GetTempPath(), $"laplace-mc-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workDir);
         try
         {
-            var recorded = await _recorder.Value.RecordAsync(
-                new NativeRuntimeWitness(AnalyzerName, TrustClass), "machine-cost.json", json, ct).ConfigureAwait(false);
-            if (recorded.WitnessId is null)
-                throw new SubstrateUnavailableException(
-                    "Machine-cost calculation succeeded, but the Engine reported no witness trunk for its record.",
-                    new InvalidOperationException(recorded.Path));
-            return new Deposit(recorded.FileId ?? recorded.WitnessId, recorded.WitnessId);
+            var artifactPath = Path.Combine(workDir, "machine-cost.json");
+            await File.WriteAllBytesAsync(artifactPath, json, ct).ConfigureAwait(false);
+            await NativeEngineCli.RunWitnessAsync(
+                AnalyzerName, TrustClass, workDir, [artifactPath], AnalyzerName, ct).ConfigureAwait(false);
+            return new Deposit(calculationId, witnessId);
         }
         catch (InvalidOperationException ex)
         {
             throw new SubstrateUnavailableException(
                 "Machine-cost calculation succeeded, but the Engine did not record it.", ex);
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch (IOException) { }
         }
     }
 }

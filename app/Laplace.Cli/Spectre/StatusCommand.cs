@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Spectre.Console.Cli;
 
@@ -16,8 +15,10 @@ internal sealed class StatusCommand : ForwardCommand<TailSettings>
             Console.Error.WriteLine("usage: status [--joins]");
             return Task.FromResult(2);
         }
-        return NativeRecipeExecution.StatusAsync(
-            NativeRecipeExecution.ConnectionInfoFromNpgsql(LaplaceInstall.PostgresConnectionString()), args.Length == 1,
-            Console.OpenStandardOutput(), Console.OpenStandardError(), ct);
+        IReadOnlyList<string> argv = args.Length == 1 ? ["status", "--joins"] : ["status"];
+        return NativeRecipeCatalog.RunNativeAsync(
+            argv,
+            NativeRecipeCatalog.ConnectionInfoFromNpgsql(LaplaceInstall.PostgresConnectionString()),
+            ct: ct);
     }
 }

@@ -1,35 +1,55 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using Laplace.Native;
+
 namespace Laplace.Engine.Core;
 
 public static unsafe class CodepointPerfcache
 {
-    // Immutable mmap after load — cache base/count so hot readers skip the native gate.
+    private const int CanonicalCodepointCount = 1_114_112;
+
     private static volatile bool _ready;
-    private static CodepointRecord* _recs;
+    private static lp_tier0_record* _recs;
     private static int _count;
+    private static string? _loadedPath;
+    private static lp_layout* _flagsLayout;
+    private static lp_field* _fGcb;
+    private static lp_field* _fWb;
+    private static lp_field* _fSb;
+    private static lp_field* _fIncb;
+    private static lp_field* _fCcc;
     private static int _recipeStreams;
+
+    internal static lp_tier0_record* TablePointer
+    {
+        get
+        {
+            LoadDefault();
+            return _recs;
+        }
+    }
 
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         lock (LaplaceCoreGate.Native)
         {
-            // Native retains one immutable mapping. Validate an explicitly selected
-            // alias instead of silently accepting a wrong path after an earlier load.
-            int rc = NativeInterop.CodepointTableLoadPerfcache(path);
-            if (rc != 0)
-            {
-                string why = rc switch
-                {
-                    -1 => "open/stat/mmap failure (missing or unreadable file)",
-                    -3 => "expected exactly 1,114,112 Native 64-byte codepoint records",
-                    -4 => "selected file differs from the canonical Native codepoint floor",
-                    -5 => "canonical Native LAPLACE_TIER0 mapping unavailable",
-                    _ => "unknown error",
-                };
-                throw new InvalidOperationException(
-                    $"codepoint_table_load_perfcache(\"{path}\") failed (rc={rc}): {why}");
-            }
-            PublishRecordsUnlocked();
+            byte[] utf8 = Encoding.UTF8.GetBytes(path + '\0');
+            lp_tier0_record* mapped;
+            fixed (byte* p = utf8)
+                mapped = LaplaceNative.lp_tier0_map(p);
+            if (mapped == null)
+                throw new InvalidOperationException($"lp_tier0_map(\"{path}\") failed: missing, malformed, or incomplete tier0.bin.");
+
+            nuint count = LaplaceNative.lp_tier0_record_count(mapped);
+            if (count != CanonicalCodepointCount)
+                throw new InvalidOperationException($"lp_tier0_map(\"{path}\") returned {count} records, expected {CanonicalCodepointCount}.");
+
+            _recs = mapped;
+            _count = checked((int)count);
+            _loadedPath = Path.GetFullPath(path);
+            LoadFlagsBesideUnlocked(path);
+            _ready = true;
         }
     }
 
@@ -39,12 +59,25 @@ public static unsafe class CodepointPerfcache
         lock (LaplaceCoreGate.Native)
         {
             if (_ready) return;
-            if (IsLoadedUnlocked()) { PublishRecordsUnlocked(); return; }
             Load(ResolveDefaultPath());
         }
     }
 
-    public static string ResolveDefaultPath() => LaplaceInstall.ResolveT0Perfcache();
+    public static string ResolveDefaultPath()
+    {
+        try
+        {
+            return LaplaceInstall.ResolveT0Perfcache();
+        }
+        catch
+        {
+            byte* p = LaplaceNative.lp_tier0_path();
+            string? fallback = Marshal.PtrToStringUTF8((nint)p);
+            if (!string.IsNullOrWhiteSpace(fallback) && File.Exists(fallback))
+                return fallback;
+            throw;
+        }
+    }
 
     public static void Unload()
     {
@@ -53,15 +86,19 @@ public static unsafe class CodepointPerfcache
             if (_recipeStreams != 0)
                 throw new InvalidOperationException(
                     $"Cannot unload the codepoint perf-cache while {_recipeStreams} native recipe stream(s) hold it.");
-            NativeInterop.CodepointTableUnload();
             _recs = null;
             _count = 0;
+            _loadedPath = null;
+            _flagsLayout = null;
+            _fGcb = null;
+            _fWb = null;
+            _fSb = null;
+            _fIncb = null;
+            _fCcc = null;
             _ready = false;
         }
     }
 
-    // Creation and final release are the only shared synchronization boundaries
-    // for native recipe streams. Their parser/tuple state has one local owner.
     internal static void RetainRecipeStream()
     {
         lock (LaplaceCoreGate.Native)
@@ -75,42 +112,18 @@ public static unsafe class CodepointPerfcache
     {
         lock (LaplaceCoreGate.Native)
         {
-            System.Diagnostics.Debug.Assert(_recipeStreams > 0);
-            --_recipeStreams;
+            if (_recipeStreams > 0) --_recipeStreams;
         }
     }
 
     public static bool IsLoaded => _ready;
 
-    private static bool IsLoadedUnlocked() => NativeInterop.CodepointTableIsLoaded() != 0;
-
-    private static void PublishRecordsUnlocked()
-    {
-        CodepointRecord* recs;
-        ulong count;
-        int rc = NativeInterop.CodepointTableRecords(&recs, &count);
-        if (rc != 0)
-            throw new InvalidOperationException(
-                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
-        // The mapped records are sorted by ID, not by scalar ordinal. Native
-        // already validated and indexed the entire floor before publication.
-        var ascii = NativeInterop.CodepointTableLookup('A');
-        if (ascii == null) throw new InvalidOperationException("Native scalar floor has no ASCII A.");
-        var probe = ascii->Hash;
-        uint codepoint;
-        if (NativeInterop.CodepointTableLookupId(&probe, &codepoint) != 0 || codepoint != 'A')
-            throw new InvalidOperationException("codepoint perf-cache reverse index initialization failed");
-        _recs = recs;
-        _count = checked((int)count);
-        _ready = true;
-    }
-
     public static ReadOnlySpan<CodepointRecord> Records
     {
         get
         {
-            if (!_ready) throw new InvalidOperationException(
-                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            if (!_ready || _recs == null)
+                throw new InvalidOperationException("codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
             return new ReadOnlySpan<CodepointRecord>(_recs, _count);
         }
     }
@@ -119,8 +132,8 @@ public static unsafe class CodepointPerfcache
     {
         get
         {
-            if (!_ready) throw new InvalidOperationException(
-                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            if (!_ready || _recs == null)
+                throw new InvalidOperationException("codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
             return _count;
         }
     }
@@ -129,12 +142,11 @@ public static unsafe class CodepointPerfcache
     {
         get
         {
-            if (!_ready) throw new InvalidOperationException(
-                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
-            Hash128 receipt = default;
-            if (NativeInterop.CodepointTableCopyReceipt(&receipt) != 0)
-                throw new InvalidOperationException("codepoint perf-cache receipt unavailable");
-            return receipt;
+            if (!_ready || _recs == null)
+                throw new InvalidOperationException("codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            byte* digest = stackalloc byte[32];
+            LaplaceNative.lp_tier0_fingerprint(_recs, digest);
+            return Hash128.FromBytes(new ReadOnlySpan<byte>(digest, 16));
         }
     }
 
@@ -143,10 +155,12 @@ public static unsafe class CodepointPerfcache
     public static bool TryLookupCodepoint(Hash128 id, out uint codepoint)
     {
         codepoint = 0;
-        if (!_ready) return false;
-        Hash128 h = id;
-        fixed (uint* pCp = &codepoint)
-            return NativeInterop.CodepointTableLookupId(&h, pCp) == 0;
+        if (!_ready || _recs == null) return false;
+        lp_id nativeId = id.ToNative();
+        long cp = LaplaceNative.lp_tier0_codepoint(_recs, &nativeId);
+        if (cp is < 0 or >= CanonicalCodepointCount) return false;
+        codepoint = (uint)cp;
+        return true;
     }
 
     public static bool IsKnownCodepointId(Hash128 id) => TryLookupCodepoint(id, out _);
@@ -154,46 +168,97 @@ public static unsafe class CodepointPerfcache
     public static bool TryLookupCodepoint(uint codepoint, out CodepointRecord record)
     {
         record = default;
-        if (!_ready) return false;
-        var entry = NativeInterop.CodepointTableLookup(codepoint);
+        if (!_ready || _recs == null) return false;
+        lp_tier0_record* entry = LaplaceNative.lp_tier0_at(_recs, codepoint);
         if (entry == null) return false;
-        record = *entry; return true;
+        record = *(CodepointRecord*)entry;
+        return true;
     }
 
     public static ref readonly CodepointRecord LookupCodepoint(uint codepoint)
     {
-        if (!_ready) throw new InvalidOperationException("Load the Native codepoint floor before lookup.");
-        var entry = NativeInterop.CodepointTableLookup(codepoint);
-        if (entry == null) throw new ArgumentOutOfRangeException(nameof(codepoint), "Outside the Unicode codespace.");
-        return ref *entry;
+        if (!_ready || _recs == null)
+            throw new InvalidOperationException("Load the Native codepoint floor before lookup.");
+        lp_tier0_record* entry = LaplaceNative.lp_tier0_at(_recs, codepoint);
+        if (entry == null)
+            throw new ArgumentOutOfRangeException(nameof(codepoint), "Outside the Unicode codespace.");
+        return ref *(CodepointRecord*)entry;
     }
 
     public static bool TryLookupScalar(uint scalar, out CodepointRecord record)
     {
         record = default;
-        return scalar < 0x110000 && (scalar < 0xd800 || scalar > 0xdfff)
+        return scalar < CanonicalCodepointCount && (scalar < 0xd800 || scalar > 0xdfff)
             && TryLookupCodepoint(scalar, out record);
     }
 
     public static ref readonly CodepointRecord LookupScalar(uint scalar)
     {
-        if (scalar >= 0x110000 || scalar is >= 0xd800 and <= 0xdfff)
+        if (scalar >= CanonicalCodepointCount || scalar is >= 0xd800 and <= 0xdfff)
             throw new ArgumentOutOfRangeException(nameof(scalar), "Not a Unicode scalar.");
         return ref LookupCodepoint(scalar);
     }
 
-    /// <summary>One native batch over the mapped floor; zero bits remain unresolved.</summary>
+    public static uint GetFlagsWord(uint codepoint)
+    {
+        if (!_ready || _flagsLayout == null) return 0u;
+        uint gcb = _fGcb != null ? LaplaceNative.lp_flags_get(_flagsLayout, codepoint, _fGcb) : 0u;
+        uint wb = _fWb != null ? LaplaceNative.lp_flags_get(_flagsLayout, codepoint, _fWb) : 0u;
+        uint sb = _fSb != null ? LaplaceNative.lp_flags_get(_flagsLayout, codepoint, _fSb) : 0u;
+        uint incb = _fIncb != null ? LaplaceNative.lp_flags_get(_flagsLayout, codepoint, _fIncb) : 0u;
+        uint ccc = _fCcc != null ? LaplaceNative.lp_flags_get(_flagsLayout, codepoint, _fCcc) : 0u;
+        return (gcb & 0x0Fu)
+             | ((wb & 0x1Fu) << 4)
+             | ((sb & 0x0Fu) << 9)
+             | ((incb & 0x03u) << 13)
+             | ((ccc & 0xFFu) << 15);
+    }
+
     public static byte[] KnownIdsBitmap(IReadOnlyList<Hash128> ids)
     {
         ArgumentNullException.ThrowIfNull(ids);
         var bitmap = new byte[ids.Count / 8 + (ids.Count % 8 == 0 ? 0 : 1)];
-        if (!_ready || ids.Count == 0) return bitmap;
-        Hash128[] packed = ids as Hash128[] ?? ids.ToArray();
-        fixed (Hash128* input = packed)
-        fixed (byte* output = bitmap)
-            if (NativeInterop.CodepointTablePresenceBitmap(
-                    input, (nuint)packed.Length, output, (nuint)bitmap.Length) != 0)
-                throw new InvalidOperationException("codepoint floor membership failed");
+        if (!_ready || _recs == null || ids.Count == 0) return bitmap;
+        for (int i = 0; i < ids.Count; i++)
+        {
+            lp_id nid = ids[i].ToNative();
+            if (LaplaceNative.lp_tier0_contains(_recs, &nid))
+                bitmap[i >> 3] |= (byte)(1 << (i & 7));
+        }
         return bitmap;
+    }
+
+    private static void LoadFlagsBesideUnlocked(string tier0Path)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(tier0Path));
+        string? flagsPath = null;
+        if (!string.IsNullOrEmpty(dir))
+        {
+            var candidate = Path.Combine(dir, "tier0.flags");
+            if (File.Exists(candidate) && File.Exists(candidate + ".layout"))
+                flagsPath = candidate;
+        }
+        if (flagsPath is null)
+        {
+            byte* p = LaplaceNative.lp_flags_path();
+            string? fallback = Marshal.PtrToStringUTF8((nint)p);
+            if (!string.IsNullOrWhiteSpace(fallback) && File.Exists(fallback))
+                flagsPath = fallback;
+        }
+        if (flagsPath is null)
+        {
+            _flagsLayout = null;
+            return;
+        }
+        byte[] fUtf8 = Encoding.UTF8.GetBytes(flagsPath + '\0');
+        fixed (byte* pf = fUtf8)
+            _flagsLayout = LaplaceNative.lp_flags_map(pf);
+        if (_flagsLayout == null) return;
+
+        fixed (byte* pGcb = "GCB\0"u8) _fGcb = LaplaceNative.lp_flags_field(_flagsLayout, pGcb);
+        fixed (byte* pWb = "WB\0"u8) _fWb = LaplaceNative.lp_flags_field(_flagsLayout, pWb);
+        fixed (byte* pSb = "SB\0"u8) _fSb = LaplaceNative.lp_flags_field(_flagsLayout, pSb);
+        fixed (byte* pIncb = "InCB\0"u8) _fIncb = LaplaceNative.lp_flags_field(_flagsLayout, pIncb);
+        fixed (byte* pCcc = "ccc\0"u8) _fCcc = LaplaceNative.lp_flags_field(_flagsLayout, pCcc);
     }
 }

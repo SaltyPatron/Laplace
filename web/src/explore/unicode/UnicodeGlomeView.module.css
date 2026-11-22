@@ -32,4 +32,40 @@
     color: var(--color-signal);
     font-weight: 650;
   }
+
+  .canvasWrap {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .canvasBar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-1);
+  }
+
+  .layout:fullscreen,
+  .layoutFullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal, 1000);
+    padding: var(--space-3);
+    background: var(--color-bg-panel);
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+
+  .layout:fullscreen .canvas,
+  .layoutFullscreen .canvas {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .layoutFullscreen .canvasWrap,
+  .layout:fullscreen .canvasWrap {
+    height: 100%;
+  }
 }

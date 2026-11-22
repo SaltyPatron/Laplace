@@ -21,4 +21,9 @@ public sealed record SynthesisExportResponse(
     [property: JsonPropertyName("format")] string Format,
     [property: JsonPropertyName("output_path")] string OutputPath,
     [property: JsonPropertyName("bytes")] long Bytes,
-    [property: JsonPropertyName("billing")] BillingReceipt? Billing);
+    [property: JsonPropertyName("billing")] BillingReceipt? Billing,
+    [property: JsonPropertyName("n_vocab"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? NVocab = null,
+    [property: JsonPropertyName("n_edges"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? NEdges = null,
+    [property: JsonPropertyName("hidden_dim"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? HiddenDim = null,
+    [property: JsonPropertyName("raw_weight_bytes_retained"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ulong? RawWeightBytesRetained = null,
+    [property: JsonPropertyName("scheme"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Scheme = null);

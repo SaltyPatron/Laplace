@@ -48,6 +48,10 @@ export function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const [labelled, setLabelled] = useState<number[]>([]);
   const invalidate = useThree((s) => s.invalidate);
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    invalidate();
+  }, [size.width, size.height, invalidate]);
   const positions = useMemo(
     () => nodes.map((n) => project(n, projection, xmAngle, zmAngle)),
     [nodes, projection, xmAngle, zmAngle],

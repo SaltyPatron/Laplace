@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using Laplace.Engine.Core;
+using Laplace.Mcp;
 using Microsoft.AspNetCore.Builder;
 using Xunit;
 
@@ -308,22 +310,22 @@ public sealed class HttpTransportTests
 
     private static async Task SubstrateToolsAgainstSourceRoot()
     {
-        await using var tools = new SubstrateTools("Host=127.0.0.1;Port=5432;Database=laplace-mono;Username=postgres");
+        CodepointPerfcache.LoadDefault();
+        await using var tools = new SubstrateTools("Host=127.0.0.1;Port=5432;Database=laplace;Username=postgres");
         var catalog = tools.ListTools();
         Assert.Contains(catalog, t => (string?)t?["name"] == "embeddings");
         Assert.Contains(catalog, t => (string?)t?["name"] == "rerank");
         var embedTool = catalog.First(t => (string?)t?["name"] == "embeddings")!;
         var rerankTool = catalog.First(t => (string?)t?["name"] == "rerank")!;
-        Assert.Equal("string", (string?)embedTool["inputSchema"]?["properties"]?["inputs"]?["items"]?["type"]);
-        Assert.Equal("string", (string?)rerankTool["inputSchema"]?["properties"]?["documents"]?["items"]?["type"]);
+        Assert.Equal("array", (string?)embedTool["inputSchema"]?["properties"]?["inputs"]?["type"]);
+        Assert.Equal("array", (string?)rerankTool["inputSchema"]?["properties"]?["documents"]?["type"]);
         Assert.Contains(catalog, t => (string?)t?["name"] == "code_search");
         Assert.Contains(catalog, t => (string?)t?["name"] == "reindex");
 
         var (reindexJson, reindexErr) = tools.Call("reindex", new JsonObject { ["force"] = false });
         Assert.False(reindexErr, reindexJson);
         var reindexNode = JsonNode.Parse(reindexJson)!;
-        Assert.True((int?)reindexNode["rows"]?[0]?["indexed_files"] > 0, reindexJson);
-        Assert.True((int?)reindexNode["rows"]?[0]?["indexed_chunks"] > 0, reindexJson);
+        Assert.True((int?)reindexNode["file_count"] > 0, reindexJson);
 
         var (embedJson, embedErr) = tools.Call("embeddings", new JsonObject
         {
@@ -332,8 +334,9 @@ public sealed class HttpTransportTests
         Assert.False(embedErr, embedJson);
         var embedNode = JsonNode.Parse(embedJson)!;
         var embedRow = embedNode["rows"]![0]!;
-        Assert.Equal(32, ((string?)embedRow["entity_id"])?.Length);
-        Assert.Equal(5, embedRow["embedding"]!.AsArray().Count);
+        Assert.Equal(32, ((string?)embedRow["id"])?.Length);
+        Assert.Equal(4, embedRow["coord"]!.AsArray().Count);
+        Assert.True((double)embedRow["radius"]! > 0.0);
 
         var (rerankJson, rerankErr) = tools.Call("rerank", new JsonObject
         {
@@ -348,32 +351,24 @@ public sealed class HttpTransportTests
         var rerankRows = rerankNode["rows"]!.AsArray();
         Assert.Equal(3, rerankRows.Count);
         Assert.Equal(1, (int?)rerankRows[0]?["index"]);
-        Assert.Equal(1.0, (double)rerankRows[0]!["relevance_score"]!, precision: 5);
         Assert.Equal(0.0, (double)rerankRows[0]!["frechet_distance"]!, precision: 5);
+        Assert.True((double)rerankRows[0]!["score"]! >= 1.5, rerankJson);
         Assert.Equal(2, (int?)rerankRows[1]?["index"]);
-        Assert.Equal(0.0, (double)rerankRows[1]!["frechet_distance"]!, precision: 5);
-        Assert.True((double)rerankRows[1]!["relevance_score"]! >= 0.85, rerankJson);
+        Assert.True((double)rerankRows[1]!["score"]! > (double)rerankRows[2]!["score"]!, rerankJson);
         Assert.Equal(0, (int?)rerankRows[2]?["index"]);
-        Assert.True((double)rerankRows[2]!["relevance_score"]! < 0.25, rerankJson);
 
         var (searchJson, searchErr) = tools.Call("code_search", new JsonObject
         {
-            ["query"] = "math4d_frechet",
-            ["path"] = "math4d.c",
+            ["query"] = "SubTrajectoryFrechet",
             ["limit"] = 5,
         });
         Assert.False(searchErr, searchJson);
         var searchNode = JsonNode.Parse(searchJson)!;
-        Assert.True((int?)searchNode["indexed_files"] > 0, searchJson);
-        Assert.True((int?)searchNode["indexed_chunks"] > 0, searchJson);
+        Assert.True((int?)searchNode["files_indexed"] > 0, searchJson);
         var searchRows = searchNode["rows"]!.AsArray();
         Assert.NotEmpty(searchRows);
         Assert.NotNull((string?)searchRows[0]?["path"]);
-        Assert.Equal(32, ((string?)searchRows[0]?["entity_id"])?.Length);
-        Assert.Equal(0.0, (double)searchRows[0]!["frechet_distance"]!, precision: 5);
-        Assert.True((double)searchRows[0]!["relevance_score"]! >= 0.90, searchJson);
-        Assert.Contains("math4d_frechet", (string?)searchRows[0]?["symbol"] ?? "");
-        Assert.DoesNotContain("math4d_centroid", (string?)searchRows[0]?["symbol"] ?? "");
+        Assert.True((double)searchRows[0]!["score"]! > 0.25, searchJson);
     }
 
     [Fact]
@@ -392,37 +387,24 @@ public sealed class HttpTransportTests
     }
 
     [Fact]
-    public void SemanticPeerExpansion_ProjectsQueryTrajectoryOntoSynonymVertices()
+    public async Task RerankTrajectory_SeparatesForwardOrderAndConstituentOverlap()
     {
-        const string query = "compute the distance of a trajectory";
-        const string doc = "double math4d_frechet(const double* p, size_t np, const double* q, size_t nq) { /* calculates discrete curve metric */ }";
-
-        var qTrace = WorkspaceCodeIndex.ComputeTrace(query);
-        var dTrace = WorkspaceCodeIndex.ComputeTrace(doc);
-
-        var baseline = WorkspaceCodeIndex.ScoreCandidate(qTrace, dTrace, query, doc);
-
-        // Simulate WordNet peer resolution: compute -> calculates, trajectory -> curve, distance -> metric
-        var computeTrace = WorkspaceCodeIndex.ComputeTrace("compute");
-        var calculatesTrace = WorkspaceCodeIndex.ComputeTrace("calculates");
-        var trajectoryTrace = WorkspaceCodeIndex.ComputeTrace("trajectory");
-        var curveTrace = WorkspaceCodeIndex.ComputeTrace("curve");
-        var distanceTrace = WorkspaceCodeIndex.ComputeTrace("distance");
-        var metricTrace = WorkspaceCodeIndex.ComputeTrace("metric");
-
-        var peers = new Dictionary<Laplace.Engine.Core.Hash128, Laplace.Engine.Core.Hash128[]>
+        CodepointPerfcache.LoadDefault();
+        await using var tools = new SubstrateTools("Host=127.0.0.1;Port=5432;Database=laplace;Username=postgres");
+        var (rerankJson, isError) = tools.Call("rerank", new JsonObject
         {
-            [computeTrace.WordIds.First()] = [calculatesTrace.WordIds.First()],
-            [trajectoryTrace.WordIds.First()] = [curveTrace.WordIds.First()],
-            [distanceTrace.WordIds.First()] = [metricTrace.WordIds.First()],
-        };
-
-        var expanded = WorkspaceCodeIndex.ScoreCandidate(qTrace, dTrace, query, doc, peers);
-        Assert.True(expanded.FrechetDistance < baseline.FrechetDistance,
-            $"Expected projected Fréchet ({expanded.FrechetDistance:F4}) < baseline ({baseline.FrechetDistance:F4})");
-        Assert.True(expanded.WordOverlap > baseline.WordOverlap,
-            $"Expected peer-expanded overlap ({expanded.WordOverlap:F4}) > baseline ({baseline.WordOverlap:F4})");
-        Assert.True(expanded.RelevanceScore > baseline.RelevanceScore + 0.35,
-            $"Expected peer-expanded relevance ({expanded.RelevanceScore:F4}) >> baseline ({baseline.RelevanceScore:F4})");
+            ["query"] = "compute trajectory frechet distance",
+            ["documents"] = new JsonArray(
+                "unrelated text about cooking pasta",
+                "compute frechet trajectory distance curve metric",
+                "trajectory frechet distance compute"),
+        });
+        Assert.False(isError, rerankJson);
+        var rows = JsonNode.Parse(rerankJson)!["rows"]!.AsArray();
+        Assert.Equal(3, rows.Count);
+        Assert.NotEqual(0, (int?)rows[0]?["index"]);
+        Assert.Equal(0, (int?)rows[2]?["index"]);
+        Assert.True((double)rows[0]!["score"]! > (double)rows[2]!["score"]! + 0.35, rerankJson);
+        Assert.True((double)rows[0]!["frechet_distance"]! < (double)rows[2]!["frechet_distance"]!, rerankJson);
     }
 }

@@ -3,26 +3,20 @@ using Laplace.Engine.Core;
 namespace Laplace.Modality.Chess;
 
 /// <summary>
-/// Chess identity as content, byte-identical to the Engine's (Laplace-Engine <c>src/chess.c</c>, the header
-/// comment and <c>id_position</c> / <c>id_move</c>): a codepoint's id is BLAKE3 of its UTF-8 bytes, a
-/// composition's id is Native's <c>lp_id_compose</c> over its children's ids in order, a one-child composition
-/// is its child, and nothing else enters a hash (no domain, no tier, no rules, no counters).
+/// Chess identity as content, byte-identical to the Engine's (<c>Laplace-Engine/src/chess/chess_rules.c</c>
+/// and <c>chess.c</c>): a codepoint's id is BLAKE3 of its UTF-8 bytes, a composition's id is Native's
+/// <c>lp_id_compose</c> over its children's ids in order, a one-child composition is its child, and nothing
+/// else enters a hash (no domain, no tier, no rule label, no counters).
 ///
-///   square    [file, rank]                         e4 is [e, 4], two codepoints
-///   piece     a codepoint, FEN's letter            K Q R B N P white, k q r b n p black
-///   board     [[piece, square], ...]               the pieces in square order a1 b1 ... h8
-///   castling  [White's mask, Black's mask]         each mask a decimal number's digits; bit 7 - f for file f,
-///                                                  the king's file (its centre bit) and the file of each rook
-///                                                  it may castle with; a side that cannot castle is 0
-///   position  [board, side, castling, en passant]  side w or b; the en passant square only where a legal
-///                                                  capture of it exists, else -
-///   move      [piece, from, to(, promoted)]        a castling is [king, king's square, its rook's square]
-///   transition [position, move, position]          the claim a played game attests, scored by the result
-///
-/// <see cref="Hash128.Merkle"/> and <see cref="Hash128.Blake3"/> are the monorepo core's binding of those two
-/// Native functions (NativeIdentityParityTests pins them to <c>lp_id_compose</c> / <c>lp_id_codepoint</c>).
-/// Only the rules the Engine reads (Standard, which Chess960 plays under) have this identity: a rule set with
-/// drops, check counts or another objective has none, and <see cref="TryPositionId"/> says so.
+///   square     [file, rank]                         e4 is [e, 4], two codepoints
+///   piece      a codepoint, FEN's letter            K Q R B N P white, k q r b n p black
+///   board      [[piece, square], ...]               the pieces in square order a1 b1 ... h8
+///   castling   [White's mask, Black's mask]         each mask a decimal number's digits; bit 7 - f for file f,
+///                                                   the king's file (its centre bit) and the file of each rook
+///                                                   it may castle with; a side that cannot castle is 0
+///   position   [board, side, castling, ep (, hand)? (, promoted)? (, checks)?]
+///   move       [piece, from, to(, promoted)] or drop [piece, @, to]; castling is [king, king_sq, rook_sq]
+///   transition [position, move, position]           the claim a played game attests, scored by the result
 /// </summary>
 public static class ChessEngineIdentity
 {
@@ -90,8 +84,8 @@ public static class ChessEngineIdentity
         return mask;
     }
 
-    /// <summary>Whether the board's rules are ones the Engine's identity covers (Standard, Chess960 included).</summary>
-    public static bool Covers(Board board) => board.Rules.IsStandard;
+    /// <summary>Whether the board's geometry is covered by the Engine's 8x8 identity (all laws in <c>chess.firmware</c>).</summary>
+    public static bool Covers(Board board) => board.Rules.Files == 8 && board.Rules.Ranks == 8;
 
     public static bool TryPositionId(Board board, out Hash128 id)
     {
@@ -100,7 +94,7 @@ public static class ChessEngineIdentity
         return true;
     }
 
-    /// <summary>The position's id, equal to the Engine's for the same board, side, castling and en passant.</summary>
+    /// <summary>The position's id, byte-identical to <c>lp_chess_id_position</c> for all 8x8 variants.</summary>
     public static Hash128 PositionId(Board board)
     {
         if (!Covers(board))
@@ -121,7 +115,8 @@ public static class ChessEngineIdentity
             }
         }
 
-        Span<Hash128> part = stackalloc Hash128[4];
+        Span<Hash128> part = stackalloc Hash128[7];
+        int parts = 4;
         part[0] = Compose(pieces[..n]);
         part[1] = Codepoint(board.WhiteToMove ? 'w' : 'b');
         two[0] = Number(CastleMask(board, white: true));
@@ -129,14 +124,69 @@ public static class ChessEngineIdentity
         part[2] = Compose(two);
         int ep = ChessModality.CapturableEpSquare(board);
         part[3] = ep < 0 ? Codepoint('-') : Square(Board.FileOf(ep), Board.RankOf(ep));
-        return Compose(part);
+
+        // Extra variant state matching lp_chess_extra in chess_rules.c: pockets (QRBNP / qrbnp),
+        // promoted squares (a1..h8), and Three-check counters (+W+B).
+        Span<Hash128> extra = stackalloc Hash128[64];
+        int nhand = FillHandCodepoints(board, extra);
+        if (nhand > 0) part[parts++] = Compose(extra[..nhand]);
+
+        int npromoted = 0;
+        if (board.Promoted != 0)
+        {
+            for (int s = 0; s < 64; s++)
+            {
+                int file = s & 7, rank = s >> 3;
+                if ((board.Promoted & (1UL << s)) != 0 && board.Squares[Board.Sq(file, rank)] != Piece.Empty)
+                    extra[npromoted++] = Square(file, rank);
+            }
+            if (npromoted > 0) part[parts++] = Compose(extra[..npromoted]);
+        }
+
+        if (board.Checks[0] > 0 || board.Checks[1] > 0)
+        {
+            string checks = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"+{board.Checks[0]}+{board.Checks[1]}");
+            for (int i = 0; i < checks.Length; i++) extra[i] = Codepoint(checks[i]);
+            part[parts++] = Compose(extra[..checks.Length]);
+        }
+
+        return Compose(part[..parts]);
     }
 
-    /// <summary>The move's id, equal to the Engine's: [piece, from, to] or with the promoted piece.</summary>
+    private static int FillHandCodepoints(Board board, Span<Hash128> hand)
+    {
+        // Matches chess_rules.c lp_chess_extra order: "QRBNP" for white, then "qrbnp" for black.
+        ReadOnlySpan<(int PocketIndex, char Symbol)> order =
+        [
+            (4, 'Q'), (3, 'R'), (2, 'B'), (1, 'N'), (0, 'P'),
+            (9, 'q'), (8, 'r'), (7, 'b'), (6, 'n'), (5, 'p'),
+        ];
+        int nhand = 0;
+        foreach (var (index, symbol) in order)
+        {
+            ushort count = board.Pockets[index];
+            for (int k = 0; k < count && nhand < hand.Length; k++)
+                hand[nhand++] = Codepoint(symbol);
+        }
+        return nhand;
+    }
+
+    /// <summary>The move's id, byte-identical to <c>id_move</c>: [piece, from, to(, promo)] or drop [piece, @, to].</summary>
     public static Hash128 MoveId(Board before, ChessMove move)
     {
-        if (move.IsDrop) throw new NotSupportedException("a drop has no Engine move identity");
         bool white = before.WhiteToMove;
+        Span<Hash128> k = stackalloc Hash128[4];
+        if (move.IsDrop)
+        {
+            Piece type = Board.TypeOf(move.Promotion);
+            Piece colored = white ? type : (Piece)(-(sbyte)type);
+            k[0] = Codepoint(Board.PieceToChar(colored));
+            k[1] = Codepoint('@');
+            k[2] = Square(Board.FileOf(move.To), Board.RankOf(move.To));
+            return Compose(k[..3]);
+        }
+
         Piece moving = before.Squares[move.From];
         int toSquare = move.To;
         if (move.IsCastle)
@@ -145,7 +195,6 @@ public static class ChessEngineIdentity
             toSquare = Board.Sq(before.CastleRookFile(white, move.IsKingSideCastle), Board.RankOf(move.From));
         }
 
-        Span<Hash128> k = stackalloc Hash128[4];
         k[0] = Codepoint(Board.PieceToChar(moving));
         k[1] = Square(Board.FileOf(move.From), Board.RankOf(move.From));
         k[2] = Square(Board.FileOf(toSquare), Board.RankOf(toSquare));

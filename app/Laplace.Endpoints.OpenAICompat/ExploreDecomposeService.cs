@@ -116,9 +116,11 @@ internal sealed class ExploreDecomposeService
         ref readonly var r = ref CodepointPerfcache.LookupCodepoint(codepoint);
         string display = Rune.IsValid((int)codepoint) ? new Rune((int)codepoint).ToString() : string.Empty;
         double radius = Math.Sqrt(r.CoordX*r.CoordX+r.CoordY*r.CoordY+r.CoordZ*r.CoordZ+r.CoordM*r.CoordM);
+        var flags = GeometricTextScorer.InspectCodepointFlags(codepoint);
         return new UnicodePointResponse(codepoint, display, Convert.ToHexStringLower(r.Hash.ToBytes()),
             r.UcaOrder, r.CoordX, r.CoordY, r.CoordZ, r.CoordM, radius,
-            Convert.ToHexStringLower(r.Hilbert.ToByteArray()), r.Flags);
+            Convert.ToHexStringLower(r.Hilbert.ToByteArray()), r.Flags,
+            flags.GeneralCategory, flags.Script, flags.FlagsHex);
     }
 
     /// <summary>
@@ -413,14 +415,14 @@ internal sealed class ExploreDecomposeService
         ArgumentException.ThrowIfNullOrEmpty(text);
         EnsurePerfcache();
 
-        var t = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(text);
+        var t = GeometricTextScorer.ComputeTrace(text);
         return new GeometricTrace(
             RootId: t.RootId,
             RootIdHex: t.RootIdHex,
             X: t.Cx, Y: t.Cy, Z: t.Cz, M: t.Cm,
             Radius: t.Radius,
             Trajectory: t.Trajectory,
-            WordIds: t.WordIds,
+            WordIds: t.WordIds.ToHashSet(),
             WordWeightSum: t.WordWeights.Values.Sum(),
             Constituents: Math.Max(1, t.Trajectory.Length / 4));
     }

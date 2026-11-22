@@ -47,7 +47,7 @@ public sealed class ConversationProvenanceGateTests
     /// </summary>
     [Theory]
     [InlineData("app/Laplace.Endpoints.OpenAICompat/EndpointMappings.Inference.cs")]
-    [InlineData("app/Laplace.Endpoints.Mcp/SubstrateTools.cs")]
+    [InlineData("app/Laplace.Mcp/SubstrateTools.cs")]
     [InlineData("app/Laplace.Cli/QueryCommands.cs")]
     public void ConversationSurfaces_RunTheEngineTurn(string surface)
     {
@@ -63,33 +63,29 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// The turn is the Engine's: <c>laplace turn</c> (or <c>said</c>) with its receipt. The
+    /// The turn is the Engine's: <c>lp_engine_turn</c>. The
     /// orchestrator composes no identity, opens no database connection and writes no row.
     /// </summary>
     [Fact]
     public void ConversationTurns_RunsTheEngineAndComposesNothing()
     {
-        var turns = StripComments(Read("app/Laplace.Substrate/Ingestion/ConversationTurns.cs"));
-        var engine = StripComments(Read("app/Laplace.Substrate/Abstractions/NativeRecipeExecution.Turns.cs"));
-        Assert.Contains(".TurnAsync(", turns);
-        Assert.Contains("\"turn\"", engine);
-        Assert.Contains("\"said\"", engine);
-        Assert.Contains("\"--receipt\"", engine);
-        Assert.Contains("\"--files\"", engine);
-        foreach (var text in new[] { turns, engine })
-            foreach (var forbidden in new[]
-                     {
-                         "ContentTierSpine", "HashComposer", "SubstrateChangeBuilder", "ConsensusAccumulatingWriter",
-                         "NpgsqlCatalog", "OpenConnectionAsync", "Blake3",
-                     })
-                Assert.DoesNotContain(forbidden, text);
+        var turns = StripComments(Read("app/Laplace.Endpoints.OpenAICompat/IConversationTurns.cs"));
+        var abi = StripComments(Read("app/Laplace.Core/Core/LaplaceEngineAbi.cs"));
+        Assert.Contains(".Turn(", turns);
+        Assert.Contains("lp_engine_turn", abi);
+        foreach (var forbidden in new[]
+                 {
+                     "ContentTierSpine", "HashComposer", "SubstrateChangeBuilder", "ConsensusAccumulatingWriter",
+                     "NpgsqlCatalog", "OpenConnectionAsync", "Blake3",
+                 })
+            Assert.DoesNotContain(forbidden, turns);
     }
 
     /// <summary>The catalog keeps no statement of the retired turn writer or its chat reads.</summary>
     [Fact]
     public void SqlCatalog_HoldsNoSecondConversationSubstrate()
     {
-        var catalog = Read("engine/core/src/sql_catalog.def");
+        var catalog = Read("app/Laplace.Core/Core/SqlCatalog.cs");
         foreach (var retired in new[]
                  {
                      "\"conversation.append_turns\"", "\"conversation.forward_turn\"",
@@ -102,12 +98,12 @@ public sealed class ConversationProvenanceGateTests
     [Fact]
     public void McpChatTurn_IsTheEngineTurnOfTheMcpParticipant()
     {
-        var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
-        var chat = StripComments(ExtractMethod(text, "private (string, bool) ChatTurn"));
-        Assert.Contains("_turns.Value.TurnAsync(McpTenant", chat);
-        // Notes and feedback are what the runtime witness mcp-local states, recorded by the Engine.
-        Assert.Contains("_witnesses.Value.RecordAsync(new NativeRuntimeWitness(McpTenant", text);
-        Assert.Contains("FeedbackStatements.StateAsync(_witnesses.Value, _db, McpTenant", text);
+        var text = Read("app/Laplace.Mcp/SubstrateTools.cs");
+        var graph = Read("app/Laplace.Mcp/SubstrateTools.Graph.cs");
+        var chat = StripComments(ExtractMethod(graph, "private (string, bool) ChatTurn"));
+        Assert.Contains("TurnAsync(", chat);
+        Assert.Contains("RunNativeWitness(", graph);
+        Assert.Contains("McpTenant", text);
         Assert.DoesNotContain("ConsensusAccumulatingWriter", text);
         Assert.DoesNotContain("FeedbackContent", text);
     }
@@ -154,7 +150,7 @@ public sealed class ConversationProvenanceGateTests
     {
         var dir = new DirectoryInfo(Path.GetDirectoryName(thisFile)!);
         while (dir is not null &&
-               !(Directory.Exists(Path.Combine(dir.FullName, "engine"))
+               !(Directory.Exists(Path.Combine(dir.FullName, "db"))
                  && Directory.Exists(Path.Combine(dir.FullName, "app"))))
             dir = dir.Parent;
         return dir?.FullName

@@ -16,7 +16,7 @@ public sealed class LaplaceInstallRepoRootTests
         Assert.True(LaplaceInstall.TryRepoRoot(out var root));
         Assert.Equal(Path.GetFullPath(stamped!), root);
         Assert.True(File.Exists(Path.Combine(root, "app", "Laplace.slnx")));
-        Assert.True(File.Exists(Path.Combine(root, "engine", "CMakeLists.txt")));
+        Assert.True(Directory.Exists(Path.Combine(root, "db", "schema")));
         Assert.True(Directory.Exists(Path.Combine(root, "test-data", "syzygy")));
     }
 }

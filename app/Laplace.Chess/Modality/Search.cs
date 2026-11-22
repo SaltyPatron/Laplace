@@ -196,7 +196,7 @@ public sealed partial class Search
     public Result Think(Board board, Limits limits, CancellationToken ct = default,
         Action<Iteration>? onIterationCompleted = null)
     {
-        var current = ChessPositionIdentity.PositionId(board);
+        var current = ChessEngineIdentity.PositionId(board);
         return ThinkCore(board, limits, [current], ct, onIterationCompleted);
     }
 
@@ -240,7 +240,7 @@ public sealed partial class Search
         if (rootHistory.Count > 0)
             _repetitionHistory.AddRange(rootHistory);
         else
-            _repetitionHistory.Add(ChessPositionIdentity.PositionId(b));
+            _repetitionHistory.Add(ChessEngineIdentity.PositionId(b));
         int repetitionStart = 0;
         ulong repetitionSignature = RepetitionSignature(_repetitionHistory, repetitionStart);
 
@@ -347,7 +347,7 @@ public sealed partial class Search
     /// illegal move. Call immediately after Think on the same root state.
     public IReadOnlyList<string> ExtractPv(Board board, int maxLen = 12)
     {
-        var current = ChessPositionIdentity.PositionId(board);
+        var current = ChessEngineIdentity.PositionId(board);
         return ExtractPvCore(board, [current], maxLen);
     }
 
@@ -366,7 +366,7 @@ public sealed partial class Search
         var b = board.Clone();
         var history = rootHistory.Count > 0
             ? new List<Hash128>(rootHistory)
-            : [ChessPositionIdentity.PositionId(b)];
+            : [ChessEngineIdentity.PositionId(b)];
         int repetitionStart = 0;
         ulong repetitionSignature = RepetitionSignature(history, repetitionStart);
 
@@ -383,7 +383,7 @@ public sealed partial class Search
             bool reset = ResetsRepetition(b, mv);
             pv.Add(mv.ToUci());
             MoveApply.Make(b, mv);
-            var childId = ChessPositionIdentity.PositionId(b);
+            var childId = ChessEngineIdentity.PositionId(b);
             history.Add(childId);
             if (reset)
             {
@@ -477,7 +477,7 @@ public sealed partial class Search
             FilterRootTablebase(b, moves);
         ChessMove? preferred = null;
         if (_continuations is not null
-            && _continuations.TryGet(ChessPositionIdentity.PositionId(b), out var continuation))
+            && _continuations.TryGet(ChessEngineIdentity.PositionId(b), out var continuation))
         {
             if (ply > 0)
             {
@@ -502,7 +502,7 @@ public sealed partial class Search
             var m = moves[mi];
             bool resetRepetition = ResetsRepetition(b, m);
             var undo = MoveApply.MakeWithUndo(b, m);
-            Hash128 childId = ChessPositionIdentity.PositionId(b);
+            Hash128 childId = ChessEngineIdentity.PositionId(b);
             _repetitionHistory.Add(childId);
             int childRepetitionStart = resetRepetition
                 ? _repetitionHistory.Count - 1

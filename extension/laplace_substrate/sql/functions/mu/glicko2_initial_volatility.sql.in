@@ -1,4 +1,0 @@
--- The unrated volatility on Laplace-Native's standing scale (LP_GLICKO_VOLATILITY).
-CREATE OR REPLACE FUNCTION consensus.glicko2_initial_volatility() RETURNS double precision
-    AS 'MODULE_PATHNAME', 'pg_laplace_standing_volatility'
-    LANGUAGE C LAPLACE_IMMUTABLE;

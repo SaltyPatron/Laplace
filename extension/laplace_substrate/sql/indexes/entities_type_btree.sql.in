@@ -1,4 +1,0 @@
--- The entity row is the structural typing fact. This is the type/tier
--- admission path for every reader.
-CREATE INDEX IF NOT EXISTS entities_type_btree
-    ON entities USING btree (type_id);

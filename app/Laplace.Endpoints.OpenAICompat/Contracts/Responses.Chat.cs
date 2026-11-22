@@ -56,9 +56,35 @@ public sealed record ProvenanceLine(
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses);
 
 
+public sealed record OodaProofReceipt(
+    [property: JsonPropertyName("verified")] bool Verified,
+    [property: JsonPropertyName("unverified")] bool Unverified,
+    [property: JsonPropertyName("rounds_run")] int RoundsRun,
+    [property: JsonPropertyName("culprit_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CulpritId,
+    [property: JsonPropertyName("culprit_contrast")] double CulpritContrast);
+
+public sealed record WorkReceipt(
+    [property: JsonPropertyName("wall_us")] ulong WallUs,
+    [property: JsonPropertyName("db_probes")] ulong DbProbes,
+    [property: JsonPropertyName("rows_scanned")] ulong RowsScanned,
+    [property: JsonPropertyName("bytes_alloc")] ulong BytesAlloc,
+    [property: JsonPropertyName("hops")] uint Hops,
+    [property: JsonPropertyName("tokens_out")] uint TokensOut,
+    [property: JsonPropertyName("truncated")] uint Truncated,
+    [property: JsonPropertyName("exhausted_reason")] int ExhaustedReason,
+    [property: JsonPropertyName("estimated_us")] ulong EstimatedUs,
+    [property: JsonPropertyName("preset")] string Preset);
+
+public sealed record WitnessShareReceipt(
+    [property: JsonPropertyName("witness_id")] string WitnessId,
+    [property: JsonPropertyName("trust")] double Trust,
+    [property: JsonPropertyName("fisher_info")] double FisherInfo,
+    [property: JsonPropertyName("games")] ulong Games,
+    [property: JsonPropertyName("share_bp")] int ShareBp);
+
 /// <summary>
-/// The receipt of the turn that produced the response: the Engine's own (<c>laplace turn --receipt</c>),
-/// with its trace. The session is [participant, session]; the turn, when witnessed, is at its ordinal.
+/// The receipt of the turn that produced the response: the Engine's own (<c>laplace_engine_abi</c>),
+/// with its trace, OODA verification, salience, compute envelope work, and Fisher share_bp attribution.
 /// </summary>
 public sealed record ForwardPassProof(
     [property: JsonPropertyName("session")] string Session,
@@ -72,7 +98,15 @@ public sealed record ForwardPassProof(
     [property: JsonPropertyName("reason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason,
     [property: JsonPropertyName("disposition")] string Disposition,
     [property: JsonPropertyName("steps")] IReadOnlyList<ForwardTurnStep> Steps,
-    [property: JsonPropertyName("trace")] string Trace);
+    [property: JsonPropertyName("trace")] string Trace,
+    [property: JsonPropertyName("firmware_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FirmwareId = null,
+    [property: JsonPropertyName("program_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProgramId = null,
+    [property: JsonPropertyName("decision_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DecisionId = null,
+    [property: JsonPropertyName("top_salience"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? TopSalience = null,
+    [property: JsonPropertyName("mean_confidence"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? MeanConfidence = null,
+    [property: JsonPropertyName("ooda"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OodaProofReceipt? Ooda = null,
+    [property: JsonPropertyName("work"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorkReceipt? Work = null,
+    [property: JsonPropertyName("witness_shares"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WitnessShareReceipt>? WitnessShares = null);
 
 /// <summary>One step of the turn: what it emitted, by which kind of proposal, and what it added to the response.</summary>
 public sealed record ForwardTurnStep(

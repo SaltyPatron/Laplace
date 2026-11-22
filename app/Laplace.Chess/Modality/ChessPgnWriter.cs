@@ -6,11 +6,12 @@ public static class ChessPgnWriter
 {
     public static string GameToPgn(
         IReadOnlyList<ChessMove> moves, int outcome, string startFen = ChessModality.StartFen,
-        string white = "Laplace", string black = "Laplace", string @event = "Laplace match")
+        string white = "Laplace", string black = "Laplace", string @event = "Laplace match",
+        ChessVariantRules? rules = null)
     {
         string result = outcome == 0 ? "1-0" : outcome == 1 ? "0-1" : "1/2-1/2";
         var m = new ChessModality();
-        var s = m.FromFen(startFen);
+        var s = m.FromFen(startFen, rules);
         bool custom = startFen != ChessModality.StartFen;
 
         var sb = new StringBuilder();
@@ -18,6 +19,8 @@ public static class ChessPgnWriter
         sb.Append("[White \"").Append(white).Append("\"]\n");
         sb.Append("[Black \"").Append(black).Append("\"]\n");
         sb.Append("[Result \"").Append(result).Append("\"]\n");
+        if (s.Board.Rules is { IsStandard: false, Law.Length: > 0 } r)
+            sb.Append("[Variant \"").Append(r.Law).Append("\"]\n");
         if (custom) { sb.Append("[SetUp \"1\"]\n"); sb.Append("[FEN \"").Append(startFen).Append("\"]\n"); }
         sb.Append('\n');
 
@@ -64,14 +67,15 @@ public static class ChessPgnWriter
     /// </summary>
     public static string Game(
         IReadOnlyList<KeyValuePair<string, string>> tags, IReadOnlyList<string> sans, string result,
-        string startFen = ChessModality.StartFen, IReadOnlyList<string?>? clocks = null)
+        string startFen = ChessModality.StartFen, IReadOnlyList<string?>? clocks = null,
+        ChessVariantRules? rules = null)
     {
         var sb = new StringBuilder();
         foreach (var (name, value) in tags)
             sb.Append('[').Append(name).Append(" \"").Append(value.Replace("\\", "\\\\").Replace("\"", "\\\""))
               .Append("\"]\n");
         sb.Append('\n');
-        var board = new ChessModality().FromFen(startFen).Board;
+        var board = new ChessModality().FromFen(startFen, rules).Board;
         int fullmove = board.FullmoveNumber;
         bool whiteToMove = board.WhiteToMove, first = true;
         for (int i = 0; i < sans.Count; i++)

@@ -1,6 +1,6 @@
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Microsoft.Extensions.Options;
 using Npgsql;
 

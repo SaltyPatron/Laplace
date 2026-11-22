@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Mcp</RootNamespace>
+    <AssemblyName>Laplace.Mcp</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Endpoints.Mcp" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.Mcp.Tests" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.OpenAICompat.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <ProjectReference Include="..\Laplace.Agents\Laplace.Agents.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Data\Laplace.Data.csproj" />
+    <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
+  </ItemGroup>
+
+</Project>

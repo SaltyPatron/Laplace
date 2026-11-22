@@ -2,10 +2,10 @@
   <Import Project="../scripts/win/machine-env.props" Condition="'$(OS)' == 'Windows_NT'" />
   <!--
     Build outputs follow the installed machine declaration (see scripts/win/machine-env.props).
-    LAPLACE_BUILD_ROOT defaults on Windows so bare `dotnet build`/IDE builds land in the
-    same tree as env.cmd-driven script builds.
+    Native libraries and CLI tools are consumed from packaged Laplace-Native and Laplace-Engine
+    artifacts resolved dynamically from LAPLACE_NATIVE_PACKAGE / LAPLACE_ENGINE_PACKAGE,
+    components.lock.tsv pins under $(LAPLACE_BUILD)/packages, or local CMake builds.
   -->
-  <!-- Shared compiler settings for every project under app/. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -13,8 +13,20 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <PropertyGroup>
-    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == '' AND '$(OS)' == 'Windows_NT'">$(LAPLACE_BUILD_ROOT)\build-win</LAPLACE_ENGINE_BUILD>
-    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == ''">$(MSBuildThisFileDirectory)../build/engine</LAPLACE_ENGINE_BUILD>
+    <LAPLACE_BUILD Condition="'$(LAPLACE_BUILD)' == '' AND '$(OS)' == 'Windows_NT'">D:\Libraries\build\Laplace</LAPLACE_BUILD>
+    <LAPLACE_BUILD Condition="'$(LAPLACE_BUILD)' == ''">$(MSBuildThisFileDirectory)../../build</LAPLACE_BUILD>
+    <LaplacePackagesRoot>$(LAPLACE_BUILD)/packages</LaplacePackagesRoot>
+    <_LaplaceLockFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../Laplace-Operations/components.lock.tsv'))</_LaplaceLockFile>
+    <_LaplaceLockText Condition="Exists('$(_LaplaceLockFile)')">$([System.IO.File]::ReadAllText('$(_LaplaceLockFile)'))</_LaplaceLockText>
+    <_LaplaceNativePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^native\tLaplace-Native\t([0-9a-f]+)').Groups[1].Value)</_LaplaceNativePin>
+    <_LaplaceEnginePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^engine\tLaplace-Engine\t([0-9a-f]+)').Groups[1].Value)</_LaplaceEnginePin>
+    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == '' AND '$(OS)' == 'Windows_NT'">$(LAPLACE_BUILD)\Laplace-Engine\icx-release</LAPLACE_ENGINE_BUILD>
+    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == ''">$(LAPLACE_BUILD)/Laplace-Engine/icx-release</LAPLACE_ENGINE_BUILD>
+    <LaplaceNativeVersion Condition="'$(LaplaceNativeVersion)' == ''">0.1.0</LaplaceNativeVersion>
+    <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND '$(LAPLACE_NATIVE_PACKAGE)' != '' AND Exists('$(LAPLACE_NATIVE_PACKAGE)/csharp/LaplaceNative.g.cs')">$(LAPLACE_NATIVE_PACKAGE)/csharp</LaplaceNativeGenerated>
+    <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp</LaplaceNativeGenerated>
+    <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/build/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/build/csharp</LaplaceNativeGenerated>
+    <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == ''">$(MSBuildThisFileDirectory)../../../Laplace-Native/build/csharp</LaplaceNativeGenerated>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
     <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>
@@ -25,75 +37,28 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
   <!--
-    Tier=db is included by default. DB-tier tests create their fixture state and
-    may depend on PostgreSQL, but not on a particular seeded product corpus.
-
-    Tier=live is intentionally different: it exercises the standing shared substrate
-    and may require foundation/content seeds or deposit durable product episodes.
-    Those are explicit product acceptance probes, not unit/database-health tests, so a
-    bare `dotnet test` does not run them accidentally during recreate/reseed work.
-
-    Tier=perf also stays explicit because a throughput threshold on a busy self-hosted
-    runner measures ambient machine load as much as code.
-
-    Category=RequiresQualification covers full corpus estates and installed model
-    checkpoints. It also stays explicit: mounting local data must not turn a normal
-    development test run into a full-corpus qualification.
-
-    Explicit filters still override the default:
-
-      dotnet test /p:VSTestTestCaseFilter="Tier=db"    run DB-backed tests
-      dotnet test /p:VSTestTestCaseFilter="Tier=live"  run seeded/shared product smokes
-      dotnet test /p:VSTestTestCaseFilter="Tier=perf"  run performance tests intentionally
-      dotnet test /p:VSTestTestCaseFilter="Category=RequiresQualification"  run corpus/model qualification
-      dotnet test /p:VSTestTestCaseFilter=""           run absolutely everything
+    dotnet test default filter: exclude Tier=perf, Tier=live, and Category=RequiresQualification
+    unless overridden via /p:VSTestTestCaseFilter="...".
   -->
-  <!-- IsTestProject is set by the test SDK, which imports AFTER this file, so it
-       is empty here; key off the project name, which is known immediately. -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(VSTestTestCaseFilter)' == ''">
     <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=live&amp;Category!=RequiresQualification</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Outputs live outside the repo, so tests can no longer find the repo
-         root by walking up from their own binary — stamp it instead. -->
+    <!-- Outputs live outside the repo, so tests locate the repo root via metadata. -->
     <AssemblyMetadata Include="LaplaceRepoRoot"
                       Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))" />
   </ItemGroup>
-  <!--
-    Copy candidate native libraries beside the managed test binary so it loads
-    the selected build instead of the installed /opt/laplace/lib copy:
-    .NET probes NATIVE_DLL_SEARCH_DIRECTORIES, which includes the app base
-    directory, BEFORE handing off to the OS loader — so an app-local copy wins
-    over /opt/laplace/lib without touching a shared path.
-
-    Persistent outputs must follow native content even when a rebuilt library has
-    an older timestamp. The shared synchronizer compares bytes and preserves the
-    versioned symlink chain. SDK copy items dereference those aliases into full
-    copies and rewrite unchanged libraries on every managed build.
-
-    Ship the same closure with executable publishes as well. If integration fails
-    after the shared engine is installed, restore-api must not start an old managed
-    layout against a new native ABI. App-local native libraries keep the previous
-    published payload coherent until the next complete publish.
-  -->
-  <!--
-    A managed-only plan (LAPLACE_REUSE_INSTALLED_NATIVE=1) builds no native tree: its
-    native closure is the installed, qualified one it will be published beside, the same
-    source scripts/sync-managed-native-artifacts.sh uses. The build itself needs it too:
-    OpenAPI generation starts the endpoint host, whose static vocabularies load the core.
-  -->
   <PropertyGroup>
     <LAPLACE_INSTALL_PREFIX Condition="'$(LAPLACE_INSTALL_PREFIX)' == ''">/opt/laplace</LAPLACE_INSTALL_PREFIX>
   </PropertyGroup>
   <ItemGroup Condition="'$(OS)' != 'Windows_NT' AND '$(LAPLACE_REUSE_INSTALLED_NATIVE)' == '1'">
-    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_core.so*" />
-    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_syzygy.so*" />
-    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_dynamics.so*" />
-    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_synthesis.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_INSTALL_PREFIX)/lib/liblaplace_engine_abi.so*" />
   </ItemGroup>
-  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
-    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/core/*.so*" />
-    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/dynamics/*.so*" />
-    <LaplaceNativeArtifact Condition="'$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'" Include="$(LAPLACE_ENGINE_BUILD)/synthesis/*.so*" />
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT' AND '$(LAPLACE_REUSE_INSTALLED_NATIVE)' != '1'">
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_NATIVE_PACKAGE)' != ''" Include="$(LAPLACE_NATIVE_PACKAGE)/lib/liblaplace.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_ENGINE_PACKAGE)' != ''" Include="$(LAPLACE_ENGINE_PACKAGE)/lib/liblaplace_engine_abi.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_NATIVE_PACKAGE)' == '' AND '$(_LaplaceNativePin)' != ''" Include="$(LaplacePackagesRoot)/laplace-native/$(_LaplaceNativePin)-*/lib/liblaplace.so*" />
+    <LaplaceNativeArtifact Condition="'$(LAPLACE_ENGINE_PACKAGE)' == '' AND '$(_LaplaceEnginePin)' != ''" Include="$(LaplacePackagesRoot)/laplace-engine/$(_LaplaceEnginePin)-*/lib/liblaplace_engine_abi.so*" />
   </ItemGroup>
 </Project>

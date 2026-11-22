@@ -178,11 +178,19 @@ public static class MemoryTopology
         return gc > 0 ? gc : (4L << 30);
     }
 
-    private static bool TryWindowsPhysical(out long bytes)
+    private static unsafe bool TryWindowsPhysical(out long bytes)
     {
         bytes = 0;
+        if (!OperatingSystem.IsWindows()) return false;
+        if (!NativeLibrary.TryLoad("kernel32.dll", out var k32)
+            || !NativeLibrary.TryGetExport(k32, "GlobalMemoryStatusEx", out var fn))
+        {
+            long gcAvail = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            if (gcAvail > 0) { bytes = gcAvail; return true; }
+            return false;
+        }
         var status = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
-        if (!GlobalMemoryStatusEx(ref status) || status.ullTotalPhys == 0)
+        if (((delegate* unmanaged[Stdcall]<MEMORYSTATUSEX*, int>)fn)(&status) == 0 || status.ullTotalPhys == 0)
             return false;
         bytes = (long)status.ullTotalPhys;
         return true;
@@ -269,8 +277,4 @@ public static class MemoryTopology
         public ulong ullAvailVirtual;
         public ulong ullAvailExtendedVirtual;
     }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 }

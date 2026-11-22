@@ -9,8 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Laplace.Ops carries the shared ops-logging foundation (LaplaceLogging) and pulls in
-         the MEL abstractions transitively; Laplace.Core is a direct dependency of Ops. GH #602. -->
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Data\Laplace.Data.csproj" />
+    <ProjectReference Include="..\Laplace.Hosting\Laplace.Hosting.csproj" />
     <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
     <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
     <InternalsVisibleTo Include="Laplace.Chess.Tests" />

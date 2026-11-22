@@ -1,6 +1,6 @@
 using System.Net;
 using Laplace.Chess.Service;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 
 namespace Laplace.Endpoints.Lichess;
 

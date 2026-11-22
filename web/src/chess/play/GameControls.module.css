@@ -1,13 +1,12 @@
 @layer components {
   .panel {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-2);
-    flex-wrap: wrap;
+    flex: 0 0 auto;
   }
 
   .statusBlock {
-    flex-basis: 100%;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -16,13 +15,44 @@
   .status {
     text-align: center;
     font-weight: 700;
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     letter-spacing: 0.01em;
-    padding: var(--space-2) var(--space-4);
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border-default);
     background: var(--color-bg-panel-2);
     color: var(--color-text-primary);
+  }
+
+  .actionRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
+  .toggleRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-size: var(--text-xs);
+  }
+
+  .settingsStack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .fenBox {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
   }
 
   .thinking {

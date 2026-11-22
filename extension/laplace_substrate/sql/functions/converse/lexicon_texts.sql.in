@@ -1,7 +1,0 @@
--- Human lexical text is a read of recorded content. A language-tagged literal
--- holds its text and language separately; its identity and exact renderer stay
--- intact. Only the declared language-shaped pair admits this projection.
-CREATE OR REPLACE FUNCTION converse.lexicon_texts(p_ids @extschema:laplace@.blake3[])
-RETURNS TABLE(entity @extschema:laplace@.blake3,content text,textual boolean)
-AS 'EXECUTION_LIBRARY', 'pg_laplace_lexicon_texts'
-LANGUAGE C STABLE STRICT PARALLEL SAFE;

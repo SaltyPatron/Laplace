@@ -20,7 +20,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     public ChessState FromFen(string fen, ChessVariantRules? rules = null)
     {
         var board = Board.FromFen(fen, rules);
-        return new ChessState(board, ImmutableList.Create(ChessPositionIdentity.PositionId(board)));
+        return new ChessState(board, ImmutableList.Create(ChessEngineIdentity.PositionId(board)));
     }
 
     public string StateKey(ChessState state) => CanonicalKey(state.Board);
@@ -76,7 +76,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
         MoveApply.Make(nb, action);
 
-        Hash128 key = ChessPositionIdentity.PositionId(nb);
+        Hash128 key = ChessEngineIdentity.PositionId(nb);
         var history = !nb.Rules.Drops && (isPawn || isCapture)
             ? ImmutableList.Create(key)
             : state.RepetitionHistory.Add(key);
@@ -114,7 +114,9 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     /// with no move, mate); null under Standard's law or while play goes on. A draw by the law is left to the caller's
     /// no-move handling.</summary>
     internal static int? RuleWinner(Board b)
-        => b.Rules.IsStandard ? null : NativeChessRules.Result(b) is int r and >= 0 ? r : null;
+        => !b.Rules.IsStandard && NativeChessRules.Supports(b.Rules)
+            ? (NativeChessRules.Result(b) is int r and >= 0 ? r : null)
+            : null;
 
     private static bool IsThreefold(ChessState state)
     {

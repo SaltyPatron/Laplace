@@ -17,14 +17,11 @@ public sealed class IdentityLawVectorTests
 {
     private static Hash128 Codepoint(string c) => Hash128.Blake3(Encoding.UTF8.GetBytes(c));
 
-    private static unsafe Hash128 Text(string s)
+    private static Hash128 Text(string s)
     {
         var kids = new Hash128[s.Length];
         for (int i = 0; i < s.Length; i++) kids[i] = Codepoint(s[i].ToString());
-        if (kids.Length == 1) return kids[0];
-        Hash128 id;
-        fixed (Hash128* p = kids) NativeInterop.Hash128Merkle(2, p, (nuint)kids.Length, &id);
-        return id;
+        return Hash128.Merkle(2, kids);
     }
 
     [Theory]

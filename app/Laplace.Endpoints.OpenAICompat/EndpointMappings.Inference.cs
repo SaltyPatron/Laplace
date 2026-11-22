@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using System.Text;
 using System.Threading.Channels;
 using Laplace.Api.Contracts;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Engine.Core;
+using Laplace.Native;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -11,15 +11,18 @@ internal static partial class InferenceEndpoints
 {
     public const string SessionHeader = "X-Laplace-Session";
 
-    // The one forward program answers under its firmware (Wiki Sequence 20, 21.4): its hops, fan, k and
-    // emission budget are the firmware's, and it reads the whole world the caller is authorized for. A
-    // request that asks for another budget, another sampler or another read is told so, never ignored.
-    private const string FirmwareGoverns =
-        "The forward program answers under its firmware; the request cannot set its emission budget, sampling, read shape, bands, scope or language.";
+    private const string UnsupportedDialMessage =
+        "Top-p/top-k/window/topic_boost/shape/bands/elaborate/language sampling dials are governed by the firmware; use temperature, max_tokens, stop, seed, scope, witnesses, and envelope.";
 
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, IBillingOrchestrator billing, IConversationTurns turns, ITenantResolver tenantResolver, IIdentityStore identityStore, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (
+            HttpRequest request,
+            IBillingOrchestrator billing,
+            IConversationTurns turns,
+            ITenantResolver tenantResolver,
+            IIdentityStore identityStore,
+            CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
             if (payload is null)
@@ -32,32 +35,52 @@ internal static partial class InferenceEndpoints
             if (payload.Messages is null || payload.Messages.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'messages' must contain at least one message.");
 
-            // Only the newest user turn is the observation; earlier turns are already
-            // witnessed under the session, so resent history is not read.
-            var prompt = payload.Messages
-                .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
-                         && !string.IsNullOrWhiteSpace(m.Content))
-                .Select(m => m.Content!)
-                .LastOrDefault();
+            var (prompt, systemPrompt, history) = ForwardProofHelper.ExtractChatInputs(payload.System, payload.Messages);
             if (string.IsNullOrWhiteSpace(prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "At least one user message must include non-empty 'content'.");
 
             if (payload.WebSearch || payload.WebSearchResults is not null)
                 return EndpointJson.BadRequest("unsupported_parameter",
                     "Web search is not implemented on this endpoint; no request will silently ignore it.");
-            if (payload.MaxTokens is not null || payload.MaxCompletionTokens is not null
-                || payload.Temperature is not null || payload.TopP is not null || payload.TopK is not null
-                || payload.Window is not null || payload.TopicBoost is not null || payload.Stop is not null
-                || payload.Scope is not null || payload.Shape is not null || payload.Bands is not null
+            if (payload.TopP is not null || payload.TopK is not null
+                || payload.Window is not null || payload.TopicBoost is not null
+                || payload.Shape is not null || payload.Bands is not null
                 || payload.Elaborate || payload.Language is not null)
-                return EndpointJson.BadRequest("unsupported_parameter", FirmwareGoverns);
+                return EndpointJson.BadRequest("unsupported_parameter", UnsupportedDialMessage);
 
-            var (scope, scopeError) = await ResolveTurnScopeAsync(
-                request, tenantResolver, payload.Session, payload.User, ct);
+            if (payload.Temperature is { } temp && (!double.IsFinite(temp) || temp < 0.0 || temp > 2.0))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'temperature' must be a finite number between 0 and 2.");
+            if (!ForwardProofHelper.TryParseStopSequences(payload.Stop, out var stopSequences, out var stopErr))
+                return EndpointJson.BadRequest("invalid_request_error", stopErr!);
+
+            int? requestedMaxTokens = payload.MaxCompletionTokens ?? payload.MaxTokens;
+            var envRes = EnvelopeBudgetPolicy.Resolve(
+                request,
+                payload.Envelope,
+                payload.MaxWallUs,
+                payload.MaxDbProbes,
+                payload.MaxRowsScanned,
+                payload.MaxTokensOut,
+                openaiMaxTokens: requestedMaxTokens);
+            if (!envRes.Valid)
+                return EndpointJson.BadRequest(envRes.ErrorCode!, envRes.ErrorMessage!);
+
+            var tenantContext = await tenantResolver.ResolveAsync(request.HttpContext, ct);
+            var auth = AuthorityScopePolicy.Resolve(
+                request,
+                tenantContext,
+                (uint)(LaplaceNative.LP_CAP_READ | LaplaceNative.LP_CAP_ATTEST),
+                requestWrite: true,
+                explicitScope: payload.Scope,
+                explicitWitnesses: payload.Witnesses);
+            if (!auth.Allowed)
+                return Results.Json(
+                    new ErrorResponse(new ErrorBody("authorization_error", auth.ErrorCode!, auth.ErrorMessage!)),
+                    statusCode: auth.StatusCode);
+
+            var (scope, scopeError) = ResolveTurnScope(tenantContext, request, payload.Session, payload.User);
             if (scopeError is not null) return scopeError;
 
-            // The Engine is checked before the billing gate, because plan-backed
-            // authorization can debit an included credit.
             if (RequireTurns(turns) is { } unavailable) return unavailable;
 
             var gate = await QuoteGate.RequireQuoteAsync(request, billing, "chat.completions", ct);
@@ -70,9 +93,23 @@ internal static partial class InferenceEndpoints
 
             await CatalogConversationAsync(identityStore, scope, prompt, ct);
 
-            // The session key returns on every response shape; the client continues the
-            // conversation by sending it back.
             request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
+
+            var turnRequest = new EngineTurnRequest(
+                FirmwarePath: null,
+                ModelName: ModelCatalog.ResolveFirmwareModel(payload.Model),
+                Prompt: prompt,
+                Messages: history,
+                SystemPrompt: systemPrompt,
+                User: scope.Participant,
+                Session: scope.SessionKey,
+                ReadOnly: false,
+                MaxTokens: requestedMaxTokens ?? 0,
+                Temperature: payload.Temperature ?? 0.0,
+                StopSequences: stopSequences,
+                Seed: payload.Seed ?? 0L,
+                Authority: auth.Scope,
+                Envelope: envRes.Envelope);
 
             var totalClock = Stopwatch.StartNew();
             if (payload.Stream)
@@ -87,7 +124,7 @@ internal static partial class InferenceEndpoints
                         completionId, "chat.completion.chunk", created, payload.Model,
                         [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
                     double? firstResultMs = null;
-                    var receipt = await StreamTurnAsync(turns, scope, prompt, async step =>
+                    var receipt = await StreamTurnAsync(turns, turnRequest, envRes.PresetName, envRes.EstimatedUs, async step =>
                     {
                         firstResultMs ??= totalClock.Elapsed.TotalMilliseconds;
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
@@ -95,10 +132,15 @@ internal static partial class InferenceEndpoints
                             [new ChatChunkChoice(0, new ChatDelta(Content: step.Text), null)],
                             Laplace: new ChunkProvenance(Step: Step(step))), ct);
                     }, ct);
+
+                    if (gate.Quote is not null && receipt.AbiResult?.Shares is { Count: > 0 } streamShares)
+                        await billing.RecordRoyaltiesAsync(gate.Quote, BillingOrchestrator.FromWitnessShares(streamShares), ct);
+
                     await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                         completionId, "chat.completion.chunk", created, payload.Model,
                         [new ChatChunkChoice(0, new ChatDelta(), "stop")],
                         Laplace: new ChunkProvenance(
+                            Witnesses: receipt.AbiResult?.Shares.Count,
                             Performance: BuildPerformance(receipt.Response, totalClock, firstResultMs, receipt.Steps.Count),
                             ForwardProof: BuildForwardProof(receipt, scope.SessionKey))), ct);
                 }
@@ -112,11 +154,19 @@ internal static partial class InferenceEndpoints
             }
 
             NativeTurnReceipt turn;
-            try { turn = await turns.TurnAsync(scope.Participant, scope.SessionKey, prompt, null, ct); }
+            try
+            {
+                turn = await turns.TurnAsync(turnRequest, envRes.PresetName, envRes.EstimatedUs, null, ct);
+            }
             catch (InvalidOperationException failure)
             {
                 return EndpointJson.ServiceUnavailable("turn_failed", failure.Message);
             }
+
+            IReadOnlyList<BillingRoyaltyRecord>? settledRoyalties = null;
+            if (gate.Quote is not null && turn.AbiResult?.Shares is { Count: > 0 } shares)
+                settledRoyalties = await billing.RecordRoyaltiesAsync(gate.Quote, BillingOrchestrator.FromWitnessShares(shares), ct);
+
             var firstMs = turn.Steps.Count > 0 ? totalClock.Elapsed.TotalMilliseconds : (double?)null;
             return Results.Json(new ChatCompletionResponse(
                 Id: $"chatcmpl-{Guid.NewGuid():N}",
@@ -124,8 +174,9 @@ internal static partial class InferenceEndpoints
                 Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Model: payload.Model,
                 Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", turn.Response), "stop")],
-                Billing: null,
+                Billing: gate.Quote is null ? null : QuoteGate.MakeReceipt(gate.Quote, settledRoyalties),
                 Metadata: new ChatMetadata(
+                    Witnesses: turn.AbiResult?.Shares.Count,
                     ReplyRows: turn.Response.Length == 0 ? 0 : 1,
                     GeneratedTokens: turn.Steps.Count,
                     Session: scope.SessionKey,
@@ -137,10 +188,17 @@ internal static partial class InferenceEndpoints
         .Accepts<ChatCompletionsRequest>("application/json")
         .Produces<ChatCompletionResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/completions", async (HttpRequest request, IBillingOrchestrator billing, IConversationTurns turns, ITenantResolver tenantResolver, IIdentityStore identityStore, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (
+            HttpRequest request,
+            IBillingOrchestrator billing,
+            IConversationTurns turns,
+            ITenantResolver tenantResolver,
+            IIdentityStore identityStore,
+            CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
@@ -152,13 +210,41 @@ internal static partial class InferenceEndpoints
                     $"Unknown model '{payload.Model}'. See GET /v1/models for the served catalog.");
             if (string.IsNullOrWhiteSpace(payload.Prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
-            if (payload.MaxTokens is not null || payload.Temperature is not null || payload.TopP is not null
-                || payload.TopK is not null || payload.Window is not null || payload.TopicBoost is not null
-                || payload.Stop is not null || payload.Echo || payload.Logprobs is not null)
-                return EndpointJson.BadRequest("unsupported_parameter", FirmwareGoverns);
+            if (payload.TopP is not null || payload.TopK is not null
+                || payload.Window is not null || payload.TopicBoost is not null
+                || payload.Echo || payload.Logprobs is not null)
+                return EndpointJson.BadRequest("unsupported_parameter", UnsupportedDialMessage);
 
-            var (scope, scopeError) = await ResolveTurnScopeAsync(
-                request, tenantResolver, payload.Session, payload.User, ct);
+            if (payload.Temperature is { } temp && (!double.IsFinite(temp) || temp < 0.0 || temp > 2.0))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'temperature' must be a finite number between 0 and 2.");
+            if (!ForwardProofHelper.TryParseStopSequences(payload.Stop, out var stopSequences, out var stopErr))
+                return EndpointJson.BadRequest("invalid_request_error", stopErr!);
+
+            var envRes = EnvelopeBudgetPolicy.Resolve(
+                request,
+                payload.Envelope,
+                payload.MaxWallUs,
+                payload.MaxDbProbes,
+                payload.MaxRowsScanned,
+                payload.MaxTokensOut,
+                openaiMaxTokens: payload.MaxTokens);
+            if (!envRes.Valid)
+                return EndpointJson.BadRequest(envRes.ErrorCode!, envRes.ErrorMessage!);
+
+            var tenantContext = await tenantResolver.ResolveAsync(request.HttpContext, ct);
+            var auth = AuthorityScopePolicy.Resolve(
+                request,
+                tenantContext,
+                (uint)(LaplaceNative.LP_CAP_READ | LaplaceNative.LP_CAP_ATTEST),
+                requestWrite: true,
+                explicitScope: payload.Scope,
+                explicitWitnesses: payload.Witnesses);
+            if (!auth.Allowed)
+                return Results.Json(
+                    new ErrorResponse(new ErrorBody("authorization_error", auth.ErrorCode!, auth.ErrorMessage!)),
+                    statusCode: auth.StatusCode);
+
+            var (scope, scopeError) = ResolveTurnScope(tenantContext, request, payload.Session, payload.User);
             if (scopeError is not null) return scopeError;
 
             if (RequireTurns(turns) is { } unavailable) return unavailable;
@@ -175,6 +261,22 @@ internal static partial class InferenceEndpoints
 
             await CatalogConversationAsync(identityStore, scope, payload.Prompt, ct);
 
+            var turnRequest = new EngineTurnRequest(
+                FirmwarePath: null,
+                ModelName: ModelCatalog.ResolveFirmwareModel(payload.Model),
+                Prompt: payload.Prompt,
+                Messages: null,
+                SystemPrompt: null,
+                User: scope.Participant,
+                Session: scope.SessionKey,
+                ReadOnly: false,
+                MaxTokens: payload.MaxTokens ?? 0,
+                Temperature: payload.Temperature ?? 0.0,
+                StopSequences: stopSequences,
+                Seed: payload.Seed ?? 0L,
+                Authority: auth.Scope,
+                Envelope: envRes.Envelope);
+
             if (payload.Stream)
             {
                 var completionId = $"cmpl-{Guid.NewGuid():N}";
@@ -183,10 +285,12 @@ internal static partial class InferenceEndpoints
                 ServerSentEvents.Begin(response);
                 try
                 {
-                    await StreamTurnAsync(turns, scope, payload.Prompt, step =>
+                    var receipt = await StreamTurnAsync(turns, turnRequest, envRes.PresetName, envRes.EstimatedUs, step =>
                         ServerSentEvents.WriteJsonAsync(response, new CompletionChunk(
                             completionId, "text_completion", created, payload.Model,
                             [new CompletionChoice(step.Text, 0, null, null)]), ct), ct);
+                    if (gate.Quote is not null && receipt.AbiResult?.Shares is { Count: > 0 } streamShares)
+                        await billing.RecordRoyaltiesAsync(gate.Quote, BillingOrchestrator.FromWitnessShares(streamShares), ct);
                     await ServerSentEvents.WriteJsonAsync(response, new CompletionChunk(
                         completionId, "text_completion", created, payload.Model,
                         [new CompletionChoice("", 0, "stop", null)]), ct);
@@ -201,11 +305,18 @@ internal static partial class InferenceEndpoints
             }
 
             NativeTurnReceipt turn;
-            try { turn = await turns.TurnAsync(scope.Participant, scope.SessionKey, payload.Prompt, null, ct); }
+            try
+            {
+                turn = await turns.TurnAsync(turnRequest, envRes.PresetName, envRes.EstimatedUs, null, ct);
+            }
             catch (InvalidOperationException failure)
             {
                 return EndpointJson.ServiceUnavailable("turn_failed", failure.Message);
             }
+
+            if (gate.Quote is not null && turn.AbiResult?.Shares is { Count: > 0 } shares)
+                await billing.RecordRoyaltiesAsync(gate.Quote, BillingOrchestrator.FromWitnessShares(shares), ct);
+
             return Results.Json(new CompletionResponse(
                 Id: $"cmpl-{Guid.NewGuid():N}",
                 Object: "text_completion",
@@ -220,6 +331,7 @@ internal static partial class InferenceEndpoints
         .Accepts<CompletionsRequest>("application/json")
         .Produces<CompletionResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
@@ -228,19 +340,30 @@ internal static partial class InferenceEndpoints
         app.MapExploreEndpoints();
     }
 
-    /// <summary>
-    /// Runs the turn and hands each step to <paramref name="write"/> as the Engine takes it, in order, on
-    /// the request's own task: the Engine reports a step on the thread that reads its receipt, and the
-    /// response is written here.
-    /// </summary>
-    private static async Task<NativeTurnReceipt> StreamTurnAsync(IConversationTurns turns, TurnScope scope,
-        string prompt, Func<NativeTurnStep, Task> write, CancellationToken ct)
+    private static async Task<NativeTurnReceipt> StreamTurnAsync(
+        IConversationTurns turns,
+        EngineTurnRequest turnRequest,
+        string envelopePreset,
+        ulong envelopeEstimatedUs,
+        Func<NativeTurnStep, Task> write,
+        CancellationToken ct)
     {
         var steps = Channel.CreateUnbounded<NativeTurnStep>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var running = Task.Run(async () =>
         {
-            try { return await turns.TurnAsync(scope.Participant, scope.SessionKey, prompt, step => steps.Writer.TryWrite(step), ct); }
-            finally { steps.Writer.TryComplete(); }
+            try
+            {
+                return await turns.TurnAsync(
+                    turnRequest,
+                    envelopePreset,
+                    envelopeEstimatedUs,
+                    step => steps.Writer.TryWrite(step),
+                    ct);
+            }
+            finally
+            {
+                steps.Writer.TryComplete();
+            }
         }, ct);
         await foreach (var step in steps.Reader.ReadAllAsync(ct)) await write(step);
         return await running;

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ProvenanceLine, PreflightQuoteResponse } from './api/client';
-import type { ForwardPassProof } from './api/forwardProof';
+import type { ComputeEnvelopePreset, FirmwareProfile, ForwardPassProof } from './api/forwardProof';
 
 export interface ProvenanceEntry {
   reply: string;
@@ -70,6 +70,8 @@ interface AppState {
   tenant: string;
   quoteId: string;
   model: string;
+  firmware: FirmwareProfile;
+  envelope: ComputeEnvelopePreset;
   /** Conversation session key (spec 34): server-minted on the first turn, resent on
    *  every later turn so the substrate carries the conversation — history is never
    *  resent. In-memory only; a new conversation starts a new session. */
@@ -88,6 +90,8 @@ interface AppState {
   setSession: (session: string | null) => void;
   setQuoteId: (quoteId: string) => void;
   setModel: (model: string) => void;
+  setFirmware: (firmware: FirmwareProfile) => void;
+  setEnvelope: (envelope: ComputeEnvelopePreset) => void;
   pushMessage: (message: ChatMessage) => void;
   updateLastAssistant: (update: (m: ChatMessage) => ChatMessage) => void;
   setPendingQuote: (gate: QuoteGate | null) => void;
@@ -104,6 +108,8 @@ export const useAppStore = create<AppState>((set) => ({
   tenant: initialTenant,
   quoteId: '',
   model: 'laplace-converse-001',
+  firmware: 'program',
+  envelope: 'standard',
   session: localStorage.getItem(sessionKey(initialTenant)),
   messages: [],
   pendingQuote: null,
@@ -126,6 +132,8 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setQuoteId: (quoteId) => set({ quoteId }),
   setModel: (model) => set({ model }),
+  setFirmware: (firmware) => set({ firmware }),
+  setEnvelope: (envelope) => set({ envelope }),
   pushMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
   updateLastAssistant: (update) =>
     set((s) => {

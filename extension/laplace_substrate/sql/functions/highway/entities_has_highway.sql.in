@@ -1,3 +1,0 @@
-CREATE INDEX IF NOT EXISTS entities_has_highway
-    ON laplace.entities (id)
-    WHERE highway_mask IS NOT NULL;

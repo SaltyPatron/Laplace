@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;

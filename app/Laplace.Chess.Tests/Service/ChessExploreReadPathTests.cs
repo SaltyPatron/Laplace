@@ -12,7 +12,7 @@ public sealed class ChessExploreReadPathTests
         string service = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Chess", "Service", "ChessEngineService.cs"));
         string reads = File.ReadAllText(Path.Combine(
-            root, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
+            root, "app", "Laplace.Data", "NpgsqlSubstrateReads.cs"));
 
         Assert.Contains("NpgsqlChessTransitionStandings.ReadAsync", service, StringComparison.Ordinal);
         Assert.Contains("ChessNativeRatings.Claim", service, StringComparison.Ordinal);

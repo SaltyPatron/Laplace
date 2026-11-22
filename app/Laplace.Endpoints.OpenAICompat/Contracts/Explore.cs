@@ -387,7 +387,10 @@ public sealed record UnicodePointResponse(
     [property: JsonPropertyName("m")] double M,
     [property: JsonPropertyName("radius")] double Radius,
     [property: JsonPropertyName("hilbert_hex")] string HilbertHex,
-    [property: JsonPropertyName("flags")] uint Flags);
+    [property: JsonPropertyName("flags")] uint Flags,
+    [property: JsonPropertyName("general_category"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? GeneralCategory = null,
+    [property: JsonPropertyName("script"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Script = null,
+    [property: JsonPropertyName("flags_hex"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FlagsHex = null);
 
 public sealed record DecomposeRequest(
     [property: JsonPropertyName("text")] string? Text);

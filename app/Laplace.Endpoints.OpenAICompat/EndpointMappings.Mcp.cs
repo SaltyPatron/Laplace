@@ -2,9 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Laplace.Endpoints.Mcp;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
+using Laplace.Mcp;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;

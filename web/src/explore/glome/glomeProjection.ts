@@ -196,10 +196,11 @@ export function placementBallPos(
   xmAngle = 0,
   zmAngle = 0,
 ): [number, number, number] {
-  const x = Number.isFinite(n.x) ? n.x : 0;
-  const y = Number.isFinite(n.y) ? n.y : 0;
-  const z = Number.isFinite(n.z) ? n.z : 0;
-  const m = n.m != null && Number.isFinite(n.m) ? n.m : 0;
+  // Clamp each axis strictly to [-1, 1]^4 (S^3 surface and interior 4-ball centroids).
+  const x = Number.isFinite(n.x) ? Math.max(-1, Math.min(1, n.x)) : 0;
+  const y = Number.isFinite(n.y) ? Math.max(-1, Math.min(1, n.y)) : 0;
+  const z = Number.isFinite(n.z) ? Math.max(-1, Math.min(1, n.z)) : 0;
+  const m = n.m != null && Number.isFinite(n.m) ? Math.max(-1, Math.min(1, n.m)) : 0;
 
   const cx = Math.cos(xmAngle);
   const sx = Math.sin(xmAngle);

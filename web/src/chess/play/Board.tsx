@@ -262,16 +262,15 @@ export function Board({
             </svg>
           </div>
         </div>
+        {footer ? <div className={styles.footer}>{footer}</div> : null}
         {!displayOnly ? (
           <div className={styles.legend}>
             <span><b className={shared.lgStar}>★</b> bot&rsquo;s pick</span>
-            <span className={styles.lgScale}><i /> weaker → stronger move</span>
-            <span><b>±</b> = substrate move edge vs even (1500 prior)</span>
-            <span>eval bar = engine score in pawns (white&rsquo;s view)</span>
+            <span className={styles.lgScale}><i /> move standing</span>
+            <span><b>±</b> substrate edge</span>
             <span>right-drag = arrow · right-click = mark</span>
           </div>
         ) : null}
-        {footer ? <div className={styles.footer}>{footer}</div> : null}
       </div>
       {drag && (
         <span

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Laplace.Native;
 
 namespace Laplace.Engine.Core;
 
@@ -23,66 +24,23 @@ public struct Glicko2Observation
 public static unsafe class Glicko2
 {
     public const long FpScale = 1_000_000_000L;
-
     public const long DefaultRatingFp1e9 = 1_500L * FpScale;
-
     public const long DefaultRdFp1e9 = 350L * FpScale;
-
     public const long DefaultVolatilityFp1e9 = 60_000_000L;
-
     public const long DefaultTauFp1e9 = 500_000_000L;
-
     public const long ScoreLoss = 0L;
-
-    /// <summary>
-    /// Draw score, mirroring <c>kScoreHalfFp</c> in engine/core/src/attestation_engine.c,
-    /// which defines it; <see cref="NativeDrawScoreFp"/> reads the native value back for
-    /// parity checks. Outcome classification on write paths is the native classifier
-    /// (AttestationMergeMath.ClassifyOutcome), not a branch on this constant.
-    /// </summary>
     public const long ScoreDraw = 500_000_000L;
-
     public const long ScoreWin = 1_000_000_000L;
 
-    /// <summary>The native draw threshold, for parity assertions.</summary>
-    internal static long NativeDrawScoreFp() => NativeInterop.LaplaceAttestationScoreDrawFp();
+    public static long EffectiveMuFp1e9(long ratingFp1e9, long rdFp1e9) =>
+        ratingFp1e9 - 2L * rdFp1e9;
 
-    public static long EffectiveMuFp1e9(long ratingFp1e9, long rdFp1e9)
+    public static Glicko2State Init(long ratingFp1e9, long rdFp1e9, long volatilityFp1e9) => new()
     {
-        var st = new Glicko2State
-        {
-            RatingFp1e9 = ratingFp1e9,
-            RdFp1e9 = rdFp1e9,
-        };
-        return NativeInterop.Glicko2EffectiveMu(&st);
-    }
-
-    public static Glicko2State Init(long ratingFp1e9, long rdFp1e9, long volatilityFp1e9)
-    {
-        var st = new Glicko2State();
-        NativeInterop.Glicko2Init(&st, ratingFp1e9, rdFp1e9, volatilityFp1e9);
-        return st;
-    }
-
-    public static long NeutralMuFp1e9() => NativeInterop.Glicko2NeutralMuFp();
-
-    public static void FoldUniformPeriod(
-        ref Glicko2State state,
-        long opponentRatingFp1e9,
-        long opponentPhiFp1e9,
-        long games,
-        long sumScoreFp1e9,
-        long tauFp1e9,
-        long nowUnixNs)
-    {
-        if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
-        fixed (Glicko2State* statePtr = &state)
-        {
-            NativeInterop.Glicko2FoldUniformPeriod(statePtr,
-                opponentRatingFp1e9, opponentPhiFp1e9, games, sumScoreFp1e9,
-                tauFp1e9, nowUnixNs);
-        }
-    }
+        RatingFp1e9 = ratingFp1e9,
+        RdFp1e9 = rdFp1e9,
+        VolatilityFp1e9 = volatilityFp1e9,
+    };
 
     public static void UpdatePeriod(
         ref Glicko2State state,
@@ -91,41 +49,35 @@ public static unsafe class Glicko2
         long nowUnixNs)
     {
         if (observations.IsEmpty) return;
-        fixed (Glicko2State* statePtr = &state)
-        fixed (Glicko2Observation* obsPtr = observations)
+        int n = observations.Length;
+        var opponents = new lp_rating[n];
+        var scores = new double[n];
+        for (int i = 0; i < n; i++)
         {
-            NativeInterop.Glicko2UpdatePeriod(statePtr, obsPtr,
-                (nuint)observations.Length, tauFp1e9, nowUnixNs);
+            opponents[i] = new lp_rating
+            {
+                rating = observations[i].OpponentRatingFp1e9 / (double)FpScale,
+                deviation = observations[i].OpponentRdFp1e9 / (double)FpScale,
+                volatility = 0.06,
+            };
+            scores[i] = observations[i].ScoreFp1e9 / (double)FpScale;
         }
-    }
-
-    public static void FoldGroupedPeriod(
-        ref Glicko2State state,
-        ReadOnlySpan<long> opponentRatingsFp1e9,
-        ReadOnlySpan<long> opponentPhisFp1e9,
-        ReadOnlySpan<long> games,
-        ReadOnlySpan<long> sumScoresFp1e9,
-        long tauFp1e9,
-        long nowUnixNs)
-    {
-        int count = opponentRatingsFp1e9.Length;
-        if (count == 0 || opponentPhisFp1e9.Length != count ||
-            games.Length != count || sumScoresFp1e9.Length != count)
-            throw new ArgumentException("grouped rating-period arrays must share a non-zero length");
-        fixed (Glicko2State* statePtr = &state)
-        fixed (long* ratingsPtr = opponentRatingsFp1e9)
-        fixed (long* phisPtr = opponentPhisFp1e9)
-        fixed (long* gamesPtr = games)
-        fixed (long* scoresPtr = sumScoresFp1e9)
+        lp_rating r = new()
         {
-            int rc = NativeInterop.Glicko2FoldGroupedPeriod(
-                statePtr, ratingsPtr, phisPtr, gamesPtr, scoresPtr,
-                (nuint)count, tauFp1e9, nowUnixNs);
-            if (rc != 0)
-                throw new InvalidOperationException("grouped rating period exceeds fixed-point capacity");
-        }
-    }
+            rating = state.RatingFp1e9 / (double)FpScale,
+            deviation = state.RdFp1e9 / (double)FpScale,
+            volatility = state.VolatilityFp1e9 / (double)FpScale,
+        };
+        fixed (lp_rating* pOpp = opponents)
+        fixed (double* pScores = scores)
+            LaplaceNative.lp_glicko2(&r, pOpp, pScores, (nuint)n, tauFp1e9 / (double)FpScale);
 
+        state.RatingFp1e9 = (long)Math.Round(r.rating * FpScale);
+        state.RdFp1e9 = (long)Math.Round(r.deviation * FpScale);
+        state.VolatilityFp1e9 = (long)Math.Round(r.volatility * FpScale);
+        state.LastObservedAtUnixNs = nowUnixNs;
+        state.ObservationCount += n;
+    }
 
     public static Glicko2State AccumulateGames(
         long priorRatingFp1e9,
@@ -138,12 +90,7 @@ public static unsafe class Glicko2
         long tauFp1e9 = DefaultTauFp1e9)
     {
         if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
-        var state = new Glicko2State
-        {
-            RatingFp1e9 = priorRatingFp1e9,
-            RdFp1e9 = priorRdFp1e9,
-            VolatilityFp1e9 = priorVolatilityFp1e9,
-        };
+        var state = Init(priorRatingFp1e9, priorRdFp1e9, priorVolatilityFp1e9);
         long q = sumScoreFp / games;
         long rem = sumScoreFp - q * (games - 1);
         Span<Glicko2Observation> obs = games <= 4096

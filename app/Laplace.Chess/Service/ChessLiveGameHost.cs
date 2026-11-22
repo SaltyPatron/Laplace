@@ -1,11 +1,10 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using global::Npgsql;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
@@ -19,7 +18,10 @@ public sealed record ChessLiveGameMetadata(
     string? StartFen = null,
     string? ExternalGameId = null,
     int? WhiteRating = null,
-    int? BlackRating = null);
+    int? BlackRating = null)
+{
+    public string? Variant { get; init; }
+}
 
 public sealed record ChessLivePlyAnalysis(
     int? ScoreCpSideToMove = null,
@@ -34,7 +36,7 @@ public sealed record ChessLivePlyAnalysis(
 /// (<see cref="ChessGameRecorder"/>, source laplace-chess). Searches read the Native standings of the
 /// moves recorded games played (<see cref="SubstrateRootBias"/>).
 /// </summary>
-public sealed partial class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
+public sealed partial class ChessLiveGameHost : IChessLiveGameHost
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ChessGameRecorder _recorder;

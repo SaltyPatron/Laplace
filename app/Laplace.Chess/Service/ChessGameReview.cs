@@ -50,7 +50,10 @@ public static class ChessGameReview
         double wSum = 0, bSum = 0; int wN = 0, bN = 0, wBlunders = 0, bBlunders = 0, plies = 0;
         int minWhiteEval = 0, maxWhiteEval = 0;
 
-        var state = m.Initial();
+        string variantTag = PgnGames.TagStr(gameText, "Variant");
+        var rules = string.IsNullOrEmpty(variantTag) ? ChessVariantRules.Standard : ChessVariants.Resolve(variantTag);
+        string fenTag = PgnGames.TagStr(gameText, "FEN");
+        var state = !string.IsNullOrEmpty(fenTag) ? m.FromFen(fenTag, rules) : m.Initial(rules);
         foreach (var san in sans)
         {
             var legal = m.LegalActions(state);

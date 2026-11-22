@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 
 namespace Laplace.Cli;
@@ -11,7 +10,6 @@ internal static class IngestDataPaths
     {
         if (!string.IsNullOrWhiteSpace(cliPath)) return Path.GetFullPath(cliPath);
 
-        // Operator-supplied media/model lanes are not corpus-order entries.
         var utility = cliSource.ToLowerInvariant() switch
         {
             "document" => "test-data/text",
@@ -35,13 +33,11 @@ internal static class IngestDataPaths
 
     public static IReadOnlyList<string> ResolveRoots(string cliSource)
     {
-        var catalog = EtlManifest.Catalog;
+        var catalog = NativeRecipeCatalog.Catalog;
         string name = catalog.Resolve(cliSource);
         var source = catalog.Sources.FirstOrDefault(source => source.Name == name)
             ?? throw new InvalidOperationException($"Unknown ingest source '{cliSource}'. Read ingest catalog.");
         var roots = source.Roots.Select(ExpandRoot).OfType<string>().ToArray();
-        // A file-only source (tokenizers) declares its roots through absolute
-        // file patterns. The stable prefix is configuration, not a corpus scan.
         if (roots.Length == 0)
             roots = source.Files.Select(ExpandRoot).OfType<string>().Select(FilePatternRoot).ToArray();
         return roots
@@ -59,12 +55,6 @@ internal static class IngestDataPaths
             : Path.GetDirectoryName(Path.GetFullPath(prefix))!;
     }
 
-    /// <summary>
-    /// A recipe path with <c>$NAME</c> read from the environment, as the Engine's
-    /// <c>path_expand</c> reads it: where data is kept is the machine's to say. The declared
-    /// ingest and model roots keep their installed resolution. A variable the environment
-    /// does not set (or sets empty) leaves the path unresolved (null), and the Engine drops it too.
-    /// </summary>
     private static string? ExpandRoot(string root)
     {
         bool resolved = true;
@@ -75,10 +65,11 @@ internal static class IngestDataPaths
             {
                 "DATA" or "LAPLACE_DATA" => LaplaceInstall.DeclaredIngestRoot(),
                 "MODELS" or "LAPLACE_MODELS" => LaplaceInstall.DeclaredModelsRoot(),
-                "SRC" or "LAPLACE_SRC" => Environment.GetEnvironmentVariable("LAPLACE_SRC")
-                    ?? throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code."),
-                // The agent transcripts are kept under the operator's home directory.
-                "HOME" => NativeRecipeExecution.HomeDirectory(),
+                "SRC" or "LAPLACE_SRC" => LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_SRC")
+                    ?? (LaplaceInstall.TryRepoRoot(out var repoRoot) && Directory.GetParent(repoRoot) is { } parent
+                        ? parent.FullName
+                        : throw new InvalidOperationException("Declare LAPLACE_SRC for workspace-code.")),
+                "HOME" => NativeRecipeCatalog.HomeDirectory(),
                 _ => Environment.GetEnvironmentVariable(name),
             };
             if (string.IsNullOrEmpty(value)) { resolved = false; return ""; }
@@ -99,7 +90,6 @@ internal static class IngestDataPaths
             directories = part.IndexOfAny(['*', '?']) >= 0
                 ? directories.Where(Directory.Exists).SelectMany(directory => Directory.EnumerateDirectories(directory, part))
                 : directories.Select(directory => Path.Combine(directory, part));
-            // Materialize each frontier before the next component captures it.
             directories = directories.ToArray();
         }
         return directories.Where(Directory.Exists);

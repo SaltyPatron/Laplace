@@ -14,16 +14,11 @@ namespace Laplace.Engine.Core.Tests;
 /// </summary>
 public sealed class ContentAddressingLawTests
 {
-    private static unsafe Hash128 Compose(byte tier, Hash128 a, Hash128 b)
+    private static Hash128 Compose(byte tier, Hash128 a, Hash128 b)
     {
-        Hash128* kids = stackalloc Hash128[2] { a, b };
-        double* coords = stackalloc double[8];
-        for (int i = 0; i < 8; i++) coords[i] = 0.0;
-        Hash128 outId;
-        // out_coord is double[4] (the 4-ball centroid); a smaller buffer is overwritten.
-        double* outCoord = stackalloc double[4];
-        Hilbert128 outHb;
-        NativeInterop.HashComposerComposeNode(tier, kids, coords, 2, &outId, outCoord, &outHb);
+        double[] coords = new double[8];
+        Span<double> outCoord = stackalloc double[4];
+        var (outId, _) = HashComposer.ComposeNode(tier, [a, b], coords, outCoord);
         Assert.False(outId.Equals(default(Hash128)), "composer returned a zero id");
         return outId;
     }

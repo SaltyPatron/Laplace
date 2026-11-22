@@ -1,2 +1,0 @@
-CREATE OR REPLACE FUNCTION consensus.relation_canonical(p_type_id bytea) RETURNS text
-    LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_canonical';

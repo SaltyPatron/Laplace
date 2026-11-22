@@ -1,42 +1,16 @@
-using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using global::Npgsql;
-using NpgsqlTypes;
-using Laplace.Decomposers.Abstractions;
-using Laplace.Decomposers.Atomic2020;
-using Laplace.Decomposers.Code;
-using Laplace.Decomposers.ConceptNet;
-using Laplace.Decomposers.ISO;
-using Laplace.Decomposers.Model;
-using Laplace.Decomposers.OMW;
-using Laplace.Decomposers.Tatoeba;
-using Laplace.Decomposers.OpenSubtitles;
-using Laplace.Decomposers.SemLink;
-using Laplace.Decomposers.Unicode;
-using Laplace.Decomposers.WordNet;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.Engine.Synthesis;
-using Laplace.Ingestion;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Laplace.Engine.Dynamics;
-using DynamicsInterop = Laplace.Engine.Dynamics.NativeInterop;
-using SynthInterop = Laplace.Engine.Synthesis.NativeInterop;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
 internal static class QueryCommands
 {
-    private static Hash128 ReadHash16(byte[] b) =>
-        new Hash128(BitConverter.ToUInt64(b, 0), BitConverter.ToUInt64(b, 8));
-
     public static async Task<int> ConverseAsync(string prompt)
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -80,7 +54,7 @@ internal static class QueryCommands
     {
         if (string.IsNullOrWhiteSpace(goal))
         {
-            Console.Error.WriteLine("usage: laplace-mono recall \"<goal>\"  (e.g. \"what is a dog\", \"how are whale and dolphin related\")");
+            Console.Error.WriteLine("usage: laplace recall \"<goal>\"");
             return 2;
         }
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -88,10 +62,9 @@ internal static class QueryCommands
         var sw = Stopwatch.StartNew();
 
         Console.WriteLine($"goal     : {goal}");
-
         Console.WriteLine("── answer ─────────────────────────────────────────");
         bool any = false;
-        foreach (var row in await NpgsqlSubstrateReads.RecallAsync(conn, goal, default))
+        foreach (var row in await NpgsqlSubstrateReads.RecallSessionAsync(conn, goal, null, default))
         {
             any = true;
             string mu = row.EffMu is { } m ? $"  μ={m:F1}" : "";
@@ -100,28 +73,21 @@ internal static class QueryCommands
         }
         if (!any) Console.WriteLine("  (the substrate holds no answer to this yet)");
 
-        Console.WriteLine("── consensus.gaps(unwitnessed arenas — the research agenda) ──");
-        var gaps = (await NpgsqlSubstrateReads.GapsForPromptAsync(conn, goal, default))
-            .Where(g => g.Length > 0).ToList();
-        Console.WriteLine(gaps.Count > 0
-            ? $"  {string.Join(", ", gaps)}"
-            : "  (none — every conceptual arena is witnessed)");
-
         sw.Stop();
-        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, intent-routed consensus reads]");
+        Console.WriteLine($"           [{sw.Elapsed.TotalMilliseconds:F1} ms, consensus read]");
         return 0;
     }
 
     public static async Task<int> NeighborsAsync(string word)
     {
-        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace-mono neighbors <word>");
+        if (string.IsNullOrWhiteSpace(word)) return Fail("usage: laplace neighbors <word>");
         int k = 10;
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
         var sw = Stopwatch.StartNew();
 
-        byte[]? id = await NpgsqlSubstrateReads.FirstPlacedTopicAsync(conn, word, default);
+        byte[]? id = await NpgsqlSubstrateReads.ResolveRefAsync(ds, word, default);
         if (id is null)
         {
             Console.WriteLine($"  ('{word}' is not a placed content entity in this substrate)");
@@ -132,10 +98,10 @@ internal static class QueryCommands
         Console.WriteLine($"  {"neighbor",-26} {"geodesic",10} {"frechet",10}");
         Console.WriteLine($"  {new string('-', 26)} {new string('-', 10)} {new string('-', 10)}");
         bool anyStructural = false;
-        foreach (var nbRow in await NpgsqlSubstrateReads.NearestNeighbors4dAsync(conn, word, k, default))
+        foreach (var nbRow in await NpgsqlSubstrateReads.StructuralNeighborsAsync(conn, id, k, default))
         {
             anyStructural = true;
-            string nb = nbRow.Neighbor;
+            string nb = nbRow.Label ?? nbRow.IdHex ?? "?";
             if (nb.Length > 26) nb = nb[..25] + "…";
             string g = nbRow.Geodesic.ToString("F6");
             string f = nbRow.Frechet is { } fr ? fr.ToString("F4") : "—";
@@ -144,17 +110,14 @@ internal static class QueryCommands
         if (!anyStructural)
             Console.WriteLine($"  (‘{word}’ is not a placed content entity in this substrate)");
 
-        if (id is not null)
+        Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via salient_facts)");
+        Console.WriteLine($"  {"type",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
+        Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
+        foreach (var factRow in await NpgsqlSubstrateReads.SalientFactsAsync(conn, id, k, default))
         {
-            Console.WriteLine($"\n  '{word}' — SEMANTIC (consensus μ via salient_facts)");
-            Console.WriteLine($"  {"type",-22} {"fact",-28} {"eff_mu",10} {"wit",4}");
-            Console.WriteLine($"  {new string('-', 22)} {new string('-', 28)} {new string('-', 10)} {new string('-', 4)}");
-            foreach (var factRow in await NpgsqlSubstrateReads.SalientFactsAsync(conn, id, k, default))
-            {
-                string fact = factRow.Fact;
-                if (fact.Length > 28) fact = fact[..27] + "…";
-                Console.WriteLine($"  {factRow.Type,-22} {fact,-28} {(long)Math.Round(factRow.EffMu),10:N0} {factRow.Witnesses,4}");
-            }
+            string fact = factRow.Fact;
+            if (fact.Length > 28) fact = fact[..27] + "…";
+            Console.WriteLine($"  {factRow.Type,-22} {fact,-28} {(long)Math.Round(factRow.EffMu),10:N0} {factRow.Witnesses,4}");
         }
 
         sw.Stop();
@@ -163,15 +126,14 @@ internal static class QueryCommands
     }
 
     /// <summary>
-    /// The forward program read, nothing witnessed (Engine <c>laplace turn --read</c>): a prompt, or a prompt a
-    /// line until a blank one, each answered under the firmware with the Engine's trace.
+    /// The forward program read, nothing witnessed (<c>lp_engine_turn</c> read-only).
     /// </summary>
     public static async Task<int> WalkAsync(string[] args)
     {
-        var turns = ConversationTurns.Installed();
+        using var runtime = new LaplaceEngineRuntime();
         string prompt = string.Join(' ', args).Trim();
         if (!string.IsNullOrWhiteSpace(prompt))
-            return await WalkOnceAsync(turns, prompt);
+            return await WalkOnceAsync(runtime, prompt);
 
         Console.WriteLine("laplace walk — type a prompt, Enter. Blank line or Ctrl-D quits.");
         while (true)
@@ -179,62 +141,76 @@ internal static class QueryCommands
             Console.Write("\nprompt> ");
             var line = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(line)) break;
-            await WalkOnceAsync(turns, line);
+            await WalkOnceAsync(runtime, line);
         }
         return 0;
     }
 
-    private static async Task<int> WalkOnceAsync(ConversationTurns turns, string prompt)
+    private static Task<EngineTurnResponse> TurnAsync(
+        LaplaceEngineRuntime runtime,
+        string participant,
+        string session,
+        string prompt,
+        bool readOnly,
+        CancellationToken ct = default) =>
+        Task.Run(() => runtime.Turn(new EngineTurnRequest(
+            Prompt: prompt,
+            User: participant,
+            Session: session,
+            ReadOnly: readOnly)), ct);
+
+    private static async Task<int> WalkOnceAsync(LaplaceEngineRuntime runtime, string prompt)
     {
         var sw = Stopwatch.StartNew();
-        var turn = await turns.TurnAsync(CliParticipant, CliSession, prompt, read: true);
+        var turn = await TurnAsync(runtime, CliParticipant, CliSession, prompt, readOnly: true);
         sw.Stop();
-        Console.WriteLine(turn.Response);
-        Console.WriteLine($"    [{turn.Steps.Count} steps, {sw.Elapsed.TotalMilliseconds:F0} ms — {turn.Disposition}; a read, nothing witnessed]");
-        return 0;
+        Console.WriteLine(turn.Text);
+        Console.WriteLine($"    [{turn.Work.tokens_out} tokens, {turn.Work.db_probes} probes, {sw.Elapsed.TotalMilliseconds:F0} ms — {turn.Disposition}; a read, nothing witnessed]");
+        return turn.StatusCode == 0 ? 0 : 1;
     }
 
     /// <summary>
-    /// One turn of the CLI's session, answered by the forward program and witnessed by the Engine
-    /// (<c>laplace turn</c>), the same program the OpenAI-compatible endpoints and MCP run.
+    /// One turn of the CLI's session, answered by the forward program and witnessed in-process via <c>lp_engine_turn</c>.
     /// </summary>
     public static async Task<int> ChatAsync(string[] args)
     {
         string prompt = string.Join(' ', args).Trim();
         if (string.IsNullOrWhiteSpace(prompt))
-            return Fail("usage: laplace-mono chat <prompt>");
+            return Fail("usage: laplace chat <prompt>");
 
-        var turn = await ConversationTurns.Installed().TurnAsync(CliParticipant, CliSession, prompt);
-        Console.WriteLine(turn.Response);
-        Console.WriteLine(turn.Witnessed
-            ? $"    [turn {turn.TurnId} at {turn.Ordinal} in session \"{CliSession}\" of {CliParticipant}; {turn.Disposition}]"
-            : $"    [not witnessed: {turn.Reason}; {turn.Disposition}]");
-        return turn.Witnessed || turn.Response.Length == 0 ? 0 : 1;
+        using var runtime = new LaplaceEngineRuntime();
+        var turn = await TurnAsync(runtime, CliParticipant, CliSession, prompt, readOnly: false);
+        Console.WriteLine(turn.Text);
+        Console.WriteLine(turn.StatusCode == 0
+            ? $"    [turn {turn.TurnId.ToHex()} in session \"{CliSession}\" of {CliParticipant}; {turn.Disposition}]"
+            : $"    [not witnessed ({turn.Error}); {turn.Disposition}]");
+        return turn.StatusCode == 0 ? 0 : 1;
     }
 
-    /// <summary>
-    /// The CLI's session is [the operator, its name]: the operator is the account running the CLI, a witness
-    /// of its turns, and LAPLACE_SESSION_KEY names the session (how a CLI invocation continues a session the
-    /// endpoint or MCP opened under the same participant). Unset, the session is "cli".
-    /// </summary>
     private static string CliParticipant => Environment.UserName;
+
     private static string CliSession =>
-        Environment.GetEnvironmentVariable("LAPLACE_SESSION_KEY") is { Length: > 0 } k
-            && ConversationContent.IsValidIdentifier(k)
+        Environment.GetEnvironmentVariable("LAPLACE_SESSION_KEY") is { Length: > 0 } k && IsValidIdentifier(k)
             ? k
             : "cli";
 
-
-
+    private static bool IsValidIdentifier(string value)
+    {
+        if (value.Length is < 1 or > 128) return false;
+        foreach (char ch in value)
+        {
+            if (!(char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '@' or '-'))
+                return false;
+        }
+        return true;
+    }
 
     /// <summary>
-    /// The operator confirms or refutes one claim, [subject, relation, object] or [subject, relation]: the operator
-    /// account is a runtime witness at UserPromptContent and the verdict its statement, recorded by the Engine
-    /// (FeedbackStatements, the lane /v1/feedback and MCP feedback share).
+    /// The operator confirms or refutes one claim via <c>laplace witness</c> (<c>.statement</c>).
     /// </summary>
     public static async Task<int> AttestAsync(string[] args)
     {
-        const string usage = "usage: laplace-mono attest <confirm|refute> <subject> <relation> [object]";
+        const string usage = "usage: laplace attest <confirm|refute> <subject> <relation> [object]";
         if (args.Length is < 3 or > 4)
             return Fail(usage);
         string mode = args[0].ToLowerInvariant();
@@ -244,27 +220,50 @@ internal static class QueryCommands
         string subject = args[1], relation = args[2], obj = args.Length == 4 ? args[3] : "";
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        var result = await FeedbackStatements.StateAsync(RuntimeWitnessRecorder.Installed(), ds,
-            Environment.UserName, subject, relation, obj, confirm);
+        var before = await NpgsqlClaimStanding.ReadAsync(ds, subject, relation, obj);
+
+        static string Esc(string s) => s.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal);
+
+        var workDir = Path.Combine(Path.GetTempPath(), "laplace-cli-attest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        try
+        {
+            string stmtPath = Path.Combine(workDir, "feedback.statement");
+            string score = confirm ? "1.0" : "0.0";
+            string line = string.Create(CultureInfo.InvariantCulture, $"{Esc(subject)}\t{Esc(relation)}\t{Esc(obj)}\t{score}\n");
+            await File.WriteAllTextAsync(stmtPath, line, new UTF8Encoding(false));
+            int rc = await NativeRecipeCatalog.RunNativeAsync(
+                ["witness", "--as", Environment.UserName, "--class", "UserPromptContent", "--lineage", Environment.UserName, "--root", workDir, stmtPath],
+                NativeRecipeCatalog.ConnectionInfoFromNpgsql(ConnString));
+            if (rc != 0)
+                return rc;
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch { }
+        }
+
+        var after = await NpgsqlClaimStanding.ReadAsync(ds, subject, relation, obj);
         string claim = obj.Length == 0 ? $"[{subject}, {relation}]" : $"[{subject}, {relation}, {obj}]";
-        Console.WriteLine($"  {(confirm ? "confirmed" : "refuted")} {claim} as {Environment.UserName} (witness {result.WitnessId ?? "not reported"})");
-        Console.WriteLine(result.Before is null
+        Console.WriteLine($"  {(confirm ? "confirmed" : "refuted")} {claim} as {Environment.UserName} (witness {Hash128.Text(Environment.UserName).ToHex()})");
+        Console.WriteLine(before is null
             ? "  before: no standing"
-            : $"  before: rating {result.Before.Rating:F1}, deviation {result.Before.Deviation:F1}, {result.Before.Matches} games");
-        Console.WriteLine(result.After is null
+            : $"  before: rating {before.Value.Rating:F1}, deviation {before.Value.Deviation:F1}, {before.Value.Matches} games");
+        Console.WriteLine(after is null
             ? "  after:  no standing"
-            : $"  after:  rating {result.After.Rating:F1}, deviation {result.After.Deviation:F1}, {result.After.Matches} games");
+            : $"  after:  rating {after.Value.Rating:F1}, deviation {after.Value.Deviation:F1}, {after.Value.Matches} games");
         return 0;
     }
 
     public static async Task<int> InspectAsync(string text)
     {
-        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace-mono inspect <text>");
+        if (string.IsNullOrEmpty(text)) return Fail("usage: laplace inspect <text>");
         CodepointPerfcache.Load(ResolveBlob());
 
         using var tree = TextDecomposer.Run(text);
-        unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
-
         var root = tree.GetNode(tree.NaturalUnitIndex());
         Hash128 id = root.Id;
         Console.WriteLine($"inspect \"{text}\"");
@@ -274,7 +273,6 @@ internal static class QueryCommands
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
-        // Facets, standings and witness series describe one database snapshot.
         await using var transaction = await conn.BeginTransactionAsync(
             System.Data.IsolationLevel.RepeatableRead);
         bool exists = false;
@@ -286,6 +284,7 @@ internal static class QueryCommands
                 Console.WriteLine($"  ENTITY: present  tier={f.Tier}  type={f.Type}");
             }
         }
+
         var utf8Input = Encoding.UTF8.GetBytes(text);
         var wordSeen = new HashSet<Hash128>();
         var words = new List<(Hash128 Id, string Label)>();
@@ -296,39 +295,19 @@ internal static class QueryCommands
         }
 
         if (!exists)
-            Console.WriteLine("  ENTITY: novel composite — correct id, not yet ingested (a prompt ingest binds it)");
+            Console.WriteLine("  ENTITY: novel composite — correct id, not yet ingested");
 
         if (words.Count > 1 || !exists)
         {
             Console.WriteLine("\n  CONSTITUENT CONTENT (the substrate answering through the parts it knows):");
-
-            // One batched read for every part; rows are bucketed by input ordinal.
-            var buckets = new Dictionary<int, List<(string Type, string? Obj, decimal Mu, long Wit)>>();
-            if (words.Count > 0)
+            foreach (var (wordId, label) in words)
             {
-                var idsArr = new byte[words.Count][];
-                for (int i = 0; i < words.Count; i++) idsArr[i] = words[i].Id.ToBytes();
-                foreach (var row in await NpgsqlSubstrateReads.ConsensusOutReadableBatchAsync(
-                             conn, idsArr, 2, default))
-                {
-                    int ord = (int)row.Ordinal;
-                    if (!buckets.TryGetValue(ord, out var list))
-                    {
-                        list = new List<(string, string?, decimal, long)>();
-                        buckets[ord] = list;
-                    }
-                    list.Add((row.Type, row.Object, row.EffMu, row.Witnesses));
-                }
-            }
-
-            for (int i = 0; i < words.Count; i++)
-            {
-                var (_, label) = words[i];
-                if (buckets.TryGetValue(i + 1, out var list) && list.Count > 0)
+                var facts = await NpgsqlSubstrateReads.SalientFactsAsync(conn, wordId.ToBytes(), 4, default);
+                if (facts.Count > 0)
                 {
                     Console.WriteLine($"    \"{label}\"");
-                    foreach (var (type, obj, mu, wit) in list)
-                        Console.WriteLine($"        [{type}] → {obj ?? "(unary)"}  μ={mu:F3}  witnesses={wit}");
+                    foreach (var fact in facts)
+                        Console.WriteLine($"        [{fact.Type}] → {fact.Fact}  μ={fact.EffMu:F3}  witnesses={fact.Witnesses}");
                 }
                 else
                 {
@@ -357,12 +336,10 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  OUTGOING consensus (this → object), Glicko-2 μ over all witnesses:");
             int n = 0;
-            foreach (var c in await NpgsqlSubstrateReads.ConsensusOutDisplayAsync(conn, id.ToBytes(), default))
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusOutLabeledAsync(conn, id.ToBytes(), 20, default))
             {
                 n++;
-                string obj = c.PeerLabel ?? "(unary)";
-                Console.WriteLine($"    [{c.TypeLabel}] → {obj,-28}  μ={c.Rating / 1e9:F3} rd={c.Rd / 1e9:F3} σ={c.Volatility / 1e9:F4}"
-                    + $"  witnesses={c.WitnessCount}");
+                Console.WriteLine($"    [{c.TypeLabel}] → {c.ObjectLabel,-28}  μ={c.EffMu:F3}  witnesses={c.Witnesses}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
@@ -370,17 +347,14 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  INCOMING consensus (subject → this), Glicko-2 μ over all witnesses:");
             int n = 0;
-            foreach (var c in await NpgsqlSubstrateReads.ConsensusInDisplayAsync(conn, id.ToBytes(), default))
+            foreach (var c in await NpgsqlSubstrateReads.ConsensusInLabeledAsync(conn, id.ToBytes(), 20, default))
             {
                 n++;
-                string subj = c.PeerLabel ?? "?";
-                Console.WriteLine($"    {subj,-28} [{c.TypeLabel}] → here  μ={c.Rating / 1e9:F3} rd={c.Rd / 1e9:F3} σ={c.Volatility / 1e9:F4}"
-                    + $"  witnesses={c.WitnessCount}");
+                Console.WriteLine($"    {c.SubjectLabel,-28} [{c.TypeLabel}] → here  μ={c.EffMu:F3}  witnesses={c.Witnesses}");
             }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
-        static string Outc(short o) => o switch { 0 => "refute", 1 => "draw", _ => "confirm" };
         static async Task<int> NativeEvidenceAsync(NpgsqlConnection connection, byte[] entity, bool inbound)
         {
             var rows = await NpgsqlSubstrateReads.EvidenceSeriesReceiptAsync(connection, entity, 40, inbound, default);
@@ -399,28 +373,12 @@ internal static class QueryCommands
         {
             Console.WriteLine("\n  OUTGOING evidence (provenance — who witnessed):");
             int n = await NativeEvidenceAsync(conn, id.ToBytes(), false);
-            foreach (var a in await NpgsqlSubstrateReads.AttestationsOutDisplayAsync(conn, id.ToBytes(), default))
-            {
-                n++;
-                string obj = a.PeerLabel ?? "(unary)";
-                string ctx = a.ContextId is null ? "-" : Hex(ReadHash16(a.ContextId))[..10] + "…";
-                Console.WriteLine($"    [{a.TypeLabel}] → {obj,-28}  {Outc(a.Outcome)}"
-                    + $"  src={a.SourceLabel}  ctx={ctx}  games={a.ObservationCount}");
-            }
             if (n == 0) Console.WriteLine("    (none)");
         }
 
         {
             Console.WriteLine("\n  INCOMING evidence (provenance — who witnessed):");
             int n = await NativeEvidenceAsync(conn, id.ToBytes(), true);
-            foreach (var a in await NpgsqlSubstrateReads.AttestationsInDisplayAsync(conn, id.ToBytes(), default))
-            {
-                n++;
-                string subj = a.PeerLabel ?? "?";
-                string ctx = a.ContextId is null ? "-" : Hex(ReadHash16(a.ContextId))[..10] + "…";
-                Console.WriteLine($"    {subj,-28} [{a.TypeLabel}] → here  {Outc(a.Outcome)}"
-                    + $"  src={a.SourceLabel}  ctx={ctx}  games={a.ObservationCount}");
-            }
             if (n == 0) Console.WriteLine("    (none)");
         }
 

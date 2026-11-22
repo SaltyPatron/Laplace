@@ -13,7 +13,7 @@ public static class MoveApply
 
     public static Undo MakeWithUndo(Board b, ChessMove m)
     {
-        if (!b.Rules.IsStandard)
+        if (!b.Rules.IsStandard && NativeChessRules.Supports(b.Rules))
         {
             var before = b.Clone();
             NativeChessRules.Apply(b, m);
@@ -99,6 +99,8 @@ public static class MoveApply
             Array.Copy(before.Checks, b.Checks, 2);
             b.Rules = before.Rules; b.Promoted = before.Promoted;
             b.Castle = before.Castle; b.EpSquare = before.EpSquare;
+            b.WhiteKingRookFile = before.WhiteKingRookFile; b.WhiteQueenRookFile = before.WhiteQueenRookFile;
+            b.BlackKingRookFile = before.BlackKingRookFile; b.BlackQueenRookFile = before.BlackQueenRookFile;
             b.HalfmoveClock = before.HalfmoveClock; b.FullmoveNumber = before.FullmoveNumber;
             b.WhiteToMove = before.WhiteToMove;
             return;

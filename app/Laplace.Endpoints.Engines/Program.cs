@@ -1,5 +1,5 @@
 using Laplace.Endpoints.Engines;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Hosting;
 
 // The engine endpoint: laplace, stockfish and lc0 over HTTP for other hosts (hart-server), a thin layer over
 // laplace-uci's library. An operator's stop persists (ManagedServiceState), as for the other managed services

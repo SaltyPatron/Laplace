@@ -220,7 +220,7 @@ public sealed class SearchTests
     public void PreRootThreefold_IsTerminalBeforeMoveSelection()
     {
         var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
-        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 root = ChessEngineIdentity.PositionId(board);
         var state = new ChessState(board, ImmutableList.Create(root, root, root));
 
         var result = new Search().Think(state, new Search.Limits(MaxDepth: 2));
@@ -235,7 +235,7 @@ public sealed class SearchTests
         var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
         var legal = MoveGen.Legal(board);
         var repeat = Assert.Single(legal, static m => m.ToUci() == "f2f3");
-        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 root = ChessEngineIdentity.PositionId(board);
         Hash128 repeatedChild = NextId(board, repeat);
         var state = new ChessState(
             board,
@@ -255,7 +255,7 @@ public sealed class SearchTests
         var legal = MoveGen.Legal(board);
         Assert.True(legal.Count > 1);
         var repeat = legal[0];
-        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 root = ChessEngineIdentity.PositionId(board);
         Hash128 repeatedChild = NextId(board, repeat);
         var state = new ChessState(
             board,
@@ -272,7 +272,7 @@ public sealed class SearchTests
     {
         var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
         var repeat = Assert.Single(MoveGen.Legal(board), static m => m.ToUci() == "f2f3");
-        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 root = ChessEngineIdentity.PositionId(board);
         Hash128 child = NextId(board, repeat);
         var withOnePriorOccurrence = new ChessState(board, ImmutableList.Create(child, root));
 
@@ -289,7 +289,7 @@ public sealed class SearchTests
     {
         var next = board.Clone();
         MoveApply.Make(next, move);
-        return ChessPositionIdentity.PositionId(next);
+        return ChessEngineIdentity.PositionId(next);
     }
 
     private static Search.Result Think(string fen, int depth)
@@ -363,14 +363,14 @@ public sealed class SearchTests
         var start = Board.FromFen(ChessModality.StartFen);
         ChessMove e4 = MoveGen.Legal(start).Single(m => m.ToUci() == "e2e4");
         ChessMove d4 = MoveGen.Legal(start).Single(m => m.ToUci() == "d2d4");
-        Hash128 id = ChessPositionIdentity.PositionId(start);
+        Hash128 id = ChessEngineIdentity.PositionId(start);
 
         var table = new SearchContinuationTable();
         table.SeedOpening(start, [e4]);
         table.SeedActiveGame(start.Clone(), [d4]);
         table.SeedWitnessedEvaluation(start.Clone(), 40);
 
-        Assert.Equal(id, ChessPositionIdentity.PositionId(start.Clone()));
+        Assert.Equal(id, ChessEngineIdentity.PositionId(start.Clone()));
         Assert.True(table.TryGet(id, out var entry));
         Assert.Equal(d4, entry.PreferredMove);
         Assert.Equal(d4, entry.ActiveGameMove);
@@ -441,7 +441,7 @@ public sealed class SearchTests
         book.SeedOpening(start, [e4]);
         book.SeedOpening(start, [MoveGen.Legal(start).Single(m => m.ToUci() == "d2d4")]);
         var overlay = new SearchContinuationTable(book);
-        Assert.True(overlay.TryGet(ChessPositionIdentity.PositionId(start), out var entry));
+        Assert.True(overlay.TryGet(ChessEngineIdentity.PositionId(start), out var entry));
         Assert.Equal(e4, entry.PreferredMove);
     }
 

@@ -23,6 +23,8 @@ const loadExplore = () => import('./explore/ExploreView');
 const loadForwardProof = () => import('./forward/ForwardProofView');
 const loadOperator = () => import('./admin/AdminView');
 const loadData = () => import('./data/DataView');
+const loadFoundry = () => import('./foundry/FoundryView');
+const loadCode = () => import('./code/CodeView');
 const loadEvents = () => import('./compete/EventsView');
 
 const ChatView = lazy(() => loadChat().then((m) => ({ default: m.ChatView })));
@@ -36,6 +38,8 @@ const ExploreView = lazy(() => loadExplore().then((m) => ({ default: m.ExploreVi
 const ForwardProofView = lazy(() => loadForwardProof().then((m) => ({ default: m.ForwardProofView })));
 const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
+const FoundryView = lazy(() => loadFoundry().then((m) => ({ default: m.FoundryView })));
+const CodeView = lazy(() => loadCode().then((m) => ({ default: m.CodeView })));
 const EventsView = lazy(() => loadEvents().then((m) => ({ default: m.EventsView })));
 
 function Shell() {
@@ -86,6 +90,8 @@ function Shell() {
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<ExploreView page="query" />} />
           <Route path="/data" element={<DataView />} />
+          <Route path="/foundry" element={<FoundryView />} />
+          <Route path="/code" element={<CodeView />} />
           <Route path="/events/*" element={<EventsView />} />
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/topic" element={<ExploreView page="topic" />} />

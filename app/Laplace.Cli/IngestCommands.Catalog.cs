@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.Cli;
 
@@ -9,10 +8,10 @@ internal static class IngestCatalogCommands
     {
         if (args.Length == 0 || args.Length > 2 || (args.Length == 2 && args[1] != "--json"))
         {
-            Console.Error.WriteLine("usage: laplace-mono ingest catalog [--json]");
+            Console.Error.WriteLine("usage: laplace ingest catalog [--json]");
             return 2;
         }
-        var catalog = EtlManifest.Catalog;
+        var catalog = NativeRecipeCatalog.Catalog;
         if (args[0] == "--list-sources")
         {
             foreach (var source in catalog.Sources) Console.WriteLine(source.Name);

@@ -1,5 +1,5 @@
 using Laplace.Endpoints.OpenAICompat.Auth;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Npgsql;
 using Xunit;
 

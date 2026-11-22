@@ -9,6 +9,10 @@ export interface BrowseHit {
   rd?: number | null;
   eff_mu?: number | null;
   witnesses: number;
+  flags?: number | string | null;
+  general_category?: string | null;
+  script?: string | null;
+  salience?: number | null;
 }
 
 export interface BrowseReceipt {

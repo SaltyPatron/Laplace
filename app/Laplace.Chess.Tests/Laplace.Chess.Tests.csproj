@@ -17,6 +17,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
     <ProjectReference Include="..\Laplace.Chess.Uci\Laplace.Chess.Uci.csproj" />
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Data\Laplace.Data.csproj" />
+    <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
   </ItemGroup>
 
   <ItemGroup>

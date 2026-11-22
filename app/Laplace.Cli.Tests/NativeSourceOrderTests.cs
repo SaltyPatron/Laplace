@@ -1,4 +1,4 @@
-using Laplace.Decomposers.Abstractions;
+using Laplace.Cli;
 using Xunit;
 
 namespace Laplace.Cli.Tests;
@@ -12,7 +12,7 @@ public sealed class NativeSourceOrderTests
         estate.Source("base", "name base\r\n");
         estate.Source("dependent", "name dependent\r\nafter base # required first\r\n");
         estate.Order("# canonical order\r\nbase\r\n\r\ndependent # last\r\n");
-        Assert.Equal(new[] { "base", "dependent" }, EtlManifest.ReadSourceOrder(estate.Root));
+        Assert.Equal(new[] { "base", "dependent" }, NativeRecipeCatalog.ReadSourceOrder(estate.Root));
     }
 
     [Theory]
@@ -27,7 +27,7 @@ public sealed class NativeSourceOrderTests
         estate.Source("base", "name base\n");
         estate.Source("dependent", "name dependent\n" + dependency);
         estate.Order(order);
-        Assert.Throws<InvalidDataException>(() => EtlManifest.ReadSourceOrder(estate.Root));
+        Assert.Throws<InvalidDataException>(() => NativeRecipeCatalog.ReadSourceOrder(estate.Root));
     }
 
     [Fact]

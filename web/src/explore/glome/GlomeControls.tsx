@@ -1,5 +1,5 @@
 /** View controls above the glome: colour metric, overlay toggles and the 4-D rotation sliders. */
-import { Checkbox, Range, Select } from '@ui';
+import { Button, Checkbox, Range, Select } from '@ui';
 import type { GlomeColorBy } from './glomeProjection';
 import styles from './GlomeCanvas.module.css';
 
@@ -15,6 +15,8 @@ export function GlomeViewControls({
   onShowEdges,
   showLabels,
   onShowLabels,
+  isFullscreen = false,
+  onToggleFullscreen,
 }: {
   colorBy: GlomeColorBy;
   onColorBy: (value: GlomeColorBy) => void;
@@ -27,6 +29,8 @@ export function GlomeViewControls({
   onShowEdges: (value: boolean) => void;
   showLabels: boolean;
   onShowLabels: (value: boolean) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }) {
   return (
     <div className={styles.viewControls}>
@@ -47,6 +51,19 @@ export function GlomeViewControls({
       ) : null}
       <label><Checkbox checked={showLabels} onChange={(e) => onShowLabels(e.target.checked)} /> labels when zoomed</label>
       <span className={styles.viewHint}>Scroll zooms toward the cursor; points keep their screen size.</span>
+      {onToggleFullscreen ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={styles.fullscreenButton}
+          aria-pressed={isFullscreen}
+          aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          onClick={onToggleFullscreen}
+        >
+          {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        </Button>
+      ) : null}
     </div>
   );
 }

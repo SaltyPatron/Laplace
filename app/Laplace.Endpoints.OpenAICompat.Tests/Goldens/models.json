@@ -14,6 +14,12 @@
       "owned_by": "laplace"
     },
     {
+      "id": "laplace-code-001",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
       "id": "laplace-embed-form-001",
       "object": "model",
       "created": 0,
@@ -21,6 +27,48 @@
     },
     {
       "id": "laplace-embed-meaning-001",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "program",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "coding",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "deductive",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "inductive",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "abductive",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "constructive",
+      "object": "model",
+      "created": 0,
+      "owned_by": "laplace"
+    },
+    {
+      "id": "adversarial",
       "object": "model",
       "created": 0,
       "owned_by": "laplace"

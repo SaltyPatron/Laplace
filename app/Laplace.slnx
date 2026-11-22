@@ -2,10 +2,10 @@
   <Project Path="Laplace.Core/Laplace.Core.csproj" />
   <Project Path="Laplace.Ops/Laplace.Ops.csproj" />
   <Project Path="Laplace.Core.Tests/Laplace.Core.Tests.csproj" />
-  <Project Path="Laplace.Substrate/Laplace.Substrate.csproj" />
-  <Project Path="Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" />
-  <Project Path="Laplace.Decomposers/Laplace.Decomposers.csproj" />
-  <Project Path="Laplace.Decomposers.Tests/Laplace.Decomposers.Tests.csproj" />
+  <Project Path="Laplace.Hosting/Laplace.Hosting.csproj" />
+  <Project Path="Laplace.Data/Laplace.Data.csproj" />
+  <Project Path="Laplace.Data.Tests/Laplace.Data.Tests.csproj" />
+  <Project Path="Laplace.Mcp/Laplace.Mcp.csproj" />
   <Project Path="Laplace.Chess/Laplace.Chess.csproj" />
   <Project Path="Laplace.Chess.Tests/Laplace.Chess.Tests.csproj" />
   <Project Path="Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" />

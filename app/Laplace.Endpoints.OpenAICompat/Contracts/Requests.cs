@@ -26,7 +26,15 @@ public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("shape")] string? Shape = null,
     [property: JsonPropertyName("bands")] int[]? Bands = null,
     [property: JsonPropertyName("elaborate")] bool Elaborate = false,
-    [property: JsonPropertyName("language")] string? Language = null);
+    [property: JsonPropertyName("language")] string? Language = null,
+    [property: JsonPropertyName("seed")] long? Seed = null,
+    [property: JsonPropertyName("system")] string? System = null,
+    [property: JsonPropertyName("envelope")] string? Envelope = null,
+    [property: JsonPropertyName("max_wall_us")] ulong? MaxWallUs = null,
+    [property: JsonPropertyName("max_db_probes")] ulong? MaxDbProbes = null,
+    [property: JsonPropertyName("max_rows_scanned")] ulong? MaxRowsScanned = null,
+    [property: JsonPropertyName("max_tokens_out")] uint? MaxTokensOut = null,
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null);
 
 public sealed record ChatMessage(
     [property: JsonPropertyName("role")] string? Role,
@@ -46,7 +54,15 @@ public sealed record CompletionsRequest(
     [property: JsonPropertyName("echo")] bool Echo = false,
     [property: JsonPropertyName("logprobs")] int? Logprobs = null,
     [property: JsonPropertyName("user")] string? User = null,
-    [property: JsonPropertyName("session")] string? Session = null);
+    [property: JsonPropertyName("session")] string? Session = null,
+    [property: JsonPropertyName("seed")] long? Seed = null,
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("envelope")] string? Envelope = null,
+    [property: JsonPropertyName("max_wall_us")] ulong? MaxWallUs = null,
+    [property: JsonPropertyName("max_db_probes")] ulong? MaxDbProbes = null,
+    [property: JsonPropertyName("max_rows_scanned")] ulong? MaxRowsScanned = null,
+    [property: JsonPropertyName("max_tokens_out")] uint? MaxTokensOut = null,
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null);
 
 public sealed record EmbeddingsRequest(
     [property: JsonPropertyName("model")] string? Model,
@@ -145,7 +161,16 @@ public sealed record SynthesisExportRequest(
     [property: JsonPropertyName("recipe_id_prefix")] string? RecipeIdPrefix = null,
     [property: JsonPropertyName("tokenizer_dir")] string? TokenizerDir = null,
     [property: JsonPropertyName("format")] string? Format = null,
-    [property: JsonPropertyName("filename")] string? Filename = null);
+    [property: JsonPropertyName("filename")] string? Filename = null,
+    [property: JsonPropertyName("model_name")] string? ModelName = null,
+    [property: JsonPropertyName("max_vocab")] uint? MaxVocab = null,
+    [property: JsonPropertyName("hidden_dim")] uint? HiddenDim = null,
+    [property: JsonPropertyName("num_layers")] uint? NumLayers = null,
+    [property: JsonPropertyName("num_heads")] uint? NumHeads = null,
+    [property: JsonPropertyName("f16_weights")] bool? F16Weights = null,
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null,
+    [property: JsonPropertyName("envelope")] string? Envelope = null);
 
 public sealed record AuditReportRequest(
     [property: JsonPropertyName("scope")] string? Scope = null,

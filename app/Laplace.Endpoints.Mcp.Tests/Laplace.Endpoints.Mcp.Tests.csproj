@@ -4,6 +4,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <ProjectReference Include="../Laplace.Core/Laplace.Core.csproj" />
+    <ProjectReference Include="../Laplace.Data/Laplace.Data.csproj" />
     <ProjectReference Include="../Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" />
+    <ProjectReference Include="../Laplace.Mcp/Laplace.Mcp.csproj" />
+    <ProjectReference Include="../Laplace.Ops/Laplace.Ops.csproj" />
   </ItemGroup>
 </Project>

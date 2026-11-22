@@ -1,24 +1,45 @@
 using System.Diagnostics;
 using global::Npgsql;
 using Laplace.Engine.Core;
-using Laplace.Ingestion;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 
 namespace Laplace.Chess.Service;
 
+internal sealed record ChessIngestRunResult(
+    Hash128 SourceId,
+    string SourceName,
+    int UnitsAttempted,
+    int UnitsApplied,
+    int UnitsFailed,
+    int FilesDone,
+    TimeSpan WallClock);
+
+internal interface IChessIngestJournal
+{
+    Guid RunId { get; }
+    void OnRunStart(string sourceName, int layerOrder);
+    void OnFileStarted(string sourceName, string fileLabel);
+    void OnFileFinished(string sourceName, string fileLabel, string status, string? error = null);
+    void OnRunFinished(string sourceName, ChessIngestRunResult result, string status, string? error = null);
+}
+
+internal sealed class LoggingChessIngestJournal : IChessIngestJournal
+{
+    public Guid RunId { get; } = Guid.NewGuid();
+    public void OnRunStart(string sourceName, int layerOrder) { }
+    public void OnFileStarted(string sourceName, string fileLabel) { }
+    public void OnFileFinished(string sourceName, string fileLabel, string status, string? error = null) { }
+    public void OnRunFinished(string sourceName, ChessIngestRunResult result, string status, string? error = null) { }
+}
+
 /// <summary>
 /// One web-triggered chess import (a Lab provider fetch, a gauntlet's games.pgn) as an ingest run: each
-/// PGN file it admits is read by the Engine, stated by the runtime witness it names (Laplace for the games
-/// Laplace played) or, with none, as a file of no corpus by the generic pgn recipe; and the run
-/// keeps the same receipts the CLI writes (<c>laplace.ingest_run_journal</c>, one
-/// <c>laplace.ingest_file_journal</c> row a file). Every exit path reaches exactly one terminal status:
-/// ok, failed (with the error text), or cancelled. The journal is operational metadata and never aborts
-/// the import; the same lines go to the host log.
+/// PGN file it admits is read by the Engine via <c>laplace witness</c>/<c>laplace ingest</c>, and every exit
+/// path drives the run to one terminal status (ok, failed, cancelled) in host logs.
 /// </summary>
 internal sealed class ChessLabIngestRun
 {
-    private readonly IIngestObservability _journal;
+    private readonly IChessIngestJournal _journal;
     private readonly ILogger _log;
     private readonly string _jobId;
     private readonly string _label;
@@ -31,7 +52,7 @@ internal sealed class ChessLabIngestRun
     private bool _finished;
 
     internal ChessLabIngestRun(
-        IIngestObservability journal, ILogger log, string jobId, string label, string? source,
+        IChessIngestJournal journal, ILogger log, string jobId, string label, string? source,
         Func<string?, string, CancellationToken, Task> ingest, Func<Guid>? runId = null)
     {
         _journal = journal ?? throw new ArgumentNullException(nameof(journal));
@@ -40,7 +61,7 @@ internal sealed class ChessLabIngestRun
         _jobId = jobId;
         _label = label;
         _source = source;
-        _runId = runId ?? (static () => Guid.Empty);
+        _runId = runId ?? (() => _journal.RunId);
     }
 
     internal Guid RunId => _runId();
@@ -50,16 +71,12 @@ internal sealed class ChessLabIngestRun
 
     internal bool IsFinished { get { lock (_gate) return _finished; } }
 
-    /// <summary>
-    /// Opens the run on the host's ingest datasource. The journal's run-start writes are synchronous (as in
-    /// the CLI), so they leave the request thread.
-    /// </summary>
     internal static async Task<ChessLabIngestRun> StartAsync(
         ChessLiveGameHost host, ILogger log, string jobId, string label, string? source, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(host);
         ct.ThrowIfCancellationRequested();
-        var journal = new NpgsqlIngestObservability(host.DataSource, logger: log);
+        var journal = new LoggingChessIngestJournal();
         var run = new ChessLabIngestRun(journal, log, jobId, label, source, host.IngestFileAsync, () => journal.RunId);
         await Task.Run(run.Start, CancellationToken.None).ConfigureAwait(false);
         return run;
@@ -67,8 +84,7 @@ internal sealed class ChessLabIngestRun
 
     internal void Start()
     {
-        // Native admission follows the recipe dependency DAG; it has no managed layer.
-        _journal.OnRunStart(SourceName, -1, inventory: null);
+        _journal.OnRunStart(SourceName, -1);
         _log.LogInformation(
             "CHESS_IMPORT_RUN_START job={JobId} run={RunId} source={Source} label={Label}",
             _jobId, RunId, SourceName, _label);
@@ -121,20 +137,14 @@ internal sealed class ChessLabIngestRun
             _finished = true;
         }
         int done = Volatile.Read(ref _unitsDone), failed = Volatile.Read(ref _unitsFailed);
-        var result = new IngestRunResult(
-            Hash128.Zero, SourceName,
+        var result = new ChessIngestRunResult(
+            Hash128.Zero,
+            SourceName,
             UnitsAttempted: done + failed,
             UnitsApplied: done,
             UnitsFailed: failed,
-            EntitiesInserted: 0,
-            PhysicalitiesInserted: 0,
-            AttestationsInserted: 0,
-            TotalRoundTrips: 0,
-            WallClock: _clock.Elapsed,
-            Failures: [],
             FilesDone: done,
-            InputUnitsDone: done,
-            InputUnitsTotal: done + failed);
+            WallClock: _clock.Elapsed);
         _journal.OnRunFinished(SourceName, result, status, error);
         if (status == "failed")
             _log.LogWarning(

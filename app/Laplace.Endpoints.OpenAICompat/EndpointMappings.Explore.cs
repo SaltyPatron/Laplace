@@ -1,5 +1,5 @@
 using Laplace.Api.Contracts;
-using Laplace.SubstrateCRUD;
+using Laplace.Data;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -41,7 +41,7 @@ internal static partial class ExploreEndpoints
             // Browse members are the word-tier ids the native text spine emitted for
             // the query, not a tokenization or substring scan of rendered text.
             var memberIds = decomposition.Nodes
-                .Where(static n => n.Tier == EntityTier.Word)
+                .Where(static n => n.Tier == 1)
                 .Select(static n => n.IdHex)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();

@@ -298,12 +298,9 @@ public static class ChessLabPaths
             return new Probe(installedCandidate, true, "install");
 
         var hasBuildRoot = LaplaceInstall.TryDefaultBuildRoot(out var buildRoot);
-        if (repoCandidate is not null && hasBuildRoot)
-        {
-            var repoPath = repoCandidate(buildRoot);
-            if (!string.IsNullOrEmpty(repoPath) && File.Exists(repoPath))
-                return new Probe(repoPath, true, "build");
-        }
+        var repoPath = repoCandidate is not null ? repoCandidate(hasBuildRoot ? buildRoot : "") : null;
+        if (!string.IsNullOrEmpty(repoPath) && File.Exists(repoPath))
+            return new Probe(repoPath, true, "build");
 
         if (!string.IsNullOrEmpty(assemblyNeighbor) && File.Exists(assemblyNeighbor))
             return new Probe(assemblyNeighbor, true, "path");
@@ -313,7 +310,7 @@ public static class ChessLabPaths
 
         var missing = !string.IsNullOrWhiteSpace(configPath) ? configPath.Trim()
             : !string.IsNullOrEmpty(sourceCandidate) ? sourceCandidate
-            : repoCandidate is not null && hasBuildRoot ? repoCandidate(buildRoot)
+            : !string.IsNullOrEmpty(repoPath) ? repoPath
             : assemblyNeighbor;
         return new Probe(missing, false, "missing");
     }

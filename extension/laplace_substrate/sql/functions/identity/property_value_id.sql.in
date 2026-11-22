@@ -1,6 +1,0 @@
--- A property's value is content: the ordered composition [property, value], both named
--- as the authority names them (ContentEmitter.StagePropertyValue in C#). The UCD's
--- General_Category=Space_Separator is [General_Category, Space_Separator].
-CREATE OR REPLACE FUNCTION laplace.property_value_id(p_property text, p_value text) RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_property_value_id'
-    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

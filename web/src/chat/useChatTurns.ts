@@ -17,7 +17,7 @@ export function useChatTurns(
   loadConversations: () => Promise<void>,
 ) {
 
-  const { tenant, quoteId, model, messages } = useAppStore();
+  const { tenant, quoteId, model, firmware, envelope, messages } = useAppStore();
 
   const { setQuoteId, pushMessage, updateLastAssistant, setPendingQuote } = useAppStore();
 
@@ -82,6 +82,8 @@ export function useChatTurns(
       stream: true,
       messages: [{ role: 'user', content: prompt }],
       ...(session ? { session } : {}),
+      ...(firmware !== 'program' ? { firmware } : {}),
+      ...(envelope !== 'standard' ? { envelope } : {}),
     };
 
 
@@ -126,7 +128,25 @@ export function useChatTurns(
 
         const forwardProof = lap?.forward_proof;
         if (forwardProof) {
-          updateLastAssistant((m) => ({ ...m, forwardProof }));
+          const mergedProof: ForwardPassProof = {
+            ...forwardProof,
+            firmware: forwardProof.firmware ?? firmware,
+            envelope: forwardProof.envelope ?? envelope,
+            top_salience: forwardProof.top_salience ?? lap?.top_salience,
+            work: forwardProof.work ?? lap?.work,
+            witness_shares: forwardProof.witness_shares ?? lap?.witness_shares,
+          };
+          updateLastAssistant((m) => ({ ...m, forwardProof: mergedProof }));
+        } else if (lap?.witness_shares || lap?.work || lap?.top_salience != null) {
+          updateLastAssistant((m) => (m.forwardProof ? {
+            ...m,
+            forwardProof: {
+              ...m.forwardProof,
+              top_salience: m.forwardProof.top_salience ?? lap.top_salience,
+              work: m.forwardProof.work ?? lap.work,
+              witness_shares: m.forwardProof.witness_shares ?? lap.witness_shares,
+            },
+          } : m));
         }
 
         if (delta?.content !== undefined || lap) {
@@ -225,6 +245,8 @@ export function useChatTurns(
           model,
           messages: [{ role: 'user', content: lastUser.content }],
           ...(session ? { session } : {}),
+          ...(firmware !== 'program' ? { firmware } : {}),
+          ...(envelope !== 'standard' ? { envelope } : {}),
         },
 
         { tenant, quoteId },

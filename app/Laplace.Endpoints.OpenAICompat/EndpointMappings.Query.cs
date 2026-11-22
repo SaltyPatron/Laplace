@@ -43,9 +43,9 @@ internal static class QueryEndpoints
         // the relation id is the identifier, the canonical name one realization.
         app.MapGet("/v1/query/relations", () =>
         {
-            var relations = Laplace.Decomposers.Abstractions.RelationTypeRegistry.AllCanonical()
+            var relations = RelationTypeCatalog.AllCanonical()
                 .Select(r => new RelationTypeView(r.Canonical, Convert.ToHexString(r.Id.ToBytes()).ToLowerInvariant(), r.Rank,
-                    r.Symmetry == Laplace.Decomposers.Abstractions.RelationTypeRegistry.Symmetry.Symmetric))
+                    r.Symmetry == RelationTypeCatalog.Symmetry.Symmetric))
                 .OrderBy(r => r.Name, StringComparer.Ordinal)
                 .ToArray();
             return Results.Json(new RelationTypesResponse("list", relations));

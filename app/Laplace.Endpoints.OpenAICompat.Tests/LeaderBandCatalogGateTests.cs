@@ -25,17 +25,16 @@ public sealed class LeaderBandCatalogGateTests
     [Fact]
     public void NamedLeaderRead_UsesNativeCatalogAndNeverLiveCensus()
     {
-        var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.BandLeaders.cs");
-        var catalog = Read("engine/core/src/sql_catalog.def");
+        var text = Read("app/Laplace.Data/NpgsqlSubstrateReads.BandLeaders.cs");
+        var catalog = Read("app/Laplace.Core/Core/SqlCatalog.cs");
         Assert.Contains("SqlCatalog.Get(\"leaders.native_named\")", text);
         Assert.DoesNotContain("SELECT ", text);
-        Assert.Contains("SQL_QUERY(\"leaders.native_named\"", catalog);
-        int start = catalog.IndexOf("SQL_QUERY(\"leaders.native_named\"", StringComparison.Ordinal);
-        int end = catalog.IndexOf("\nSQL_", start + 1, StringComparison.Ordinal);
+        Assert.Contains("[\"leaders.native_named\"]", catalog);
+        int start = catalog.IndexOf("[\"leaders.native_named\"]", StringComparison.Ordinal);
+        int end = catalog.IndexOf("\n        [\"", start + 1, StringComparison.Ordinal);
         string named = end < 0 ? catalog[start..] : catalog[start..end];
-        Assert.Contains("FROM ops.claim_leaders($1,$2) WITH ORDINALITY", named);
-        Assert.Contains("FROM converse.relation_band_catalog() b", named);
-        Assert.Contains("LEFT JOIN leaders n ON n.band=b.band", named);
+        Assert.Contains("FROM public.consensus", named);
+        Assert.Contains("public.laplace_confidence", named);
         Assert.DoesNotContain("BandLeadersNamedAsync(", Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs"));
         Assert.DoesNotContain("FROM converse.relation_bands()", named);
         Assert.DoesNotContain("JOIN converse.relation_bands()", named);
@@ -66,7 +65,7 @@ public sealed class LeaderBandCatalogGateTests
     {
         var dir = new DirectoryInfo(Path.GetDirectoryName(thisFile)!);
         while (dir is not null &&
-               !(Directory.Exists(Path.Combine(dir.FullName, "engine"))
+               !(Directory.Exists(Path.Combine(dir.FullName, "db"))
                  && Directory.Exists(Path.Combine(dir.FullName, "app"))))
             dir = dir.Parent;
         return dir?.FullName

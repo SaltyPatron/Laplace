@@ -1,6 +1,6 @@
-using Npgsql;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD.Npgsql;
+using Npgsql;
 using System.Text.RegularExpressions;
 
 namespace Laplace.Migrations;

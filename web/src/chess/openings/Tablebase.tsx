@@ -27,12 +27,19 @@ export function PositionTablebase({ fen }: { fen: string }) {
     enabled: eligible,
     read: (signal) => positionTablebase(fen, signal),
   });
-  if (!eligible) return null;
+  if (!eligible) {
+    return (
+      <section className={styles.panel} aria-label="Endgame tablebase">
+        <h3 className={styles.heading}>Endgame tablebase (Syzygy WDL/DTZ)</h3>
+        <Muted>{pieces} pieces on board — Syzygy WDL/DTZ probes activate at &le; {TABLEBASE_PIECES} pieces.</Muted>
+      </section>
+    );
+  }
   const toMove = fen.split(' ')[1] === 'b' ? 'Black' : 'White';
   const verdict = read.data;
   return (
     <section className={styles.panel} aria-label="Endgame tablebase">
-      <h3 className={styles.heading}>Endgame tablebase</h3>
+      <h3 className={styles.heading}>Endgame tablebase (Syzygy WDL/DTZ)</h3>
       <ReadStatus label="Tablebase" resource={read} />
       {verdict && (verdict.wdl == null ? (
         <Muted>No tablebase verdict is recorded for this {pieces}-piece position.</Muted>

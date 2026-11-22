@@ -1,9 +1,8 @@
 using global::Npgsql;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -55,10 +54,16 @@ public sealed partial class ChessEngineService
         }
     }
 
-    public async Task<ChessPlayStart> StartPlaySessionAsync(
+    public Task<ChessPlayStart> StartPlaySessionAsync(
         bool recordToSubstrate = true, IReadOnlyList<string>? moves = null,
         string tenantId = "public", string? userId = null, CancellationToken ct = default,
         OperationPrincipal? requester = null)
+        => StartPlaySessionAsync(recordToSubstrate, moves, tenantId, userId, variant: null, startFen: null, requester, ct);
+
+    public async Task<ChessPlayStart> StartPlaySessionAsync(
+        bool recordToSubstrate, IReadOnlyList<string>? moves,
+        string tenantId, string? userId, string? variant, string? startFen,
+        OperationPrincipal? requester = null, CancellationToken ct = default)
     {
         await EngineAsync(ct);
         var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
@@ -70,11 +75,14 @@ public sealed partial class ChessEngineService
             tenantId: tenantId,
             userId: userId,
             whitePlayerName: humanName,
-            blackPlayerName: "Laplace", requester: requester);
+            blackPlayerName: "Laplace", requester: requester,
+            variant: variant, startFen: startFen);
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 
-        var state = _modality!.Initial();
+        var rules = ChessVariants.Resolve(variant);
+        var resolvedFen = session.Metadata?.StartFen ?? ChessModality.StartFen;
+        var state = _modality!.FromFen(resolvedFen, rules);
         if (moves is { Count: > 0 })
         {
             foreach (var uci in moves)
@@ -157,10 +165,40 @@ public sealed partial class ChessEngineService
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         string startFen = session.Metadata?.StartFen ?? ChessModality.StartFen;
+        int boundedDepth = Math.Clamp(depth, 1, 12);
         bool reads = substrate && !HasImmediateMate(_modality, state);
+        if (reads && TryNativeChessPlay(state.Board, state.Board.Rules, boundedDepth) is { StatusCode: 0 } native
+            && ResolveNativeMove(state.Board, native.BestUci) is { } nativeMove)
+        {
+            string nFrom = _modality.StateKey(state);
+            var nNext = _modality.Apply(state, nativeMove);
+            string nTo = _modality.StateKey(nNext);
+            var nStatus = _modality.Terminal(nNext) is { } tn ? Describe(tn) : "ongoing";
+            var nPv = new[] { nativeMove.ToUci() };
+            var nMotifs = ChessMotifs.DetectAtPly(state.Board, nativeMove, nNext.Board).ToList();
+            int nWhiteCp = state.Board.WhiteToMove ? native.ScoreCp : -native.ScoreCp;
+
+            var nAnalysis = new ChessLivePlyAnalysis(native.ScoreCp, native.DepthReached, (long)native.NodesSearched, nPv, nMotifs);
+            session.CommitMove(nNext, nativeMove.ToUci(), nAnalysis);
+
+            if (session.RecordToSubstrate)
+            {
+                await liveHost.RecordPlayPlyAsync(sessionId, session.PlyCount, nFrom, nTo, nativeMove.ToUci(), ct);
+                await liveHost.RecordPlayPlyAnalysisAsync(sessionId, session.PlyCount, nAnalysis, ct);
+            }
+            if (nStatus != "ongoing")
+                liveHost.FinishPlaySessionAfterReply(sessionId, ParseTerminalStatus(nStatus), adjudicated: false);
+
+            return new ChessBestMove(nativeMove.ToUci(), nNext.Board.ToFen(), native.ScoreCp, Rated: true,
+                nStatus != "ongoing", nStatus, ScoreCp: nWhiteCp, Depth: native.DepthReached,
+                Nodes: (long)native.NodesSearched, Pv: nPv, Motifs: nMotifs,
+                SyzygyWdl: native.SyzygyWdl, FromSyzygy: native.FromSyzygy,
+                WallUs: (long)native.WallUs, Source: native.Source, BestSan: native.BestSan);
+        }
+
         var search = BuildEngine(
             reads, continuations: ContinuationsFor(startFen, session.Moves, reads, movesIgnoreFen: false));
-        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: boundedDepth));
         ChessMove mv = result.BestMove!.Value;
 
         string fromKey = _modality.StateKey(state);
@@ -206,11 +244,15 @@ public sealed partial class ChessEngineService
         _ => GameOutcome.Draw,
     };
 
-    public async Task<ChessApplyResult> ApplyMoveAsync(
+    public Task<ChessApplyResult> ApplyMoveAsync(
         string fen, string uci, IReadOnlyList<string>? moves = null, CancellationToken ct = default)
+        => ApplyMoveAsync(fen, uci, moves, variant: null, ct);
+
+    public async Task<ChessApplyResult> ApplyMoveAsync(
+        string fen, string uci, IReadOnlyList<string>? moves, string? variant, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = StateFromHistory(fen, moves);
+        var state = StateFromHistory(fen, moves, ChessVariants.Resolve(variant));
         if (FindLegalUci(state, uci) is not { } mv)
             return new ChessApplyResult(fen, false, "illegal move", Legal: false);
         var next = _modality!.Apply(state, mv);
@@ -312,6 +354,7 @@ public sealed partial class ChessEngineService
             catch (OperationCanceledException) when (_trainCts?.IsCancellationRequested == true) { }
             catch (Exception error) { _log.LogError(error, "Chess training worker failed during shutdown."); }
         }
+        _ownedRuntime?.Dispose();
         _initGate.Dispose();
     }
 }

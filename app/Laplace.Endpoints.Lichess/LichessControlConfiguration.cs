@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Laplace.Chess.Service;
 using Laplace.Chess.Service.Uci;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 
 namespace Laplace.Endpoints.Lichess;
 

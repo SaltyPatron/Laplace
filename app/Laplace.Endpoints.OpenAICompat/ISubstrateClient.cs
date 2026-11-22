@@ -1,8 +1,18 @@
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
+
+internal sealed record CodeSymbolHit(
+    string FileIdHex,
+    string FilePath,
+    string Kind,
+    string Name,
+    int Ordinal,
+    string Snippet,
+    string Language);
 
 internal interface ISubstrateClient
 {
@@ -117,7 +127,21 @@ internal interface ISubstrateClient
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
         int timeoutSeconds, CancellationToken ct);
 
-    Task<IReadOnlyDictionary<Laplace.Engine.Core.Hash128, Laplace.Engine.Core.Hash128[]>?> ResolveSemanticPeersAsync(
-        IEnumerable<Laplace.Engine.Core.Hash128> wordIds, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyDictionary<Laplace.Engine.Core.Hash128, Laplace.Engine.Core.Hash128[]>?>(null);
+    Task<IReadOnlyDictionary<Hash128, Hash128[]>?> ResolveSemanticPeersAsync(
+        IEnumerable<Hash128> wordIds, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyDictionary<Hash128, Hash128[]>?>(null);
+
+    Task<IReadOnlyList<RoyaltyAttributionShare>> ResolveSourceAttributionAsync(
+        IReadOnlyList<string> claimIdsHex,
+        IReadOnlyList<string>? scopeWitnessIdsHex,
+        CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<RoyaltyAttributionShare>>(Array.Empty<RoyaltyAttributionShare>());
+
+    Task<IReadOnlyList<CodeSymbolHit>> SearchCodeSymbolsAsync(
+        string query,
+        string? path,
+        int limit,
+        int offset,
+        CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<CodeSymbolHit>>(Array.Empty<CodeSymbolHit>());
 }

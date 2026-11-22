@@ -14,6 +14,7 @@ export interface MoveListProps {
   history?: string[];
   viewPly?: number;
   onGoToPly?: (ply: number) => void;
+  onPlayMove?: (uci: string) => void;
   evalMode?: boolean;
   search?: SearchInfo | null;
   searchDepth?: number;
@@ -26,6 +27,7 @@ export function MoveList({
   history = [],
   viewPly = 0,
   onGoToPly,
+  onPlayMove,
   evalMode = false,
   search = null,
   searchDepth,
@@ -39,27 +41,10 @@ export function MoveList({
 
   return (
     <>
-      {search && (
-        <Panel title="Last search">
-          <ul className={shared.stats}>
-            <li>eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b> <Muted>pawns, white&rsquo;s view</Muted></li>
-            <li>
-              depth <b>{search.depth}</b>
-              {searchDepth !== undefined && search.depth < searchDepth && (
-                <Muted> (requested {searchDepth})</Muted>
-              )}
-              {' · '}nodes <b>{search.nodes.toLocaleString()}</b>
-            </li>
-            {search.pv.length > 0 && (
-              <li>line <span className={shared.pv}>{(fen ? sanLine(fen, search.pv) : search.pv).join(' ')}</span></li>
-            )}
-            <li><Muted>{search.substrate ? 'substrate-biased' : 'pure PeSTO'} alpha-beta</Muted></li>
-          </ul>
-        </Panel>
-      )}
-
-      {history.length > 0 && (
-        <Panel title={<>Move list <Muted>({history.length} plies)</Muted></>}>
+      <Panel title={<>Moves {history.length > 0 && <Muted>({history.length} plies)</Muted>}</>}>
+        {history.length === 0 ? (
+          <Muted>Drag or click a piece on the board, or click Bot move to start.</Muted>
+        ) : (
           <ol className={styles.moveHistory}>
             {Array.from({ length: Math.ceil(history.length / 2) }, (_, i) => (
               <li key={i}>
@@ -80,50 +65,65 @@ export function MoveList({
                     {history[i * 2 + 1]}
                   </UnstyledButton>
                 ) : (
-                  <span className={styles.ply} />
+                  <span className={styles.plyEmpty} />
                 )}
               </li>
             ))}
           </ol>
-          <Muted>Click a move, or use ◀ ▶ · ← → keys</Muted>
+        )}
+        {search && (
+          <div className={styles.searchStrip}>
+            <span>
+              eval <b>{search.scoreCp >= 0 ? '+' : ''}{(search.scoreCp / 100).toFixed(2)}</b>
+              {' · '}depth <b>{search.depth}</b>
+              {searchDepth !== undefined && search.depth < searchDepth && <Muted>/{searchDepth}</Muted>}
+              {' · '}<b>{search.nodes.toLocaleString()}</b> nodes
+            </span>
+            {search.pv.length > 0 && (
+              <span className={shared.pv}>{(fen ? sanLine(fen, search.pv) : search.pv).join(' ')}</span>
+            )}
+          </div>
+        )}
+      </Panel>
+
+      {topMoves.length > 0 && (
+        <Panel title={evalMode ? 'Eval mode — candidates' : 'Candidate moves'}>
+          {noEvidence ? (
+            <Muted role="status">
+              No recorded game reached this position yet; moves sit at the 1500 prior.
+            </Muted>
+          ) : (
+            <Muted>
+              Recorded standing delta per move.{searchPickUci ? <> <b className={shared.lgStar}>★</b> search pick.</> : null}
+            </Muted>
+          )}
+          <ul className={styles.moves}>
+            {topMoves.map((m) => (
+              <li key={m.uci} className={cn(!m.rated && styles.prior)}>
+                <UnstyledButton
+                  type="button"
+                  disabled={!onPlayMove}
+                  onClick={onPlayMove ? () => onPlayMove(m.uci) : undefined}
+                  className={cn(styles.moveRowBtn, onPlayMove && styles.moveRowInteractive)}
+                >
+                  <span className={styles.dot} style={{ background: `hsl(${goodHue(m.effMu)} 70% 50%)` }} />
+                  <span className={styles.uci}>{san(m.uci)}</span>
+                  <span className={styles.mu}>{formatSubstrateMoveDelta(m.effMu)}</span>
+                  {searchPickUci === m.uci && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={styles.pickstar}>★</span>
+                      </TooltipTrigger>
+                      <TooltipContent>search pick (depth {searchDepth ?? search?.depth ?? '?'})</TooltipContent>
+                    </Tooltip>
+                  )}
+                  {!m.rated && !noEvidence && <span className={styles.tag}>prior</span>}
+                </UnstyledButton>
+              </li>
+            ))}
+          </ul>
         </Panel>
       )}
-
-      <Panel title={evalMode ? 'Eval mode — legal move scores' : 'Substrate move scores'}>
-        {noEvidence ? (
-          <Muted role="status">
-            No recorded game has reached this position, so the substrate has no evidence for any move here.
-            Every move sits at the even starting standing.
-          </Muted>
-        ) : (
-          <Muted>
-            How recorded games rate each legal move from here (one move deep, not a search).
-            {searchPickUci ? (
-              <> <b className={shared.lgStar}>★</b> = the search&rsquo;s pick.</>
-            ) : (
-              <> Greener dot = stronger move.</>
-            )}
-          </Muted>
-        )}
-        <ul className={styles.moves}>
-          {topMoves.map((m) => (
-            <li key={m.uci} className={cn(!m.rated && styles.prior)}>
-              <span className={styles.dot} style={{ background: `hsl(${goodHue(m.effMu)} 70% 50%)` }} />
-              <span className={styles.uci}>{san(m.uci)}</span>
-              <span className={styles.mu}>{formatSubstrateMoveDelta(m.effMu)}</span>
-              {searchPickUci === m.uci && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className={styles.pickstar}>★</span>
-                  </TooltipTrigger>
-                  <TooltipContent>search pick (depth {searchDepth ?? search?.depth ?? '?'})</TooltipContent>
-                </Tooltip>
-              )}
-              {!m.rated && !noEvidence && <span className={styles.tag}>no games</span>}
-            </li>
-          ))}
-        </ul>
-      </Panel>
     </>
   );
 }

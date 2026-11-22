@@ -470,59 +470,93 @@ public static partial class CpuTopology
 
 
 
-    [DllImport("kernel32.dll")]
+    private static unsafe nint _kernel32;
+    private static unsafe nint _libc;
 
-    private static extern IntPtr GetCurrentThread();
+    private static unsafe nint Kernel32()
+    {
+        if (!OperatingSystem.IsWindows()) return IntPtr.Zero;
+        if (_kernel32 == IntPtr.Zero) NativeLibrary.TryLoad("kernel32.dll", out _kernel32);
+        return _kernel32;
+    }
 
+    private static unsafe nint Libc()
+    {
+        if (!OperatingSystem.IsLinux()) return IntPtr.Zero;
+        if (_libc == IntPtr.Zero)
+        {
+            if (!NativeLibrary.TryLoad("libc.so.6", out _libc))
+                NativeLibrary.TryLoad("libc", out _libc);
+        }
+        return _libc;
+    }
 
+    private static unsafe IntPtr GetCurrentThread()
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "GetCurrentThread", out var fn)) return IntPtr.Zero;
+        return ((delegate* unmanaged[Stdcall]<IntPtr>)fn)();
+    }
 
-    [DllImport("kernel32.dll")]
+    private static unsafe IntPtr GetCurrentProcess()
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "GetCurrentProcess", out var fn)) return IntPtr.Zero;
+        return ((delegate* unmanaged[Stdcall]<IntPtr>)fn)();
+    }
 
-    private static extern IntPtr GetCurrentProcess();
+    private static unsafe IntPtr SetThreadAffinityMask(IntPtr hThread, UIntPtr dwThreadAffinityMask)
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "SetThreadAffinityMask", out var fn)) return IntPtr.Zero;
+        return ((delegate* unmanaged[Stdcall]<IntPtr, UIntPtr, IntPtr>)fn)(hThread, dwThreadAffinityMask);
+    }
 
+    private static unsafe bool SetThreadGroupAffinity(
+        IntPtr hThread, ref GroupAffinity groupAffinity, out GroupAffinity previousGroupAffinity)
+    {
+        previousGroupAffinity = default;
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "SetThreadGroupAffinity", out var fn)) return false;
+        fixed (GroupAffinity* pNew = &groupAffinity)
+        fixed (GroupAffinity* pPrev = &previousGroupAffinity)
+            return ((delegate* unmanaged[Stdcall]<IntPtr, GroupAffinity*, GroupAffinity*, int>)fn)(hThread, pNew, pPrev) != 0;
+    }
 
+    private static unsafe bool SetThreadSelectedCpuSets(
+        IntPtr thread, uint[] cpuSetIds, uint cpuSetIdCount)
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "SetThreadSelectedCpuSets", out var fn)) return false;
+        fixed (uint* pIds = cpuSetIds)
+            return ((delegate* unmanaged[Stdcall]<IntPtr, uint*, uint, int>)fn)(thread, pIds, cpuSetIdCount) != 0;
+    }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    private static unsafe bool GetSystemCpuSetInformation(
+        IntPtr information, uint bufferLength, ref uint returnedLength, IntPtr process, uint flags)
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "GetSystemCpuSetInformation", out var fn)) return false;
+        fixed (uint* pLen = &returnedLength)
+            return ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint*, IntPtr, uint, int>)fn)(information, bufferLength, pLen, process, flags) != 0;
+    }
 
-    private static extern IntPtr SetThreadAffinityMask(IntPtr hThread, UIntPtr dwThreadAffinityMask);
+    private static unsafe bool GetLogicalProcessorInformationEx(
+        int relationshipType, IntPtr buffer, ref uint returnedLength)
+    {
+        var h = Kernel32();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "GetLogicalProcessorInformationEx", out var fn)) return false;
+        fixed (uint* pLen = &returnedLength)
+            return ((delegate* unmanaged[Stdcall]<int, IntPtr, uint*, int>)fn)(relationshipType, buffer, pLen) != 0;
+    }
 
-
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-
-    private static extern bool SetThreadGroupAffinity(
-
-        IntPtr hThread, ref GroupAffinity groupAffinity, out GroupAffinity previousGroupAffinity);
-
-
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-
-    private static extern bool SetThreadSelectedCpuSets(
-
-        IntPtr Thread, uint[] CpuSetIds, uint CpuSetIdCount);
-
-
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-
-    private static extern bool GetSystemCpuSetInformation(
-
-        IntPtr Information, uint BufferLength, ref uint ReturnedLength, IntPtr Process, uint Flags);
-
-
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-
-    private static extern bool GetLogicalProcessorInformationEx(
-
-        int relationshipType, IntPtr buffer, ref uint returnedLength);
-
-
-
-    [DllImport("libc", SetLastError = true)]
-
-    private static extern int sched_setaffinity(int pid, IntPtr cpusetsize, byte[] mask);
+    private static unsafe int sched_setaffinity(int pid, IntPtr cpusetsize, byte[] mask)
+    {
+        var h = Libc();
+        if (h == IntPtr.Zero || !NativeLibrary.TryGetExport(h, "sched_setaffinity", out var fn)) return -1;
+        fixed (byte* pMask = mask)
+            return ((delegate* unmanaged[Cdecl]<int, IntPtr, byte*, int>)fn)(pid, cpusetsize, pMask);
+    }
 
 
 

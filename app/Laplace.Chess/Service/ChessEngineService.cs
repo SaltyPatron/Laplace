@@ -1,9 +1,8 @@
 using global::Npgsql;
+using Laplace.Data;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -19,10 +18,13 @@ public sealed record ChessLegalResponse(
 public sealed record ChessBestMove(
     string? Uci, string Fen, double EffMu, bool Rated, bool Terminal, string Status,
     int ScoreCp = 0, int Depth = 0, long Nodes = 0,
-    IReadOnlyList<string>? Pv = null, IReadOnlyList<string>? Motifs = null);
+    IReadOnlyList<string>? Pv = null, IReadOnlyList<string>? Motifs = null,
+    int SyzygyWdl = 0, bool FromSyzygy = false, long WallUs = 0,
+    string? Source = null, string? BestSan = null);
 
 public sealed record ChessPositionEval(
-    int WhiteScoreCp, int Depth, long Nodes, bool Substrate, bool Terminal, string Status);
+    int WhiteScoreCp, int Depth, long Nodes, bool Substrate, bool Terminal, string Status,
+    int SyzygyWdl = 0, bool FromSyzygy = false, long WallUs = 0, string? Source = null);
 
 public sealed record ChessApplyResult(
     string Fen, bool Terminal, string Status, bool Legal, IReadOnlyList<string>? Motifs = null);
@@ -44,7 +46,7 @@ public sealed record ChessPlayMoveResult(
     string Fen, bool Terminal, string Status, bool Legal, int Ply,
     IReadOnlyList<string>? Motifs = null);
 
-public sealed partial class ChessEngineService : IAsyncDisposable
+public sealed partial class ChessEngineService : IChessEngineService
 {
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
     private readonly NpgsqlDataSource? _readOnlyDataSource;
@@ -52,6 +54,9 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     private readonly ILogger _log;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly ILaplaceEngineRuntime? _injectedRuntime;
+    private LaplaceEngineRuntime? _ownedRuntime;
+    private bool _nativeRuntimeAttempted;
     private NpgsqlDataSource? _ds;
     private ChessModality? _modality;
     private ModalityEngine<ChessState, ChessMove>? _engine;
@@ -66,7 +71,7 @@ public sealed partial class ChessEngineService : IAsyncDisposable
 
     public ChessEngineService(
         double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
-        : this(witnessWeight, liveHost.DataSource, _ => Task.FromResult(liveHost), log)
+        : this(witnessWeight, liveHost.DataSource, _ => Task.FromResult(liveHost), log, null)
     {
         _liveHost = liveHost;
     }
@@ -74,9 +79,19 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     public ChessEngineService(
         double witnessWeight,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost, ILogger? log = null)
+        : this(witnessWeight, getLiveHost, log, null)
+    {
+    }
+
+    internal ChessEngineService(
+        double witnessWeight,
+        Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
+        ILogger? log,
+        ILaplaceEngineRuntime? engineRuntime)
     {
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
+        _injectedRuntime = engineRuntime;
         _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessEngineService).FullName!);
     }
 
@@ -88,11 +103,13 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         double witnessWeight,
         NpgsqlDataSource readOnlyDataSource,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
-        ILogger? log = null)
+        ILogger? log = null,
+        ILaplaceEngineRuntime? engineRuntime = null)
     {
         _readOnlyDataSource = readOnlyDataSource ?? throw new ArgumentNullException(nameof(readOnlyDataSource));
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
+        _injectedRuntime = engineRuntime;
         _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessEngineService).FullName!);
     }
 
@@ -137,10 +154,13 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         finally { _initGate.Release(); }
     }
 
-    public async Task<ChessLegalResponse> LegalAsync(string fen, CancellationToken ct = default)
+    public Task<ChessLegalResponse> LegalAsync(string fen, CancellationToken ct = default)
+        => LegalAsync(fen, variant: null, ct);
+
+    public async Task<ChessLegalResponse> LegalAsync(string fen, string? variant, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
+        var state = _modality!.FromFen(fen, ChessVariants.Resolve(variant));
         var terminal = _modality!.Terminal(state);
         var status = terminal is { } t ? Describe(t) : "ongoing";
         var inCheck = MoveGen.InCheck(state.Board, state.Board.WhiteToMove);
@@ -161,11 +181,15 @@ public sealed partial class ChessEngineService : IAsyncDisposable
     /// The recorded games' moves from a position: each legal move's [position, move, position] claim and its
     /// Native standing, the most played first.
     /// </summary>
-    public async Task<ChessExploreResponse> ExploreAsync(
+    public Task<ChessExploreResponse> ExploreAsync(
         string fen, int limit = 12, CancellationToken ct = default)
+        => ExploreAsync(fen, limit, variant: null, ct);
+
+    public async Task<ChessExploreResponse> ExploreAsync(
+        string fen, int limit, string? variant, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
+        var state = _modality!.FromFen(fen, ChessVariants.Resolve(variant));
         var legal = _modality.LegalActions(state);
         var claims = new Hash128[legal.Count];
         for (int i = 0; i < legal.Count; i++)
@@ -216,36 +240,75 @@ public sealed partial class ChessEngineService : IAsyncDisposable
 
     private void ReturnEngine(Search search) => _searchPool.Add(search);
 
-    public async Task<ChessPositionEval> EvalPositionAsync(
+    public Task<ChessPositionEval> EvalPositionAsync(
         string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
+        => EvalPositionAsync(fen, depth, substrate, variant: null, ct);
+
+    public async Task<ChessPositionEval> EvalPositionAsync(
+        string fen, int depth, bool substrate, string? variant, CancellationToken ct = default)
     {
-        await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
-        if (_modality!.Terminal(state) is { } term)
+        if (substrate)
+            await EngineAsync(ct);
+        var rules = ChessVariants.Resolve(variant);
+        var modality = _modality ??= new ChessModality();
+        var state = modality.FromFen(fen, rules);
+        if (modality.Terminal(state) is { } term)
         {
             int whiteCp = term.IsDraw ? 0 : term.Winner == 0 ? 30_000 : -30_000;
-            return new ChessPositionEval(whiteCp, 0, 0, substrate, true, Describe(term));
+            return new ChessPositionEval(whiteCp, 0, 0, substrate, true, Describe(term), Source: "terminal");
+        }
+
+        int boundedDepth = Math.Clamp(depth, 1, 12);
+        if (substrate && TryNativeChessPlay(state.Board, rules, boundedDepth) is { StatusCode: 0 } native)
+        {
+            int nativeWhiteCp = state.Board.WhiteToMove ? native.ScoreCp : -native.ScoreCp;
+            return new ChessPositionEval(
+                nativeWhiteCp, native.DepthReached, (long)native.NodesSearched, Substrate: true, Terminal: false, "ongoing",
+                SyzygyWdl: native.SyzygyWdl, FromSyzygy: native.FromSyzygy, WallUs: (long)native.WallUs, Source: native.Source);
         }
 
         var search = BuildEngine(substrate, continuations: ContinuationsFor(fen, moves: null, substrate));
-        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: boundedDepth));
         ReturnEngine(search);
         int score = state.Board.WhiteToMove ? result.Score : -result.Score;
-        return new ChessPositionEval(score, result.Depth, result.Nodes, substrate, false, "ongoing");
+        return new ChessPositionEval(score, result.Depth, result.Nodes, substrate, false, "ongoing", Source: "managed");
     }
 
-    public async Task<ChessBestMove> BestMoveSearchAsync(
+    public Task<ChessBestMove> BestMoveSearchAsync(
         string fen, int depth = 4, bool substrate = true, IReadOnlyList<string>? moves = null,
+        CancellationToken ct = default)
+        => BestMoveSearchAsync(fen, depth, substrate, moves, variant: null, ct);
+
+    public async Task<ChessBestMove> BestMoveSearchAsync(
+        string fen, int depth, bool substrate, IReadOnlyList<string>? moves, string? variant,
         CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = StateFromHistory(fen, moves);
+        var rules = ChessVariants.Resolve(variant);
+        var state = StateFromHistory(fen, moves, rules);
         if (_modality!.Terminal(state) is { } term)
-            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
+            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term), Source: "terminal");
 
+        int boundedDepth = Math.Clamp(depth, 1, 12);
         bool reads = substrate && !HasImmediateMate(_modality, state);
+        if (reads && TryNativeChessPlay(state.Board, rules, boundedDepth) is { StatusCode: 0 } native
+            && ResolveNativeMove(state.Board, native.BestUci) is { } nativeMove)
+        {
+            var nextNative = _modality.Apply(state, nativeMove);
+            var nativeStatus = _modality.Terminal(nextNative) is { } tNative ? Describe(tNative) : "ongoing";
+            var nativeMotifs = ChessMotifs.DetectAtPly(state.Board, nativeMove, nextNative.Board).ToList();
+            int nativeWhiteCp = state.Board.WhiteToMove ? native.ScoreCp : -native.ScoreCp;
+            return new ChessBestMove(
+                nativeMove.ToUci(), nextNative.Board.ToFen(), native.ScoreCp, Rated: true,
+                nativeStatus != "ongoing", nativeStatus, ScoreCp: nativeWhiteCp,
+                Depth: native.DepthReached, Nodes: (long)native.NodesSearched,
+                Pv: [nativeMove.ToUci()], Motifs: nativeMotifs,
+                SyzygyWdl: native.SyzygyWdl, FromSyzygy: native.FromSyzygy,
+                WallUs: (long)native.WallUs, Source: native.Source, BestSan: native.BestSan);
+        }
+
         var search = BuildEngine(reads, continuations: ContinuationsFor(fen, moves, reads, movesIgnoreFen: true));
-        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: boundedDepth));
         ChessMove mv = result.BestMove!.Value;
 
         var next = _modality.Apply(state, mv);
@@ -257,7 +320,74 @@ public sealed partial class ChessEngineService : IAsyncDisposable
 
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, reads,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
-            Pv: pv, Motifs: motifs);
+            Pv: pv, Motifs: motifs, Source: "managed", BestSan: San.ToSan(state.Board, mv));
+    }
+
+    internal EngineChessResponse? TryNativeChessPlay(
+        Board board, ChessVariantRules rules, int maxDepth,
+        int quiesceDepth = 4, ulong maxNodes = 200_000, ulong maxWallUs = 250_000)
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_NATIVE"), "0", StringComparison.Ordinal))
+            return null;
+
+        var runtime = ResolveNativeRuntime();
+        if (runtime is null) return null;
+
+        try
+        {
+            string? variant = rules.IsStandard ? null : rules.Law;
+            return runtime.ChessPlay(new EngineChessRequest(
+                Fen: board.ToFen(),
+                Variant: variant,
+                MaxDepth: maxDepth,
+                QuiesceDepth: quiesceDepth,
+                MaxNodes: maxNodes,
+                MaxWallUs: maxWallUs));
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or ArgumentException)
+        {
+            _log.LogDebug(ex, "Native lp_engine_chess_play unavailable; falling back to managed Search.");
+            return null;
+        }
+    }
+
+    private ILaplaceEngineRuntime? ResolveNativeRuntime()
+    {
+        if (_injectedRuntime is not null) return _injectedRuntime;
+        if (_ownedRuntime is not null) return _ownedRuntime;
+        if (_nativeRuntimeAttempted || _ds is null) return null;
+        _nativeRuntimeAttempted = true;
+        try
+        {
+            var conn = _ds.ConnectionString;
+            if (string.IsNullOrWhiteSpace(conn)) return null;
+            _ownedRuntime = new LaplaceEngineRuntime(ChessGameRecorder.ToLibpqConnInfo(conn));
+            return _ownedRuntime;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or TypeInitializationException)
+        {
+            _log.LogDebug(ex, "LaplaceEngineRuntime initialization skipped; chess will use managed Search.");
+            return null;
+        }
+    }
+
+    internal static ChessMove? ResolveNativeMove(Board board, string? uci)
+    {
+        if (string.IsNullOrWhiteSpace(uci)) return null;
+        string trimmed = uci.Trim();
+        foreach (var m in MoveGen.Legal(board))
+        {
+            if (string.Equals(m.ToUci(), trimmed, StringComparison.OrdinalIgnoreCase))
+                return m;
+            if (m.IsCastle && trimmed.Length == 4)
+            {
+                int rookSq = Board.Sq(board.CastleRookFile(board.WhiteToMove, m.IsKingSideCastle), Board.RankOf(m.From));
+                string c960Uci = Board.SquareToAlgebraic(m.From) + Board.SquareToAlgebraic(rookSq);
+                if (string.Equals(c960Uci, trimmed, StringComparison.OrdinalIgnoreCase))
+                    return m;
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -283,12 +413,15 @@ public sealed partial class ChessEngineService : IAsyncDisposable
         return SearchContinuationSeed.ForUci(_modality!, origin, moves);
     }
 
-    private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves)
+    private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves, ChessVariantRules? rules = null)
     {
+        var resolved = rules ?? ChessVariantRules.Standard;
         if (moves is not { Count: > 0 })
-            return _modality!.FromFen(fen);
+            return _modality!.FromFen(fen, resolved);
 
-        var state = _modality!.Initial();
+        var state = string.IsNullOrWhiteSpace(fen) || fen == "startpos"
+            ? _modality!.Initial(resolved)
+            : _modality!.FromFen(fen, resolved);
         foreach (var uci in moves)
         {
             if (FindLegalUci(state, uci) is not { } mv) break;

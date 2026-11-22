@@ -15,10 +15,13 @@ export interface Preview {
   missing: { name: string; hint: string; looked: string | null; source: string }[];
 }
 
+export type ChessVariant = 'standard' | 'chess960';
+
 export interface Setup {
   laplaceProfile: string;
   stockfishProfile: string;
   conductor: 'fastchess' | 'cutechess';
+  variant: ChessVariant;
   clock: 'seconds' | 'depth';
   st: string;
   depth: string;
@@ -37,6 +40,7 @@ export const DEFAULT_SETUP: Setup = {
   laplaceProfile: '',
   stockfishProfile: '',
   conductor: 'fastchess',
+  variant: 'standard',
   clock: 'seconds',
   st: '1',
   depth: '8',

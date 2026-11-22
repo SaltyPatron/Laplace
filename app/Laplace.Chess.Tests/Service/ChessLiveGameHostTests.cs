@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -42,10 +41,9 @@ internal sealed class RecordingEngine : IDisposable
     /// <summary>A host that records through this engine. Its datasource is absent: a search may not read.</summary>
     public ChessLiveGameHost Host() => new(null!, Recorder());
 
-    private Task<int> Execute(NativeRecipeRequest request, Stream output, Stream error, CancellationToken ct)
+    private Task<int> Execute(ChessNativeWitnessRequest request, Stream output, Stream error, CancellationToken ct)
     {
-        Assert.Null(request.Source);
-        lock (Reads) Reads.Add((request.Witness?.Name, request.Paths[0], File.ReadAllText(request.Paths[0])));
+        lock (Reads) Reads.Add((request.Witness, request.Path, File.ReadAllText(request.Path)));
         if (ExitCode != 0) error.Write("fixture: the Engine refused the file"u8);
         return Task.FromResult(ExitCode);
     }

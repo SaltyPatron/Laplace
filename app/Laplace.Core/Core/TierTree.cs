@@ -1,55 +1,31 @@
-using System.Runtime.InteropServices;
-
 namespace Laplace.Engine.Core;
 
-public sealed class TierTree : SafeHandle
+public sealed unsafe class TierTree : IDisposable
 {
     public const uint Invalid = uint.MaxValue;
 
-    private TierTree(IntPtr handle, bool ownsHandle) : base(IntPtr.Zero, ownsHandle)
+    private readonly List<TierNodeView> _nodes;
+    private bool _disposed;
+
+    private TierTree(int capacityHint)
     {
-        SetHandle(handle);
+        _nodes = new List<TierNodeView>(Math.Max(0, capacityHint));
     }
 
-    public override bool IsInvalid => handle == IntPtr.Zero;
-
-    protected override bool ReleaseHandle()
-    {
-        lock (LaplaceCoreGate.Native)
-            NativeInterop.TierTreeFree(handle);
-        return true;
-    }
-
-    public static TierTree New(int capacityHint)
+    public static TierTree New(int capacityHint = 0)
     {
         if (capacityHint < 0) throw new ArgumentOutOfRangeException(nameof(capacityHint));
-        lock (LaplaceCoreGate.Native)
-        {
-            IntPtr handle = NativeInterop.TierTreeNew((nuint)capacityHint);
-            if (handle == IntPtr.Zero) throw new OutOfMemoryException("tier_tree_new returned NULL");
-            return new TierTree(handle, ownsHandle: true);
-        }
+        return new TierTree(capacityHint);
     }
 
-    internal static TierTree FromExistingHandle(IntPtr handle)
-    {
-        if (handle == IntPtr.Zero) throw new ArgumentException("handle is null", nameof(handle));
-        return new TierTree(handle, ownsHandle: true);
-    }
-
-    public static TierTree FromBorrowedHandle(IntPtr handle)
-    {
-        if (handle == IntPtr.Zero) throw new ArgumentException("handle is null", nameof(handle));
-        return new TierTree(handle, ownsHandle: false);
-    }
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     public int NodeCount
     {
         get
         {
             ThrowIfDisposed();
-            lock (LaplaceCoreGate.Native)
-                return checked((int)NativeInterop.TierTreeNodeCount(handle));
+            return _nodes.Count;
         }
     }
 
@@ -58,8 +34,7 @@ public sealed class TierTree : SafeHandle
         get
         {
             ThrowIfDisposed();
-            lock (LaplaceCoreGate.Native)
-                return checked((int)NativeInterop.TierTreeCapacity(handle));
+            return _nodes.Capacity;
         }
     }
 
@@ -68,67 +43,80 @@ public sealed class TierTree : SafeHandle
         get
         {
             ThrowIfDisposed();
-            lock (LaplaceCoreGate.Native)
-                return checked((long)NativeInterop.TierTreeResidentBytes(handle));
+            return (long)_nodes.Capacity * sizeof(TierNodeView);
         }
     }
 
     public uint AddLeaf(byte tier, uint atom, uint textRangeOff, uint textRangeLen)
     {
         ThrowIfDisposed();
-        lock (LaplaceCoreGate.Native)
+        var node = new TierNodeView
         {
-            uint idx = NativeInterop.TierTreeAddLeaf(handle, tier, atom, textRangeOff, textRangeLen);
-            if (idx == Invalid) throw new InvalidOperationException("tier_tree_add_leaf failed (likely OOM)");
-            return idx;
-        }
+            Tier = tier,
+            Role = 0,
+            ParentIdx = Invalid,
+            FirstChildIdx = Invalid,
+            ChildCount = 0,
+            TextRangeOff = textRangeOff,
+            TextRangeLen = textRangeLen,
+            Atom = atom,
+        };
+        _nodes.Add(node);
+        return (uint)(_nodes.Count - 1);
     }
 
     public uint AddNode(byte tier, uint firstChildIdx, uint childCount,
                         uint textRangeOff, uint textRangeLen)
     {
         ThrowIfDisposed();
-        lock (LaplaceCoreGate.Native)
+        if (childCount > 0 && (ulong)firstChildIdx + childCount > (ulong)_nodes.Count)
+            throw new InvalidOperationException($"Child span [{firstChildIdx}..{(ulong)firstChildIdx + childCount}) exceeds node count {_nodes.Count}.");
+        var node = new TierNodeView
         {
-            uint idx = NativeInterop.TierTreeAddNode(handle, tier, firstChildIdx, childCount,
-                                                      textRangeOff, textRangeLen);
-            if (idx == Invalid) throw new InvalidOperationException(
-                "tier_tree_add_node rejected (invalid child range or OOM)");
-            return idx;
-        }
+            Tier = tier,
+            Role = 0,
+            ParentIdx = Invalid,
+            FirstChildIdx = firstChildIdx,
+            ChildCount = childCount,
+            TextRangeOff = textRangeOff,
+            TextRangeLen = textRangeLen,
+            Atom = 0,
+        };
+        _nodes.Add(node);
+        return (uint)(_nodes.Count - 1);
+    }
+
+    internal void AppendPrebuilt(in TierNodeView node)
+    {
+        ThrowIfDisposed();
+        _nodes.Add(node);
     }
 
     public void FinalizeParents()
     {
         ThrowIfDisposed();
-        lock (LaplaceCoreGate.Native)
+        for (int i = 0; i < _nodes.Count; i++)
         {
-            if (NativeInterop.TierTreeFinalize(handle) != 0)
-                throw new InvalidOperationException("tier_tree_finalize failed");
+            var n = _nodes[i];
+            if (n.ChildCount == 0 || n.FirstChildIdx == Invalid) continue;
+            for (uint c = 0; c < n.ChildCount; c++)
+            {
+                int ci = checked((int)(n.FirstChildIdx + c));
+                var child = _nodes[ci];
+                child.ParentIdx = (uint)i;
+                _nodes[ci] = child;
+            }
         }
     }
 
     public TierNodeView GetNode(uint idx)
     {
         ThrowIfDisposed();
-        lock (LaplaceCoreGate.Native)
-        {
-            TierNodeView view = default;
-            unsafe
-            {
-                if (NativeInterop.TierTreeGetNode(handle, idx, &view) != 0)
-                    throw new ArgumentOutOfRangeException(nameof(idx),
-                        $"tier_tree_get_node({idx}) failed (count={NodeCount})");
-            }
-            return view;
-        }
+        if (idx >= (uint)_nodes.Count)
+            throw new ArgumentOutOfRangeException(nameof(idx), $"Index {idx} out of range (count={_nodes.Count}).");
+        return _nodes[(int)idx];
     }
 
-    // Tier is a FLOOR: a single-child, span-identical wrapper IS its child (same
-    // bytes, same id). This collapses through the grapheme tier too -- a
-    // single-codepoint UAX29 cluster is in-memory scaffold only; the tier-0
-    // codepoint leaf is the stored identity. Mirrors collapse_idx() in
-    // engine/core/src/content_witness_batch.c; the two rules are one identity law.
     public uint CollapseIndex(uint idx)
     {
         ThrowIfDisposed();
@@ -147,7 +135,7 @@ public sealed class TierTree : SafeHandle
     public uint NaturalUnitIndex()
     {
         ThrowIfDisposed();
-        int nc = NodeCount;
+        int nc = _nodes.Count;
         if (nc <= 0) return 0;
         return CollapseIndex((uint)(nc - 1));
     }
@@ -162,78 +150,45 @@ public sealed class TierTree : SafeHandle
     public void SetId(uint idx, Hash128 id)
     {
         ThrowIfDisposed();
-        unsafe
-        {
-            lock (LaplaceCoreGate.Native)
-            {
-                if (NativeInterop.TierTreeSetId(handle, idx, &id) != 0)
-                    throw new ArgumentOutOfRangeException(nameof(idx));
-            }
-        }
+        if (idx >= (uint)_nodes.Count) throw new ArgumentOutOfRangeException(nameof(idx));
+        var n = _nodes[(int)idx];
+        n.Id = id;
+        _nodes[(int)idx] = n;
     }
 
     public void SetCoord(uint idx, ReadOnlySpan<double> coord)
     {
         ThrowIfDisposed();
+        if (idx >= (uint)_nodes.Count) throw new ArgumentOutOfRangeException(nameof(idx));
         if (coord.Length < 4) throw new ArgumentException("coord must have at least 4 elements", nameof(coord));
-        unsafe
-        {
-            fixed (double* p = coord)
-            {
-                lock (LaplaceCoreGate.Native)
-                {
-                    if (NativeInterop.TierTreeSetCoord(handle, idx, p) != 0)
-                        throw new ArgumentOutOfRangeException(nameof(idx));
-                }
-            }
-        }
+        var n = _nodes[(int)idx];
+        n.Coord[0] = coord[0];
+        n.Coord[1] = coord[1];
+        n.Coord[2] = coord[2];
+        n.Coord[3] = coord[3];
+        _nodes[(int)idx] = n;
     }
 
     public void SetHilbert(uint idx, Hilbert128 hilbert)
     {
         ThrowIfDisposed();
-        unsafe
-        {
-            lock (LaplaceCoreGate.Native)
-            {
-                if (NativeInterop.TierTreeSetHilbert(handle, idx, &hilbert) != 0)
-                    throw new ArgumentOutOfRangeException(nameof(idx));
-            }
-        }
-    }
-
-    public IntPtr IdArrayPointer
-    {
-        get
-        {
-            ThrowIfDisposed();
-            lock (LaplaceCoreGate.Native)
-                return NativeInterop.TierTreeIdArray(handle);
-        }
+        if (idx >= (uint)_nodes.Count) throw new ArgumentOutOfRangeException(nameof(idx));
+        var n = _nodes[(int)idx];
+        n.Hilbert = hilbert;
+        _nodes[(int)idx] = n;
     }
 
     public Hash128[] NodeIds()
     {
         ThrowIfDisposed();
-        lock (LaplaceCoreGate.Native)
-        {
-            int n = NodeCount;
-            var ids = new Hash128[n];
-            if (n == 0) return ids;
-            IntPtr p = NativeInterop.TierTreeIdArray(handle);
-            if (p == IntPtr.Zero) throw new InvalidOperationException("tier_tree_id_array returned NULL");
-            unsafe
-            {
-                new ReadOnlySpan<Hash128>((void*)p, n).CopyTo(ids);
-            }
-            return ids;
-        }
+        var ids = new Hash128[_nodes.Count];
+        for (int i = 0; i < _nodes.Count; i++)
+            ids[i] = _nodes[i].Id;
+        return ids;
     }
 
-    public IntPtr DangerousNativeHandle => handle;
-
-    private void ThrowIfDisposed()
+    public void Dispose()
     {
-        if (IsClosed || IsInvalid) throw new ObjectDisposedException(nameof(TierTree));
+        _disposed = true;
     }
 }

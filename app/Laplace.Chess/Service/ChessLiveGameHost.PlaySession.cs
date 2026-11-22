@@ -10,22 +10,29 @@ public sealed partial class ChessLiveGameHost
 {
     public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session",
         string tenantId = "public", string? userId = null,
-        string? whitePlayerName = null, string? blackPlayerName = null, OperationPrincipal? requester = null)
+        string? whitePlayerName = null, string? blackPlayerName = null, OperationPrincipal? requester = null,
+        string? variant = null, string? startFen = null)
     {
-        if (!Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(tenantId))
+        if (!ChessInput.IsValidIdentifier(tenantId))
             throw new ArgumentException($"tenant '{tenantId}' is not a valid identifier", nameof(tenantId));
-        if (userId is not null && !Laplace.Decomposers.Abstractions.ConversationContent.IsValidIdentifier(userId))
+        if (userId is not null && !ChessInput.IsValidIdentifier(userId))
             throw new ArgumentException($"user '{userId}' is not a valid identifier", nameof(userId));
 
         var id = Guid.NewGuid();
         if (requester is not null && (requester.TenantId != tenantId || requester.Subject != userId))
             throw new ArgumentException("Play ownership must match the authenticated requester.");
+        var rules = ChessVariants.Resolve(variant);
+        string resolvedStartFen = !string.IsNullOrWhiteSpace(startFen) ? startFen!
+            : rules.IsStandard ? ChessModality.StartFen : NativeChessRules.LawStart(rules.Law) ?? ChessModality.StartFen;
         var eventId = SessionHandle(id);
         var metadata = new ChessLiveGameMetadata(
             Event: "Laplace Play",
             Site: "Laplace",
             Date: DateTimeOffset.UtcNow.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture),
-            StartFen: ChessModality.StartFen);
+            StartFen: resolvedStartFen)
+        {
+            Variant = variant,
+        };
         var session = new PlaySession(
             eventId, learnContext, recordToSubstrate, tenantId, userId,
             whitePlayerName, blackPlayerName, requester)
@@ -33,7 +40,7 @@ public sealed partial class ChessLiveGameHost
             Metadata = metadata,
             Operation = requester is null ? null : ChessPlayOperation.Start(id, requester, recordToSubstrate) with
             {
-                Context = new(learnContext, null, whitePlayerName, null, blackPlayerName, metadata),
+                Context = new(learnContext, null, whitePlayerName, null, blackPlayerName, metadata) { Variant = variant },
             },
         };
         session.SaveOperation();
@@ -63,7 +70,8 @@ public sealed partial class ChessLiveGameHost
     {
         var game = new LiveGameSession(session.WhitePlayerName, session.BlackPlayerName, session.Metadata!);
         var modality = new ChessModality();
-        var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen);
+        var rules = ChessVariants.Resolve(session.Operation?.Context?.Variant ?? session.Metadata?.Variant);
+        var state = modality.FromFen(session.Metadata!.StartFen ?? ChessModality.StartFen, rules);
         foreach (var uci in session.Moves)
         {
             var move = MoveGen.Legal(state.Board).First(m => m.ToUci() == uci);
@@ -195,9 +203,9 @@ public sealed partial class ChessLiveGameHost
         for (int i = 0; i < edges.Count; i++)
         {
             if (edges[i].MoverOutcome != PlyOutcome.Win) continue;
-            if (!PositionContent.TryFenFromSurface(edges[i].SubjectKey, out var fen))
+            if (!PositionContent.TryBoardFromSurface(edges[i].SubjectKey, out var board))
                 throw new InvalidOperationException("live outcome has no typed pre-move board");
-            return GameOutcome.WonBy(Board.FromFen(fen).WhiteToMove ? 0 : 1);
+            return GameOutcome.WonBy(board.WhiteToMove ? 0 : 1);
         }
         return GameOutcome.Draw;
     }
@@ -231,13 +239,20 @@ public sealed partial class ChessLiveGameHost
         tags.Add(new("Termination", termination));
         if (Clean(meta.ExternalGameId) is { Length: > 0 } external) tags.Add(new("GameId", external));
         string startFen = session.Plies[0].FromFen;
+        var startBoard = session.Plies[0].Before;
+        if (!startBoard.Rules.IsStandard && !string.IsNullOrEmpty(startBoard.Rules.Law))
+            tags.Add(new("Variant", startBoard.Rules.Law));
+        else if (Clean(meta.Variant) is { Length: > 0 } variantTag
+                 && !string.Equals(variantTag, "standard", StringComparison.OrdinalIgnoreCase)
+                 && !string.Equals(variantTag, "fromPosition", StringComparison.OrdinalIgnoreCase))
+            tags.Add(new("Variant", variantTag));
         if (NonStandardStartFen(startFen) is { } setup)
         {
             tags.Add(new("SetUp", "1"));
             tags.Add(new("FEN", setup));
         }
         return ChessPgnWriter.Game(tags, session.Plies.Select(static p => p.San).ToArray(), result.ResultToken,
-            startFen, CompleteClockTokens(session));
+            startFen, CompleteClockTokens(session), startBoard.Rules);
     }
 
     /// <summary>The Engine's id of the game's line [P0, M0, P1, ...], or zero where its rules have none.</summary>
@@ -253,9 +268,8 @@ public sealed partial class ChessLiveGameHost
     private static (Board Board, Piece Moving, ChessMove Move) ResolveMove(
         string fromKey, string toKey, string token)
     {
-        if (!PositionContent.TryFenFromSurface(fromKey, out var fen))
+        if (!PositionContent.TryBoardFromSurface(fromKey, out var board))
             throw new InvalidOperationException("live move has no typed pre-move board");
-        var board = Board.FromFen(fen);
         var legal = MoveGen.Legal(board);
         ChessMove? move = null;
         if (token != "?")
@@ -266,9 +280,9 @@ public sealed partial class ChessLiveGameHost
                 move = San.Resolve(board, legal, token);
         }
 
-        if (move is null && PositionContent.TryFenFromSurface(toKey, out var toFen))
+        if (move is null && PositionContent.TryBoardFromSurface(toKey, out var toBoard))
         {
-            string target = Board.FromFen(toFen).ToFen();
+            string target = toBoard.ToFen();
             ChessMove? unique = null;
             foreach (var candidate in legal)
             {
@@ -356,6 +370,7 @@ public sealed partial class ChessLiveGameHost
                 ExternalGameId = Prefer(next.ExternalGameId, Metadata.ExternalGameId),
                 WhiteRating = next.WhiteRating is > 0 ? next.WhiteRating : Metadata.WhiteRating,
                 BlackRating = next.BlackRating is > 0 ? next.BlackRating : Metadata.BlackRating,
+                Variant = Prefer(next.Variant, Metadata.Variant),
             };
         }
 

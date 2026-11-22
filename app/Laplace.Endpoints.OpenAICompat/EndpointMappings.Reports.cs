@@ -175,7 +175,26 @@ internal static class ReportEndpoints
                     hops: payload.Depth,
                     fanout: payload.Beam,
                     ct);
-                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                IReadOnlyList<BillingRoyaltyRecord>? settledRoyalties = null;
+                if (gateQuote is not null)
+                {
+                    var claimIds = trace.Select(static s => s.SupportAnchorIdHex)
+                        .Concat(trace.Select(static s => s.EntityIdHex))
+                        .Where(static h => !string.IsNullOrWhiteSpace(h) && h.Length == 32)
+                        .Select(static h => h!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    IReadOnlyList<RoyaltyAttributionShare> attributions = Array.Empty<RoyaltyAttributionShare>();
+                    if (claimIds.Length > 0)
+                    {
+                        try { attributions = await substrate.ResolveSourceAttributionAsync(claimIds, null, ct); }
+                        catch (Exception) { attributions = Array.Empty<RoyaltyAttributionShare>(); }
+                    }
+                    if (attributions.Count > 0)
+                        settledRoyalties = await billing.MarkConsumedAndRecordWithRoyaltiesAsync(gateQuote, attributions, ct);
+                    else
+                        await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                }
 
                 return Results.Json(new ExplainReportResponse(
                     Id: $"explain-{Guid.NewGuid():N}",
@@ -190,7 +209,7 @@ internal static class ReportEndpoints
                     Spread: payload.Spread,
                     TopK: payload.TopK,
                     Trace: trace,
-                    Billing: gateQuote is null ? null : QuoteGate.MakeReceipt(gateQuote)));
+                    Billing: gateQuote is null ? null : QuoteGate.MakeReceipt(gateQuote, settledRoyalties)));
             });
         })
         .WithTags("reports")

@@ -13,7 +13,13 @@
       "finish_reason": "stop"
     }
   ],
-  "billing": null,
+  "billing": {
+    "quote_id": "<quote_id>",
+    "amount_cents": 3,
+    "currency": "usd",
+    "tenant": "golden-chat-tenant",
+    "service_id": "chat.completions"
+  },
   "metadata": {
     "reply_rows": 1,
     "generated_tokens": 3,

@@ -1,9 +1,8 @@
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -46,7 +45,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public Task<IReadOnlyDictionary<Hash128, Hash128[]>?> ResolveSemanticPeersAsync(
         IEnumerable<Hash128> wordIds, CancellationToken ct) =>
-        Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ResolveSemanticPeersAsync(_dataSourceReadOnly, wordIds, ct);
+        Laplace.Mcp.SubstrateTools.ResolveSemanticPeersOptionalAsync(_dataSourceReadOnly, wordIds, ct);
 
 
 
@@ -551,7 +550,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     /// <summary>
     /// Exception translation passed as the <c>onError</c> delegate to
-    /// <see cref="Laplace.SubstrateCRUD.Npgsql.NpgsqlSubstrateReads"/>: a
+    /// <see cref="Laplace.Data.NpgsqlSubstrateReads"/>: a
     /// <see cref="PostgresException"/> is the query's own rejection and is named with its
     /// SQL state; a plain <see cref="NpgsqlException"/> or <see cref="TimeoutException"/>
     /// means the server was unreachable.

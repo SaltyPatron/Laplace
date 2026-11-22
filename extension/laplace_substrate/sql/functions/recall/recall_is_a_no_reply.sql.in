@@ -1,9 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
-    RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT 'No witnessed IS_A path from "'
-           || COALESCE(public.laplace_label_text((p_from)::bytea, false), public.laplace_label_text((p_from)::bytea, false))
-           || '" to "'
-           || COALESCE(public.laplace_label_text((p_to)::bytea, false), public.laplace_label_text((p_to)::bytea, false)) || '".';
-END;

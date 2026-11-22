@@ -6,9 +6,10 @@ namespace Laplace.Engine.Core.Tests;
 public class NativeInteropTests
 {
     [Fact]
-    public void LaplaceCoreVersion_ReturnsExpected()
+    public void NativeIdentity_ResolvesCodepointAndTextDeterministically()
     {
-        var version = NativeInterop.LaplaceCoreVersion();
-        Assert.Equal("0.1.0", version);
+        var cpA = Hash128.Codepoint('A');
+        Assert.Equal("32684bfa28c0c84d6f210511aace0efc", cpA.ToHex());
+        Assert.Equal(cpA, Hash128.Text("A"));
     }
 }

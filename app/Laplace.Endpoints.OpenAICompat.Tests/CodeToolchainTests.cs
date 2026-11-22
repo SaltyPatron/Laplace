@@ -96,9 +96,9 @@ public sealed class CodeToolchainTests
     }
 
     [Fact]
-    public void CodeCompatibilitySelectorHasGovernedIdWithoutModelCatalogPromotion()
+    public void CodeCompatibilitySelectorHasGovernedIdAndModelCatalogPromotion()
     {
         Assert.True(ModelCatalog.IsCode("laplace-code-001"));
-        Assert.DoesNotContain(ModelCatalog.All, model => model.Id == ModelCatalog.Code);
+        Assert.Contains(ModelCatalog.All, model => model.Id == ModelCatalog.Code);
     }
 }

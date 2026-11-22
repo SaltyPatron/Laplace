@@ -49,6 +49,13 @@
     padding: var(--space-1) var(--space-2);
   }
 
+  .scopeBadges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    align-items: center;
+  }
+
   .transcript {
     flex: 1;
     min-height: 0;

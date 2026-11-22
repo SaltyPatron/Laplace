@@ -16,6 +16,7 @@ import { FacetCheckboxes } from '../../ui/composites/FacetCheckboxes/FacetCheckb
 import { browseSubstrate } from './api';
 import type { BrowseResponse } from './types';
 import { collectKnowledge, keyedAnswers, type KnowledgeAnswers, type KnowledgeResult } from './knowledge';
+import { LeaderboardsPanel } from './LeaderboardsPanel';
 import styles from './BrowseHome.module.css';
 
 const SubjectView = lazy(() => import('../../lenses/SubjectView').then(module => ({ default: module.SubjectView })));
@@ -72,7 +73,7 @@ export function KnowledgeWorkspace() {
   const [methodsDraft, setMethodsDraft] = useState<string[] | null>(hasMethods ? params.getAll('method') : null);
   const [methodReads, setMethodReads] = useState<{ scope: string; reads: Read[] }>({ scope: '', reads: [] });
   const [attempt, setAttempt] = useState(0);
-  const types = params.getAll('type'), tiers = params.getAll('tier'), matchedBy = params.getAll('matched');
+  const types = params.getAll('type'), tiers = params.getAll('tier'), matchedBy = params.getAll('matched'), gc = params.getAll('gc'), script = params.getAll('script');
   const shapes = useReadResource({ key: JSON.stringify(['knowledge-methods', tenant, quoteId]), read: signal => queryShapes({ tenant, quoteId, signal }) });
   const relations = useReadResource({ key: JSON.stringify(['knowledge-relations', tenant, quoteId]), read: signal => relationTypes({ tenant, quoteId, signal }) });
   const bands = useReadResource({ key: JSON.stringify(['knowledge-bands', tenant, quoteId]), read: signal => relationBands({ tenant, quoteId, signal }) });
@@ -157,7 +158,13 @@ export function KnowledgeWorkspace() {
     }
     return [...result.values()];
   }, [query, browse, reads, leaders.data]);
-  const rows = all.filter(row => (!types.length || types.includes(row.kind)) && (!tiers.length || tiers.includes(String(row.tier ?? ''))) && (!matchedBy.length || row.methods.some(method => matchedBy.includes(label(method)))));
+  const rows = all.filter(row =>
+    (!types.length || types.includes(row.kind)) &&
+    (!tiers.length || tiers.includes(String(row.tier ?? ''))) &&
+    (!matchedBy.length || row.methods.some(method => matchedBy.includes(label(method)))) &&
+    (!gc.length || gc.includes(row.generalCategory ?? '')) &&
+    (!script.length || script.includes(row.script ?? ''))
+  );
   const answer = all.find(row => row.key === selectedAnswer);
   const loading = reads.some(read => read.status === 'loading'), errors = reads.filter(read => read.status === 'error');
   function apply(patch: Record<string, string | string[] | null>) {
@@ -216,7 +223,9 @@ export function KnowledgeWorkspace() {
       <FacetCheckboxes label="Type" values={all.map(row => row.kind)} selected={types} onChange={values => apply({ type: values })} />
       <FacetCheckboxes label="Tier" values={all.map(row => row.tier === undefined ? null : String(row.tier))} selected={tiers} onChange={values => apply({ tier: values })} />
       <FacetCheckboxes label="Found as" values={all.flatMap(row => [...new Set(row.methods.map(label))])} selected={matchedBy} onChange={values => apply({ matched: values })} />
-      {(types.length + tiers.length + matchedBy.length > 0) && <Button variant="ghost" onClick={() => apply({ type: null, tier: null, matched: null })}>Clear result filters</Button>}
+      <FacetCheckboxes label="Unicode category (tier0.flags)" values={all.map(row => row.generalCategory ?? null)} selected={gc} onChange={values => apply({ gc: values })} />
+      <FacetCheckboxes label="Unicode script (tier0.flags)" values={all.map(row => row.script ?? null)} selected={script} onChange={values => apply({ script: values })} />
+      {(types.length + tiers.length + matchedBy.length + gc.length + script.length > 0) && <Button variant="ghost" onClick={() => apply({ type: null, tier: null, matched: null, gc: null, script: null })}>Clear result filters</Button>}
     </div>
     <MasterDetail label="Knowledge results and detail" selected={!!selected || !!selectedAnswer} onBack={() => apply({ selected: null, answer: null })} master={<Panel title={`${rows.length} results${query ? ` for “${query}”` : ''}`}>
       {!rows.length ? <Muted>{loading ? 'Reading knowledge…' : query ? `Nothing recorded matches “${query}”. Try a single word or a name.` : 'Nothing to show yet.'}</Muted> : <Table className={styles.resultsTable}><thead><tr><Th>Knowledge</Th><Th>Type</Th><Th>Found as</Th></tr></thead><tbody>{rows.map(row => <tr key={row.key} data-claim-id={row.claim?.claim_id} className={row.entityId === selected || row.key === selectedAnswer ? styles.selected : undefined}><Td><Link className={styles.entityLink} to={destination(row)} preventScrollReset aria-current={row.entityId === selected || row.key === selectedAnswer ? 'true' : undefined}>{row.text}</Link>{row.claim && <><Muted>{row.claim.witnesses} {row.claim.witnesses === 1 ? 'witness' : 'witnesses'} · confidence {round(row.claim.confidence)}</Muted><details><summary>Ordered assertion members</summary><ol>{row.claim.parts.map((part, ordinal) => <li key={ordinal}><EntityLink idHex={part.id} label={part.label || part.id} />{part.run > 1 ? ` × ${part.run}` : ''}</li>)}</ol><p>Recorded trajectory</p><pre className={styles.claimTrajectory}><code>{row.claim.trajectory}</code></pre></details></>}</Td><Td data-label="Type">{row.kind}</Td><Td data-label="Found as">{[...new Set(row.methods.map(label))].join(', ')}</Td></tr>)}</tbody></Table>}
@@ -227,6 +236,7 @@ export function KnowledgeWorkspace() {
             lens={PRESENTATION_LENS[params.get('presentation') ?? ''] ?? params.get('presentation') ?? 'means'}
             onLensChange={(lens) => apply({ presentation: lens === 'means' ? null : lens })} /> : selectedAnswer ? <p role="status">{loading ? 'Reading the selected answer…' : 'The selected answer was not returned in this read. Its reference has been retained.'}</p> : <><h2>Select a result</h2><p>Read its content and relations here. Your search and filters remain in place.</p></>}
     </MasterDetail>
+    {!query && <LeaderboardsPanel tenant={tenant} quoteId={quoteId} bands={bands.data?.bands ?? []} />}
     {query && <details className={styles.receiptDetails}><summary>Search read scope</summary><p>Methods combine by union. Result checkboxes use OR within a field and AND between fields; they filter the returned collection. Entity paging and frontier limits apply to the entity method. Other methods return their own bounded reads. Equal reply text is combined without merging method measurements.</p>{reads.map(read => <p key={read.method}>{label(read.method)}: {read.status}{read.result ? ` · ${read.result.rows.length} rows` : ''}</p>)}{browse && <pre>{JSON.stringify(browse.receipt, null, 2)}</pre>}</details>}
   </Stack>;
 }

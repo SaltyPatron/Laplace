@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
+  Badge,
   Banner,
   Button,
   ConsensusBadge,
@@ -11,6 +12,13 @@ import {
 } from '@ui';
 
 import { apiGet } from '../api/client';
+import {
+  COMPUTE_ENVELOPES,
+  FIRMWARE_PROFILES,
+  summarizeWitnessShares,
+  type ComputeEnvelopePreset,
+  type FirmwareProfile,
+} from '../api/forwardProof';
 
 import { asNum, useAppStore } from '../store';
 
@@ -25,9 +33,21 @@ import styles from './ChatView.module.css';
 
 export function ChatView() {
 
-  const { session, messages, pendingQuote, exploreSeedPrompt, authUser } = useAppStore();
+  const {
+    tenant,
+    session,
+    model,
+    firmware,
+    envelope,
+    messages,
+    pendingQuote,
+    exploreSeedPrompt,
+    authUser,
+    servicePrincipal,
+    devPrincipal,
+  } = useAppStore();
 
-  const { setExploreSeedPrompt, clearConversation } = useAppStore();
+  const { setExploreSeedPrompt, clearConversation, setFirmware, setEnvelope } = useAppStore();
 
   const [input, setInput] = useState('');
 
@@ -106,6 +126,50 @@ export function ChatView() {
           <Muted className={styles.modeHint}>
             Replies are composed from witnessed consensus; each carries its receipt.
           </Muted>
+
+          <label className={styles.sessions}>
+            <span>Firmware</span>
+            <Select
+              aria-label="Firmware profile"
+              value={firmware}
+              onChange={(event) => setFirmware(event.target.value as FirmwareProfile)}
+            >
+              {FIRMWARE_PROFILES.map((profile) => (
+                <option key={profile.id} value={profile.id} title={profile.summary}>
+                  {profile.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          <label className={styles.sessions}>
+            <span>Envelope</span>
+            <Select
+              aria-label="Compute envelope"
+              value={envelope}
+              onChange={(event) => setEnvelope(event.target.value as ComputeEnvelopePreset)}
+            >
+              {COMPUTE_ENVELOPES.map((item) => (
+                <option key={item.id} value={item.id} title={item.bounds}>
+                  {item.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          <div className={styles.scopeBadges} aria-label="Authority scope and compute envelope">
+            <Badge>
+              authority:{' '}
+              {authUser
+                ? `${authUser.tenantId}`
+                : servicePrincipal
+                  ? `${servicePrincipal.kind}:${servicePrincipal.tenantId}`
+                  : devPrincipal
+                    ? `dev:${devPrincipal}`
+                    : tenant}
+            </Badge>
+            <Badge>model: {model}</Badge>
+          </div>
 
           {authUser && conversations.length > 0 && (
             <label className={styles.sessions}>
@@ -201,13 +265,28 @@ export function ChatView() {
 
               )}
 
-              {m.forwardProof && (
-                <details className={styles.trace}>
-                  <summary>Reasoning trace{lastStage(m.forwardProof) ? ` · reached ${lastStage(m.forwardProof)}` : ''}</summary>
-                  <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>Open the full trace page</Link>
-                  <ForwardPassProofPanel proof={m.forwardProof} />
-                </details>
-              )}
+              {m.forwardProof && (() => {
+                const proof = m.forwardProof;
+                const stage = lastStage(proof);
+                const dbProbes = proof.work?.db_probes ?? proof.db_probes;
+                const wallUs = proof.work?.wall_us ?? proof.wall_us;
+                const shares = summarizeWitnessShares(proof.witness_shares);
+                return (
+                  <details className={styles.trace}>
+                    <summary>
+                      OODA &amp; Reasoning trace
+                      {proof.disposition ? ` · ${proof.disposition}` : ''}
+                      {stage ? ` · reached ${stage}` : ''}
+                      {proof.top_salience != null ? ` · salience ${Number(proof.top_salience).toFixed(2)}` : ''}
+                      {dbProbes != null ? ` · ${dbProbes} probes` : ''}
+                      {wallUs != null ? ` · ${wallUs} µs` : ''}
+                      {shares.count > 0 ? ` · Σ share_bp ${shares.sumBp}/${shares.expectedBp}` : ''}
+                    </summary>
+                    <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>Open the full trace page</Link>
+                    <ForwardPassProofPanel proof={proof} />
+                  </details>
+                );
+              })()}
 
               {m.performance && (
                 <div className={styles.performance}>

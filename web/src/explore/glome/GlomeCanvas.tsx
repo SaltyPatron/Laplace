@@ -10,6 +10,7 @@ import {
   type GlomeColorBy, type GlomeNode, type GlomeProjection,
 } from './glomeProjection';
 import { GlomeScene } from './GlomeScene';
+import { useInPlaceFullscreen } from './useInPlaceFullscreen';
 import styles from './GlomeCanvas.module.css';
 
 // The glome's model, decoders and colours live in sibling modules; this file stays
@@ -66,6 +67,7 @@ export function GlomeCanvas({
   const [showLabels, setShowLabels] = useState(true);
   const [xmDegrees, setXmDegrees] = useState(35);
   const [zmDegrees, setZmDegrees] = useState(25);
+  const { containerRef: rootRef, isFullscreen, cssFullscreen, toggleFullscreen } = useInPlaceFullscreen<HTMLDivElement>();
   const xmAngle = xmDegrees * Math.PI / 180;
   const zmAngle = zmDegrees * Math.PI / 180;
   const sharedPalette = useVisualizationPalette();
@@ -116,8 +118,19 @@ export function GlomeCanvas({
     return <div className={styles.empty}>{emptyLabel}</div>;
   }
 
+  const rootClass = [
+    styles.root,
+    fill && styles.rootFill,
+    cssFullscreen && styles.rootFullscreen,
+  ].filter(Boolean).join(' ');
+  const canvasClass = [
+    styles.canvas,
+    fill && styles.canvasFill,
+    isFullscreen && styles.canvasFullscreen,
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
+    <div ref={rootRef} className={rootClass} data-fullscreen={isFullscreen ? 'true' : undefined}>
       <GlomeViewControls
         colorBy={colorBy}
         onColorBy={setColorBy}
@@ -130,6 +143,8 @@ export function GlomeCanvas({
         onShowEdges={setShowEdges}
         showLabels={showLabels}
         onShowLabels={setShowLabels}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
       />
       {projection === 'placement' ? (
         <GlomeRotationControls
@@ -139,7 +154,7 @@ export function GlomeCanvas({
           onZmDegrees={setZmDegrees}
         />
       ) : null}
-      <div className={fill ? `${styles.canvas} ${styles.canvasFill}` : styles.canvas}>
+      <div className={canvasClass}>
         {webGlReady ? (
           <Canvas
             frameloop="demand"

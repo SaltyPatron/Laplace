@@ -11,6 +11,12 @@ const exports = {};
 new Function('require', 'exports', compiled)(require, exports);
 const { classifyTurn, lastStage } = exports;
 
+const proofSource = await readFile(new URL('../src/api/forwardProof.ts', import.meta.url), 'utf8');
+const proofCompiled = ts.transpileModule(proofSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const proofExports = {};
+new Function('require', 'exports', proofCompiled)(require, proofExports);
+const { summarizeWitnessShares, FIRMWARE_PROFILES, SHARE_BP_TOTAL } = proofExports;
+
 // The Engine's receipt: each stage of its trace is a line that begins with the stage's name.
 const proof = (disposition, stages) => ({ session: 's', participant: 'u', prompt_id: 'p', ordinal: 1, turns_before: 0,
   witnessed: false, disposition, steps: [],
@@ -51,4 +57,18 @@ test('last stage follows pipeline order, not event order', () => {
   assert.equal(lastStage(proof('x', ['steer', 'resolve', 'scan'])), 'steer');
   assert.equal(lastStage(proof('x', ['unknown'])), null);
   assert.equal(lastStage(undefined), null);
+});
+
+test('firmware profile catalog covers all 7 profiles and share_bp conservation checks out of 10000', () => {
+  assert.deepEqual(
+    FIRMWARE_PROFILES.map((p) => p.id),
+    ['program', 'coding', 'deductive', 'inductive', 'abductive', 'constructive', 'adversarial'],
+  );
+  assert.equal(SHARE_BP_TOTAL, 10000);
+  assert.deepEqual(summarizeWitnessShares([
+    { witness: 'a', share_bp: 6250 },
+    { witness: 'b', share_bp: 3750 },
+  ]), { count: 2, sumBp: 10000, expectedBp: 10000, conserved: true });
+  assert.equal(summarizeWitnessShares([{ witness: 'a', share_bp: 5000 }]).conserved, false);
+  assert.equal(summarizeWitnessShares([]).conserved, false);
 });

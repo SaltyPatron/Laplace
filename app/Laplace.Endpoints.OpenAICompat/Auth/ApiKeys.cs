@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;

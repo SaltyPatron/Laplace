@@ -1,23 +1,41 @@
-using Laplace.Endpoints.Lichess;
-using Laplace.SubstrateCRUD.Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Data;
+using Laplace.Endpoints.Lichess;
+using Laplace.Hosting;
 using Laplace.Ops;
 
-Microsoft.Extensions.Logging.ILoggerFactory? processLogging = null;
-try
+return await LaplaceHost.RunAsync("lichess", args, async _ =>
 {
-processLogging = LaplaceLogging.ConsoleAndFile("lichess");
-Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(processLogging, parameterLoggingEnabled: false);
+    var logging = LaplaceLogging.ConsoleAndFile("lichess");
+    try
+    {
+        Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(logging, parameterLoggingEnabled: false);
+        if (args.Length is 2 or 4 && args[0] == "--verify-routing")
+            return VerifyRouting(args);
+        if (args.Length != 0)
+            throw new ArgumentException("Usage: --verify-routing <configuration> [--selection <state>], or no arguments to run the installed service.");
 
-if (args.Length is 2 or 4 && args[0] == "--verify-routing")
+        await using var app = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CONFIG") is { Length: > 0 } control
+            ? ControlledLichessHost.Build(control)
+            : LichessServiceHost.Build(LichessOptions.FromEnvironment());
+        await app.RunAsync();
+        return Environment.ExitCode;
+    }
+    finally
+    {
+        logging.Dispose();
+    }
+});
+
+static int VerifyRouting(string[] args)
 {
-    var declaration = args[1];
-    var configuration = LichessControlConfiguration.Read(declaration);
+    var configuration = LichessControlConfiguration.Read(args[1]);
     var routing = configuration.Routing ?? throw new InvalidDataException("Independent routing is not declared.");
     if (args.Length == 4)
     {
         if (args[2] != "--selection") throw new ArgumentException("Expected --selection <installed state file>.");
-        var selection = System.Text.Json.JsonSerializer.Deserialize<LichessSelection>(File.ReadAllText(args[3]), LichessControlConfiguration.Json)
+        var selection = System.Text.Json.JsonSerializer.Deserialize<LichessSelection>(
+            File.ReadAllText(args[3]), LichessControlConfiguration.Json)
             ?? throw new InvalidDataException("Empty selection.");
         selection = routing.Restore(selection);
         if (selection.Profile is not null) _ = configuration.Resolve(selection.Profile, selection.ReadSource, selection.RecordingTarget);
@@ -39,26 +57,3 @@ if (args.Length is 2 or 4 && args[0] == "--verify-routing")
     }
     return 0;
 }
-if (args.Length != 0) throw new ArgumentException("Usage: --verify-routing <configuration> [--selection <state>], or no arguments to run the installed service.");
-
-// An operator's stop persists (ManagedServiceState): on Windows the service manager (NSSM) starts this process at
-// boot and after a deploy, so the process honors the stop itself and exits 0, which NSSM's AppExit 0 maps to Exit
-// (scripts/win/ensure-managed-services.ps1). On Linux the unit's ConditionPathExists does this before start.
-if (OperatingSystem.IsWindows() && ManagedServiceState.OperatorStopped("lichess"))
-{
-    Console.WriteLine($"laplace-lichess: stopped by an operator ({ManagedServiceState.StopMarker("lichess")}); not starting.");
-    return 0;
-}
-await using var app = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_CONTROL_CONFIG") is { Length: > 0 } control
-    ? ControlledLichessHost.Build(control)
-    : LichessServiceHost.Build(LichessOptions.FromEnvironment());
-await app.RunAsync();
-return Environment.ExitCode;
-}
-catch (Exception ex)
-{
-    processLogging?.CreateLogger("lichess").LogCritical(ex, "Lichess process terminated unexpectedly.");
-    Console.Error.WriteLine($"laplace-lichess: {ex}");
-    return 1;
-}
-finally { processLogging?.Dispose(); }

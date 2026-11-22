@@ -5,28 +5,39 @@
     justify-content: center;
   }
 
-  /* Board beside its panel needs about 52rem of the play area itself; narrower, they stack. */
-  .frame { container: chess-play / inline-size; height: 100%; min-height: 0; }
+  /* Board beside its console needs about 52rem of the play area itself; narrower, they stack. */
+  .frame {
+    container: chess-play / inline-size;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
 
   .layout {
     display: grid;
-    grid-template-columns: minmax(32rem, 1fr) minmax(19rem, 22rem);
-    gap: clamp(var(--space-4), 2.5vw, var(--space-6));
-    padding: clamp(var(--space-4), 2.5vw, var(--space-6));
+    grid-template-columns: minmax(28rem, 1fr) minmax(21rem, 25rem);
+    align-items: stretch;
+    gap: var(--space-4);
+    padding: var(--space-1) var(--space-2);
+    flex: 1 1 0;
     height: 100%;
     min-height: 0;
     width: 100%;
     box-sizing: border-box;
     overflow: hidden;
-    max-width: 1360px;
+    max-width: 1380px;
     margin: 0 auto;
   }
 
   .main {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    width: min(100%, 760px);
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    width: min(100%, 820px);
+    height: 100%;
     justify-self: center;
     min-width: 0;
     min-height: 0;
@@ -35,11 +46,27 @@
   .side {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-3);
     width: 100%;
+    height: 100%;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .tabs {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .tabBody {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
+    padding-inline-end: var(--space-1);
   }
 }
 
@@ -47,19 +74,26 @@
   .layout {
     display: flex;
     flex-direction: column;
-    overflow: auto;
+    overflow-y: auto;
   }
 
   .side {
     flex: 1 1 auto;
+    height: auto;
     min-width: 0;
     width: 100%;
     overflow: visible;
   }
 
+  .tabBody {
+    flex: 0 0 auto;
+    overflow: visible;
+    padding-inline-end: 0;
+  }
+
   .main {
     flex: 0 0 auto;
-    height: min(calc(100cqw + 8rem), 48rem);
-    min-height: 30rem;
+    height: min(calc(100cqw + 6rem), 44rem);
+    min-height: 26rem;
   }
 }

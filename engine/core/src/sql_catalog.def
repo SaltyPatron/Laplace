@@ -1,4 +1,0 @@
-#include "sql_catalog/core_cognition.def"
-#include "sql_catalog/ingest_app.def"
-#include "sql_catalog/substrate_reads.def"
-#include "sql_catalog/native_ops.def"

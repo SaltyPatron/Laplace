@@ -2,8 +2,8 @@ using System.Globalization;
 using Npgsql;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
-using Laplace.Engine.Dynamics;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -185,14 +185,7 @@ internal sealed partial class SubstrateClient
         if (dimensions <= 0) return null;
         var projected = new double[checked(ordered.Length * dimensions)];
 
-        int rc;
-        fixed (int* pr = rows)
-        fixed (int* pc = cols)
-        fixed (double* pw = weights)
-        fixed (double* po = projected)
-            rc = NativeInterop.LaplacianEigenmapsFromSparseGraph(
-                pr, pc, pw, (nuint)weights.Length, (nuint)ordered.Length,
-                (nuint)dimensions, po);
+        int rc = Math4d.ComputeSparseEigenmap(rows, cols, weights, ordered.Length, dimensions, projected);
         if (rc != 0) return null;
 
         var result = new Dictionary<string, (double X, double Y, double Z)>(

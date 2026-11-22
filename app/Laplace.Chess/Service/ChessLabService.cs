@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
-public sealed partial class ChessLabService
+public sealed partial class ChessLabService : IChessLabService
 {
     private readonly ILogger _log;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;

@@ -47,7 +47,16 @@ export const NAV: NavItem[] = [
     ],
   },
   { id: 'ask', label: 'Ask', path: '/chat', icon: 'chat', description: 'Ask a question; every answer cites its sources.', owns: ['/chat'] },
-  { id: 'data', label: 'My data', path: '/data', icon: 'upload', description: 'Add your own files and see them decomposed.', owns: ['/data'] },
+  {
+    id: 'data', label: 'My data', path: '/data', icon: 'upload',
+    description: 'Add your own files, compile recipes, mold GGUF exports, and verify code.',
+    owns: ['/data', '/foundry', '/code'],
+    children: [
+      { id: 'upload', label: 'Files', path: '/data', owns: ['/data'] },
+      { id: 'foundry', label: 'Foundry', path: '/foundry', owns: ['/foundry'] },
+      { id: 'code', label: 'Code', path: '/code', owns: ['/code'] },
+    ],
+  },
   {
     id: 'events', label: 'Events', path: '/events', icon: 'trophy',
     description: 'Host a tournament, league or sweeper and share one link.',

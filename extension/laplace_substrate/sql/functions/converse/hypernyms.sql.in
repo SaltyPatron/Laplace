@@ -1,4 +1,0 @@
-CREATE OR REPLACE FUNCTION converse.hypernyms(p_word bytea, p_depth int DEFAULT 8)
-    RETURNS TABLE(depth int, hypernym text, gloss text)
-    LANGUAGE C STABLE STRICT
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_hypernyms';

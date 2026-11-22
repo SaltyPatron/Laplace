@@ -125,14 +125,28 @@ test.describe('chess UI', () => {
     expect(new URL(page.url()).searchParams.has('offset')).toBe(false);
   });
 
-  test('the player index asks for a search instead of reading a roster', async ({ page }) => {
-    let reads = 0;
-    await page.route('**/modular/api/chess/players?**', (route) => { reads += 1; return route.fulfill({ json: { search: '', total: 0, offset: 0, players: [] } }); });
+  test('the player index loads the recorded roster most games first', async ({ page }) => {
+    const requests: URL[] = [];
+    await page.route('**/modular/api/chess/players?**', (route) => {
+      const url = new URL(route.request().url());
+      requests.push(url);
+      return route.fulfill({ json: {
+        search: '',
+        total: 2,
+        offset: 0,
+        players: [
+          { name: 'Carlsen, Magnus', games: 412, games_complete: true },
+          { name: 'Nakamura, Hikaru', games: 318, games_complete: true },
+        ],
+      } });
+    });
     await page.goto('/chess');
-    await expect(page.getByText('Search for a player to see their recorded games.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Recorded players' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Games Laplace played' })).toHaveAttribute('href', '/chess/laplace');
-    await expect(page.getByRole('table')).toHaveCount(0);
-    expect(reads).toBe(0);
+    await expect(page.getByRole('link', { name: 'Carlsen, Magnus' })).toHaveAttribute('href', '/chess/players/Carlsen%2C%20Magnus');
+    await expect(page.getByRole('row').filter({ hasText: 'Carlsen, Magnus' })).toContainText('412');
+    expect(requests.length).toBe(1);
+    expect(requests[0].searchParams.get('search')).toBeNull();
   });
 
   test('a player page reads one name: record by colour, source ratings, opponents and paged games', async ({ page }) => {
@@ -235,7 +249,18 @@ test.describe('chess UI', () => {
     await page.goto('/chess');
     await page.getByRole('link', { name: 'Play', exact: true }).click();
     await expect(page).toHaveURL(/\/play$/);
-    await expect(page.getByRole('grid')).toBeVisible();
+    const grid = page.getByRole('grid');
+    await expect(grid).toBeVisible();
+
+    // Board and move navigation must fit strictly inside the initial viewport without page scroll.
+    const viewport = page.viewportSize()!;
+    const gridBox = (await grid.boundingBox())!;
+    const firstBtnBox = (await page.getByRole('button', { name: 'First move' }).boundingBox())!;
+    expect(gridBox.y).toBeGreaterThanOrEqual(0);
+    expect(gridBox.y + gridBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(firstBtnBox.y + firstBtnBox.height).toBeLessThanOrEqual(viewport.height);
+    const pageOverflow = await page.evaluate(() => document.scrollingElement!.scrollHeight - document.scrollingElement!.clientHeight);
+    expect(pageOverflow).toBeLessThanOrEqual(1);
 
     // A play session starts with the game, not on page load.
     const sessionPromise = page.waitForResponse((response) =>

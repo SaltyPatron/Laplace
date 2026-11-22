@@ -1,16 +1,19 @@
+using System.Runtime.InteropServices;
+using Laplace.Native;
+
 namespace Laplace.Engine.Core;
 
 public static unsafe class Trajectory
 {
-    public static double[] Build(ReadOnlySpan<Hash128> constituents)
-    {
-        return BuildRle(constituents);
-    }
-
     public const ulong VFlagHasAtom = 1UL;
-    public const int VFlagTierShift = 1, VFlagAtomShift = 31;
+    public const int VFlagTierShift = 1;
+    public const int VFlagAtomShift = 31;
     public const int VFlagTierExtensionShift = 43;
     public const ulong VFlagTierExtension = 1UL << 46;
+
+    private const ulong ExponentMinusTwoBits = 1021UL << 52;
+    private const ulong RunMask = (1UL << 20) - 1;
+    private const int MaxRunChunk = ushort.MaxValue;
 
     public static ulong VertexFlags(byte tier, bool hasAtom, uint atom)
     {
@@ -21,82 +24,90 @@ public static unsafe class Trajectory
         return f;
     }
 
-    public static unsafe double[] Build(ReadOnlySpan<Hash128> constituents, ReadOnlySpan<ulong> flags)
+    public static double[] Build(ReadOnlySpan<Hash128> constituents) => BuildRle(constituents);
+
+    public static double[] BuildRle(ReadOnlySpan<Hash128> constituents) =>
+        BuildCore(constituents, ReadOnlySpan<ulong>.Empty);
+
+    public static double[] Build(ReadOnlySpan<Hash128> constituents, ReadOnlySpan<ulong> flags)
     {
         if (flags.Length != constituents.Length)
             throw new ArgumentException("flags length must match constituents length");
-        if (constituents.Length == 0) return [];
-        var xyzm = new double[constituents.Length * 4];
-        nuint vertexCount;
-        fixed (Hash128* h = constituents)
-        fixed (ulong* fl = flags)
-        fixed (double* o = xyzm)
-        {
-            int rc = NativeInterop.TrajectoryBuildFlaggedRle(
-                h, fl, (nuint)constituents.Length, o, &vertexCount);
-            if (rc != 0) throw new InvalidOperationException($"trajectory_build_flagged_rle returned {rc}");
-        }
-        return Trim(xyzm, checked((int)vertexCount));
+        return BuildCore(constituents, flags);
     }
 
-    public static double[] BuildRle(ReadOnlySpan<Hash128> constituents)
+    private static double[] BuildCore(ReadOnlySpan<Hash128> constituents, ReadOnlySpan<ulong> flags)
     {
         if (constituents.Length == 0) return [];
-        var xyzm = new double[constituents.Length * 4];
-        nuint vertexCount;
-        fixed (Hash128* h = constituents)
-        fixed (double* o = xyzm)
+        bool hasFlags = !flags.IsEmpty;
+
+        var xyzm = new List<double>(constituents.Length * 4);
+        double* xyz3 = stackalloc double[3];
+        int i = 0;
+        while (i < constituents.Length)
         {
-            int rc = NativeInterop.TrajectoryBuildRle(h, (nuint)constituents.Length, o, &vertexCount);
-            if (rc != 0) throw new InvalidOperationException($"trajectory_build_rle returned {rc}");
+            Hash128 id = constituents[i];
+            ulong f = hasFlags ? flags[i] : 0UL;
+            int run = 1;
+            while (i + run < constituents.Length
+                   && constituents[i + run] == id
+                   && (!hasFlags || flags[i + run] == f))
+                run++;
+
+            lp_id nid = id.ToNative();
+            LaplaceNative.lp_id_to_xyz(&nid, xyz3);
+
+            ulong flagTag = (f ^ (f >> 24)) & 0xFFFFFFFFUL;
+            int rem = run;
+            while (rem > 0)
+            {
+                int chunk = Math.Min(rem, MaxRunChunk);
+                ulong mbits = ExponentMinusTwoBits | ((uint)chunk & RunMask) | ((flagTag & 0xFFFFFFFFUL) << 20);
+                xyzm.Add(xyz3[0]);
+                xyzm.Add(xyz3[1]);
+                xyzm.Add(xyz3[2]);
+                xyzm.Add(BitConverter.UInt64BitsToDouble(mbits));
+                rem -= chunk;
+            }
+            i += run;
         }
-        return Trim(xyzm, checked((int)vertexCount));
+        return xyzm.ToArray();
     }
 
     public static Hash128 ContentIdentity(ReadOnlySpan<double> xyzm, out int constituentCount)
     {
         if (xyzm.Length == 0 || xyzm.Length % 4 != 0)
             throw new ArgumentException("content trajectory must contain one or more XYZM vertex groups", nameof(xyzm));
-        Hash128 id;
-        nuint count;
-        fixed (double* x = xyzm)
-        {
-            int rc = NativeInterop.TrajectoryContentIdentity(
-                x, (nuint)(xyzm.Length / 4), &id, &count);
-            if (rc != 0)
-                throw new InvalidOperationException($"trajectory_content_identity returned {rc}");
-        }
-        constituentCount = checked((int)count);
-        return id;
+        var expanded = Constituents(xyzm);
+        constituentCount = expanded.Length;
+        return Hash128.Merkle(0, expanded);
     }
 
     public static Hash128[] Constituents(ReadOnlySpan<double> xyzm)
     {
         if (xyzm.Length % 4 != 0)
-            throw new ArgumentException("trajectory must contain XY ZM vertex groups", nameof(xyzm));
-        int n = xyzm.Length / 4;
-        if (n == 0) return [];
-        nuint count;
-        fixed (double* x = xyzm)
-        {
-            int rc = NativeInterop.TrajectoryConstituentCount(x, (nuint)n, &count);
-            if (rc != 0) throw new InvalidOperationException($"trajectory_constituent_count returned {rc}");
-        }
-        var outH = new Hash128[checked((int)count)];
-        fixed (double* x = xyzm)
-        fixed (Hash128* o = outH)
-        {
-            int rc = NativeInterop.TrajectoryConstituents(x, (nuint)n, o, count);
-            if (rc != outH.Length) throw new InvalidOperationException($"trajectory_constituents returned {rc}");
-        }
-        return outH;
-    }
+            throw new ArgumentException("trajectory must contain XYZM vertex groups", nameof(xyzm));
+        int nv = xyzm.Length / 4;
+        if (nv == 0) return [];
 
-    private static double[] Trim(double[] xyzm, int vertices)
-    {
-        if (vertices == xyzm.Length / 4) return xyzm;
-        var trimmed = new double[checked(vertices * 4)];
-        Array.Copy(xyzm, trimmed, trimmed.Length);
-        return trimmed;
+        var result = new List<Hash128>(nv);
+        double* xyz3 = stackalloc double[3];
+        lp_id nid;
+        for (int v = 0; v < nv; v++)
+        {
+            int o = v * 4;
+            xyz3[0] = xyzm[o];
+            xyz3[1] = xyzm[o + 1];
+            xyz3[2] = xyzm[o + 2];
+            LaplaceNative.lp_xyz_to_id(xyz3, &nid);
+            var id = Hash128.FromNative(nid);
+
+            ulong mbits = BitConverter.DoubleToUInt64Bits(xyzm[o + 3]);
+            int run = checked((int)(mbits & RunMask));
+            if (run <= 0) run = 1;
+            for (int r = 0; r < run; r++)
+                result.Add(id);
+        }
+        return result.ToArray();
     }
 }

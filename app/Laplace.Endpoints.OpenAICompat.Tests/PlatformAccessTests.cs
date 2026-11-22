@@ -151,11 +151,11 @@ public sealed class PlatformAccessTests
     [Fact]
     public async Task EveryInstalledMutationRequiresAPlatformPermission()
     {
-        foreach (var operation in Laplace.SubstrateCRUD.Npgsql.InstalledOpInvoker.WritableOps)
+        foreach (var operation in Laplace.Data.InstalledOpInvoker.WritableOps)
             Assert.NotNull(PlatformPolicy.ForOperation(operation));
         await using var factory = new Factory(null);
         using var client = factory.Client();
-        foreach (var operation in Laplace.SubstrateCRUD.Npgsql.InstalledOpInvoker.WritableOps)
+        foreach (var operation in Laplace.Data.InstalledOpInvoker.WritableOps)
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/v1/op", new { name = operation })).StatusCode);
     }
 

@@ -5,7 +5,10 @@ import {
   apiGet, apiGetCached, apiPost, type BillingCatalogResponse, type BillingPlansResponse,
   type EntitlementsResponse, type PlanSubscribeResponse, type UsageResponse,
 } from '../api/client';
+import type { components } from '../api/types.gen';
 import { AccountControls } from '../auth/AccountControls';
+
+type RoyaltiesResponse = components['schemas']['RoyaltiesResponse'];
 import { useAppStore } from '../store';
 import { formatCents, formatCurrencyCents as amount } from './amounts';
 import { humanizeIdentifier, serviceLabel, workspaceLabel } from './labels';
@@ -55,6 +58,12 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
   const [checkout, setCheckout] = useState<PlanSubscribeResponse | null>(null);
   const [error, setError] = useState('');
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [showRoyalties, setShowRoyalties] = useState(false);
+  const royaltiesRead = useReadResource({
+    key: JSON.stringify(['billing-royalties', tenant, authUser?.id]),
+    enabled: signedIn && showRoyalties,
+    read: (signal) => apiGet<RoyaltiesResponse>('/v1/billing/royalties', { tenant, signal }),
+  });
   const submitting = useRef(false);
   const plans = (plansRead.data?.data ?? []).filter((plan) => plan.active !== false);
   const services = (servicesRead.data?.data ?? []).filter((service) => service.active !== false);
@@ -208,6 +217,59 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
       </TableScroll>
       <Muted>Laplace records admitted work and its quoted amount. Stripe invoices remain the authoritative paid total.</Muted>
     </> : <Muted>No usage recorded for this workspace.</Muted>)}
+    <h2>Creator source royalties (<code>share_bp</code> / 10000)</h2>
+    {!signedIn ? <Muted>Sign in to view source royalties attributed to this workspace.</Muted> : (
+      <>
+        <div className={styles.sectionHead}>
+          <Muted>Integer-conserved basis points attributed to attested sources across executed quotes (Σ share_bp = 10000).</Muted>
+          <Button variant="ghost" onClick={() => setShowRoyalties((v) => !v)}>
+            {showRoyalties ? 'Hide royalties ledger' : 'Load royalties ledger'}
+          </Button>
+        </div>
+        {showRoyalties && (
+          <>
+            <ReadStatus label="Source royalties" resource={royaltiesRead} />
+            {royaltiesRead.data && (
+              royaltiesRead.data.entries.length === 0 ? (
+                <Muted>No royalty entries recorded for this workspace.</Muted>
+              ) : (
+                <>
+                  <p>Total attributed: {formatCents(royaltiesRead.data.total_royalty_cents)}</p>
+                  <TableScroll className={styles.catalogScroll}>
+                    <Table className={styles.catalog}>
+                      <thead>
+                        <tr>
+                          <Th>Source</Th>
+                          <Th>Service</Th>
+                          <Th>Payer</Th>
+                          <Th>share_bp</Th>
+                          <Th>Hits</Th>
+                          <Th>Royalty</Th>
+                          <Th>Executed</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {royaltiesRead.data.entries.map((entry, idx) => (
+                          <tr key={`${entry.quote_id}:${entry.source_id}:${idx}`}>
+                            <Td><code>{entry.source_id}</code></Td>
+                            <Td>{serviceName(entry.service_id)}</Td>
+                            <Td>{entry.payer_tenant}</Td>
+                            <Td>{entry.share_bp} / 10000</Td>
+                            <Td>{Number(entry.hit_count).toLocaleString()}</Td>
+                            <Td>{formatCents(entry.royalty_cents)}</Td>
+                            <Td>{entry.executed_at ? new Date(entry.executed_at).toLocaleString() : '—'}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </TableScroll>
+                </>
+              )
+            )}
+          </>
+        )}
+      </>
+    )}
   </div>;
 }
 

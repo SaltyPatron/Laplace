@@ -168,9 +168,9 @@ internal static class CpuTopologyCommands
         // The correct form reads back as [laplace_substrate, pg_stat_statements]; applied=false
         // is expected until the postmaster restarts.
         //
-        // laplace_substrate stays first: the extension image is pinned in the postmaster and
+        // laplace stays first: the extension image is pinned in the postmaster and
         // the perfcache blobs are mapped at preload.
-        w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate', 'pg_stat_statements';");
+        w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace', 'pg_stat_statements';");
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track = 'all';");
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.max = 10000;");
         // Planning time separately from execution. MaxAutoPrepare is zero and hot typed

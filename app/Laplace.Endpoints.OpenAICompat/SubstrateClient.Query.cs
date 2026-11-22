@@ -1,6 +1,6 @@
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;

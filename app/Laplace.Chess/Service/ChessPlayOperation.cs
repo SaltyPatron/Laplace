@@ -55,7 +55,8 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
     public IEnumerable<ChessState> ReplayStates()
     {
         var modality = new ChessModality();
-        var state = modality.FromFen(Context?.Metadata.StartFen ?? ChessModality.StartFen);
+        var rules = ChessVariants.Resolve(Context?.Variant ?? Context?.Metadata.Variant);
+        var state = modality.FromFen(Context?.Metadata.StartFen ?? ChessModality.StartFen, rules);
         yield return state;
         foreach (var uci in Moves)
         {
@@ -90,4 +91,7 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
 }
 
 public sealed record ChessPlayContext(string LearnContext, string? WhitePlayerId, string? WhitePlayerName,
-    string? BlackPlayerId, string? BlackPlayerName, ChessLiveGameMetadata Metadata);
+    string? BlackPlayerId, string? BlackPlayerName, ChessLiveGameMetadata Metadata)
+{
+    public string? Variant { get; init; }
+}

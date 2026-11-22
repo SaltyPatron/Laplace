@@ -3,6 +3,7 @@
   <ItemGroup>
     <!-- laplace-uci's library (catalog, sessions, codec), and its executable beside this one for the laplace engine -->
     <ProjectReference Include="../Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" />
+    <ProjectReference Include="../Laplace.Hosting/Laplace.Hosting.csproj" />
     <ProjectReference Include="../Laplace.Ops/Laplace.Ops.csproj" />
     <InternalsVisibleTo Include="Laplace.Endpoints.Engines.Tests" />
   </ItemGroup>

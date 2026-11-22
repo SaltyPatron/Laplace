@@ -13,12 +13,13 @@ export const LAPLACE_WITNESS = 'Laplace';
 /** The page of one player, addressed by the name as written. */
 export const playerPath = (name: string) => `/chess/players/${encodeURIComponent(name)}`;
 
-/** Names matching a name as written, or a word of one, most games first. */
+/** Recorded players (all when search is empty, or matching a name / word), most games first. */
 export function chessPlayers(
-  params: { search: string; limit?: number; offset?: number },
+  params: { search?: string; limit?: number; offset?: number } = {},
   opts: ApiOptions = {},
 ) {
-  const q = new URLSearchParams({ search: params.search });
+  const q = new URLSearchParams();
+  if (params.search) q.set('search', params.search);
   if (params.limit != null) q.set('limit', String(params.limit));
   if (params.offset != null) q.set('offset', String(params.offset));
   return apiGet<ChessPlayersResponse>(`/modular/api/chess/players?${q}`, opts);

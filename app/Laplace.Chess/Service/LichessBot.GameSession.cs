@@ -84,7 +84,10 @@ public sealed partial class LichessBot
                         StartFen: startFenMeta,
                         ExternalGameId: $"lichess:{lichessGameId}",
                         WhiteRating: ReadPlayerRating(ev, "white"),
-                        BlackRating: ReadPlayerRating(ev, "black")));
+                        BlackRating: ReadPlayerRating(ev, "black"))
+                    {
+                        Variant = ev.TryGetProperty("variant", out var vMeta) && vMeta.TryGetProperty("key", out var vkMeta) ? vkMeta.GetString() : null,
+                    });
                 }
                 else
                 {

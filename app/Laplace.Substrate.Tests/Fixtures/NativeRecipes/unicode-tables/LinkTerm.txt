@@ -1,6 +1,0 @@
-# Actual Unicode 17 UTS58 rows; https://www.unicode.org/terms_of_use.html
-# @missing: 0000..10FFFF; Hard
-0021..0022    ; Soft    # 1.1   [2] (!..")  EXCLAMATION MARK..QUOTATION MARK
-0027          ; Soft    # 1.1       (')  APOSTROPHE
-002C          ; Soft    # 1.1       (,)  COMMA
-002E          ; Soft    # 1.1       (.)  FULL STOP

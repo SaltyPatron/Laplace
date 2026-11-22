@@ -6,19 +6,10 @@ namespace Laplace.Engine.Core.Tests;
 /// <summary>
 /// The collapse rule decides which node is the stored identity: a single-child,
 /// span-identical wrapper is its child (one-child composition is the child). It is
-/// implemented by <c>TierTree.CollapseIndex</c> and natively by
-/// <c>laplace_tier_tree_collapse_index</c> (<see cref="NativeInterop.TierTreeCollapseIndex"/>).
-/// Each clause (span check, walk to tier 0, multi-child stop) has its own test, and each
-/// asserts the managed and native results agree.
+/// implemented by <c>TierTree.CollapseIndex</c>.
 /// </summary>
 public class CollapseIndexParityTests
 {
-    private static uint NativeCollapse(TierTree t, uint idx)
-    {
-        lock (LaplaceCoreGate.Native)
-            return NativeInterop.TierTreeCollapseIndex(t.DangerousGetHandle(), idx);
-    }
-
     /// <summary>tier-0 leaf 'A', wrapped by a span-identical grapheme, wrapped again by a
     /// span-identical word: the tree one-codepoint text composes to.</summary>
     private static TierTree SingleCodepointChain()
@@ -39,8 +30,6 @@ public class CollapseIndexParityTests
         using var t = SingleCodepointChain();
         Assert.Equal(0u, t.CollapseIndex(2));
         Assert.Equal(0u, t.CollapseIndex(1));
-        Assert.Equal(t.CollapseIndex(2), NativeCollapse(t, 2));
-        Assert.Equal(t.CollapseIndex(1), NativeCollapse(t, 1));
     }
 
     [Fact]
@@ -48,7 +37,6 @@ public class CollapseIndexParityTests
     {
         using var t = SingleCodepointChain();
         Assert.Equal(0u, t.CollapseIndex(0));
-        Assert.Equal(t.CollapseIndex(0), NativeCollapse(t, 0));
     }
 
     [Fact]
@@ -63,7 +51,6 @@ public class CollapseIndexParityTests
         using (t)
         {
             Assert.Equal(2u, t.CollapseIndex(2));
-            Assert.Equal(t.CollapseIndex(2), NativeCollapse(t, 2));
         }
     }
 
@@ -79,7 +66,6 @@ public class CollapseIndexParityTests
         using (t)
         {
             Assert.Equal(1u, t.CollapseIndex(1));
-            Assert.Equal(t.CollapseIndex(1), NativeCollapse(t, 1));
         }
     }
 }

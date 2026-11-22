@@ -1,13 +1,14 @@
 using System.Text.Json;
 using Laplace.Api.Contracts;
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Native;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Chat-completions transport for code construction. <c>laplace-code-001</c> is a selector,
-/// not a separate model: with <c>code_language</c> the request runs
-/// <see cref="CodePlayerService"/>, the same construction /v1/code/completions runs;
-/// without it the request continues down the pipeline unchanged.
+/// Chat-completions transport for verified code construction when <c>code_language</c> is supplied
+/// with <c>laplace-code-001</c> or <c>coding</c>. Requests without <c>code_language</c> pass cleanly
+/// through to <c>/v1/chat/completions</c> (<c>coding.firmware</c>).
 /// </summary>
 internal sealed class CodeModelChatMiddleware(RequestDelegate next)
 {
@@ -51,14 +52,14 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 && streamElement.ValueKind is JsonValueKind.True)
             {
                 await WriteAsync(context, EndpointJson.BadRequest("unsupported_parameter",
-                    "Streaming is not yet implemented for laplace-code-001; the code lane will not silently fall through to prose streaming."));
+                    "Streaming is not supported on the verified toolchain code middleware."));
                 return;
             }
 
             if (HasUnsupportedCodeChatControl(root, out var unsupported))
             {
                 await WriteAsync(context, EndpointJson.BadRequest("unsupported_parameter",
-                    $"Field '{unsupported}' is not implemented by laplace-code-001 and will not be ignored."));
+                    $"Field '{unsupported}' is not implemented by the verified code lane."));
                 return;
             }
 
@@ -66,7 +67,7 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 || messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
             {
                 await WriteAsync(context, EndpointJson.BadRequest("invalid_request_error",
-                    "Field 'messages' must contain exactly one non-empty user message for laplace-code-001."));
+                    "Field 'messages' must contain at least one non-empty user message."));
                 return;
             }
 
@@ -90,7 +91,7 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 if (!string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
                 {
                     await WriteAsync(context, EndpointJson.BadRequest("unsupported_role",
-                        $"Role '{role}' is not yet implemented by laplace-code-001; role history is never silently discarded."));
+                        $"Role '{role}' is not supported when invoking code toolchain verification directly; pass plain messages without code_language for multi-turn coding.firmware chat."));
                     return;
                 }
                 if (string.IsNullOrWhiteSpace(content))
@@ -102,7 +103,7 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
             if (userMessages != 1 || string.IsNullOrWhiteSpace(prompt))
             {
                 await WriteAsync(context, EndpointJson.BadRequest("invalid_request_error",
-                    "laplace-code-001 currently requires exactly one non-empty user message; multi-message history is rejected rather than ignored."));
+                    "Verified code lane requires one non-empty user message."));
                 return;
             }
 
@@ -115,18 +116,32 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 return;
             }
 
-            // The forward program answers under its firmware: a request cannot set its emission budget or sampling.
-            foreach (var governed in new[] { "max_tokens", "max_completion_tokens", "window", "top_k", "temperature" })
-                if (root.TryGetProperty(governed, out _))
-                {
-                    await WriteAsync(context, EndpointJson.BadRequest("unsupported_parameter",
-                        "The forward program answers under its firmware; the request cannot set its emission budget or sampling."));
-                    return;
-                }
             int maxAttempts = IntOrDefault(root, "max_attempts", 4);
             if (maxAttempts is < 1 or > 8)
             {
                 await WriteAsync(context, EndpointJson.BadRequest("invalid_request_error", "max_attempts 1..8 is required."));
+                return;
+            }
+
+            var tenants = context.RequestServices.GetRequiredService<ITenantResolver>();
+            var tenant = await tenants.ResolveAsync(context, context.RequestAborted);
+            var scopeStr = root.TryGetProperty("scope", out var scEl) && scEl.ValueKind == JsonValueKind.String ? scEl.GetString() : null;
+            var auth = AuthorityScopePolicy.Resolve(context.Request, tenant,
+                (uint)(LaplaceNative.LP_CAP_READ | LaplaceNative.LP_CAP_ATTEST), requestWrite: true, explicitScope: scopeStr);
+            if (!auth.Allowed)
+            {
+                await WriteAsync(context, Results.Json(
+                    new ErrorResponse(new ErrorBody("authorization_error", auth.ErrorCode!, auth.ErrorMessage!)),
+                    statusCode: auth.StatusCode));
+                return;
+            }
+
+            var envName = root.TryGetProperty("envelope", out var envEl) && envEl.ValueKind == JsonValueKind.String ? envEl.GetString() : null;
+            var maxTokens = root.TryGetProperty("max_tokens", out var mtEl) && mtEl.TryGetInt32(out var mtVal) ? mtVal : (int?)null;
+            var envRes = EnvelopeBudgetPolicy.Resolve(context.Request, envName, openaiMaxTokens: maxTokens);
+            if (!envRes.Valid)
+            {
+                await WriteAsync(context, EndpointJson.BadRequest(envRes.ErrorCode!, envRes.ErrorMessage!));
                 return;
             }
 
@@ -145,8 +160,21 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
             if (gate.Quote is not null)
                 await billing.MarkConsumedAndRecordAsync(gate.Quote, context.RequestAborted);
 
-            var result = await new CodePlayerService().GenerateAsync(
-                prompt, modality, maxAttempts, context.RequestAborted);
+            var player = context.RequestServices.GetRequiredService<CodePlayerService>();
+            var codePath = root.TryGetProperty("code_path", out var cpEl) && cpEl.ValueKind == JsonValueKind.String ? cpEl.GetString() : null;
+            var codeText = root.TryGetProperty("code_text", out var ctEl) && ctEl.ValueKind == JsonValueKind.String ? ctEl.GetString() : null;
+            var verifyCmd = root.TryGetProperty("verify_cmd", out var vcEl) && vcEl.ValueKind == JsonValueKind.String ? vcEl.GetString() : null;
+
+            var result = await player.GenerateAsync(
+                prompt, modality, maxAttempts, context.RequestAborted,
+                authority: auth.Scope,
+                envelope: envRes.Envelope,
+                envelopePreset: envRes.PresetName,
+                codePath: codePath,
+                codeText: codeText,
+                verifyCmd: verifyCmd,
+                user: tenant.TenantId,
+                session: $"code-{Guid.NewGuid():N}");
 
             if (!result.Verified)
             {
@@ -158,43 +186,41 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                     "invalid_request_error",
                     result.FailureKind ?? "code_verification_failed",
                     diagnostic));
-                int status = result.FailureKind is "toolchain_unavailable"
+                int status = result.FailureKind is "toolchain_unavailable" or "engine_unavailable"
                     ? StatusCodes.Status503ServiceUnavailable
                     : StatusCodes.Status422UnprocessableEntity;
                 await WriteAsync(context, Results.Json(error, statusCode: status));
                 return;
             }
 
-            var billingReceipt = gate.Quote is null ? null : new BillingReceipt(
-                gate.Quote.QuoteId, gate.Quote.AmountCents, gate.Quote.Currency,
-                gate.Quote.Tenant, "chat.completions");
+            IReadOnlyList<BillingRoyaltyRecord>? settledRoyalties = null;
+            if (gate.Quote is not null && result.AbiResult?.Shares is { Count: > 0 } shares)
+                settledRoyalties = await billing.RecordRoyaltiesAsync(gate.Quote, BillingOrchestrator.FromWitnessShares(shares), context.RequestAborted);
+
+            var billingReceipt = gate.Quote is null ? null : QuoteGate.MakeReceipt(gate.Quote, settledRoyalties);
             var response = new ChatCompletionResponse(
                 Id: $"chatcmpl-{Guid.NewGuid():N}",
                 Object: "chat.completion",
                 Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                Model: ModelCatalog.Code,
+                Model: modelElement.GetString()!,
                 Choices: [new ChatChoice(0,
                     new ChatResponseMessage("assistant", result.Code), "stop")],
                 Billing: billingReceipt,
                 Metadata: new ChatMetadata(
                     ReplyRows: 1,
                     Laplace: new LaplaceChatMetadata(
-                        [new ProvenanceLine(result.Code, null, null)])));
+                        [new ProvenanceLine(result.Code, null, null)],
+                        ForwardProofHelper.FromAbi(result.AbiResult, $"code-{modality}", tenant.TenantId, envRes.PresetName, envRes.EstimatedUs))));
             await WriteAsync(context, Results.Json(response));
         }
     }
 
     private static bool HasUnsupportedCodeChatControl(JsonElement root, out string field)
     {
-        foreach (var name in new[]
-        {
-            "top_p", "topic_boost", "stop", "web_search", "web_search_results",
-            "shape", "bands", "elaborate", "language", "scope", "session"
-        })
+        foreach (var name in new[] { "top_p", "topic_boost", "web_search", "web_search_results", "shape", "bands", "elaborate" })
         {
             if (!root.TryGetProperty(name, out var value)) continue;
-            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) continue;
-            if (value.ValueKind == JsonValueKind.False) continue;
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.False) continue;
             if (value.ValueKind == JsonValueKind.Array && value.GetArrayLength() == 0) continue;
             field = name;
             return true;

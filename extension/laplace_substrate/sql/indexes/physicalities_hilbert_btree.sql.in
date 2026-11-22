@@ -1,6 +1,0 @@
--- hilbert_index equality lookups. Equal content shape composes to one
--- coordinate and so one Hilbert key; structural.anagrams_of() joins on
--- hilbert_index equality to find every row sharing a word's key. The PK is
--- (id), so this is the only index covering hilbert_index.
-CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree
-    ON physicalities USING btree (hilbert_index);

@@ -1,10 +1,8 @@
 using global::Npgsql;
 using Laplace.Chess.Service;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
-using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;

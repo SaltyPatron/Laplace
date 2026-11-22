@@ -1,8 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Laplace.Decomposers.Composition;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -16,13 +15,6 @@ internal static class CliRuntime
     public static IServiceProvider Services =>
         _services ?? throw new InvalidOperationException("CliRuntime.Services not initialized");
 
-    public static ISeedDecomposerResolver Decomposers =>
-        Services.GetRequiredService<ISeedDecomposerResolver>();
-
-    /// <summary>
-    /// The process-wide CLI logger factory. ConsoleAndFile opens a file sink, so there is
-    /// exactly one; lazy so commands that never log open nothing.
-    /// </summary>
     private static readonly Lazy<ILoggerFactory> _loggerFactory =
         new(() => Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli"), isThreadSafe: true);
 
@@ -32,14 +24,11 @@ internal static class CliRuntime
     {
         if (_services is not null) return;
         var sc = new ServiceCollection();
-        sc.AddLaplaceSeedIngest();
+        sc.AddSingleton<ILoggerFactory>(_ => LoggerFactory);
+        sc.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
         _services = sc.BuildServiceProvider();
     }
 
-    /// <summary>
-    /// Connection string under the shared Ingest access policy: long COPY and fold
-    /// statements are expected, so the timeout is unbounded and auto-prepare is off.
-    /// </summary>
     public static string ConnString
         => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 

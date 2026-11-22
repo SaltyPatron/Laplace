@@ -13,7 +13,13 @@
       "finish_reason": "stop"
     }
   ],
-  "billing": null,
+  "billing": {
+    "quote_id": "<quote_id>",
+    "amount_cents": 3,
+    "currency": "usd",
+    "tenant": "golden-empty-tenant",
+    "service_id": "chat.completions"
+  },
   "metadata": {
     "reply_rows": 0,
     "generated_tokens": 0,
@@ -27,7 +33,6 @@
         "ordinal": 1,
         "turns_before": 0,
         "witnessed": false,
-        "reason": "nothing emitted: nothing to witness",
         "disposition": "unresolved: what follows grounds nothing that is owed",
         "steps": [],
         "trace": "RESOLVE    prompt\nREALIZE    \"\"\n"

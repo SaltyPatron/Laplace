@@ -4,7 +4,7 @@ using System.Text;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;

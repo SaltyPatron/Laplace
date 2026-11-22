@@ -1,5 +1,3 @@
-using System.Reflection;
-using System.Text.RegularExpressions;
 using Laplace.Cli;
 using Xunit;
 
@@ -7,10 +5,6 @@ namespace Laplace.Cli.Tests;
 
 public sealed class IngestRosterParityTests
 {
-    /// <summary>
-    /// Routes that dispatch but are absent from the seed-cadence manifest; every such
-    /// route must be listed here explicitly.
-    /// </summary>
     private static readonly HashSet<string> OperationalOnlyRoutes =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -28,22 +22,16 @@ public sealed class IngestRosterParityTests
             "track-audio",
         };
 
-    // Upper bound on OperationalOnlyRoutes, so adding a route outside the manifest is an
-    // explicit edit here. These routes read admitted structure or an operator-supplied path
-    // (derivation lanes over recorded games, media format lanes, agents, code/tabular/parquet,
-    // model-corroborate) rather than a corpus the seed cadence orders.
     private const int OperationalOnlyRouteCeiling = 25;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
     {
-        var manifestRoutes = Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder
+        var manifestRoutes = NativeRecipeCatalog.SourceOrder
             .ToHashSet(StringComparer.Ordinal);
         var runtimeRoutes = IngestDispatchTable.RegisteredKeys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase).ToList();
-        // These existing path/operator commands were previously mixed into the
-        // cadence JSON. They do not declare corpus order or another recipe estate.
         string[] pathCommands = ["document", "repo", "stack", "tiny-codes", "safetensors"];
         var unclassified = runtimeRoutes
             .Except(manifestRoutes, StringComparer.OrdinalIgnoreCase)
@@ -73,7 +61,7 @@ public sealed class IngestRosterParityTests
     public void CanonicalRecipeSourcesRetainTheirDeclaredRoots()
     {
         CliRuntime.InitializeServices();
-        var orderPath = Path.Combine(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot, "order");
+        var orderPath = Path.Combine(NativeRecipeCatalog.RecipesRoot, "order");
         Assert.True(File.Exists(orderPath), $"Missing {orderPath}");
 
         var sources = File.ReadLines(orderPath)
@@ -82,10 +70,9 @@ public sealed class IngestRosterParityTests
             .Select(static l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0])
             .ToList();
 
-        Assert.Equal(sources, Laplace.Decomposers.Abstractions.EtlManifest.ReadSourceOrder(
-            Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot));
-        Assert.Equal(Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder, IngestDispatchTable.CanonicalSourceKeys);
-        var directories = Directory.EnumerateDirectories(Laplace.Decomposers.Abstractions.EtlManifest.RecipesRoot)
+        Assert.Equal(sources, NativeRecipeCatalog.ReadSourceOrder(NativeRecipeCatalog.RecipesRoot));
+        Assert.Equal(NativeRecipeCatalog.SourceOrder, IngestDispatchTable.CanonicalSourceKeys);
+        var directories = Directory.EnumerateDirectories(NativeRecipeCatalog.RecipesRoot)
             .Where(directory => File.Exists(Path.Combine(directory, "source")))
             .Select(Path.GetFileName).OrderBy(static name => name, StringComparer.Ordinal).ToArray();
         Assert.Equal(directories, IngestDispatchTable.CanonicalSourceKeys.OrderBy(static name => name, StringComparer.Ordinal));
@@ -96,8 +83,6 @@ public sealed class IngestRosterParityTests
             Assert.NotEmpty(roots);
             Assert.All(roots, root => Assert.True(Path.IsPathFullyQualified(root), $"Source '{source}' has a relative root: {root}"));
         }
-        // A same-format route is not evidence that another corpus is implemented.
-        // Native recipe dispatch acceptance is checked separately from this path contract.
     }
 
     [Theory]
@@ -118,18 +103,5 @@ public sealed class IngestRosterParityTests
     public void ExistingSourceAliasesSelectCanonicalNativeRecipes(string alias, string expected)
     {
         Assert.Equal(expected, IngestDispatchTable.CanonicalSourceName(alias));
-        Assert.Contains(expected, Laplace.Decomposers.Abstractions.EtlManifest.SourceOrder);
-        Assert.DoesNotContain(alias, IngestDispatchTable.RegisteredKeys, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string FindRepoRoot()
-    {
-        var stamped = typeof(IngestRosterParityTests).Assembly
-            .GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(a => a.Key == "LaplaceRepoRoot")?.Value;
-        if (stamped is not null && File.Exists(
-                Path.Combine(stamped, "scripts", "ingest-source.sh")))
-            return stamped;
-        throw new InvalidOperationException("Repository root metadata is missing");
     }
 }

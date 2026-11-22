@@ -13,7 +13,7 @@ export interface StubOptions {
  */
 export async function stubApi(page: Page, options: StubOptions = {}) {
   await page.route(
-    (url) => url.pathname.startsWith('/v1/') || url.pathname === '/health',
+    (url) => url.pathname.startsWith('/v1/') || url.pathname.startsWith('/modular/') || url.pathname === '/health',
     (route) => route.fulfill({ status: 404, json: { error: { message: 'Not served by this test fixture' } } }),
   );
   await page.route('**/v1/auth/me', (route) => route.fulfill({

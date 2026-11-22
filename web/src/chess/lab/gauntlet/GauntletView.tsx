@@ -34,6 +34,7 @@ export function GauntletView() {
   const [metrics, setMetrics] = useState<Record<string, number>>({});
   const [boards, setBoards] = useState<Record<number, LabBoardState>>({});
   const [lastGame, setLastGame] = useState<number | null>(null);
+  const [sseTelemetry, setSseTelemetry] = useState<{ count: number; lastAt: string | null }>({ count: 0, lastAt: null });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -85,6 +86,7 @@ export function GauntletView() {
       laplaceProfile: setup.laplaceProfile,
       stockfishProfile: setup.stockfishProfile,
       conductor: setup.conductor,
+      ...(setup.variant !== 'standard' ? { variant: setup.variant } : {}),
       rounds: setup.rounds || '2',
       depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
       st: setup.clock === 'seconds' ? setup.st || '1' : '0',
@@ -111,6 +113,7 @@ export function GauntletView() {
     setMetrics({});
     setBoards({});
     setLastGame(null);
+    setSseTelemetry({ count: 0, lastAt: null });
     streamRef.current?.abort();
     const ac = new AbortController();
     streamRef.current = ac;
@@ -123,6 +126,7 @@ export function GauntletView() {
     })();
 
     function apply(evt: LabEvent) {
+      setSseTelemetry((prev) => ({ count: prev.count + 1, lastAt: evt.at ?? prev.lastAt ?? new Date().toISOString() }));
       if (evt.fen !== undefined && evt.game !== undefined) {
         const board: LabBoardState = {
           game: evt.game, ply: evt.ply ?? 0, uci: evt.uci ?? '',
@@ -180,6 +184,7 @@ export function GauntletView() {
         laplaceProfile: setup.laplaceProfile,
         stockfishProfile: setup.stockfishProfile,
         conductor: setup.conductor,
+        ...(setup.variant !== 'standard' ? { variant: setup.variant } : {}),
         rounds: setup.rounds,
         elo: setup.elo || '2000',
         limitStrength: String(setup.limitStrength),
@@ -339,6 +344,14 @@ export function GauntletView() {
           lastGame={lastGame}
         />
       </div>
+
+      {activeId && (
+        <Muted>
+          SSE telemetry: {sseTelemetry.count.toLocaleString()} events received
+          {sseTelemetry.lastAt ? ` · last event ${sseTelemetry.lastAt}` : ''}
+          {setup.stockfishSyzygyPath ? ` · Syzygy path ${setup.stockfishSyzygyPath}` : ''}
+        </Muted>
+      )}
 
       <Panel title="Transcript" className={styles.terminalPanel} fill>
         <Terminal jobId={activeId} command={preview?.commandLine ?? null} className={styles.terminal} />

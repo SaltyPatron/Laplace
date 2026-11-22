@@ -1,6 +1,6 @@
 using System.Linq;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Spectre.Console.Cli;

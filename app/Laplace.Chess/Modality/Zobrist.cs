@@ -32,7 +32,7 @@ public static class Zobrist
     {
         if (!b.Rules.IsStandard)
         {
-            var id = ChessPositionIdentity.PositionId(b);
+            var id = ChessEngineIdentity.PositionId(b);
             return id.Lo ^ id.Hi;
         }
         ulong h = 0;

@@ -29,7 +29,7 @@ public sealed class ChessPositionSurfaceIdentityTests
     {
         var board = Board.FromFen(
             "nqrkbbrn/pppppppp/8/8/8/8/PPPPPPPP/NQRKBBRN w GCgc - 0 1");
-        Assert.Equal(0x0F, ChessPositionIdentity.CastlingDestinationMask(board));
+        Assert.Equal(0x0F, (byte)board.Castle & 0x0F);
     }
 
     private static void AssertEqual(ChessState state)
@@ -37,7 +37,7 @@ public sealed class ChessPositionSurfaceIdentityTests
         var board = state.Board;
         string surface = PositionContent.Surface(board, Ep(board));
         Assert.True(PositionContent.TryBoardFromSurface(surface, out var parsed));
-        Assert.Equal(ChessPositionIdentity.PositionId(parsed), ChessPositionIdentity.PositionId(board));
+        Assert.Equal(ChessEngineIdentity.PositionId(parsed), ChessEngineIdentity.PositionId(board));
     }
 
     private static string Ep(Board b)

@@ -17,7 +17,10 @@ public sealed unsafe class NativeScalarFloorParityTests
     [Fact]
     public void EntireMappingMatchesTheIndependentNativeLibraryByteForByte()
     {
-        var library = NativeLibrary.Load(Environment.GetEnvironmentVariable("LAPLACE_NATIVE_TEST_LIBRARY") ?? "laplace");
+        var defaultLib = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "laplace.dll" : "liblaplace.so");
+        var library = NativeLibrary.Load(
+            Environment.GetEnvironmentVariable("LAPLACE_NATIVE_TEST_LIBRARY")
+            ?? (File.Exists(defaultLib) ? defaultLib : "laplace"));
         try
         {
             var map = Marshal.GetDelegateForFunctionPointer<Map>(NativeLibrary.GetExport(library, "lp_tier0_map"));
@@ -66,31 +69,5 @@ public sealed unsafe class NativeScalarFloorParityTests
             Assert.Equal(atom.Hash, CodepointPerfcache.LookupScalar(0x10ffff).Hash);
         }
         finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void UnicodeSnapshotCopyUsesTheNativeRecordSizeAndHasNoSeedingExport()
-    {
-        string directory = Path.Combine(Path.GetTempPath(), "native-snapshot-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        string xml = Path.Combine(directory, "ucd.xml"), ducet = Path.Combine(directory, "allkeys.txt");
-        File.WriteAllText(xml, "<ucd><repertoire><char cp=\"0041\"/></repertoire></ucd>");
-        File.WriteAllText(ducet, "0041 ; [.1.2.3]\n");
-        string file = OperatingSystem.IsWindows() ? "laplace_core.dll" : "liblaplace_core.so";
-        nint library = NativeLibrary.Load(Path.Combine(AppContext.BaseDirectory, file));
-        try
-        {
-            using var snapshot = UnicodeSeed.OpenSnapshot(xml, ducet);
-            Assert.Equal(1_114_112, snapshot.Count);
-            Assert.Equal(CodepointPerfcache.Records[0].Hash, snapshot.RecordAt(0).Hash);
-            var copy = Marshal.GetDelegateForFunctionPointer<CopyRecord>(
-                NativeLibrary.GetExport(library, "laplace_unicode_seed_snapshot_copy_record"));
-            Span<byte> guarded = stackalloc byte[80]; guarded.Fill(0xa5);
-            fixed (byte* output = guarded) Assert.Equal(0, copy(snapshot.DangerousGetHandle(), 0, output));
-            Assert.Equal(CodepointPerfcache.Records[0].Hash, MemoryMarshal.Read<CodepointRecord>(guarded).Hash);
-            Assert.All(guarded[64..].ToArray(), value => Assert.Equal((byte)0xa5, value));
-            Assert.False(NativeLibrary.TryGetExport(library, "laplace_unicode_seed_snapshot_stage", out _));
-        }
-        finally { NativeLibrary.Free(library); Directory.Delete(directory, recursive: true); }
     }
 }

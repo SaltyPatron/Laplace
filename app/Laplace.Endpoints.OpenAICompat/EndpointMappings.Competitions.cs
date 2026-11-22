@@ -1,7 +1,7 @@
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Endpoints.OpenAICompat.Competitions;
-using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Data;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;

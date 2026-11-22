@@ -52,15 +52,6 @@ public sealed class ChessEngineIdentityTests
         Assert.Equal(EngineStart, EngineHeldHex(ChessEngineIdentity.PositionId(start)));
     }
 
-    [Fact]
-    public void TheMonorepoLegacyId_DiffersFromTheEnginesForTheSameBoard()
-    {
-        // The id the domain-tagged atoms compose: this is the divergence the Engine id replaces.
-        var start = Board.FromFen(ChessModality.StartFen);
-        lock (LaplaceCoreGate.Native)
-            Assert.NotEqual(EngineStart, EngineHeldHex(ChessPositionIdentity.PositionId(start)));
-    }
-
     [Theory]
     [InlineData("e4", "b17034a030605a7b729131993c5ca42d")]
     [InlineData("e4 e5 Nf3 Nc6", "2559928d51a3fa236734fbb1a71ac18b")]
@@ -127,9 +118,48 @@ public sealed class ChessEngineIdentityTests
     }
 
     [Fact]
-    public void RuleSetsTheEngineDoesNotRead_HaveNoEngineIdentity()
+    public void CrazyhousePosition_ComposesHandInQrbnpOrderAndPromotedSquares()
     {
-        var board = Board.FromFen(ChessModality.StartFen, ChessVariants.Crazyhouse);
+        var fen = "r4qk1/ppp1b2p/3pN1pP/3P1b2/8/3P4/PP3PPP/R1Bb1RK1[RPqnnnp] b - - 1 20";
+        var board = Board.FromFen(fen, ChessVariants.Crazyhouse);
+        Assert.True(ChessEngineIdentity.TryPositionId(board, out var actual));
+
+        var withoutHand = Board.FromFen("r4qk1/ppp1b2p/3pN1pP/3P1b2/8/3P4/PP3PPP/R1Bb1RK1 b - - 1 20");
+        Assert.NotEqual(ChessEngineIdentity.PositionId(withoutHand), actual);
+
+        var promotedBoard = Board.FromFen("r1b2rk1/pp3p2/5ppb/4p3/2n5/2PBP1P1/PP1rN3/1K5q~[QQBNPrnppp] w - - 0 33", ChessVariants.Crazyhouse);
+        var unpromotedBoard = Board.FromFen("r1b2rk1/pp3p2/5ppb/4p3/2n5/2PBP1P1/PP1rN3/1K5q[QQBNPrnppp] w - - 0 33", ChessVariants.Crazyhouse);
+        Assert.NotEqual(ChessEngineIdentity.PositionId(unpromotedBoard), ChessEngineIdentity.PositionId(promotedBoard));
+    }
+
+    [Fact]
+    public void CrazyhouseDropMove_UsesAtSignComposition()
+    {
+        var board = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[P] w KQkq - 0 1", ChessVariants.Crazyhouse);
+        var drop = MoveGen.Legal(board).First(m => m.IsDrop && Board.TypeOf(m.Promotion) == Piece.WPawn && m.To == Board.Sq(4, 3));
+        var expected = ChessEngineIdentity.Compose(new[]
+        {
+            ChessEngineIdentity.Codepoint('P'),
+            ChessEngineIdentity.Codepoint('@'),
+            ChessEngineIdentity.Square(4, 3),
+        });
+        Assert.Equal(expected, ChessEngineIdentity.MoveId(board, drop));
+    }
+
+    [Fact]
+    public void ThreeCheckPosition_ComposesChecksGiven()
+    {
+        var a = Board.FromFen("r5k1/ppp2rpp/8/4p1B1/6n1/2Nq4/PP1Q2P1/nK5R w - - 2+0 0 19", ChessVariants.ThreeCheck);
+        var b = Board.FromFen("r5k1/ppp2rpp/8/4p1B1/6n1/2Nq4/PP1Q2P1/nK5R w - - +1+3 0 19", ChessVariants.ThreeCheck);
+        var c = Board.FromFen("r5k1/ppp2rpp/8/4p1B1/6n1/2Nq4/PP1Q2P1/nK5R w - - 3+3 0 19", ChessVariants.ThreeCheck);
+        Assert.Equal(ChessEngineIdentity.PositionId(a), ChessEngineIdentity.PositionId(b));
+        Assert.NotEqual(ChessEngineIdentity.PositionId(a), ChessEngineIdentity.PositionId(c));
+    }
+
+    [Fact]
+    public void RuleSetsBeyondEightByEight_HaveNoEngineIdentity()
+    {
+        var board = Board.FromFen(ChessModality.StartFen, ChessVariants.Capablanca);
         Assert.False(ChessEngineIdentity.TryPositionId(board, out _));
     }
 }

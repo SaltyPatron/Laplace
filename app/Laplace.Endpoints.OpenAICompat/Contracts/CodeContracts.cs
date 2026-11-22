@@ -10,7 +10,13 @@ public sealed record CodeCompletionRequest(
     [property: JsonPropertyName("window")] int? Window = null,
     [property: JsonPropertyName("temperature")] double? Temperature = null,
     [property: JsonPropertyName("top_k")] int? TopK = null,
-    [property: JsonPropertyName("max_attempts")] int? MaxAttempts = null);
+    [property: JsonPropertyName("max_attempts")] int? MaxAttempts = null,
+    [property: JsonPropertyName("code_path")] string? CodePath = null,
+    [property: JsonPropertyName("code_text")] string? CodeText = null,
+    [property: JsonPropertyName("verify_cmd")] string? VerifyCmd = null,
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null,
+    [property: JsonPropertyName("envelope")] string? Envelope = null);
 
 public sealed record CodeAttemptReceipt(
     [property: JsonPropertyName("attempt")] int Attempt,
@@ -34,4 +40,7 @@ public sealed record CodeCompletionResponse(
     [property: JsonPropertyName("verified")] bool Verified,
     [property: JsonPropertyName("failure_kind"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureKind,
     [property: JsonPropertyName("attempts")] IReadOnlyList<CodeAttemptReceipt> Attempts,
-    [property: JsonPropertyName("billing")] BillingReceipt? Billing);
+    [property: JsonPropertyName("billing")] BillingReceipt? Billing,
+    [property: JsonPropertyName("ooda"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OodaProofReceipt? Ooda = null,
+    [property: JsonPropertyName("work"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorkReceipt? Work = null,
+    [property: JsonPropertyName("witness_shares"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WitnessShareReceipt>? WitnessShares = null);

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Laplace.Api.Contracts;
-using Laplace.Decomposers.Abstractions;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
 
@@ -121,10 +120,10 @@ internal static partial class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            Laplace.Endpoints.Mcp.WorkspaceCodeIndex.TraceResult queryTrace;
+            GeometricTextScorer.Trace queryTrace;
             try
             {
-                queryTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(payload.Query);
+                queryTrace = GeometricTextScorer.ComputeTrace(payload.Query);
             }
             catch (InvalidOperationException ex)
             {
@@ -137,8 +136,8 @@ internal static partial class InferenceEndpoints
             for (var i = 0; i < docs.Count; i++)
             {
                 var docText = docs[i];
-                var docTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(docText);
-                var s = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ScoreCandidate(queryTrace, docTrace, payload.Query, docText, semanticPeers);
+                var docTrace = GeometricTextScorer.ComputeTrace(docText);
+                var s = GeometricTextScorer.ScoreCandidate(queryTrace, docTrace, semanticPeers);
 
                 ranked.Add(new RerankResultItem(
                     Index: i,
@@ -150,8 +149,8 @@ internal static partial class InferenceEndpoints
                         CentroidDistance: Math.Round(s.CentroidDistance, 6),
                         WordOverlap: Math.Round(s.WordOverlap, 6),
                         SharedWords: s.SharedWords,
-                        QueryWords: queryTrace.WordIds.Count,
-                        DocumentWords: docTrace.WordIds.Count)));
+                        QueryWords: queryTrace.WordIds.Length,
+                        DocumentWords: docTrace.WordIds.Length)));
             }
 
             ranked.Sort(static (a, b) =>
@@ -194,10 +193,10 @@ internal static partial class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            Laplace.Endpoints.Mcp.WorkspaceCodeIndex.TraceResult queryTrace;
+            GeometricTextScorer.Trace queryTrace;
             try
             {
-                queryTrace = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.ComputeTrace(payload.Query);
+                queryTrace = GeometricTextScorer.ComputeTrace(payload.Query);
             }
             catch (InvalidOperationException ex)
             {
@@ -206,23 +205,40 @@ internal static partial class InferenceEndpoints
 
             var limit = Math.Clamp(payload.Limit ?? 20, 1, 200);
             var offset = Math.Max(0, payload.Offset ?? 0);
+            var symbols = await substrate.SearchCodeSymbolsAsync(payload.Query, payload.Path, limit, offset, ct);
             var semanticPeers = await substrate.ResolveSemanticPeersAsync(queryTrace.WordIds, ct);
-            var rows = Laplace.Endpoints.Mcp.WorkspaceCodeIndex.Search(
-                payload.Query,
-                payload.Path,
-                limit,
-                offset,
-                payload.Reindex,
-                out var indexedChunks,
-                out var indexedFiles,
-                semanticPeers);
+
+            var rows = symbols.Select(sym =>
+            {
+                var docTrace = GeometricTextScorer.ComputeTrace($"{sym.Kind} {sym.Name}\n{sym.Snippet}");
+                var score = GeometricTextScorer.ScoreCandidate(
+                    queryTrace, docTrace, semanticPeers);
+                return new
+                {
+                    file_id = sym.FileIdHex,
+                    path = sym.FilePath,
+                    kind = sym.Kind,
+                    name = sym.Name,
+                    ordinal = sym.Ordinal,
+                    language = sym.Language,
+                    snippet = sym.Snippet,
+                    relevance_score = Math.Round(score.RelevanceScore, 6),
+                    frechet_distance = Math.Round(score.FrechetDistance, 6),
+                    centroid_distance = Math.Round(score.CentroidDistance, 6),
+                    word_overlap = Math.Round(score.WordOverlap, 6),
+                    shared_words = score.SharedWords,
+                };
+            })
+            .OrderByDescending(r => r.relevance_score)
+            .ThenBy(r => r.path, StringComparer.Ordinal)
+            .ToArray();
 
             return Results.Json(new
             {
                 @object = "list",
                 query_entity_id = queryTrace.RootIdHex,
-                indexed_files = indexedFiles,
-                indexed_chunks = indexedChunks,
+                indexed_files = rows.Select(r => r.file_id).Distinct(StringComparer.Ordinal).Count(),
+                indexed_chunks = rows.Length,
                 rows,
             });
         })
@@ -245,11 +261,12 @@ internal static partial class InferenceEndpoints
     internal readonly record struct TurnScope(
         string Tenant, string Participant, Guid? UserId, string SessionKey);
 
-    private static async ValueTask<(TurnScope Scope, IResult? Error)> ResolveTurnScopeAsync(
-        HttpRequest request, ITenantResolver tenantResolver,
-        string? bodySessionKey, string? userKey, CancellationToken ct)
+    private static (TurnScope Scope, IResult? Error) ResolveTurnScope(
+        TenantContext tenantContext,
+        HttpRequest request,
+        string? bodySessionKey,
+        string? userKey)
     {
-        var tenantContext = await tenantResolver.ResolveAsync(request.HttpContext, ct);
         var tenant = tenantContext.TenantId;
         if (!ConversationContent.IsValidIdentifier(tenant))
             return (default, EndpointJson.BadRequest("invalid_tenant",
@@ -334,20 +351,8 @@ internal static partial class InferenceEndpoints
             ? EndpointJson.ServiceUnavailable("turn_unavailable", "No turn can run here: " + why)
             : null;
 
-    private static ForwardPassProof BuildForwardProof(NativeTurnReceipt turn, string sessionKey)
-        => new(
-            Session: sessionKey,
-            Participant: turn.Participant,
-            PromptId: turn.PromptId,
-            ResponseId: turn.ResponseId,
-            TurnId: turn.TurnId,
-            Ordinal: turn.Ordinal,
-            TurnsBefore: turn.TurnsBefore,
-            Witnessed: turn.Witnessed,
-            Reason: turn.Reason,
-            Disposition: turn.Disposition ?? "",
-            Steps: turn.Steps.Select(Step).ToArray(),
-            Trace: turn.Trace);
+    private static ForwardPassProof BuildForwardProof(NativeTurnReceipt turn, string sessionKey) =>
+        ForwardProofHelper.Build(turn, sessionKey);
 
     private static ChatPerformance BuildPerformance(
         string output, Stopwatch totalClock, double? firstResultMs, int? generatedTokens = null)

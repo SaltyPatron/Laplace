@@ -11,71 +11,65 @@
 -- Reconcile missing object privileges only: repeating GRANT ON ALL TABLES locks
 -- already-correct ingest tables and makes application activation wait on ingest.
 
--- 1. laplace_app reads and writes schema laplace; laplace_readonly reads it.
+-- 1. laplace_app reads and writes canonical public substrate tables (and ops); laplace_readonly reads them.
 DO $$
 DECLARE
     spec record;
+    ns text;
     required text;
     objects text;
-    obj_name text;
+    canonical_tables oid[];
 BEGIN
-    IF to_regnamespace('laplace') IS NULL THEN
-        RETURN;
-    END IF;
+    SELECT ARRAY(
+        SELECT c.oid
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('entity', 'physicality', 'attestation', 'consensus')
+          AND c.relkind IN ('r', 'p')
+        UNION
+        SELECT pt.relid
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN LATERAL pg_partition_tree(c.oid) pt
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('entity', 'physicality', 'attestation', 'consensus')
+          AND c.relkind = 'p'
+    ) INTO canonical_tables;
+
     FOR spec IN
         SELECT * FROM (VALUES
-            ('laplace_app', ARRAY['SELECT','INSERT','UPDATE','DELETE']),
-            ('laplace_readonly', ARRAY['SELECT'])
-        ) AS roles(rolname, privileges)
+            ('laplace_app', true),
+            ('laplace_readonly', false)
+        ) AS roles(rolname, can_write)
         WHERE EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = roles.rolname)
     LOOP
-        IF NOT has_schema_privilege(spec.rolname, 'laplace', 'USAGE') THEN
-            EXECUTE format('GRANT USAGE ON SCHEMA laplace TO %I', spec.rolname);
-        END IF;
-        FOREACH required IN ARRAY spec.privileges LOOP
-            SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
-            INTO objects FROM pg_class c
-            WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind IN ('r','p','v','m','f')
-              AND NOT COALESCE(has_table_privilege(spec.rolname, c.oid, required), true);
-            IF objects IS NOT NULL THEN
-                BEGIN
+        FOREACH ns IN ARRAY ARRAY['public', 'ops'] LOOP
+            IF to_regnamespace(ns) IS NULL THEN
+                CONTINUE;
+            END IF;
+            IF NOT has_schema_privilege(spec.rolname, ns, 'USAGE') THEN
+                EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', ns, spec.rolname);
+            END IF;
+            FOREACH required IN ARRAY CASE WHEN spec.can_write THEN ARRAY['SELECT','INSERT','UPDATE','DELETE'] ELSE ARRAY['SELECT'] END LOOP
+                SELECT string_agg(format('%I.%I', ns, c.relname), ', ' ORDER BY c.oid)
+                INTO objects FROM pg_class c
+                WHERE c.relnamespace = ns::regnamespace AND c.relkind IN ('r','p','v','m','f')
+                  AND (required = 'SELECT' OR ns <> 'public' OR c.oid = ANY(canonical_tables))
+                  AND NOT COALESCE(has_table_privilege(spec.rolname, c.oid, required), true);
+                IF objects IS NOT NULL THEN
                     EXECUTE format('GRANT %s ON TABLE %s TO %I', required, objects, spec.rolname);
-                EXCEPTION WHEN undefined_table THEN
-                    FOR obj_name IN
-                        SELECT format('%I.%I', 'laplace', c.relname)
-                        FROM pg_class c
-                        WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind IN ('r','p','v','m','f')
-                          AND NOT COALESCE(has_table_privilege(spec.rolname, c.oid, required), true)
-                        ORDER BY c.oid
-                    LOOP
-                        BEGIN
-                            EXECUTE format('GRANT %s ON TABLE %s TO %I', required, obj_name, spec.rolname);
-                        EXCEPTION WHEN undefined_table THEN
-                            NULL;
-                        END;
-                    END LOOP;
-                END;
+                END IF;
+            END LOOP;
+            SELECT string_agg(format('%I.%I(%s)', ns, p.proname,
+                                    pg_get_function_identity_arguments(p.oid)), ', ' ORDER BY p.oid)
+            INTO objects FROM pg_proc p
+            WHERE p.pronamespace = ns::regnamespace AND p.prokind IN ('f','a','w')
+              AND NOT has_function_privilege(spec.rolname, p.oid, 'EXECUTE');
+            IF objects IS NOT NULL THEN
+                EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', objects, spec.rolname);
             END IF;
         END LOOP;
-        SELECT string_agg(format('%I.%I', 'laplace', c.relname), ', ' ORDER BY c.oid)
-        INTO objects FROM pg_class c
-        WHERE c.relnamespace = 'laplace'::regnamespace AND c.relkind = 'S'
-          AND NOT has_sequence_privilege(spec.rolname, c.oid, 'USAGE');
-        IF objects IS NOT NULL THEN
-            EXECUTE format('GRANT USAGE ON SEQUENCE %s TO %I', objects, spec.rolname);
-        END IF;
-        SELECT string_agg(format('%I.%I(%s)', 'laplace', p.proname,
-                                pg_get_function_identity_arguments(p.oid)), ', ' ORDER BY p.oid)
-        INTO objects FROM pg_proc p
-        WHERE p.pronamespace = 'laplace'::regnamespace AND p.prokind IN ('f','a','w')
-          AND NOT has_function_privilege(spec.rolname, p.oid, 'EXECUTE');
-        IF objects IS NOT NULL THEN
-            EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', objects, spec.rolname);
-        END IF;
-        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT %s ON TABLES TO %I',
-            array_to_string(spec.privileges, ','), spec.rolname);
-        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT USAGE ON SEQUENCES TO %I', spec.rolname);
-        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA laplace GRANT EXECUTE ON FUNCTIONS TO %I', spec.rolname);
     END LOOP;
 END $$;
 

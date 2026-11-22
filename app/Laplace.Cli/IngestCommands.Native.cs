@@ -1,182 +1,111 @@
-using Laplace.Decomposers.Abstractions;
+using Laplace.Data;
 using Laplace.Engine.Core;
-using Laplace.Ingestion;
-using Laplace.SubstrateCRUD.Npgsql;
-using Microsoft.Extensions.Logging;
-using System.Diagnostics;
 
 namespace Laplace.Cli;
 
 internal static partial class IngestCommands
 {
-    private static async Task<int?> PrintNativeStatsAsync(global::Npgsql.NpgsqlDataSource data, string? source)
+    public static async Task<int> StatsAsync(string? source)
     {
+        await using var data = LaplaceDataSource.Create(SubstrateAccess.Serving, CliRuntime.ConnString);
         await using var conn = await data.OpenConnectionAsync();
         var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
-        if (!counts.Any(row => row.Metric == "attestations(MEASURED)")) return null;
-        Console.WriteLine("substrate totals (ESTIMATE: storage estimate; MEASURED: retained assertion count):");
+        Console.WriteLine("substrate totals:");
         foreach (var row in counts)
             Console.WriteLine($"  {row.Metric,-32}: {row.Value?.ToString("N0") ?? "Not measured",12}");
         var sources = await NpgsqlSubstrateReads.SourceStatusAsync(data, source, CancellationToken.None);
         if (source is not null && sources.All(row => !row.Known))
-            return CliRuntime.Fail($"No registered source or ingestion receipt matches '{source}'.");
+            return CliRuntime.Fail($"No registered source or witness matches '{source}'.");
         foreach (var row in sources)
-            Console.WriteLine($"  {row.Source}: {row.EvidenceApprox?.ToString("N0") ?? "Not measured"} attestations; ingested={row.Ingested.ToString().ToLowerInvariant()}; last run={row.LastRunStatus ?? "Not recorded"}");
+            Console.WriteLine($"  {row.Source}: {row.EvidenceApprox?.ToString("N0") ?? "Not measured"} attestations; ingested={row.Ingested.ToString().ToLowerInvariant()}");
         return 0;
     }
 
     internal static Task<int> IngestNativeRecipeAsync(string source, IngestCliArgs cli, CancellationToken ct = default)
-        => IngestNativeAsync(source, source, cli, ct);
+        => RunNativeIngestAsync(source, cli, ct);
 
-    /// <summary>
-    /// Files that belong to no corpus of the recipe estate (a code tree, documents, tables): the Engine
-    /// reads each through the recipe its name matches, and each file's trunk is its own witness at the
-    /// class that recipe declares. <paramref name="lane"/> only names the run in its receipts.
-    /// </summary>
     internal static Task<int> IngestNativeFilesAsync(string lane, IngestCliArgs cli, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(cli.Path))
-            return Task.FromResult(CliRuntime.Fail($"usage: laplace-mono ingest {lane} <file-or-directory>"));
+            return Task.FromResult(CliRuntime.Fail($"usage: laplace ingest {lane} <file-or-directory>"));
         if (!File.Exists(cli.Path) && !Directory.Exists(cli.Path))
             return Task.FromResult(CliRuntime.Fail($"ingest {lane}: path not found: {cli.Path}"));
-        return IngestNativeAsync(null, lane, cli, ct);
+        return RunNativeIngestAsync(null, cli, ct);
     }
 
-    private static async Task<int> IngestNativeAsync(string? source, string lane, IngestCliArgs cli, CancellationToken ct)
+    internal static Task<int> IngestSafetensorSnapshotAsync(string modelDir, IngestCliArgs cli, CancellationToken ct = default)
     {
-        if (cli.LangOverride is not null || (source is not null && LanguageFilter.ForSource(source)?.IsActive == true))
-            throw new ArgumentException("Native source ingestion admits the languages declared by its recipe. Remove --langs and ambient language filters, or select a language-scoped recipe.");
+        if (string.IsNullOrEmpty(modelDir))
+            return Task.FromResult(CliRuntime.Fail("usage: laplace ingest safetensors <snapshot-dir>"));
+        if (!Directory.Exists(modelDir) && !File.Exists(modelDir))
+            return Task.FromResult(CliRuntime.Fail($"ingest safetensors: path not found: {modelDir}"));
+        return RunNativeIngestAsync(null, cli with { Path = Path.GetFullPath(modelDir) }, ct);
+    }
+
+    internal static Task<int> CorroborateSafetensorSnapshotsAsync(IngestCliArgs cli)
+        => Task.FromResult(CliRuntime.Fail("Model corroboration runs via native `laplace model` / `laplace ingest`."));
+
+    internal static Task<int> IngestRecipeAsync(IngestCliArgs cli, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(cli.Path))
+            return Task.FromResult(CliRuntime.Fail("usage: laplace ingest recipe <recipe-path>"));
+        if (!File.Exists(cli.Path))
+            return Task.FromResult(CliRuntime.Fail($"ingest recipe: file not found: {cli.Path}"));
+        return RunNativeIngestAsync(null, cli with { Path = Path.GetFullPath(cli.Path) }, ct);
+    }
+
+    internal static Task<int> IngestRepoAsync(IngestCliArgs cli, CancellationToken ct = default)
+    {
+        ValidateVerifiedGitArguments(cli);
+        if (string.IsNullOrWhiteSpace(cli.Path))
+            return Task.FromResult(CliRuntime.Fail("usage: laplace ingest repo <repository-root>"));
+        return IngestNativeFilesAsync("repo", cli, ct);
+    }
+
+    internal static Task<int> IngestParquetAsync(IngestCliArgs cli, CancellationToken ct = default)
+        => IngestNativeFilesAsync("parquet", cli, ct);
+
+    private static Task<int> RunNativeIngestAsync(string? source, IngestCliArgs cli, CancellationToken ct)
+    {
+        if (cli.Langs is not null)
+            throw new ArgumentException("Native source ingestion admits the languages declared by its recipe. Remove --langs or select a language-scoped recipe.");
         if (cli.EmitCrossLanguageLinks is not null
             || cli.RegisterOnly || cli.Force || cli.NoAnalyze || cli.Recursive
             || cli.AnalyzeDepth != 0 || cli.AnalyzeNodes != 0 || cli.SecondPath.Length != 0
             || cli.GitCorpusSelection is not null || cli.GitCorpusReceipt is not null)
             throw new ArgumentException("Native ingestion reads through the Engine's recipes. Select input paths or a recipe preview mode.");
 
-        var execution = NativeRecipeExecution.Configured();
-        string[] paths = string.IsNullOrWhiteSpace(cli.Path) ? [] : [cli.Path];
-        var request = new NativeRecipeRequest(cli.NativeMode, source, paths,
-            ConnectionInfo: NativeConnectionInfo(CliRuntime.ConnString), Threads: CpuTopology.ResolveCpuBoundWorkers(),
-            ExpandPrerequisites: cli.NativeExpandPrerequisites);
-        using var output = Console.OpenStandardOutput();
-        using var standardError = Console.OpenStandardError();
-        // The terminal still sees everything; a failure records what Native said, not only its status.
-        using var error = new TailCaptureStream(standardError);
-        using (var cancellation = new IngestCancellationScope(ct))
+        var argv = new List<string> { "ingest", "-r", NativeRecipeCatalog.RecipesRoot, "-t", LaplaceInstall.ResolveT0Perfcache() };
+        int threads = CpuTopology.ResolveCpuBoundWorkers();
+        if (threads > 0)
         {
-            if (cli.NativeMode != NativeRecipeMode.Ingest)
-                return await execution.ExecuteAsync(request, output, error, cancellation.Token).ConfigureAwait(false);
-
-            await using var data = LaplaceDataSource.Create(SubstrateAccess.Ingest,
-                b => b.ConnectionStringBuilder.CommandTimeout = 0, CliRuntime.ConnString);
-            var journal = new NpgsqlIngestObservability(data,
-                logger: CliRuntime.LoggerFactory.CreateLogger<NpgsqlIngestObservability>());
-            // Native admission follows the recipe dependency DAG. Managed decomposer
-            // layer numbers are a different contract and must not initialize its rows.
-            const int layer = -1;
-            var catalog = EtlManifest.Catalog;
-            string? canonicalSource = source is null ? null : catalog.Resolve(source);
-            journal.OnNativeRunStart(lane, layer);
-            var elapsed = Stopwatch.StartNew();
-            long entities = 0, physicalities = 0, attestations = 0;
-            long completedEntities = 0, completedPhysicalities = 0, completedAttestations = 0;
-            bool completedAttestationsMeasured = true, attestationsMeasured = false;
-            int total = 0, done = 0, completedFiles = 0;
-            bool complete = false;
-            Hash128 sourceId = default;
-            double printedAt = -5;
-            IngestProgress? lastProgress = null;
-            void Observe(NativeRecipeProgress progress)
-            {
-                if (progress.Event == "inventory")
-                {
-                    total += progress.FilesTotal;
-                    journal.OnNativeInventory(total);
-                    complete = false;
-                }
-                entities = completedEntities + progress.Entities;
-                physicalities = completedPhysicalities + progress.Physicalities;
-                attestations = completedAttestations + (progress.Attestations ?? 0);
-                done = completedFiles + progress.FilesDone;
-                if (progress.File is { } file)
-                {
-                    if (progress.Event is "file-start" or "file-known")
-                    {
-                        var info = new FileInfo(file);
-                        journal.OnFileStarted(lane, file, info.Exists ? info.Length : progress.FileBytes);
-                    }
-                    if (progress.Event is "file-composed" or "file-known") journal.OnFileComposed(lane, file,
-                        progress.FileId is { } id ? Hash128.FromBytes(Convert.FromHexString(id)) : null,
-                        records: progress.Records);
-                }
-                if (progress.Event == "complete")
-                {
-                    completedEntities = entities; completedPhysicalities = physicalities; completedFiles = done;
-                    completedAttestations = attestations;
-                    completedAttestationsMeasured &= progress.AttestationsMeasured == true;
-                    bool requested = canonicalSource is null || catalog.Resolve(progress.Source ?? "") == canonicalSource;
-                    if (progress.SourceId is { } id && canonicalSource is not null && requested)
-                    {
-                        sourceId = Hash128.FromBytes(Convert.FromHexString(id));
-                        journal.OnNativeSourceIdentified(sourceId);
-                    }
-                    complete = requested;
-                }
-                bool measured = completedAttestationsMeasured && progress.AttestationsMeasured == true;
-                if (measured != attestationsMeasured)
-                {
-                    journal.OnNativeAttestationMeasurement(measured);
-                    attestationsMeasured = measured;
-                }
-                lastProgress = new IngestProgress(lane, layer, 0, 0, 0,
-                    total, done, total, done, progress.File, "files", elapsed.Elapsed,
-                    EntitiesInserted: entities, PhysicalitiesInserted: physicalities, AttestationsInserted: attestations);
-                journal.OnNativeProgress(lastProgress);
-                if (elapsed.Elapsed.TotalSeconds - printedAt >= 5
-                    || progress.Event is "inventory" or "source-trunk" or "source-publication" or "complete")
-                {
-                    string reading = progress.File is null ? "" : $"; file={System.Text.Json.JsonSerializer.Serialize(progress.File)}; records={progress.Records:N0}";
-                    string assertions = attestationsMeasured ? $", {attestations:N0} new attestations" : "";
-                    Console.WriteLine($"ingest {lane}: {done}/{total} files, {entities:N0} new entities, {physicalities:N0} new physicalities{assertions}; {progress.Event}{reading}");
-                    printedAt = elapsed.Elapsed.TotalSeconds;
-                }
-            }
-            try
-            {
-                if (journal.FailureCount != 0) throw new InvalidOperationException("The ingest run journal could not start.");
-                int code = await execution.ExecuteAsync(request, output, error, cancellation.Token, Observe).ConfigureAwait(false);
-                if (code != 0)
-                {
-                    if (lastProgress is { } final) journal.OnNativeProgress(final, force: true);
-                    string said = error.Tail();
-                    string failure = said.Length == 0
-                        ? $"Native ingestion exited with status {code} and wrote nothing to stderr."
-                        : $"Native ingestion exited with status {code}:\n{said}";
-                    CliRuntime.LoggerFactory.CreateLogger("ingest").LogError("{Source}: {Failure}", lane, failure);
-                    journal.OnRunFailed(lane, "failed", failure);
-                    journal.OnNativeFilesFinished("failed");
-                    return code;
-                }
-                if (!complete || total == 0) throw new InvalidDataException("The Native Engine did not report a completed ingest with selected files for the requested source.");
-                if (source is not null && paths.Length == 0 && sourceId == default)
-                    throw new InvalidDataException("The Native Engine reported files without publishing the requested corpus witness. The retained files do not establish completed corpus admission.");
-                journal.OnRunFinished(lane, new IngestRunResult(sourceId, lane, 0, 0, 0,
-                    entities, physicalities, attestations, 0, elapsed.Elapsed, [],
-                    FilesDone: done, InputUnitsDone: done, InputUnitsTotal: total), "ok");
-                journal.OnNativeFilesFinished("ok");
-                if (journal.FailureCount != 0) throw new InvalidOperationException("Native ingestion completed, but its run/file receipts could not be persisted.");
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                string status = ex is OperationCanceledException ? "cancelled" : "failed";
-                if (lastProgress is { } final) journal.OnNativeProgress(final, force: true);
-                journal.OnRunFailed(lane, status, ex.Message);
-                journal.OnNativeFilesFinished(status);
-                throw;
-            }
+            argv.Add("-j");
+            argv.Add(threads.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
-    }
+        switch (cli.NativeMode)
+        {
+            case NativeRecipeMode.Plan: argv.Add("--plan"); break;
+            case NativeRecipeMode.Claims: argv.Add("--claims-tsv"); break;
+            case NativeRecipeMode.NoLoad: argv.Add("--no-load"); break;
+        }
+        if (source is not null && !string.IsNullOrWhiteSpace(cli.Path))
+        {
+            argv.Add("-s");
+            argv.Add(source);
+            argv.Add(Path.GetFullPath(cli.Path));
+        }
+        else if (!string.IsNullOrWhiteSpace(cli.Path))
+        {
+            argv.Add(Path.GetFullPath(cli.Path));
+        }
+        else if (source is not null)
+        {
+            argv.Add(source);
+        }
 
-    internal static string NativeConnectionInfo(string connectionString)
-        => NativeRecipeExecution.ConnectionInfoFromNpgsql(connectionString);
+        string? connInfo = cli.NativeMode == NativeRecipeMode.Ingest
+            ? NativeRecipeCatalog.ConnectionInfoFromNpgsql(CliRuntime.ConnString)
+            : null;
+        return NativeRecipeCatalog.RunNativeAsync(argv, connInfo, cli.NativeExpandPrerequisites, ct);
+    }
 }
