@@ -79,8 +79,14 @@ public sealed partial class ChessLiveGameHost
             game.Plies.Add(ResolveRecordedPly(modality.StateKey(state), modality.StateKey(next), uci));
             state = next;
         }
+        if (_games.TryGetValue(session.EventId, out var existing))
+        {
+            foreach (var (ply, ms) in existing.ClockRemainingMs) game.ClockRemainingMs[ply] = ms;
+            foreach (var (ply, analysis) in existing.Analysis) game.Analysis[ply] = analysis;
+        }
+        foreach (var (ply, analysis) in session.Analysis) game.Analysis[ply] = analysis;
         if (session.Operation is { } operation)
-            foreach (var (ply, analysis) in operation.Analysis) game.Analysis.Add(ply, analysis);
+            foreach (var (ply, analysis) in operation.Analysis) game.Analysis[ply] = analysis;
         _games[session.EventId] = game;
     }
 
@@ -170,7 +176,9 @@ public sealed partial class ChessLiveGameHost
         {
             "1-0" => GameOutcome.WonBy(0),
             "0-1" => GameOutcome.WonBy(1),
-            _ => GameOutcome.Draw,
+            "1/2-1/2" => GameOutcome.Draw,
+            "*" when operation.Adjudicated == true => GameOutcome.Unknown,
+            _ => throw new InvalidOperationException($"Unsupported retained result '{operation.Result}'."),
         };
         return FinishPlaySessionAsync(sessionId, outcome, operation.Adjudicated!.Value, ct);
     }
@@ -185,7 +193,9 @@ public sealed partial class ChessLiveGameHost
     public async Task RecordPlayPlyAnalysisAsync(
         Guid sessionId, int ply, ChessLivePlyAnalysis analysis, CancellationToken ct = default)
     {
-        if (!_playSessions.TryGetValue(sessionId, out var session) || !session.RecordToSubstrate) return;
+        if (!_playSessions.TryGetValue(sessionId, out var session)) return;
+        session.RecordAnalysis(ply, analysis);
+        if (!session.RecordToSubstrate) return;
         await RecordPlyAnalysisAsync(session.EventId, ply, analysis, ct);
     }
 
@@ -199,9 +209,10 @@ public sealed partial class ChessLiveGameHost
 
     internal static GameOutcome InferOutcome(IReadOnlyList<RecordedEdge> edges, bool adjudicated)
     {
-        if (adjudicated) return GameOutcome.Draw;
+        if (adjudicated) return GameOutcome.Unknown;
         for (int i = 0; i < edges.Count; i++)
         {
+            if (edges[i].MoverOutcome == PlyOutcome.Neutral) return GameOutcome.Unknown;
             if (edges[i].MoverOutcome != PlyOutcome.Win) continue;
             if (!PositionContent.TryBoardFromSurface(edges[i].SubjectKey, out var board))
                 throw new InvalidOperationException("live outcome has no typed pre-move board");
@@ -306,15 +317,19 @@ public sealed partial class ChessLiveGameHost
 
     private static string?[]? CompleteClockTokens(LiveGameSession session)
     {
-        if (session.Plies.Count == 0 || session.ClockRemainingMs.Count < session.Plies.Count)
+        if (session.Plies.Count == 0 || session.ClockRemainingMs.Count == 0)
             return null;
         var tokens = new string?[session.Plies.Count];
+        bool any = false;
         for (int i = 0; i < tokens.Length; i++)
         {
-            if (!session.ClockRemainingMs.TryGetValue(i + 1, out int ms)) return null;
-            tokens[i] = ClockToken(ms);
+            if (session.ClockRemainingMs.TryGetValue(i + 1, out int ms))
+            {
+                tokens[i] = ClockToken(ms);
+                any = true;
+            }
         }
-        return tokens;
+        return any ? tokens : null;
     }
 
     private static string ClockToken(int milliseconds)
@@ -402,6 +417,16 @@ public sealed class PlaySession(
     public int PlyCount { get; set; }
     public ChessState? State { get; set; }
     public List<string> Moves { get; } = new();
+    private readonly Dictionary<int, ChessLivePlyAnalysis> _analysis = new();
+    public IReadOnlyDictionary<int, ChessLivePlyAnalysis> Analysis => _analysis;
+
+    internal void RecordAnalysis(int ply, ChessLivePlyAnalysis analysis)
+    {
+        if (ply <= 0) return;
+        _analysis[ply] = analysis;
+        if (Operation is { } operation)
+            Operation = operation with { Analysis = new(operation.Analysis) { [ply] = analysis } };
+    }
 
     internal void SaveOperation(string state = "ongoing", string? recording = null, string? result = null, string? error = null)
     {
@@ -414,10 +439,12 @@ public sealed class PlaySession(
 
     internal void CommitMove(ChessState nextState, string uci, ChessLivePlyAnalysis analysis)
     {
+        int ply = Moves.Count + 1;
+        _analysis[ply] = analysis;
         if (Operation is { } operation)
         {
             var next = operation with { UpdatedUtc = DateTimeOffset.UtcNow, Fen = nextState.Board.ToFen(),
-                Moves = [.. Moves, uci], Analysis = new(operation.Analysis) { [Moves.Count + 1] = analysis } };
+                Moves = [.. Moves, uci], Analysis = new(operation.Analysis) { [ply] = analysis } };
             next.Save();
             Operation = next;
         }

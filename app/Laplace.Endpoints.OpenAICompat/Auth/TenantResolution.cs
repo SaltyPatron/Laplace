@@ -144,6 +144,7 @@ internal sealed class ApiKeyEnforcementMiddleware
     private static bool PublicRead(HttpRequest request, string path) =>
         (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
         && (path.Equals("/v1/models", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/firmwares", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/v1/capabilities", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/v1/billing/catalog", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/v1/billing/products", StringComparison.OrdinalIgnoreCase)
@@ -162,7 +163,9 @@ internal sealed class ApiKeyEnforcementMiddleware
         // /chess is both an engine operation prefix and a web route; a request no
         // chess operation matched is a page navigation served by the web fallback.
         if (!IsUnder(path, "/v1") && !ChessOperation(context)) { await _next(context); return; }
-        if (path.Equals("/v1/billing/webhooks/stripe", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(request.Method))
+        if ((path.Equals("/v1/billing/webhooks/stripe", StringComparison.OrdinalIgnoreCase)
+             || path.Equals("/v1/billing/webhooks/patreon", StringComparison.OrdinalIgnoreCase))
+            && HttpMethods.IsPost(request.Method))
         {
             await _next(context); return;
         }
@@ -193,6 +196,7 @@ internal sealed class ApiKeyEnforcementMiddleware
         }
         if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !PublicRead(request, path)
             && !CompetitionEndpoints.IsPublic(request, path)
+            && !(IsUnder(path, "/v1/authority/packages") && OperatorAuth.HasCredential(request, _options))
             && !(path.Equals("/v1/op", StringComparison.OrdinalIgnoreCase) && OperatorAuth.HasCredential(request, _options)))
         {
             await Reject(context, "authentication_required", "Sign in or provide a Laplace API key for this workspace."); return;

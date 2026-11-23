@@ -9,7 +9,13 @@ public static class ChessPgnWriter
         string white = "Laplace", string black = "Laplace", string @event = "Laplace match",
         ChessVariantRules? rules = null)
     {
-        string result = outcome == 0 ? "1-0" : outcome == 1 ? "0-1" : "1/2-1/2";
+        string result = outcome switch
+        {
+            0 => "1-0",
+            1 => "0-1",
+            2 => "1/2-1/2",
+            _ => "*",
+        };
         var m = new ChessModality();
         var s = m.FromFen(startFen, rules);
         bool custom = startFen != ChessModality.StartFen;

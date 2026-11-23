@@ -43,7 +43,7 @@ public sealed partial class ChessEngineService
                 terminal = _modality.Terminal(state);
             }
 
-            var outcome = terminal ?? GameOutcome.Draw;
+            var outcome = terminal ?? GameOutcome.Unknown;
             var edges = new RecordedEdge[subjectKeys.Count];
             for (int i = 0; i < edges.Length; i++)
                 edges[i] = new RecordedEdge(subjectKeys[i], objectKeys[i], null, outcome.ForMover(movers[i]));
@@ -66,6 +66,39 @@ public sealed partial class ChessEngineService
         OperationPrincipal? requester = null, CancellationToken ct = default)
     {
         await EngineAsync(ct);
+
+        var rules = ChessVariants.Resolve(variant);
+        string resolvedFen = !string.IsNullOrWhiteSpace(startFen)
+            ? startFen.Trim()
+            : rules.IsStandard
+                ? ChessModality.StartFen
+                : NativeChessRules.LawStart(rules.Law) ?? ChessModality.StartFen;
+        var initialState = ParseValidatedState(resolvedFen, rules, nameof(startFen));
+        string canonicalStartFen = string.Equals(resolvedFen, "startpos", StringComparison.OrdinalIgnoreCase)
+            ? initialState.Board.ToFen()
+            : resolvedFen;
+
+        var state = initialState;
+        List<(string FromKey, string ToKey, string Uci)>? validatedMoves = null;
+        if (moves is { Count: > 0 })
+        {
+            validatedMoves = new List<(string, string, string)>(moves.Count);
+            for (int i = 0; i < moves.Count; i++)
+            {
+                string rawUci = moves[i] ?? "";
+                if (_modality!.Terminal(state) is not null)
+                    throw new ArgumentException($"Illegal UCI move '{rawUci}' at index {i}: position is already terminal.", nameof(moves));
+                if (FindLegalUci(state, rawUci) is not { } mv)
+                    throw new ArgumentException($"Illegal UCI move '{rawUci}' at index {i}.", nameof(moves));
+                string canonicalUci = mv.ToUci();
+                string fromKey = _modality.StateKey(state);
+                var next = _modality.Apply(state, mv);
+                string toKey = _modality.StateKey(next);
+                validatedMoves.Add((fromKey, toKey, canonicalUci));
+                state = next;
+            }
+        }
+
         var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
         // An authenticated account does not establish a canonical chess player.
         // A participant relation requires a recorded player record, not a name hash.
@@ -76,32 +109,24 @@ public sealed partial class ChessEngineService
             userId: userId,
             whitePlayerName: humanName,
             blackPlayerName: "Laplace", requester: requester,
-            variant: variant, startFen: startFen);
+            variant: variant, startFen: canonicalStartFen);
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 
-        var rules = ChessVariants.Resolve(variant);
-        var resolvedFen = session.Metadata?.StartFen ?? ChessModality.StartFen;
-        var state = _modality!.FromFen(resolvedFen, rules);
-        if (moves is { Count: > 0 })
+        if (validatedMoves is { Count: > 0 })
         {
-            foreach (var uci in moves)
+            foreach (var (fromKey, toKey, canonicalUci) in validatedMoves)
             {
-                if (FindLegalUci(state, uci) is not { } mv) break;
-                string fromKey = _modality.StateKey(state);
-                var next = _modality.Apply(state, mv);
-                string toKey = _modality.StateKey(next);
-                session.Moves.Add(uci);
+                session.Moves.Add(canonicalUci);
                 session.PlyCount = session.Moves.Count;
                 if (session.RecordToSubstrate)
-                    await liveHost.RecordPlayPlyAsync(id, session.PlyCount, fromKey, toKey, uci, ct);
-                state = next;
+                    await liveHost.RecordPlayPlyAsync(id, session.PlyCount, fromKey, toKey, canonicalUci, ct);
             }
         }
 
         session.State = state;
         session.PlyCount = session.Moves.Count;
-        var status = _modality.Terminal(state) is { } t ? Describe(t) : "ongoing";
+        var status = _modality!.Terminal(state) is { } t ? Describe(t) : "ongoing";
         session.SaveOperation();
         return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
             session.TenantId, session.UserId,
@@ -109,11 +134,7 @@ public sealed partial class ChessEngineService
     }
 
     private static ChessMove? FindLegalUci(ChessState state, string uci)
-    {
-        foreach (var m in MoveGen.Legal(state.Board))
-            if (m.ToUci() == uci) return m;
-        return null;
-    }
+        => ResolveNativeMove(state.Board, uci);
 
     public async Task<ChessPlayMoveResult> PlayMoveAsync(
         Guid sessionId, string fen, string uci, CancellationToken ct = default)
@@ -123,7 +144,7 @@ public sealed partial class ChessEngineService
         if (liveHost.GetPlaySession(sessionId) is not { } session)
             return new ChessPlayMoveResult(fen, false, "session expired", Legal: false, Ply: 0);
 
-        var state = session.State ?? _modality!.FromFen(fen);
+        var state = session.State ?? ParseValidatedState(fen, ChessVariants.Resolve(session.Metadata?.Variant), nameof(fen));
         if (FindLegalUci(state, uci) is not { } mv)
             return new ChessPlayMoveResult(state.Board.ToFen(), false, "illegal move", Legal: false,
                 Ply: session.PlyCount);
@@ -160,7 +181,7 @@ public sealed partial class ChessEngineService
         if (liveHost.GetPlaySession(sessionId) is not { } session)
             return new ChessBestMove(null, fen, 0, false, false, "session expired");
 
-        var state = session.State ?? _modality!.FromFen(fen);
+        var state = session.State ?? ParseValidatedState(fen, ChessVariants.Resolve(session.Metadata?.Variant), nameof(fen));
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
@@ -229,20 +250,68 @@ public sealed partial class ChessEngineService
             Pv: pv, Motifs: motifs);
     }
 
-    public async Task FinishPlaySessionAsync(
+    public Task FinishPlaySessionAsync(
         Guid sessionId, string status, bool adjudicated = false, CancellationToken ct = default)
+        => FinishPlaySessionAsync(sessionId, status, (bool?)adjudicated, ct);
+
+    public async Task FinishPlaySessionAsync(
+        Guid sessionId, string? status, bool? adjudicated, CancellationToken ct = default)
     {
         var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
-        await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated, ct);
+        var modality = _modality ??= new ChessModality();
+        var session = liveHost.GetPlaySession(sessionId, resumeRecording: true);
+        var (outcome, isAdjudicated) = ResolveFinishOutcome(status, session?.State, modality, adjudicated);
+        await liveHost.FinishPlaySessionAsync(sessionId, outcome, isAdjudicated, ct);
     }
 
-    private static GameOutcome ParseTerminalStatus(string status) => status switch
+    private static GameOutcome ParseTerminalStatus(string status)
+        => ResolveFinishOutcome(status, state: null, modality: new ChessModality(), adjudicated: null).Outcome;
+
+    internal static (GameOutcome Outcome, bool Adjudicated) ResolveFinishOutcome(
+        string? status, ChessState? state, ChessModality modality, bool? adjudicated)
     {
-        "draw" => GameOutcome.Draw,
-        "white wins" => GameOutcome.WonBy(0),
-        "black wins" => GameOutcome.WonBy(1),
-        _ => GameOutcome.Draw,
-    };
+        var boardTerminal = state is null ? null : modality.Terminal(state);
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            if (boardTerminal is { } t)
+                return (t, adjudicated ?? false);
+            return (GameOutcome.Unknown, adjudicated ?? true);
+        }
+
+        string normalized = status.Trim().ToLowerInvariant();
+        switch (normalized)
+        {
+            case "auto" or "rules" or "terminal":
+                return boardTerminal is { } bt
+                    ? (bt, adjudicated ?? false)
+                    : (GameOutcome.Unknown, adjudicated ?? true);
+            case "ongoing" or "incomplete" or "*" or "aborted":
+                return (GameOutcome.Unknown, adjudicated ?? true);
+            case "checkmate":
+                if (boardTerminal is { IsDraw: false, IsUnknown: false } mate)
+                    return (mate, adjudicated ?? false);
+                throw new ArgumentException("Position is not checkmate.", nameof(status));
+            case "stalemate":
+                if (state is null)
+                    return (GameOutcome.Draw, adjudicated ?? false);
+                if (boardTerminal is { IsDraw: true } && !MoveGen.InCheck(state.Board, state.Board.WhiteToMove))
+                    return (GameOutcome.Draw, adjudicated ?? false);
+                throw new ArgumentException("Position is not stalemate.", nameof(status));
+            case "draw" or "draw_agreement" or "draw agreement" or "1/2-1/2"
+                or "fifty_move" or "fifty-move" or "threefold" or "insufficient_material":
+                return (GameOutcome.Draw, adjudicated ?? false);
+            case "white wins" or "white_wins" or "1-0":
+                return (GameOutcome.WonBy(0), adjudicated ?? false);
+            case "black wins" or "black_wins" or "0-1":
+                return (GameOutcome.WonBy(1), adjudicated ?? false);
+            case "resign_white" or "white_resigns" or "white_resign" or "timeout_white" or "white_timeout":
+                return (GameOutcome.WonBy(1), adjudicated ?? false);
+            case "resign_black" or "black_resigns" or "black_resign" or "timeout_black" or "black_timeout":
+                return (GameOutcome.WonBy(0), adjudicated ?? false);
+            default:
+                throw new ArgumentException($"Unknown chess terminal status '{status}'.", nameof(status));
+        }
+    }
 
     public Task<ChessApplyResult> ApplyMoveAsync(
         string fen, string uci, IReadOnlyList<string>? moves = null, CancellationToken ct = default)
@@ -334,7 +403,8 @@ public sealed partial class ChessEngineService
         {
             _games++;
             if (played.Adjudicated) _adjudicated++;
-            if (played.Outcome.IsDraw) { _draws++; _lastOutcome = "draw"; }
+            if (played.Outcome.IsUnknown) { _lastOutcome = "*"; }
+            else if (played.Outcome.IsDraw) { _draws++; _lastOutcome = "draw"; }
             else if (played.Outcome.Winner == 0) { _white++; _lastOutcome = "white"; }
             else { _black++; _lastOutcome = "black"; }
         }
@@ -343,7 +413,7 @@ public sealed partial class ChessEngineService
     private Random Rng() => new();
 
     private static string Describe(GameOutcome o) =>
-        o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
+        o.IsUnknown ? "incomplete" : o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
 
     public async ValueTask DisposeAsync()
     {

@@ -17,5 +17,14 @@ internal static class TestEnvironmentPin
     {
         Environment.SetEnvironmentVariable("LAPLACE_AUTH_MODE", "header");
         Environment.SetEnvironmentVariable("LAPLACE_BILLING_STORE", "memory");
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_OPS_LOG_DIR")))
+        {
+            var tempLogDir = Path.Combine(
+                Path.GetTempPath(),
+                "laplace-openaicompat-tests-logs",
+                Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(tempLogDir);
+            Environment.SetEnvironmentVariable("LAPLACE_OPS_LOG_DIR", tempLogDir);
+        }
     }
 }

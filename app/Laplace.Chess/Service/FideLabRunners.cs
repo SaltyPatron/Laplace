@@ -15,7 +15,7 @@ internal static class FideLabRunners
         if (query.Length < 2)
             throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
 
-        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
+        int limit = ChessLabRunners.ParseInt(slot.Job.Config, "limit", 25, 1, 100);
         IReadOnlyList<FidePlayerCandidate> candidates;
         if (query.Length is >= 4 and <= 12 && query.All(char.IsDigit))
         {
@@ -43,7 +43,7 @@ internal static class FideLabRunners
         ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
         string cohort = Config(slot.Job.Config, "cohort", "open").Trim().ToLowerInvariant();
-        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
+        int limit = ChessLabRunners.ParseInt(slot.Job.Config, "limit", 25, 1, 100);
         if (!ChessGameFetcher.FideCohorts.Contains(cohort))
             throw new ArgumentException($"unknown FIDE cohort '{cohort}'", nameof(cohort));
 

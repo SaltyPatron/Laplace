@@ -41,6 +41,7 @@ internal static class ApiClientCommands
             using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
             using var client = new HttpClient(handler) { BaseAddress = origin, Timeout = Timeout.InfiniteTimeSpan };
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Laplace-Cli/1.0");
             return await RunAsync(args, client, Console.Out, Console.Error, cancellation.Token, logError);
         }
         catch (OperationCanceledException)

@@ -1,17 +1,24 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
+using global::Npgsql;
 using Laplace.Engine.Core;
+using Laplace.Modality.Chess;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
-public sealed partial class ChessLabService : IChessLabService
+public sealed partial class ChessLabService : IChessLabService, IDisposable
 {
     private readonly ILogger _log;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
+    private readonly Func<ILaplaceEngineRuntime?>? _nativeRuntime;
     private readonly ConcurrentDictionary<string, JobSlot> _jobs = new();
+    private readonly object _startGate = new();
+    private readonly object _nativeLock = new();
+    private LaplaceEngineRuntime? _ownedRuntime;
+    private bool _nativeRuntimeAttempted;
     private readonly string _labDir;
 
     // Host capacity applies in addition to the API's authenticated workspace boundary.
@@ -26,9 +33,11 @@ public sealed partial class ChessLabService : IChessLabService
 
     public ChessLabService(
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
-        ILogger? log = null)
+        ILogger? log = null,
+        Func<ILaplaceEngineRuntime?>? nativeRuntime = null)
     {
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
+        _nativeRuntime = nativeRuntime;
         _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessLabService).FullName!);
         _labDir = Path.GetFullPath(ChessLabPaths.LabDir);
     }
@@ -45,44 +54,86 @@ public sealed partial class ChessLabService : IChessLabService
 
     internal ILogger Log => _log;
 
+    internal ILaplaceEngineRuntime? ResolveNativeRuntime(NpgsqlDataSource? ds)
+    {
+        if (_nativeRuntime is not null && _nativeRuntime() is { } supplied) return supplied;
+        if (_ownedRuntime is not null) return _ownedRuntime;
+        lock (_nativeLock)
+        {
+            if (_ownedRuntime is not null) return _ownedRuntime;
+            if (_nativeRuntimeAttempted || ds is null) return null;
+            _nativeRuntimeAttempted = true;
+            try
+            {
+                var conn = ds.ConnectionString;
+                if (string.IsNullOrWhiteSpace(conn)) return null;
+                _ownedRuntime = new LaplaceEngineRuntime(ChessGameRecorder.ToLibpqConnInfo(conn));
+                return _ownedRuntime;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or TypeInitializationException)
+            {
+                _log.LogDebug(ex, "LaplaceEngineRuntime initialization skipped in ChessLabService; using managed Search.");
+                return null;
+            }
+        }
+    }
+
+    public void Dispose() => _ownedRuntime?.Dispose();
+
+    private static bool IsExclusiveMatchJob(ChessLabJobKind kind) =>
+        kind is ChessLabJobKind.SubstrateTest or ChessLabJobKind.Ladder or ChessLabJobKind.Cutechess;
+
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null,
         OperationPrincipal? requester = null)
     {
-        // Every new run first bounds process-local history and stale work left by a prior
-        // service process. This turns job creation into the maintenance cadence instead of
-        // requiring a separate cron job with weaker content of which jobs are live.
-        PruneRetainedState(DateTimeOffset.UtcNow);
+        ChessLabRunners.ValidateConfig(kind, config);
 
-        int running = 0;
-        foreach (var s in _jobs.Values)
-            if (Snapshot(s).State == ChessLabJobState.Running && ++running >= MaxConcurrentJobs)
+        JobSlot slot;
+        string id;
+        lock (_startGate)
+        {
+            // Every new run first bounds process-local history and stale work left by a prior
+            // service process. This turns job creation into the maintenance cadence instead of
+            // requiring a separate cron job with weaker content of which jobs are live.
+            PruneRetainedState(DateTimeOffset.UtcNow);
+
+            int running = 0;
+            bool exclusiveActive = false;
+            foreach (var s in _jobs.Values)
+            {
+                var snap = Snapshot(s);
+                if (snap.State != ChessLabJobState.Running) continue;
+                running++;
+                if (IsExclusiveMatchJob(snap.Kind)) exclusiveActive = true;
+            }
+
+            if (running >= MaxConcurrentJobs)
             {
                 _log.LogWarning("chess lab job rejected: {Max} jobs already running", MaxConcurrentJobs);
                 return null;
             }
 
-        var id = Guid.NewGuid().ToString("N");
-        var now = DateTimeOffset.UtcNow;
-        var job = new ChessLabJob(
-            id, kind, ChessLabJobState.Pending,
-            config ?? EmptyConfig.Instance,
-            new ChessLabJobSummary(),
-            EmptyConfig.Instance,
-            now, Requester: requester);
+            if (IsExclusiveMatchJob(kind) && exclusiveActive)
+            {
+                _log.LogWarning("chess lab job {Kind} rejected: a conflicting match/benchmark job is already running", kind);
+                return null;
+            }
 
-        var channel = Channel.CreateBounded<ChessLabEvent>(new BoundedChannelOptions(4096)
-        {
-            SingleReader = false,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.DropOldest,
-        });
+            id = Guid.NewGuid().ToString("N");
+            var now = DateTimeOffset.UtcNow;
+            var job = new ChessLabJob(
+                id, kind, ChessLabJobState.Running,
+                config ?? EmptyConfig.Instance,
+                new ChessLabJobSummary(),
+                EmptyConfig.Instance,
+                now, Requester: requester);
 
-        var slot = new JobSlot(job, channel);
-        if (!_jobs.TryAdd(id, slot)) return null;
+            slot = new JobSlot(job);
+            if (!_jobs.TryAdd(id, slot)) return null;
+        }
 
         lock (slot.Gate)
         {
-            slot.Job = slot.Job with { State = ChessLabJobState.Running };
             slot.Cts = new CancellationTokenSource();
             slot.RunTask = Task.Run(() => RunJobAsync(slot, slot.Cts.Token));
         }
@@ -122,7 +173,11 @@ public sealed partial class ChessLabService : IChessLabService
     }
 
     public ChannelReader<ChessLabEvent>? EventReader(string jobId) =>
-        _jobs.TryGetValue(jobId, out var slot) ? slot.Channel.Reader : null;
+        _jobs.TryGetValue(jobId, out var slot) ? slot.Events.SubscribeReader() : null;
+
+    /// <summary>Multi-viewer sequenced event stream supporting replay via <c>Last-Event-ID</c> or <c>?after=</c>.</summary>
+    public ChessLabEventStream? Events(string jobId) =>
+        _jobs.TryGetValue(jobId, out var slot) ? slot.Events : null;
 
     /// <summary>The job's raw process transcript — replayable, multi-viewer, independent of the event channel.</summary>
     public ChessLabTerminal? Terminal(string jobId) =>
@@ -192,10 +247,11 @@ public sealed partial class ChessLabService : IChessLabService
         }
     }
 
-    private void Finish(JobSlot slot, ChessLabJobState state, string? message)
+    internal void Finish(JobSlot slot, ChessLabJobState state, string? message)
     {
         lock (slot.Gate)
         {
+            if (IsTerminal(slot.Job.State)) return;
             slot.Job = slot.Job with
             {
                 State = state,
@@ -204,17 +260,14 @@ public sealed partial class ChessLabService : IChessLabService
             };
         }
 
-        Publish(slot, new ChessLabDoneEvent(state, message));
-        slot.Channel.Writer.TryComplete();
+        slot.Events.Publish(new ChessLabDoneEvent(state, message));
+        slot.Events.Complete();
         slot.Terminal.Complete();
         _log.LogInformation("chess lab job {JobId} finished ({State})", slot.Job.Id, state);
     }
 
     public void Publish(JobSlot slot, ChessLabEvent evt)
-    {
-        if (!slot.Channel.Writer.TryWrite(evt))
-            _log.LogWarning("chess lab job {JobId} event dropped (channel full)", slot.Job.Id);
-    }
+        => slot.Events.Publish(evt);
 
     /// <summary>
     /// Raw process I/O goes here, never to <see cref="Publish"/>: the event channel is a
@@ -372,17 +425,21 @@ public sealed partial class ChessLabService : IChessLabService
     {
         public readonly object Gate = new();
         public ChessLabJob Job;
-        public Channel<ChessLabEvent> Channel { get; }
+        public ChessLabEventStream Events { get; } = new();
         public ChessLabTerminal Terminal { get; } = new();
         public CancellationTokenSource? Cts;
         public Task? RunTask;
         internal readonly SemaphoreSlim IngestGate = new(1, 1);
         internal int ActiveIngests;
 
-        public JobSlot(ChessLabJob job, Channel<ChessLabEvent> channel)
+        public JobSlot(ChessLabJob job)
         {
             Job = job;
-            Channel = channel;
+        }
+
+        public JobSlot(ChessLabJob job, Channel<ChessLabEvent> _)
+            : this(job)
+        {
         }
     }
 

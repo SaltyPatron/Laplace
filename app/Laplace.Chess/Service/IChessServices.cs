@@ -34,6 +34,7 @@ public interface IChessEngineService : IAsyncDisposable
     Task<ChessPlayMoveResult> PlayMoveAsync(Guid sessionId, string fen, string uci, CancellationToken ct = default);
     Task<ChessBestMove> PlayBestMoveAsync(Guid sessionId, string fen, int depth = 4, bool substrate = true, CancellationToken ct = default);
     Task FinishPlaySessionAsync(Guid sessionId, string status, bool adjudicated = false, CancellationToken ct = default);
+    Task FinishPlaySessionAsync(Guid sessionId, string? status, bool? adjudicated, CancellationToken ct = default);
 
     bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0);
     bool StopTraining();
@@ -68,6 +69,7 @@ public interface IChessLabService
     ChessLabJob? GetJob(string jobId);
     IReadOnlyList<ChessLabJob> ListJobs();
     ChannelReader<ChessLabEvent>? EventReader(string jobId);
+    ChessLabEventStream? Events(string jobId);
     ChessLabTerminal? Terminal(string jobId);
     Task<ChessLabArtifactIngestResult?> IngestArtifactAsync(string jobId, CancellationToken ct = default);
 }

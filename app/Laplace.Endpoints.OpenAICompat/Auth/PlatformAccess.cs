@@ -33,6 +33,7 @@ internal static class PlatformPolicy
         if (path.StartsWithSegments("/v1/billing/operator") || path == "/v1/billing/catalog/sync") return Maintain;
         if (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
             return path.StartsWithSegments("/v1/admin/ingest") || path.StartsWithSegments("/v1/admin/services") ? Read : Maintain;
+        if (path == "/v1/admin/ingest/forget" || path == "/v1/admin/ingest/sweep") return Maintain;
         if (path.StartsWithSegments("/v1/admin/ingest")) return Ingest;
         if (path.StartsWithSegments("/v1/admin/services")) return Services;
         return Maintain;

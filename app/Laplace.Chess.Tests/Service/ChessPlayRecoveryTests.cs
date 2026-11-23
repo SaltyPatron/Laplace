@@ -87,5 +87,9 @@ public sealed class ChessPlayRecoveryTests
             Assert.False(invalid.CanRetryRecording);
             Assert.Throws<InvalidOperationException>(() => invalid.Restore(resumeRecording: true));
         }
+        var retainedIncomplete = game with { State = "failed", Result = "*", Adjudicated = true };
+        Assert.True(retainedIncomplete.CanRetryRecording);
+        var restoredIncomplete = retainedIncomplete.Restore(resumeRecording: true);
+        Assert.Equal("*", restoredIncomplete.Operation!.Result);
     }
 }

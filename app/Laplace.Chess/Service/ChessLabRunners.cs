@@ -17,24 +17,31 @@ public static partial class ChessLabRunners
     {
         var cfg = slot.Job.Config;
         string mode = Config(cfg, "mode", "transition");
-        int games = int.Parse(Config(cfg, "games", "20"));
-        int depth = int.Parse(Config(cfg, "depth", "4"));
-        int maxPlies = int.Parse(Config(cfg, "maxPlies", "160"));
+        int games = ParseInt(cfg, "games", 20, 1, 1000);
+        int depth = ParseInt(cfg, "depth", 4, 1, 20);
+        int maxPlies = ParseInt(cfg, "maxPlies", 160, 1, 1000);
         int concurrency = ResolveConcurrency(cfg);
-        bool openings = Config(cfg, "openings", "false") == "true";
+        bool openings = ParseBool(cfg, "openings", false);
         bool persistPgn = ChessLabStorage.PersistPgn(cfg);
 
         var liveHost = await lab.GetLiveHostAsync(ct);
 
-        lab.Publish(slot, new ChessLabLogEvent("info",
-            $"substrate-test [{mode}] {games} games depth {depth} — recording to substrate"));
-
         var ds = liveHost.DataSource;
+        var nativeRuntime = mode == "off"
+            || string.Equals(Environment.GetEnvironmentVariable("LAPLACE_CHESS_NATIVE"), "0", StringComparison.Ordinal)
+            ? null
+            : lab.ResolveNativeRuntime(ds);
+
+        lab.Publish(slot, new ChessLabLogEvent("info",
+            $"substrate-test [{mode}] {games} games depth {depth} ({(nativeRuntime is not null ? "native-c" : "managed")}) — recording to substrate"));
+
         var exactBias = new SubstrateRootBias(ds);
         Func<Board, SearchTablebaseVerdict?> tablebase = ChessTablebaseRuntime.ProbeSearch;
         Func<MoveChooser> guided = mode == "off"
             ? () => SearchChooser(depth, null, null, tablebase, ct)
-            : () => SearchChooser(depth, exactBias, null, tablebase, ct);
+            : nativeRuntime is not null
+                ? () => NativeOrSearchChooser(nativeRuntime, depth, exactBias, tablebase, lab.Log, ct)
+                : () => SearchChooser(depth, exactBias, null, tablebase, ct);
         Func<MoveChooser> pure = () => SearchChooser(depth, null, null, tablebase, ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
         ConcurrentBag<MatchPgnGame>? pgnSink = persistPgn ? new() : null;
@@ -45,7 +52,7 @@ public static partial class ChessLabRunners
             lab.Publish(slot, new ChessLabProgressEvent(p.Done, games));
         });
 
-        var r = await Task.Run(() => MatchRunner.Play(
+        var r = await MatchRunner.PlayAsync(
             guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
             openingFens: book, pgnSink: pgnSink, progress: progress, ct: ct,
             liveHost: liveHost,
@@ -54,12 +61,12 @@ public static partial class ChessLabRunners
             aPlayerName: "Laplace",
             bPlayerName: "Classical-control",
             eventName: $"Laplace substrate lift ({mode})",
-            externalIdPrefix: $"laplace-lab/substrate/{mode}/seed-99"), ct);
+            externalIdPrefix: $"laplace-lab/substrate/{mode}/seed-99").ConfigureAwait(false);
 
         if (pgnSink is not null)
             AddPgnArtifact(lab, slot, pgnSink, $"chess-lab/substrate-test/{mode}");
 
-        int recorded = r.AWins + r.Draws + r.BWins;
+        int recorded = r.Games;
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorded));
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
@@ -73,8 +80,45 @@ public static partial class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("syzygy_max_men", ChessTablebaseRuntime.Largest));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorded} recorded"));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games,
+            r.Incomplete > 0
+                ? $"Elo {elo} · {recorded} recorded ({r.Incomplete} incomplete)"
+                : $"Elo {elo} · {recorded} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    private static MoveChooser NativeOrSearchChooser(
+        ILaplaceEngineRuntime nativeRuntime, int depth, IRootBias? bias,
+        Func<Board, SearchTablebaseVerdict?> tablebase, ILogger log, CancellationToken ct)
+    {
+        MoveChooser? fallback = null;
+        return (state, rng) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                string? variant = state.Board.Rules.IsStandard ? null : state.Board.Rules.Law;
+                var response = nativeRuntime.ChessPlay(new EngineChessRequest(
+                    Fen: state.Board.ToFen(),
+                    Variant: variant,
+                    MaxDepth: depth,
+                    QuiesceDepth: 4,
+                    MaxNodes: 200_000,
+                    MaxWallUs: 250_000));
+                if (response.StatusCode == 0
+                    && ChessEngineService.ResolveNativeMove(state.Board, response.BestUci) is { } mv)
+                {
+                    return mv;
+                }
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or ArgumentException)
+            {
+                log.LogDebug(ex, "Native lp_engine_chess_play unavailable in substrate-test; falling back to managed Search.");
+            }
+
+            fallback ??= SearchChooser(depth, bias, null, tablebase, ct);
+            return fallback(state, rng);
+        };
     }
 
     private static MoveChooser SearchChooser(
@@ -90,11 +134,11 @@ public static partial class ChessLabRunners
 
     public static async Task RunLadderAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        int games = int.Parse(Config(slot.Job.Config, "games", "20"));
-        int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
-        int maxPlies = int.Parse(Config(slot.Job.Config, "maxPlies", "160"));
+        int games = ParseInt(slot.Job.Config, "games", 20, 1, 1000);
+        int depth = ParseInt(slot.Job.Config, "depth", 4, 1, 20);
+        int maxPlies = ParseInt(slot.Job.Config, "maxPlies", 160, 1, 1000);
         int budget = ResolveConcurrency(slot.Job.Config);
-        bool record = bool.TryParse(Config(slot.Job.Config, "record", "false"), out bool recordValue) && recordValue;
+        bool record = ParseBool(slot.Job.Config, "record", false);
         bool persistPgn = ChessLabStorage.PersistPgn(slot.Job.Config);
         var terms = new[]
         {
@@ -117,47 +161,44 @@ public static partial class ChessLabRunners
         var termDone = new int[terms.Length];
         var progressLock = new object();
 
-        await Task.Run(() =>
+        await Parallel.ForEachAsync(Enumerable.Range(0, terms.Length), new ParallelOptions
         {
-            Parallel.For(0, terms.Length, new ParallelOptions
-            {
-                MaxDegreeOfParallelism = terms.Length,
-                CancellationToken = ct,
-            }, ti =>
-            {
-                var term = terms[ti];
-                lab.Publish(slot, new ChessLabLogEvent("info", $"term {ti + 1}/{terms.Length}: {term}"));
+            MaxDegreeOfParallelism = terms.Length,
+            CancellationToken = ct,
+        }, async (ti, token) =>
+        {
+            var term = terms[ti];
+            lab.Publish(slot, new ChessLabLogEvent("info", $"term {ti + 1}/{terms.Length}: {term}"));
 
-                var full = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct);
-                var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~term, ct: ct);
-                var progress = new Progress<(int Done, int AWins, int Draws, int BWins)>(p =>
+            var full = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: token);
+            var minus = MatchRunner.SearcherFactory(depth, EvalTerm.All & ~term, ct: token);
+            var progress = new Progress<(int Done, int AWins, int Draws, int BWins)>(p =>
+            {
+                int overall;
+                lock (progressLock)
                 {
-                    int overall;
-                    lock (progressLock)
-                    {
-                        termDone[ti] = p.Done;
-                        overall = 0;
-                        foreach (var d in termDone) overall += d;
-                        lab.UpdateSummary(slot, new ChessLabJobSummary(
-                            overall, totalGames, $"{term}: {p.AWins}-{p.Draws}-{p.BWins}"));
-                    }
-                    lab.Publish(slot, new ChessLabProgressEvent(overall, totalGames, term.ToString()));
-                });
-
-                var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm,
-                    pgnSink: pgnSink, progress: progress, ct: ct,
-                    liveHost: liveHost,
-                    liveLearnContext: $"chess/lab/ladder/{term}",
-                    onPly: LiveBoardPublisher(lab, slot, "Laplace-full", $"minus-{term}"),
-                    aPlayerName: "Laplace-full",
-                    bPlayerName: $"Laplace-minus-{term}",
-                    eventName: $"Laplace evaluation ladder ({term})",
-                    externalIdPrefix: $"laplace-lab/ladder/{term}/seed-{7 + ti}");
-                string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
-                rows[ti] = [term.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo];
-                lab.Publish(slot, new ChessLabLogEvent("info", $"{term}: {r.AWins}-{r.Draws}-{r.BWins} Elo {elo}"));
+                    termDone[ti] = p.Done;
+                    overall = 0;
+                    foreach (var d in termDone) overall += d;
+                    lab.UpdateSummary(slot, new ChessLabJobSummary(
+                        overall, totalGames, $"{term}: {p.AWins}-{p.Draws}-{p.BWins}"));
+                }
+                lab.Publish(slot, new ChessLabProgressEvent(overall, totalGames, term.ToString()));
             });
-        }, ct);
+
+            var r = await MatchRunner.PlayAsync(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm,
+                pgnSink: pgnSink, progress: progress, ct: token,
+                liveHost: liveHost,
+                liveLearnContext: $"chess/lab/ladder/{term}",
+                onPly: LiveBoardPublisher(lab, slot, "Laplace-full", $"minus-{term}"),
+                aPlayerName: "Laplace-full",
+                bPlayerName: $"Laplace-minus-{term}",
+                eventName: $"Laplace evaluation ladder ({term})",
+                externalIdPrefix: $"laplace-lab/ladder/{term}/seed-{7 + ti}").ConfigureAwait(false);
+            string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
+            rows[ti] = [term.ToString(), $"{r.AWins}-{r.Draws}-{r.BWins}", elo];
+            lab.Publish(slot, new ChessLabLogEvent("info", $"{term}: {r.AWins}-{r.Draws}-{r.BWins} Elo {elo}"));
+        }).ConfigureAwait(false);
 
         if (pgnSink is not null)
             AddPgnArtifact(lab, slot, pgnSink, "chess-lab/ladder");
@@ -174,7 +215,7 @@ public static partial class ChessLabRunners
     public static Task RunTacticsAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
         => Task.Run(() =>
         {
-            int depth = int.Parse(Config(slot.Job.Config, "depth", "6"));
+            int depth = ParseInt(slot.Job.Config, "depth", 6, 1, 20);
             var (solved, total, results) = ChessTactics.Run(ChessTactics.Builtin, depth);
             lab.Publish(slot, new ChessLabMetricEvent("solve_rate", total > 0 ? 100.0 * solved / total : 0, "%"));
             lab.Publish(slot, new ChessLabTableEvent("tactics", ["id", "ok", "engine", "expected"],
@@ -193,12 +234,12 @@ public static partial class ChessLabRunners
                 Finish(lab, slot, ChessLabJobState.Failed, "path outside allowed dirs");
                 return;
             }
-            int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
-            int max = int.Parse(Config(slot.Job.Config, "maxGames", "10"));
+            int depth = ParseInt(slot.Job.Config, "depth", 4, 1, 20);
+            int max = ParseInt(slot.Job.Config, "maxGames", 10, 1, 1000);
             var games = ChessGameReview.ReviewFile(path, depth, max);
             var rows = games.Select(g => (IReadOnlyList<string>)[
                 Short(g.White), Short(g.Black),
-                g.Result?.IsDraw == true ? "1/2" : g.Result?.Winner == 0 ? "1-0" : "0-1",
+                g.Result is { IsUnknown: true } ? "*" : g.Result?.IsDraw == true ? "1/2" : g.Result?.Winner == 0 ? "1-0" : "0-1",
                 g.WhiteAcpl.ToString("F0"), g.BlackAcpl.ToString("F0"),
                 g.CrazyWin ? "crazy" : ""]).ToList();
             lab.Publish(slot, new ChessLabTableEvent("review", ["white", "black", "res", "wAcpl", "bAcpl", "flag"], rows));
@@ -215,20 +256,21 @@ public static partial class ChessLabRunners
         ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
         var cfg = slot.Job.Config;
-        bool ingest = bool.TryParse(Config(cfg, "ingest", "true"), out bool ingestValue) && ingestValue;
+        bool ingest = ParseBool(cfg, "ingest", true);
         bool persistPgn = ChessLabStorage.PersistPgn(cfg, defaultValue: !ingest);
         bool persistTranscript = ChessLabStorage.PersistTranscript(cfg);
         var spoolDir = ChessLabStorage.CreateJobSpool(slot.Job.Id);
         var pgnOut = Path.Combine(spoolDir, "games.pgn");
 
+        int concCap = Math.Max(1, Environment.ProcessorCount / 2);
         var options = new CutechessOptions
         {
-            Rounds = int.Parse(Config(cfg, "rounds", "10")),
-            Depth = int.Parse(Config(cfg, "depth", "0")),
-            SecondsPerMove = double.Parse(Config(cfg, "st", "1"), System.Globalization.CultureInfo.InvariantCulture),
-            StockfishElo = int.Parse(Config(cfg, "elo", "2000")),
-            StockfishLimitStrength = bool.Parse(Config(cfg, "limitStrength", "true")),
-            Concurrency = Math.Max(1, int.Parse(Config(cfg, "concurrency", "1"))),
+            Rounds = ParseInt(cfg, "rounds", 10, 1, 1000),
+            Depth = ParseInt(cfg, "depth", 0, 0, 20),
+            SecondsPerMove = ParseDouble(cfg, "st", 1.0, 0.05, 3600.0),
+            StockfishElo = ParseInt(cfg, "elo", 2000, 100, 4000),
+            StockfishLimitStrength = ParseBool(cfg, "limitStrength", true),
+            Concurrency = Math.Clamp(ParseInt(cfg, "concurrency", 1, 1, 256), 1, concCap),
             Conductor = Config(cfg, "conductor", "fastchess").Trim().ToLowerInvariant(),
             Affinity = cfg.TryGetValue("affinity", out var affinity) && !string.IsNullOrWhiteSpace(affinity) ? affinity.Trim() : null,
             PgnOut = pgnOut,

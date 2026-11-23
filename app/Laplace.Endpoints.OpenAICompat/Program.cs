@@ -76,6 +76,7 @@ return await LaplaceHost.RunAsync("api", args, async logHealth =>
     app.MapFeedbackEndpoints();
     app.MapUserContentEndpoints();
     app.MapMcpEndpoints();
+    app.MapArenaEndpoints();
 
     app.MapFallback("/v1/{*path}", () => Results.Json(
         new Laplace.Api.Contracts.ErrorResponse(

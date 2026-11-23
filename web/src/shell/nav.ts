@@ -63,6 +63,11 @@ export const NAV: NavItem[] = [
     owns: ['/events'],
   },
   {
+    id: 'arena', label: 'Arena', path: '/arena', icon: 'trophy',
+    description: 'Highway Race, Graphle, Provenance Detective, Craft (COMBINE), and blind matchups.',
+    owns: ['/arena'],
+  },
+  {
     id: 'chess', label: 'Chess', path: '/chess', icon: 'chess',
     description: 'Players, games, and playing against Laplace.',
     owns: ['/chess', '/play', '/lab'],

@@ -176,11 +176,13 @@ def paths(path, process, checkout):
 def database(path, process):
     result = resolve(path, process, bool(process.get('LAPLACE_MACHINE_ENV')))
     values = {**result, **{k: v for k, v in canonical_process(process).items() if v}}
+    runtime_db = re.search(r'(?i)(?:^|;)\s*Database\s*=\s*"?([^";]+)"?', values.get('LAPLACE_DATABASE_RUNTIME_DB', ''))
+    default_db = runtime_db.group(1).strip() if runtime_db else 'laplace'
     for name, value in {
         'PGHOST': values.get('LAPLACE_PGHOST', '/tmp'),
         'PGPORT': values.get('LAPLACE_PGPORT', '5432'),
         'PGUSER': values.get('LAPLACE_DATABASE_ROLE') or values.get('LAPLACE_ROLE'),
-        'PGDATABASE': values.get('LAPLACE_DBNAME', 'laplace-mono'),
+        'PGDATABASE': values.get('LAPLACE_DBNAME') or default_db,
     }.items():
         result[name] = values.get(name) or value
         if not result[name]:

@@ -216,7 +216,7 @@ public static partial class ChessGameFetcher
     internal static string LichessGamesUrl(string user, int? max)
     {
         ValidateLimit(max);
-        string url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}?sort=dateAsc";
+        string url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}?sort=dateAsc&clocks=true&evals=true&opening=true";
         return max is { } limit ? $"{url}&max={limit}" : url;
     }
 

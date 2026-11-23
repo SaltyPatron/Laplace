@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -19,8 +20,7 @@ public static partial class ChessLabRunners
             Finish(lab, slot, ChessLabJobState.Failed, "no token");
             return;
         }
-        int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent",
-            LichessDefaults.MaxConcurrent.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        int maxConcurrent = ParseInt(slot.Job.Config, "maxConcurrent", LichessDefaults.MaxConcurrent, 1, 64);
         var host = await lab.GetLiveHostAsync(ct);
 
         await using var bot = new LichessBot(
@@ -39,8 +39,8 @@ public static partial class ChessLabRunners
     {
         string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
-        bool all = bool.TryParse(Config(slot.Job.Config, "all", "true"), out bool allValue) && allValue;
-        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
+        bool all = ParseBool(slot.Job.Config, "all", true);
+        bool ingest = ParseBool(slot.Job.Config, "ingest", true);
         bool persistPgn = ChessLabStorage.PersistPgn(slot.Job.Config, defaultValue: !ingest);
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
@@ -190,23 +190,91 @@ public static partial class ChessLabRunners
     }
 
     private static void Finish(ChessLabService lab, ChessLabService.JobSlot slot, ChessLabJobState state, string? msg = null)
-    {
-        lock (slot.Gate)
-        {
-            slot.Job = slot.Job with
-            {
-                State = state,
-                FinishedAt = DateTimeOffset.UtcNow,
-                Summary = slot.Job.Summary with { Message = msg ?? slot.Job.Summary.Message },
-            };
-        }
-        lab.Publish(slot, new ChessLabDoneEvent(state, msg));
-        slot.Channel.Writer.TryComplete();
-        slot.Terminal.Complete();
-    }
+        => lab.Finish(slot, state, msg);
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string def)
         => cfg.TryGetValue(key, out var v) ? v : def;
+
+    public static void ValidateConfig(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config)
+    {
+        if (config is null || config.Count == 0) return;
+
+        switch (kind)
+        {
+            case ChessLabJobKind.SubstrateTest:
+                _ = ParseInt(config, "games", 20, 1, 1000);
+                _ = ParseInt(config, "depth", 4, 1, 20);
+                _ = ParseInt(config, "maxPlies", 160, 1, 1000);
+                _ = ResolveConcurrency(config);
+                _ = ParseBool(config, "openings", false);
+                break;
+            case ChessLabJobKind.Ladder:
+                _ = ParseInt(config, "games", 20, 1, 1000);
+                _ = ParseInt(config, "depth", 4, 1, 20);
+                _ = ParseInt(config, "maxPlies", 160, 1, 1000);
+                _ = ResolveConcurrency(config);
+                _ = ParseBool(config, "record", false);
+                break;
+            case ChessLabJobKind.Tactics:
+                _ = ParseInt(config, "depth", 6, 1, 20);
+                break;
+            case ChessLabJobKind.Review:
+                _ = ParseInt(config, "depth", 4, 1, 20);
+                _ = ParseInt(config, "maxGames", 10, 1, 1000);
+                break;
+            case ChessLabJobKind.Cutechess:
+                _ = ParseInt(config, "rounds", 10, 1, 1000);
+                _ = ParseInt(config, "depth", 0, 0, 20);
+                _ = ParseDouble(config, "st", 1.0, 0.05, 3600.0);
+                _ = ParseInt(config, "elo", 2000, 100, 4000);
+                _ = ParseBool(config, "limitStrength", true);
+                _ = ParseInt(config, "concurrency", 1, 1, 256);
+                _ = ParseBool(config, "ingest", true);
+                break;
+            case ChessLabJobKind.LichessBot:
+                _ = ParseInt(config, "maxConcurrent", LichessDefaults.MaxConcurrent, 1, 64);
+                break;
+            case ChessLabJobKind.LichessFetch:
+                _ = ParseBool(config, "all", true);
+                _ = ParseBool(config, "ingest", true);
+                break;
+            case ChessLabJobKind.FideSearch:
+            case ChessLabJobKind.FideRoster:
+                _ = ParseInt(config, "limit", 25, 1, 100);
+                break;
+        }
+    }
+
+    internal static int ParseInt(IReadOnlyDictionary<string, string> cfg, string key, int def, int min, int max)
+    {
+        if (!cfg.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+            return def;
+        if (!int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+            throw new ArgumentException($"Invalid '{key}' value '{raw}'; expected an integer in [{min}, {max}].", key);
+        if (parsed < min || parsed > max)
+            throw new ArgumentException($"'{key}' value {parsed} must be between {min} and {max}.", key);
+        return parsed;
+    }
+
+    internal static double ParseDouble(IReadOnlyDictionary<string, string> cfg, string key, double def, double min, double max)
+    {
+        if (!cfg.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+            return def;
+        if (!double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) || !double.IsFinite(parsed))
+            throw new ArgumentException($"Invalid '{key}' value '{raw}'; expected a finite number in [{min}, {max}].", key);
+        if (parsed < min || parsed > max)
+            throw new ArgumentException($"'{key}' value {parsed} must be between {min} and {max}.", key);
+        return parsed;
+    }
+
+    internal static bool ParseBool(IReadOnlyDictionary<string, string> cfg, string key, bool def)
+    {
+        if (!cfg.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+            return def;
+        if (!bool.TryParse(raw.Trim(), out bool parsed))
+            throw new ArgumentException($"Invalid '{key}' value '{raw}'; expected true or false.", key);
+        return parsed;
+    }
 
     internal static bool IsReviewablePath(string path)
     {
@@ -249,10 +317,15 @@ public static partial class ChessLabRunners
 
     private static int ResolveConcurrency(IReadOnlyDictionary<string, string> cfg, string key = "concurrency")
     {
-        if (cfg.TryGetValue(key, out var raw) && int.TryParse(raw, out var parsed))
-            return parsed <= 0 ? CpuTopology.PerformanceLogicalProcessorCount : parsed;
+        int cap = Math.Max(1, Environment.ProcessorCount / 2);
+        int defaultConcurrency = Math.Clamp(CpuTopology.PerformanceLogicalProcessorCount, 1, cap);
+        if (!cfg.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+            return defaultConcurrency;
 
-        return CpuTopology.PerformanceLogicalProcessorCount;
+        if (!int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) || parsed < 0)
+            throw new ArgumentException($"Invalid '{key}' value '{raw}'; expected non-negative integer.", key);
+
+        return parsed == 0 ? defaultConcurrency : Math.Clamp(parsed, 1, cap);
     }
 
     private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : (name.Length > 16 ? name[..16] : name);

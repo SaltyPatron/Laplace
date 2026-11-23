@@ -14,7 +14,8 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
     public string? RecordedPlayingId { get; init; }
     public bool? Adjudicated { get; init; }
     public bool CanRetryRecording => RecordToSubstrate && State is "recording" or "failed"
-        && Adjudicated is not null && Result is "1-0" or "0-1" or "1/2-1/2";
+        && Adjudicated is not null
+        && (Result is "1-0" or "0-1" or "1/2-1/2" || (Result == "*" && Adjudicated == true));
     public Dictionary<int, ChessLivePlyAnalysis> Analysis { get; init; } = new();
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string[]? PositionFens { get; init; }
@@ -49,6 +50,7 @@ public sealed record ChessPlayOperation(Guid SessionId, OperationPrincipal Reque
             context.WhitePlayerName, context.BlackPlayerName, Requester)
         { Operation = this with { Context = context }, Metadata = context.Metadata, State = state, PlyCount = Moves.Length };
         session.Moves.AddRange(Moves);
+        foreach (var (ply, analysis) in Analysis) session.RecordAnalysis(ply, analysis);
         return session;
     }
 

@@ -1,0 +1,182 @@
+@layer components {
+  .studio {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .filterInput {
+    flex: 1 1 14rem;
+    min-width: 0;
+  }
+
+  .metaStrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .tableWrap {
+    max-width: 100%;
+    max-height: 28rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .subMeta {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .statusStaged {
+    color: var(--color-confirm);
+    border-color: currentColor;
+  }
+
+  .statusHeld {
+    color: var(--color-draw);
+    border-color: currentColor;
+  }
+
+  .statusMissing {
+    color: var(--color-text-muted);
+    border-color: currentColor;
+  }
+
+  .statusError {
+    color: var(--color-error);
+    border-color: currentColor;
+  }
+
+  .recipeChips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .drawer {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+  }
+
+  .drawerHead {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .preBox {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 18rem;
+    overflow: auto;
+  }
+
+  .workbenchShell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .workbenchShell:fullscreen,
+  .workbenchFullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    padding: var(--space-4);
+    background: var(--color-bg-surface);
+    overflow: auto;
+  }
+
+  .workbenchGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    align-items: start;
+    min-width: 0;
+  }
+
+  .pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .codeArea {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    min-height: 16rem;
+  }
+
+  .badgeRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    align-items: center;
+  }
+
+  .previewGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .recordCard {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+  }
+
+  .claimList {
+    margin: 0;
+    padding-left: var(--space-4);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    display: grid;
+    gap: var(--space-half);
+  }
+
+  @container page (max-width: 52rem) {
+    .workbenchGrid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}

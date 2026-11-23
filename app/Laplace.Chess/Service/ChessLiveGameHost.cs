@@ -40,8 +40,11 @@ public sealed partial class ChessLiveGameHost : IChessLiveGameHost
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ChessGameRecorder _recorder;
+    private const int MaxRetainedCompletedAnalyses = 64;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ConcurrentDictionary<Hash128, LiveGameSession> _games = new();
+    private readonly ConcurrentDictionary<Hash128, IReadOnlyDictionary<int, ChessLivePlyAnalysis>> _completedAnalyses = new();
+    private readonly ConcurrentQueue<Hash128> _completedAnalysisOrder = new();
     private readonly ConcurrentDictionary<Guid, PlaySession> _playSessions = new();
     private readonly object _playRecoveryGate = new();
 
@@ -170,6 +173,14 @@ public sealed partial class ChessLiveGameHost : IChessLiveGameHost
                 await _recorder.RecordAsync(Pgn(session, result, adjudicated), ct).ConfigureAwait(false);
                 lineId = LineId(session);
             }
+            if (session.Analysis.Count > 0)
+            {
+                _completedAnalyses[eventId] = new Dictionary<int, ChessLivePlyAnalysis>(session.Analysis);
+                _completedAnalysisOrder.Enqueue(eventId);
+                while (_completedAnalysisOrder.Count > MaxRetainedCompletedAnalyses
+                       && _completedAnalysisOrder.TryDequeue(out var oldest))
+                    _completedAnalyses.TryRemove(oldest, out _);
+            }
             GamesCompleted++;
             _games.TryRemove(eventId, out _);
             return lineId;
@@ -178,6 +189,15 @@ public sealed partial class ChessLiveGameHost : IChessLiveGameHost
         {
             _writeGate.Release();
         }
+    }
+
+    internal IReadOnlyDictionary<int, ChessLivePlyAnalysis>? GetRecordedAnalysis(Hash128 eventId)
+    {
+        if (_games.TryGetValue(eventId, out var session))
+            return session.Analysis.Count > 0
+                ? new Dictionary<int, ChessLivePlyAnalysis>(session.Analysis)
+                : null;
+        return _completedAnalyses.TryGetValue(eventId, out var completed) ? completed : null;
     }
 
     Task ITurnLearner.LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct)

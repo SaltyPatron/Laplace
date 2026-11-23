@@ -32,6 +32,9 @@ internal static class CoreEndpoints
         app.MapGet("/v1/models", () => Results.Json(new ModelList("list", ModelCatalog.All)))
             .WithTags("core").Produces<ModelList>();
 
+        app.MapGet("/v1/firmwares", () => Results.Json(new FirmwareListResponse("list", FirmwareCatalog.List())))
+            .WithTags("core").Produces<FirmwareListResponse>();
+
         app.MapGet("/v1/pulse", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
             var pulse = await substrate.PulseAsync(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ct);

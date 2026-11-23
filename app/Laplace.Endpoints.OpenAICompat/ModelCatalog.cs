@@ -4,7 +4,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
 /// Model ids the OpenAI-compatible interface accepts. Maps product aliases and all
-/// 7 Laplace firmware profiles (<c>*.firmware</c>) onto <c>lp_engine_turn</c>.
+/// 8 Laplace firmware profiles (<c>*.firmware</c>) onto <c>lp_engine_turn</c>.
 /// </summary>
 internal static class ModelCatalog
 {
@@ -24,6 +24,7 @@ internal static class ModelCatalog
         "abductive",
         "constructive",
         "adversarial",
+        "chess",
     ];
 
     public static readonly ModelInfo[] All =
@@ -40,6 +41,7 @@ internal static class ModelCatalog
         new ModelInfo("abductive", "model", 0, "laplace"),
         new ModelInfo("constructive", "model", 0, "laplace"),
         new ModelInfo("adversarial", "model", 0, "laplace"),
+        new ModelInfo("chess", "model", 0, "laplace"),
     ];
 
     public static bool IsConverse(string model) =>
@@ -62,7 +64,7 @@ internal static class ModelCatalog
     public static string ResolveFirmwareModel(string model) => model switch
     {
         Code or "coding" => "coding",
-        "deductive" or "inductive" or "abductive" or "constructive" or "adversarial" or "program" => model,
+        "deductive" or "inductive" or "abductive" or "constructive" or "adversarial" or "chess" or "program" => model,
         _ => "program",
     };
 

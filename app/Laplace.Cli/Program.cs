@@ -17,6 +17,8 @@ internal static class Program
         {
             if (args.Length >= 2 && args[0] == "ingest" && args[1] is "catalog" or "--catalog" or "--list-sources")
                 return IngestCatalogCommands.Run(args[1..]);
+            if (args.Length >= 2 && args[0] == "decompose")
+                return RunDecompose(string.Join(' ', args[1..]));
             logging = CliRuntime.LoggerFactory;
             using var scope = logging.CreateLogger("cli").BeginScope(
                 new Dictionary<string, object>
@@ -103,5 +105,29 @@ internal static class Program
             config.AddCommand<CpuTopologyCommand>("cpu-topology");
         });
         return app;
+    }
+
+    private static int RunDecompose(string input)
+    {
+        CodepointPerfcache.LoadDefault();
+        using var tree = TextDecomposer.Run(input);
+        unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
+        var root = tree.GetNode(tree.NaturalUnitIndex());
+        Console.WriteLine($"{Convert.ToHexStringLower(root.Id.ToBytes())}\ttier={root.Tier}\tnodes={tree.NodeCount}");
+        return 0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe int PerfcacheResolver(
+        uint atom, IntPtr userData, Hash128* outId, double* outCoord, Hilbert128* outHb)
+    {
+        if (!CodepointPerfcache.TryLookupCodepoint(atom, out var r)) return -1;
+        *outId = r.Hash;
+        outCoord[0] = r.CoordX;
+        outCoord[1] = r.CoordY;
+        outCoord[2] = r.CoordZ;
+        outCoord[3] = r.CoordM;
+        *outHb = r.Hilbert;
+        return 0;
     }
 }

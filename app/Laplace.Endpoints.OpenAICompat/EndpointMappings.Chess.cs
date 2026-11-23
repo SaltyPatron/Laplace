@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.Endpoints.OpenAICompat.Auth;
@@ -18,25 +20,35 @@ internal static class ChessEndpoints
         app.MapGet("/chess/new", (ChessEngineService svc) =>
             Results.Json(new { fen = svc.NewGameFen() })).WithTags("chess");
 
-        app.MapPost("/chess/legal", async (FenRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.LegalAsync(req.Fen, ct))).WithTags("chess");
+        app.MapPost("/chess/legal", (FenRequest req, ChessEngineService svc, CancellationToken ct) =>
+            WithChessValidation(async () => Results.Json(await svc.LegalAsync(req.Fen, ct)))).WithTags("chess");
 
-        app.MapPost("/chess/move", async (MoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, req.Moves, ct))).WithTags("chess");
+        app.MapPost("/chess/move", (MoveRequest req, ChessEngineService svc, CancellationToken ct) =>
+            WithChessValidation(async () => Results.Json(await svc.ApplyMoveAsync(req.Fen, req.Uci, req.Moves, ct)))).WithTags("chess");
 
-        app.MapPost("/chess/eval", async (EvalRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.EvalPositionAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))).WithTags("chess");
+        app.MapPost("/chess/eval", (EvalRequest req, ChessEngineService svc, CancellationToken ct) =>
+            WithChessValidation(async () => Results.Json(await svc.EvalPositionAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)))).WithTags("chess");
 
-        app.MapPost("/chess/bestmove", async (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct))).WithTags("chess");
+        app.MapPost("/chess/bestmove", (BestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
+            WithChessValidation(async () => Results.Json(await svc.BestMoveSearchAsync(req.Fen, req.Depth ?? 4, req.Substrate ?? true, req.Moves, ct)))).WithTags("chess");
 
         // The moves recorded games played from a position: each one's Native standing, the most played first.
-        app.MapPost("/chess/explore", async (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.ExploreAsync(req.Fen, req.Limit ?? 12, ct))).WithTags("chess");
+        app.MapPost("/chess/explore", (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
+            WithChessValidation(async () => Results.Json(await svc.ExploreAsync(req.Fen, req.Limit ?? 12, ct)))).WithTags("chess");
 
         app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
-            Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) }))
-            .WithTags("chess");
+        {
+            if (temperature is { } t && (!double.IsFinite(t) || t < 0 || t > 10_000))
+                return EndpointJson.BadRequest("invalid_chess_request", "temperature must be between 0 and 10000.");
+            if (weight is { } w && (!double.IsFinite(w) || w <= 0 || w > 100))
+                return EndpointJson.BadRequest("invalid_chess_request", "weight must be between 0 and 100.");
+            if (maxPlies is < 1 or > 1000)
+                return EndpointJson.BadRequest("invalid_chess_request", "maxPlies must be between 1 and 1000.");
+            if (games is < 0 or > 10_000)
+                return EndpointJson.BadRequest("invalid_chess_request", "games must be between 0 and 10000.");
+
+            return Results.Json(new { started = svc.StartTraining(temperature ?? 120d, weight ?? 0.5d, maxPlies ?? 400, games ?? 0) });
+        }).WithTags("chess");
 
         app.MapPost("/chess/train/stop", (ChessEngineService svc) =>
             Results.Json(new { stopped = svc.StopTraining() })).WithTags("chess");
@@ -49,8 +61,9 @@ internal static class ChessEndpoints
         {
             var tenant = await resolver.ResolveAsync(ctx, ct);
             if (RequestPrincipal(tenant) is not { } requester) return Results.Unauthorized();
-            return Results.Json(await svc.StartPlaySessionAsync(
-                req.Record ?? true, req.Moves, requester.TenantId, requester.Subject, ct, requester));
+            return await WithChessValidation(async () => Results.Json(await svc.StartPlaySessionAsync(
+                req.Record ?? true, req.Moves, requester.TenantId, requester.Subject,
+                req.Variant, req.StartFen ?? req.Fen, requester, ct)));
         }).WithTags("chess");
 
         app.MapGet("/chess/play/{sessionId:guid}", async (HttpContext ctx, Guid sessionId,
@@ -68,7 +81,7 @@ internal static class ChessEndpoints
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
             return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
-                async () => Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct)), ct, req.Fen);
+                () => WithChessValidation(async () => Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))), ct, req.Fen);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/bestmove", async (HttpContext ctx, PlayBestMoveRequest req,
@@ -76,19 +89,19 @@ internal static class ChessEndpoints
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
             return await WithPlaySession(ctx, req.SessionId, runtime, resolver,
-                async () => Results.Json(await svc.PlayBestMoveAsync(
-                    req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)), ct, req.Fen);
+                () => WithChessValidation(async () => Results.Json(await svc.PlayBestMoveAsync(
+                    req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct))), ct, req.Fen);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/finish", async (HttpContext ctx, PlayFinishRequest req,
             ChessEngineService svc, ChessRuntimeService runtime,
             Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
-            return await WithPlaySession(ctx, req.SessionId, runtime, resolver, async () =>
+            return await WithPlaySession(ctx, req.SessionId, runtime, resolver, () => WithChessValidation(async () =>
             {
-                await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
+                await svc.FinishPlaySessionAsync(req.SessionId, req.Status, req.Adjudicated, ct);
                 return Results.Json(new { finished = true });
-            }, ct, finish: true);
+            }), ct, finish: true);
         }).WithTags("chess");
 
         app.MapPost("/chess/play/{sessionId:guid}/recording/retry", async (HttpContext ctx, Guid sessionId,
@@ -152,14 +165,26 @@ internal static class ChessEndpoints
             string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath,
             string? conductor, string? affinity, string? laplaceProfile, string? stockfishProfile) =>
         {
+            if (rounds is < 1 or > 1000)
+                return EndpointJson.BadRequest("invalid_chess_request", "rounds must be between 1 and 1000.");
+            if (depth is < 0 or > 20)
+                return EndpointJson.BadRequest("invalid_chess_request", "depth must be between 0 and 20.");
+            if (st is { } stVal && (!double.IsFinite(stVal) || stVal < 0.05 || stVal > 3600))
+                return EndpointJson.BadRequest("invalid_chess_request", "st must be between 0.05 and 3600.");
+            if (elo is < 100 or > 4000)
+                return EndpointJson.BadRequest("invalid_chess_request", "elo must be between 100 and 4000.");
+            if (concurrency is < 1 or > 256)
+                return EndpointJson.BadRequest("invalid_chess_request", "concurrency must be between 1 and 256.");
+
+            int concCap = Math.Max(1, Environment.ProcessorCount / 2);
             var options = new CutechessOptions
             {
-                Rounds = Math.Max(1, rounds ?? 10),
-                Depth = Math.Max(0, depth ?? 0),
-                SecondsPerMove = Math.Max(0.05, st ?? 1),
+                Rounds = rounds ?? 10,
+                Depth = depth ?? 0,
+                SecondsPerMove = st ?? 1,
                 StockfishElo = elo ?? 2000,
                 StockfishLimitStrength = limitStrength ?? true,
-                Concurrency = Math.Max(1, concurrency ?? 1),
+                Concurrency = Math.Clamp(concurrency ?? 1, 1, concCap),
                 Conductor = string.IsNullOrWhiteSpace(conductor) ? "fastchess" : conductor.Trim().ToLowerInvariant(),
                 Affinity = string.IsNullOrWhiteSpace(affinity) ? null : affinity.Trim(),
                 PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
@@ -235,9 +260,10 @@ internal static class ChessEndpoints
             if (kind == ChessLabJobKind.LichessBot)
                 return Results.Conflict(new { error = "managed_service", message = "Use the Lichess service controls; the API must not start a second bot." });
             var config = req.Config?.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()) ?? new Dictionary<string, string>();
-            if (kind == ChessLabJobKind.Cutechess)
+            try
             {
-                try
+                ChessLabRunners.ValidateConfig(kind, config);
+                if (kind == ChessLabJobKind.Cutechess)
                 {
                     var options = new CutechessOptions
                     {
@@ -247,12 +273,28 @@ internal static class ChessEndpoints
                     options.ValidateStockfishConfiguration();
                     _ = ChessEngineConnections.Select(options, config);
                 }
-                catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_chess_request", ex.Message);
+            }
+
             var requester = RequestPrincipal(await resolver.ResolveAsync(ctx, ct));
             if (requester is null) return Results.Unauthorized();
-            var id = lab.StartJob(kind, config, requester);
-            return id is null ? Results.Problem("failed to start job") : Results.Json(new { jobId = id });
+            try
+            {
+                var id = lab.StartJob(kind, config, requester);
+                return id is null
+                    ? Results.Json(
+                        new ErrorResponse(new ErrorBody("rate_limit_error", "chess_lab_busy",
+                            "A conflicting Chess Lab job is already running or host capacity has been reached.")),
+                        statusCode: StatusCodes.Status429TooManyRequests)
+                    : Results.Json(new { jobId = id });
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_chess_request", ex.Message);
+            }
         }).WithTags("chess-lab");
 
         app.MapPost("/chess/lab/stop/{jobId}", async (HttpContext ctx, string jobId, ChessLabService lab,
@@ -273,18 +315,31 @@ internal static class ChessEndpoints
             return OwnsLabJob(job, (await resolver.ResolveAsync(ctx, ct)).TenantId) ? Results.Json(job) : Results.NotFound();
         }).WithTags("chess-lab");
 
-        app.MapGet("/chess/lab/jobs/{jobId}/events", async (HttpContext ctx, string jobId, ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
+        app.MapGet("/chess/lab/jobs/{jobId}/events", async (HttpContext ctx, string jobId, long? after, ChessLabService lab, ITenantResolver resolver, CancellationToken ct) =>
         {
             if (!OwnsLabJob(lab.GetJob(jobId), (await resolver.ResolveAsync(ctx, ct)).TenantId)) { ctx.Response.StatusCode = 404; return; }
-            var reader = lab.EventReader(jobId);
-            if (reader is null) { ctx.Response.StatusCode = 404; return; }
+            var events = lab.Events(jobId);
+            if (events is null) { ctx.Response.StatusCode = 404; return; }
+
+            long lastSeen = 0;
+            if (after is { } afterSeq)
+            {
+                lastSeen = Math.Max(0, afterSeq);
+            }
+            else if (ctx.Request.Headers.TryGetValue("Last-Event-ID", out var headerValues)
+                     && long.TryParse(headerValues.FirstOrDefault()?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long headerSeq))
+            {
+                lastSeen = Math.Max(0, headerSeq);
+            }
+
             ctx.Response.Headers.ContentType = "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
-            await foreach (var evt in reader.ReadAllAsync(ct))
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            await foreach (var item in events.ReadAsync(lastSeen, ct))
             {
                 // camelCase, matching Results.Json elsewhere.
-                var json = JsonSerializer.Serialize(evt, evt.GetType(), LabEventJson);
-                await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
+                var json = JsonSerializer.Serialize(item.Event, item.Event.GetType(), LabEventJson);
+                await ctx.Response.WriteAsync($"id: {item.Seq}\ndata: {json}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             }
         }).WithTags("chess-lab");
@@ -438,6 +493,29 @@ internal static class ChessEndpoints
         _ => (parsed = default) == default && false,
     };
 
+    private static async Task<IResult> WithChessValidation(Func<Task<IResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (ArgumentException ex)
+        {
+            string code = ex.ParamName switch
+            {
+                "fen" or "startFen" => "invalid_fen",
+                "moves" => "invalid_chess_move",
+                "status" => "invalid_chess_status",
+                _ => "invalid_chess_request",
+            };
+            return EndpointJson.BadRequest(code, ex.Message);
+        }
+        catch (FormatException ex)
+        {
+            return EndpointJson.BadRequest("invalid_fen", ex.Message);
+        }
+    }
+
     private sealed record FenRequest(string Fen);
     private sealed record MoveRequest(string Fen, string Uci, string[]? Moves);
     private sealed record EvalRequest(string Fen, int? Depth, bool? Substrate);
@@ -445,7 +523,7 @@ internal static class ChessEndpoints
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth = null, int? MaxConcurrent = null, bool? Substrate = null, string[]? Speeds = null);
-    private sealed record PlayStartRequest(bool? Record, string[]? Moves);
+    private sealed record PlayStartRequest(bool? Record, string[]? Moves, string? StartFen = null, string? Fen = null, string? Variant = null);
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);

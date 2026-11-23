@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text;
 using Laplace.Api.Contracts;
+using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -15,10 +17,30 @@ internal static class FeedbackEndpoints
 {
     private const string TrustClass = "UserPromptContent";
 
+    internal static string ActorLineageName(string tenantId) => $"feedback-actor:{tenantId}";
+
     public static void MapFeedbackEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/feedback", async (HttpRequest request, SubstrateClient substrate, Auth.ITenantResolver tenants, CancellationToken ct) =>
+        app.MapPost("/v1/feedback", async (
+            HttpRequest request,
+            SubstrateClient substrate,
+            ITenantResolver tenants,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
         {
+            var tenant = await tenants.ResolveAsync(request.HttpContext, ct);
+            if (tenant.AuthKind == "invalid_key")
+                return Unauthorized("invalid_api_key", "The provided API key is unknown, malformed, or revoked.");
+            if (string.Equals(tenant.AuthKind, "anonymous", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(tenant.TenantId)
+                || (auth.Value.RequiresIdentity
+                    && tenant.AuthKind is not ("api_key" or "browser" or "dev")
+                    && !OperatorAuth.IsAuthorized(request, auth.Value)))
+            {
+                return Unauthorized("authentication_required",
+                    "Authenticated actor identity (api_key, browser, operator, or dev) is required to submit feedback.");
+            }
+
             var payload = await EndpointJson.ReadJsonAsync<FeedbackRequest>(request, ct);
             if (payload is null)
                 return EndpointJson.BadRequest("invalid_request_error", "Request body must be JSON.");
@@ -31,17 +53,20 @@ internal static class FeedbackEndpoints
                     "Feedback names one claim: 'subject' and 'relation', and 'object' unless the claim has none. "
                     + "Order is what content shows, not a claim: a sequence of tokens is not feedback.");
 
-            var tenant = await tenants.ResolveAsync(request.HttpContext, ct);
             string participant = tenant.Claims.TryGetValue("user_id", out var user) && Guid.TryParse(user, out var id)
                 ? id.ToString("D")
                 : tenant.TenantId;
-            if (!ConversationContent.IsValidIdentifier(participant))
+            if (!ConversationContent.IsValidIdentifier(participant)
+                || !ConversationContent.IsValidIdentifier(tenant.TenantId))
                 return EndpointJson.BadRequest("invalid_tenant", "Tenant id must match [A-Za-z0-9._@-]{1,128}.");
 
             string objText = payload.Object ?? "";
             Hash128 claimId = ComputeStatementClaimId(payload.Subject, payload.Relation, objText);
             string witnessIdHex = Hash128.Text(participant).ToHex();
             string claimIdHex = claimId.ToHex();
+            string actorLineageName = ActorLineageName(tenant.TenantId);
+            string actorLineageHex = Hash128.Text(actorLineageName).ToHex();
+            request.HttpContext.Response.Headers["X-Laplace-Lineage"] = actorLineageHex;
 
             FeedbackStanding? before;
             FeedbackStanding? after;
@@ -59,7 +84,7 @@ internal static class FeedbackEndpoints
                         $"{SanitizeField(payload.Subject)}\t{SanitizeField(payload.Relation)}\t{SanitizeField(objText)}\t{score}\n");
                     await File.WriteAllTextAsync(stmtPath, line, new UTF8Encoding(false), ct);
                     await NativeEngineCli.RunWitnessAsync(
-                        participant, TrustClass, workDir, [stmtPath], participant, ct);
+                        participant, TrustClass, workDir, [stmtPath], actorLineageName, ct);
                 }
                 finally
                 {
@@ -93,8 +118,14 @@ internal static class FeedbackEndpoints
         .Accepts<FeedbackRequest>("application/json")
         .Produces<FeedbackResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
+
+    private static IResult Unauthorized(string code, string message) =>
+        Results.Json(
+            new ErrorResponse(new ErrorBody("authentication_error", code, message)),
+            statusCode: StatusCodes.Status401Unauthorized);
 
     private static string SanitizeField(string value) =>
         value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');

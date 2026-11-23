@@ -1,6 +1,7 @@
 using Laplace.Engine.Core;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Native;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -29,8 +30,11 @@ internal static class AuthorityScopePolicy
         bool requestWrite,
         string? explicitScope = null,
         IReadOnlyList<string>? explicitWitnesses = null,
-        double? minTrust = null)
+        double? minTrust = null,
+        IKnowledgePackageStore? packages = null)
     {
+        packages ??= BillingServiceFallback.GetPackages(request.HttpContext?.RequestServices);
+
         var scopeSpec = !string.IsNullOrWhiteSpace(explicitScope)
             ? explicitScope.Trim()
             : request.Headers[ScopeHeader].ToString().Trim();
@@ -39,60 +43,78 @@ internal static class AuthorityScopePolicy
         var witnessIds = new List<Hash128>();
         bool scoped = !string.IsNullOrWhiteSpace(scopeSpec)
             && !string.Equals(scopeSpec, "world", StringComparison.OrdinalIgnoreCase);
+        bool packageScoped = false;
+        double packageMinTrust = 0.0;
+
+        if (scoped)
+        {
+            if (string.Equals(scopeSpec, "deny", StringComparison.OrdinalIgnoreCase))
+            {
+                return Refused("authority_refused",
+                    "Authority disposition refuses execution for this request scope.",
+                    StatusCodes.Status403Forbidden);
+            }
+            if (string.Equals(scopeSpec, "empty", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(scopeSpec, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                // Keep witnessIds empty so the fail-closed check below refuses with authority_empty_scope.
+            }
+            else if (TryParseWitnessId(scopeSpec, out var singleId))
+            {
+                witnessIds.Add(singleId);
+            }
+            else if (string.Equals(scopeSpec, "tenant", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(scopeSpec, "private", StringComparison.OrdinalIgnoreCase))
+            {
+                // Deterministic tenant-scoped witness root; if empty, fail closed below.
+                if (!string.IsNullOrWhiteSpace(tenant.TenantId))
+                    witnessIds.Add(Hash128.Text(tenant.TenantId));
+            }
+            else
+            {
+                packageScoped = true;
+                var packageIds = scopeSpec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (packageIds.Length == 0)
+                    return Refused("authority_empty_scope",
+                        "Scoped authority package list resolved zero permitted witnesses; failing closed.",
+                        StatusCodes.Status403Forbidden);
+                if (packages is null)
+                    return Refused("authority_package_denied",
+                        $"Authority package scope '{scopeSpec}' cannot be resolved without a knowledge package store.",
+                        StatusCodes.Status403Forbidden);
+
+                var resolvedPkg = packages.ResolveForTenant(tenant.TenantId, packageIds);
+                if (!resolvedPkg.Authorized)
+                {
+                    return Refused(
+                        resolvedPkg.ErrorCode ?? "authority_package_denied",
+                        resolvedPkg.ErrorMessage ?? $"Authority scope '{scopeSpec}' is denied for workspace '{tenant.TenantId}'.",
+                        StatusCodes.Status403Forbidden);
+                }
+
+                witnessIds.AddRange(resolvedPkg.WitnessIds);
+                packageMinTrust = resolvedPkg.MinTrust;
+            }
+        }
 
         if (explicitWitnesses is not null)
         {
+            if (!TryParseWitnessList(explicitWitnesses, out var requested, out var badCode, out var badMessage))
+                return Refused(badCode!, badMessage!, StatusCodes.Status400BadRequest);
             scoped = true;
-            foreach (var w in explicitWitnesses)
-            {
-                if (!TryParseWitnessId(w, out var id))
-                    return Refused("invalid_authority_witness",
-                        $"Witness id '{w}' must be a 32-hex entity id.",
-                        StatusCodes.Status400BadRequest);
-                witnessIds.Add(id);
-            }
+            witnessIds = packageScoped
+                ? IntersectWitnesses(witnessIds, requested)
+                : requested;
         }
         else if (!string.IsNullOrWhiteSpace(rawWitnessHeader))
         {
+            var headerParts = rawWitnessHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (!TryParseWitnessList(headerParts, out var requested, out var badCode, out var badMessage, WitnessesHeader))
+                return Refused(badCode!, badMessage!, StatusCodes.Status400BadRequest);
             scoped = true;
-            foreach (var part in rawWitnessHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (!TryParseWitnessId(part, out var id))
-                    return Refused("invalid_authority_witness",
-                        $"Header {WitnessesHeader} contains invalid witness id '{part}'.",
-                        StatusCodes.Status400BadRequest);
-                witnessIds.Add(id);
-            }
-        }
-        else if (TryParseWitnessId(scopeSpec, out var singleId))
-        {
-            scoped = true;
-            witnessIds.Add(singleId);
-        }
-        else if (string.Equals(scopeSpec, "tenant", StringComparison.OrdinalIgnoreCase)
-                 || string.Equals(scopeSpec, "private", StringComparison.OrdinalIgnoreCase))
-        {
-            scoped = true;
-            // Deterministic tenant-scoped witness root; if a caller specifies "none"/"empty", stay empty and fail closed.
-            if (!string.IsNullOrWhiteSpace(tenant.TenantId))
-                witnessIds.Add(Hash128.Text(tenant.TenantId));
-        }
-        else if (string.Equals(scopeSpec, "empty", StringComparison.OrdinalIgnoreCase)
-                 || string.Equals(scopeSpec, "none", StringComparison.OrdinalIgnoreCase))
-        {
-            scoped = true;
-        }
-        else if (scoped && string.Equals(scopeSpec, "deny", StringComparison.OrdinalIgnoreCase))
-        {
-            return Refused("authority_refused",
-                "Authority disposition refuses execution for this request scope.",
-                StatusCodes.Status403Forbidden);
-        }
-        else if (scoped)
-        {
-            return Refused("unknown_authority_scope",
-                $"Authority scope '{scopeSpec}' cannot resolve a governed witness package.",
-                StatusCodes.Status403Forbidden);
+            witnessIds = packageScoped
+                ? IntersectWitnesses(witnessIds, requested)
+                : requested;
         }
 
         // Fail closed (#1708): scoped request with empty witness allowlist must refuse, never widen.
@@ -114,9 +136,10 @@ internal static class AuthorityScopePolicy
                 StatusCodes.Status403Forbidden);
 
         var distinct = witnessIds.Distinct().ToArray();
-        double effectiveMinTrust = minTrust is { } mt && double.IsFinite(mt)
+        double callerMinTrust = minTrust is { } mt && double.IsFinite(mt)
             ? Math.Clamp(mt, 0.0, 1.0)
             : 0.0;
+        double effectiveMinTrust = Math.Max(callerMinTrust, packageMinTrust);
 
         return new Resolution(
             new EngineAuthorityScope(
@@ -129,6 +152,39 @@ internal static class AuthorityScopePolicy
             null,
             null,
             StatusCodes.Status200OK);
+    }
+
+    private static bool TryParseWitnessList(
+        IEnumerable<string> values,
+        out List<Hash128> ids,
+        out string? errorCode,
+        out string? errorMessage,
+        string? headerName = null)
+    {
+        ids = new List<Hash128>();
+        errorCode = null;
+        errorMessage = null;
+        foreach (var raw in values)
+        {
+            if (!TryParseWitnessId(raw, out var id))
+            {
+                errorCode = "invalid_authority_witness";
+                errorMessage = headerName is null
+                    ? $"Witness id '{raw}' must be a 32-hex entity id."
+                    : $"Header {headerName} contains invalid witness id '{raw}'.";
+                return false;
+            }
+            ids.Add(id);
+        }
+        return true;
+    }
+
+    private static List<Hash128> IntersectWitnesses(List<Hash128> allowed, List<Hash128> requested)
+    {
+        if (allowed.Count == 0 || requested.Count == 0)
+            return new List<Hash128>();
+        var allowedSet = allowed.ToHashSet();
+        return requested.Where(allowedSet.Contains).Distinct().ToList();
     }
 
     private static uint ResolveTenantCapabilities(TenantContext tenant)

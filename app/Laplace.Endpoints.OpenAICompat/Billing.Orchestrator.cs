@@ -266,6 +266,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
     private readonly IStripeCheckoutGateway _stripe;
     private readonly IBillingEntitlementStore _entitlements;
     private readonly StripeBillingOptions _options;
+    private readonly IWitnessPayeeStore? _payees;
 
     public BillingOrchestrator(
         IBillingCatalog catalog,
@@ -273,7 +274,8 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         IBillingLedger ledger,
         IStripeCheckoutGateway stripe,
         IBillingEntitlementStore entitlements,
-        IOptions<StripeBillingOptions> options)
+        IOptions<StripeBillingOptions> options,
+        IWitnessPayeeStore? payees = null)
     {
         _catalog = catalog;
         _store = store;
@@ -281,6 +283,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         _stripe = stripe;
         _entitlements = entitlements;
         _options = options.Value;
+        _payees = payees;
     }
 
     public IReadOnlyList<ServicePrice> ListCatalog() => _catalog.List();
@@ -471,7 +474,15 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         if (attributions is null || attributions.Count == 0)
             return Array.Empty<BillingRoyaltyRecord>();
 
-        var royalties = ComputeRoyaltyShares(quote, attributions, DateTimeOffset.UtcNow);
+        IReadOnlyDictionary<string, WitnessPayeeRecord>? resolvedPayees = null;
+        if (_payees is not null)
+        {
+            var map = await _payees.GetByWitnessIdsAsync(attributions.Select(a => a.SourceIdHex), ct);
+            if (map.Count > 0)
+                resolvedPayees = map;
+        }
+
+        var royalties = ComputeRoyaltyShares(quote, attributions, DateTimeOffset.UtcNow, resolvedPayees);
         if (royalties.Count > 0)
             await _ledger.RecordRoyaltiesAsync(royalties, ct);
         return royalties;
@@ -563,6 +574,20 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         BillingQuote quote,
         IReadOnlyList<RoyaltyAttributionShare> attributions,
         DateTimeOffset executedAt,
+        int seederPoolBp = 7000) =>
+        ComputeRoyaltyShares(quote, attributions, executedAt, payees: null, seederPoolBp);
+
+    /// <summary>
+    /// Computes deterministic Mold-A-Model basis-point royalty payouts while resolving unregistered
+    /// or null <see cref="RoyaltyAttributionShare.SourceOwnerTenant"/> entries against <paramref name="payees"/>.
+    /// Open-license witnesses keep their causal <c>ShareBp</c> (<c>SUM(share_bp) == 10000</c>) and receive
+    /// <c>0</c> cents, while royalty-bearing payees receive exact integer remainder distribution (<c>SUM(royalty_cents) &lt;= poolCents</c>).
+    /// </summary>
+    public static IReadOnlyList<BillingRoyaltyRecord> ComputeRoyaltyShares(
+        BillingQuote quote,
+        IReadOnlyList<RoyaltyAttributionShare> attributions,
+        DateTimeOffset executedAt,
+        IReadOnlyDictionary<string, WitnessPayeeRecord>? payees,
         int seederPoolBp = 7000)
     {
         if (attributions.Count == 0)
@@ -582,6 +607,40 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             .ToArray();
         if (unique.Length == 0)
             return Array.Empty<BillingRoyaltyRecord>();
+
+        var resolvedOwners = new string?[unique.Length];
+        var royaltyBearing = new bool[unique.Length];
+        for (int i = 0; i < unique.Length; i++)
+        {
+            var a = unique[i];
+            if (payees is not null && payees.TryGetValue(a.SourceIdHex, out var payee))
+            {
+                if (string.Equals(payee.LicenseKind, "open_license", StringComparison.OrdinalIgnoreCase))
+                {
+                    royaltyBearing[i] = false;
+                    resolvedOwners[i] = null;
+                }
+                else
+                {
+                    var owner = !string.IsNullOrWhiteSpace(a.SourceOwnerTenant)
+                        ? a.SourceOwnerTenant.Trim()
+                        : payee.OwnerTenant;
+                    royaltyBearing[i] = !string.IsNullOrWhiteSpace(owner);
+                    resolvedOwners[i] = royaltyBearing[i] ? owner : null;
+                }
+            }
+            else if (payees is not null)
+            {
+                var owner = string.IsNullOrWhiteSpace(a.SourceOwnerTenant) ? null : a.SourceOwnerTenant.Trim();
+                royaltyBearing[i] = owner is not null;
+                resolvedOwners[i] = owner;
+            }
+            else
+            {
+                royaltyBearing[i] = true;
+                resolvedOwners[i] = a.SourceOwnerTenant;
+            }
+        }
 
         // Normalize weights into basis points summing to 10000 if caller did not supply pre-normalized share_bp.
         int suppliedBpSum = unique.Sum(a => a.ShareBp);
@@ -615,25 +674,41 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
 
         long poolCents = (quote.AmountCents * Math.Clamp(seederPoolBp, 0, 10000)) / 10000L;
         long[] cents = new long[unique.Length];
-        long centsSum = 0;
-        var centRems = new long[unique.Length];
+        long royaltyBearingBpSum = 0;
         for (int i = 0; i < unique.Length; i++)
         {
-            long num = poolCents * normalizedBp[i];
-            cents[i] = num / 10000L;
-            centRems[i] = num % 10000L;
-            centsSum += cents[i];
+            if (royaltyBearing[i])
+                royaltyBearingBpSum += normalizedBp[i];
         }
-        long centLeft = poolCents - centsSum;
-        if (centLeft > 0)
+
+        if (poolCents > 0 && royaltyBearingBpSum > 0)
         {
-            var centOrder = Enumerable.Range(0, unique.Length)
-                .OrderByDescending(i => centRems[i])
-                .ThenByDescending(i => normalizedBp[i])
-                .ThenBy(i => unique[i].SourceIdHex, StringComparer.Ordinal)
-                .ToArray();
-            for (int k = 0; k < centLeft && k < centOrder.Length; k++)
-                cents[centOrder[k]]++;
+            long payablePoolCents = royaltyBearingBpSum == 10000L
+                ? poolCents
+                : (poolCents * royaltyBearingBpSum) / 10000L;
+            long centsSum = 0;
+            var centRems = new long[unique.Length];
+            for (int i = 0; i < unique.Length; i++)
+            {
+                if (!royaltyBearing[i])
+                    continue;
+                long num = poolCents * normalizedBp[i];
+                cents[i] = num / 10000L;
+                centRems[i] = num % 10000L;
+                centsSum += cents[i];
+            }
+            long centLeft = payablePoolCents - centsSum;
+            if (centLeft > 0)
+            {
+                var centOrder = Enumerable.Range(0, unique.Length)
+                    .Where(i => royaltyBearing[i])
+                    .OrderByDescending(i => centRems[i])
+                    .ThenByDescending(i => normalizedBp[i])
+                    .ThenBy(i => unique[i].SourceIdHex, StringComparer.Ordinal)
+                    .ToArray();
+                for (int k = 0; k < centLeft && k < centOrder.Length; k++)
+                    cents[centOrder[k]]++;
+            }
         }
 
         var results = new BillingRoyaltyRecord[unique.Length];
@@ -645,7 +720,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
                 PayerTenant: quote.Tenant,
                 ServiceId: quote.ServiceId,
                 SourceIdHex: a.SourceIdHex,
-                SourceOwnerTenant: a.SourceOwnerTenant,
+                SourceOwnerTenant: resolvedOwners[i],
                 ShareBp: normalizedBp[i],
                 RoyaltyCents: cents[i],
                 HitCount: a.HitCount,

@@ -85,8 +85,8 @@ public static class ChessGameReview
         }
 
         int winnerDownCp = 0;
-        if (result is { IsDraw: false } r)
-            winnerDownCp = r.Winner == 0 ? Math.Max(0, -minWhiteEval) : Math.Max(0, maxWhiteEval);
+        if (result is { IsDraw: false, IsUnknown: false } r && r.Winner is int winner)
+            winnerDownCp = winner == 0 ? Math.Max(0, -minWhiteEval) : Math.Max(0, maxWhiteEval);
         bool crazyWin = winnerDownCp >= ComebackCp;
 
         worst.Sort((x, y) => y.CpLoss.CompareTo(x.CpLoss));

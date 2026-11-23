@@ -330,7 +330,7 @@ public sealed partial class LichessBot
         => challenge.TryGetProperty("speed", out var s) ? s.GetString() ?? "" : "";
 
     private static string Describe(GameOutcome o)
-        => o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
+        => o.IsUnknown ? "incomplete" : o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
 
     /// <summary>The game's engine receipt: which engine played (path, SHA-256, UCI id, and the engine behind
     /// laplace-uci) and each move's receipt, beside the recorded game (LAPLACE_LICHESS_RECEIPTS, default under the temp

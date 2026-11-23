@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
@@ -9,6 +9,9 @@ import {
   Muted,
   Select,
   TextArea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from '@ui';
 
 import { apiGet } from '../api/client';
@@ -31,6 +34,25 @@ import styles from './ChatView.module.css';
 
 
 
+interface FirmwareCatalogEntry {
+  id: string;
+  label: string;
+  summary: string;
+  path?: string | null;
+  id_hex?: string | null;
+  directives?: Record<string, string> | null;
+  bytes?: number | null;
+  available_on_disk?: boolean;
+}
+
+function formatFirmwareTooltip(entry: FirmwareCatalogEntry): string {
+  const dirs = Object.entries(entry.directives ?? {})
+    .slice(0, 8)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' · ');
+  return dirs ? `${entry.summary} (${dirs})` : entry.summary;
+}
+
 export function ChatView() {
 
   const {
@@ -50,6 +72,9 @@ export function ChatView() {
   const { setExploreSeedPrompt, clearConversation, setFirmware, setEnvelope } = useAppStore();
 
   const [input, setInput] = useState('');
+  const [firmwares, setFirmwares] = useState<FirmwareCatalogEntry[]>(() =>
+    FIRMWARE_PROFILES.map((profile) => ({ ...profile })),
+  );
 
   const transcriptRef = useRef<HTMLDivElement>(null);
 
@@ -84,6 +109,38 @@ export function ChatView() {
 
 
   useEffect(() => { void loadConversations(); }, [loadConversations]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void apiGet<{ object?: string; data?: FirmwareCatalogEntry[] }>('/v1/firmwares', { signal: controller.signal })
+      .then((res) => {
+        if (res?.data && res.data.length > 0) {
+          setFirmwares(res.data);
+        }
+      })
+      .catch(() => {
+        // Keep built-in FIRMWARE_PROFILES fallback when offline or unserved.
+      });
+    return () => controller.abort();
+  }, []);
+
+  const selectedFirmware = useMemo(
+    () => firmwares.find((item) => item.id === firmware)
+      ?? { id: firmware, label: firmware, summary: 'Detached firmware profile' },
+    [firmwares, firmware],
+  );
+  const selectedDirectives = useMemo(
+    () => Object.entries(selectedFirmware.directives ?? {}),
+    [selectedFirmware],
+  );
+  const selectedFirmwareTooltip = useMemo(
+    () => formatFirmwareTooltip(selectedFirmware),
+    [selectedFirmware],
+  );
+  const lastUserPrompt = useMemo(
+    () => [...messages].reverse().find((m) => m.role === 'user' && !m.streaming && !m.error)?.content ?? null,
+    [messages],
+  );
 
 
 
@@ -131,16 +188,39 @@ export function ChatView() {
             <span>Firmware</span>
             <Select
               aria-label="Firmware profile"
+              title={selectedFirmwareTooltip}
               value={firmware}
               onChange={(event) => setFirmware(event.target.value as FirmwareProfile)}
             >
-              {FIRMWARE_PROFILES.map((profile) => (
-                <option key={profile.id} value={profile.id} title={profile.summary}>
+              {firmwares.map((profile) => (
+                <option key={profile.id} value={profile.id} title={formatFirmwareTooltip(profile)}>
                   {profile.label}
                 </option>
               ))}
+              {firmwares.every((profile) => profile.id !== firmware) && (
+                <option value={firmware}>{firmware}</option>
+              )}
             </Select>
           </label>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge title={selectedFirmwareTooltip}>
+                fw: {selectedFirmware.id}
+                {selectedDirectives.length > 0 ? ` (${selectedDirectives.length})` : ''}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <div><strong>{selectedFirmware.label}</strong></div>
+              <div>{selectedFirmware.summary}</div>
+              {selectedFirmware.id_hex && (
+                <div>blake3: <code>{selectedFirmware.id_hex.slice(0, 16)}…</code></div>
+              )}
+              {selectedDirectives.length > 0 && (
+                <div>{selectedDirectives.slice(0, 10).map(([k, v]) => `${k} ${v}`).join(' · ')}</div>
+              )}
+            </TooltipContent>
+          </Tooltip>
 
           <label className={styles.sessions}>
             <span>Envelope</span>
@@ -189,6 +269,17 @@ export function ChatView() {
                 ))}
               </Select>
             </label>
+          )}
+
+          {lastUserPrompt && (
+            <Button
+              variant="ghost"
+              onClick={() => void retryWithQuote()}
+              disabled={busy}
+              title={`Re-run previous prompt using ${selectedFirmware.id}`}
+            >
+              Re-run with selected firmware
+            </Button>
           )}
 
           <Button variant="ghost" onClick={clearConversation}>New</Button>

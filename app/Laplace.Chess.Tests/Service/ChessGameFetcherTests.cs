@@ -203,8 +203,14 @@ public sealed class ChessGameFetcherTests
         string limited = ChessGameFetcher.LichessGamesUrl("Magnus Carlsen", 1000);
         Assert.DoesNotContain("max=", all);
         Assert.Contains("sort=dateAsc", all);
+        Assert.Contains("clocks=true", all);
+        Assert.Contains("evals=true", all);
+        Assert.Contains("opening=true", all);
         Assert.Equal(1000, ChessGameFetcher.ResolveArchiveLimit(false, "1000"));
         Assert.Contains("sort=dateAsc", limited);
+        Assert.Contains("clocks=true", limited);
+        Assert.Contains("evals=true", limited);
+        Assert.Contains("opening=true", limited);
         Assert.Contains("max=1000", limited);
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, ""));
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, "0"));

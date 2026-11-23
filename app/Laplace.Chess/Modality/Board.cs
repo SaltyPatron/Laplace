@@ -177,6 +177,8 @@ public sealed class Board
 
     public static Board FromFen(string fen, ChessVariantRules? rules = null)
     {
+        if (string.IsNullOrWhiteSpace(fen))
+            throw new FormatException("Invalid FEN (empty).");
         var parts = fen.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 4)
             throw new FormatException($"Invalid FEN (need >=4 fields): {fen}");
@@ -223,7 +225,12 @@ public sealed class Board
                     b.Promoted |= 1UL << (rank * 8 + file - 1);
                     continue;
                 }
-                if (char.IsDigit(c)) { file += c - '0'; continue; }
+                if (c is >= '1' and <= '8')
+                {
+                    file += c - '0';
+                    if (file > 8) throw new FormatException($"Invalid FEN rank width: {fen}");
+                    continue;
+                }
                 if (file >= 8) throw new FormatException($"Invalid FEN rank width: {fen}");
                 b.Set(Sq(file, rank), CharToPiece(c));
                 file++;
@@ -231,6 +238,8 @@ public sealed class Board
             if (file != 8) throw new FormatException($"Invalid FEN rank width: {fen}");
         }
 
+        if (parts[1] is not ("w" or "b"))
+            throw new FormatException($"Invalid side to move '{parts[1]}' in FEN '{fen}'.");
         b.WhiteToMove = parts[1] == "w";
 
         // Castling field, including Chess960. Three forms are read:
@@ -427,6 +436,10 @@ public sealed class Board
 
     public static int AlgebraicToSquare(string s)
     {
+        if (string.IsNullOrEmpty(s) || s.Length != 2
+            || s[0] < 'a' || s[0] > 'h'
+            || s[1] < '1' || s[1] > '8')
+            throw new FormatException($"Invalid algebraic square '{s}'.");
         int file = s[0] - 'a';
         int rank = s[1] - '1';
         return Sq(file, rank);

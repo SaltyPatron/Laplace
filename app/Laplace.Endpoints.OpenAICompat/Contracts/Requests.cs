@@ -34,7 +34,8 @@ public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("max_db_probes")] ulong? MaxDbProbes = null,
     [property: JsonPropertyName("max_rows_scanned")] ulong? MaxRowsScanned = null,
     [property: JsonPropertyName("max_tokens_out")] uint? MaxTokensOut = null,
-    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null);
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null,
+    [property: JsonPropertyName("firmware")] string? Firmware = null);
 
 public sealed record ChatMessage(
     [property: JsonPropertyName("role")] string? Role,
@@ -62,7 +63,8 @@ public sealed record CompletionsRequest(
     [property: JsonPropertyName("max_db_probes")] ulong? MaxDbProbes = null,
     [property: JsonPropertyName("max_rows_scanned")] ulong? MaxRowsScanned = null,
     [property: JsonPropertyName("max_tokens_out")] uint? MaxTokensOut = null,
-    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null);
+    [property: JsonPropertyName("witnesses")] IReadOnlyList<string>? Witnesses = null,
+    [property: JsonPropertyName("firmware")] string? Firmware = null);
 
 public sealed record EmbeddingsRequest(
     [property: JsonPropertyName("model")] string? Model,

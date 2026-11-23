@@ -126,12 +126,10 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
             {
                 await Reject(http, 503, "subscription_configuration_incomplete", "Subscriptions require configured Stripe and durable PostgreSQL billing storage."); return;
             }
-            if ((options.Value.ApiKey.StartsWith("sk_live_", StringComparison.Ordinal)
-                    || options.Value.ApiKey.StartsWith("rk_live_", StringComparison.Ordinal))
-                && !options.Value.CommercialCatalogApproved)
+            if (IsLiveStripeKey(options.Value.ApiKey) && !options.Value.CommercialCatalogApproved)
             {
                 await Reject(http, 503, "commercial_catalog_review_required",
-                    "Live checkout is disabled until the operator explicitly approves the measured commercial catalog."); return;
+                    "Live checkout is disabled because commercial catalog approval is explicitly set to false."); return;
             }
             var existing = await entitlements.GetByTenantAsync(tenant.TenantId, ct);
             if (existing.Any(e => !string.IsNullOrWhiteSpace(e.StripeSubscriptionId)
@@ -155,6 +153,10 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
         }
         return result;
     }
+    private static bool IsLiveStripeKey(string? key) =>
+        key?.StartsWith("sk_live_", StringComparison.Ordinal) == true
+        || key?.StartsWith("rk_live_", StringComparison.Ordinal) == true;
+
     private static Task Reject(HttpContext http, int status, string code, string message)
     {
         http.Response.StatusCode = status;

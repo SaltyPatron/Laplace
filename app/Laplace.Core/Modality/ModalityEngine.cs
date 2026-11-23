@@ -231,7 +231,7 @@ public sealed class ModalityEngine<TState, TAction>
             terminal = _modality.Terminal(state);
         }
 
-        var outcome = terminal ?? GameOutcome.Draw;
+        var outcome = terminal ?? (adjudicated ? GameOutcome.Unknown : GameOutcome.Draw);
         var edges = new RecordedEdge[subjectKeys.Count];
         for (int i = 0; i < edges.Length; i++)
             edges[i] = new RecordedEdge(

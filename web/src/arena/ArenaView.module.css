@@ -1,0 +1,274 @@
+@layer components {
+  .page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    width: min(100%, var(--page-width-workspace));
+    min-width: 0;
+    margin: 0 auto;
+    padding: clamp(var(--space-3), 2vw, var(--space-5));
+    overflow-y: auto;
+  }
+
+  .hero {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .hero h2 {
+    margin: 0 0 var(--space-1);
+  }
+
+  .tabList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    border-bottom: 1px solid var(--color-border-default);
+    padding-bottom: var(--space-2);
+  }
+
+  .tabButton {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+  }
+
+  .tabButton:hover {
+    border-color: var(--color-accent);
+  }
+
+  .tabActive {
+    background: var(--color-accent-fill);
+    border-color: var(--color-accent-fill);
+    color: var(--button-primary-fg);
+  }
+
+  .panelWrap {
+    min-width: 0;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: var(--space-3);
+    align-items: start;
+  }
+
+  .row2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: var(--space-2);
+  }
+
+  .inlineForm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: flex-end;
+  }
+
+  .inlineForm > * {
+    flex: 1 1 14rem;
+  }
+
+  .formSubmit {
+    flex: 0 0 auto !important;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .actionsRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .rowHeader {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .chipRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .entityLink {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    color: var(--color-accent);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .entityLink:hover {
+    text-decoration: underline;
+  }
+
+  .hex {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .monoLine {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .receipt {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+  }
+
+  .receipt div {
+    min-width: 0;
+  }
+
+  .receipt dt {
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+  }
+
+  .receipt dd {
+    margin: var(--space-hair) 0 0;
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .synthesisBox {
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+  }
+
+  .synthesisBox p {
+    margin: var(--space-2) 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .strand {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .strandWrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .strandItem {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .relTag {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .plainList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .claimText {
+    margin: 0;
+    font-size: var(--text-base);
+    overflow-wrap: anywhere;
+  }
+
+  .candidateList {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
+  .candidateCard {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+    cursor: pointer;
+  }
+
+  .candidatePicked {
+    border-color: var(--color-accent);
+  }
+
+  .candidateBody {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .responseBox {
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    min-height: 6rem;
+    max-height: 22rem;
+    overflow: auto;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}

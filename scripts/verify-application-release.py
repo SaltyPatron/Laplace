@@ -36,7 +36,8 @@ def _read_body(response) -> bytes:
 
 def request(method: str, url: str, body: bytes | None = None,
             headers: dict[str, str] | None = None) -> tuple[int, str, bytes]:
-    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    hdrs = {"User-Agent": "Laplace-Verify/1.0", **(headers or {})}
+    req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             return response.status, response.headers.get("Content-Type", ""), _read_body(response)

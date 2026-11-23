@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -147,9 +148,20 @@ internal static class McpEndpoints
         }
         session.Touch();
         string? reply;
+        string? method = message["method"] is JsonValue mv && mv.TryGetValue<string>(out var m) ? m : null;
         try
         {
-            reply = await Task.Run(() => session.Server.Handle(message.ToJsonString()), ct);
+            var (handled, directReply) = await TryHandleFirmwareToolCallAsync(context, session, message, method, ct);
+            if (handled)
+            {
+                reply = directReply;
+            }
+            else
+            {
+                reply = await Task.Run(() => session.Server.Handle(message.ToJsonString()), ct);
+                if (string.Equals(method, "tools/list", StringComparison.Ordinal) && reply is not null)
+                    reply = EnrichToolsListReply(reply);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -223,4 +235,163 @@ internal static class McpEndpoints
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(McpServer.ErrorReply(null, code, message), context.RequestAborted);
     }
+
+    private static async Task<(bool Handled, string? Reply)> TryHandleFirmwareToolCallAsync(
+        HttpContext context,
+        McpSession session,
+        JsonObject message,
+        string? method,
+        CancellationToken ct)
+    {
+        var rpcId = message["id"];
+        if (rpcId is null || !string.Equals(method, "tools/call", StringComparison.Ordinal))
+            return (false, null);
+
+        if (message["params"] is not JsonObject paramsObj
+            || paramsObj["name"] is not JsonValue nameVal
+            || !nameVal.TryGetValue<string>(out var toolName)
+            || toolName is not ("chat" or "turn"))
+            return (false, null);
+
+        if (paramsObj["arguments"] is not JsonObject toolArgs
+            || !toolArgs.TryGetPropertyValue("firmware", out var fwNode)
+            || fwNode is null)
+            return (false, null);
+
+        if (fwNode is not JsonValue fwVal || !fwVal.TryGetValue<string>(out var fwRaw))
+            return (true, ToolResultReply(rpcId,
+                $"Invalid 'firmware' parameter: expected a string firmware profile ({ValidFirmwareList()}).",
+                isError: true));
+
+        if (string.IsNullOrEmpty(fwRaw))
+            return (false, null);
+
+        if (!FirmwareCatalog.TryResolve(fwRaw, out var firmware))
+            return (true, ToolResultReply(rpcId,
+                $"Unknown firmware '{fwRaw}'. Valid firmware profiles: {ValidFirmwareList()}.",
+                isError: true));
+
+        if (!string.Equals(toolName, "chat", StringComparison.Ordinal))
+            return (false, null);
+
+        var prompt = ReadOptionalString(toolArgs, "prompt");
+        if (string.IsNullOrWhiteSpace(prompt))
+            return (true, ToolResultReply(rpcId, "chat error: missing required parameter 'prompt'", isError: true));
+
+        var turns = context.RequestServices.GetService<IConversationTurns>();
+        if (turns is null)
+            return (true, ToolResultReply(rpcId, "chat error: conversation turn service is unavailable", isError: true));
+        if (turns.Unavailable is { } why)
+            return (true, ToolResultReply(rpcId, $"chat error: {why}", isError: true));
+
+        string sessionKey = ReadOptionalString(toolArgs, "session") ?? session.Id;
+        string participant = ReadOptionalString(toolArgs, "user") ?? "mcp-local";
+        bool readOnly = toolArgs["read_only"] is JsonValue roVal && roVal.TryGetValue<bool>(out var ro) && ro;
+
+        var clock = Stopwatch.StartNew();
+        try
+        {
+            var receipt = await turns.TurnAsync(
+                new EngineTurnRequest(
+                    FirmwarePath: firmware.Path,
+                    ModelName: firmware.Id,
+                    Prompt: prompt,
+                    Messages: null,
+                    SystemPrompt: null,
+                    User: participant,
+                    Session: sessionKey,
+                    ReadOnly: readOnly),
+                envelopePreset: "standard",
+                envelopeEstimatedUs: 0,
+                step: null,
+                ct: ct);
+
+            var abi = receipt.AbiResult;
+            var obj = new JsonObject
+            {
+                ["reply"] = receipt.Response,
+                ["prompt_id"] = receipt.PromptId,
+                ["response_id"] = receipt.ResponseId ?? string.Empty,
+                ["turn_id"] = receipt.TurnId,
+                ["disposition"] = receipt.Disposition,
+                ["firmware"] = firmware.Id,
+                ["firmware_id"] = abi is { } a && a.FirmwareId != Hash128.Zero
+                    ? a.FirmwareId.ToHex()
+                    : string.IsNullOrEmpty(firmware.IdHex) ? null : firmware.IdHex,
+                ["top_salience"] = abi?.TopSalience ?? receipt.Steps.FirstOrDefault()?.Grounds ?? 0.0,
+                ["mean_confidence"] = abi?.MeanConfidence ?? receipt.Steps.FirstOrDefault()?.Confidence ?? 0.0,
+                ["wall_us"] = abi?.Work.wall_us ?? 0UL,
+                ["db_probes"] = abi?.Work.db_probes ?? 0UL,
+                ["rows_scanned"] = abi?.Work.rows_scanned ?? 0UL,
+                ["elapsed_ms"] = Math.Round(clock.Elapsed.TotalMilliseconds, 2),
+            };
+            return (true, ToolResultReply(rpcId, obj.ToJsonString(JsonSerializerOptions.Default), isError: false));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (true, ToolResultReply(rpcId, $"chat error: {ex.Message}", isError: true));
+        }
+    }
+
+    private static string EnrichToolsListReply(string reply)
+    {
+        try
+        {
+            if (JsonNode.Parse(reply) is not JsonObject root
+                || root["result"]?["tools"] is not JsonArray tools)
+                return reply;
+
+            bool updated = false;
+            string valid = ValidFirmwareList();
+            foreach (var item in tools)
+            {
+                if (item is not JsonObject tool)
+                    continue;
+                var name = tool["name"] is JsonValue nv && nv.TryGetValue<string>(out var n) ? n : null;
+                if (name is not ("chat" or "turn"))
+                    continue;
+                if (tool["inputSchema"] is not JsonObject schema)
+                    continue;
+                if (schema["properties"] is not JsonObject props)
+                {
+                    props = new JsonObject();
+                    schema["properties"] = props;
+                }
+                props["firmware"] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["description"] = $"Optional detached firmware profile ({valid})."
+                };
+                updated = true;
+            }
+
+            return updated ? root.ToJsonString(JsonSerializerOptions.Default) : reply;
+        }
+        catch (JsonException)
+        {
+            return reply;
+        }
+    }
+
+    private static string ToolResultReply(JsonNode? id, string text, bool isError) =>
+        new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = id?.DeepClone(),
+            ["result"] = new JsonObject
+            {
+                ["content"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = text,
+                }),
+                ["isError"] = isError,
+            },
+        }.ToJsonString(JsonSerializerOptions.Default);
+
+    private static string? ReadOptionalString(JsonObject obj, string key) =>
+        obj[key] is JsonValue val && val.TryGetValue<string>(out var s) ? s : null;
+
+    private static string ValidFirmwareList() =>
+        string.Join(", ", FirmwareCatalog.List().Select(static f => f.Id));
 }

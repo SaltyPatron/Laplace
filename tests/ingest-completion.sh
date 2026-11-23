@@ -21,6 +21,14 @@ export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
 export LAPLACE_REUSE_INSTALLED_NATIVE=1
 export LAPLACE_NATIVE_TEST_LIBRARY="$prefix/lib/liblaplace.so"
 export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
+site_build="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}"
+if [[ ! -s "$site_build/csharp/LaplaceNative.g.cs" ]]; then
+  native_src="${LAPLACE_NATIVE:-/repos/src/Laplace-Native}"
+  [[ -d "$native_src" ]] || native_src="$(dirname "$root")/Laplace-Native"
+  mkdir -p "$site_build/csharp"
+  cmake -DCC=icx -DNODE="$(command -v node)" -DSOURCE="$native_src" -DOUT="$site_build/csharp" -P "$native_src/tools/csharp/generate.cmake" 8>&- 9>&-
+fi
+export LaplaceNativeGenerated="$site_build/csharp"
 output="${LAPLACE_BUILD:?}/laplace-mono/ingest-completion"
 results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/ingest-completion-results"
 mkdir -p "$results"

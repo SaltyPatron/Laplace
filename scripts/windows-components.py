@@ -57,7 +57,7 @@ def closure(root: Path, name: str) -> set[str]:
         if project in result:
             continue
         result.add(project)
-        pending.extend(projects[project].refs)
+        pending.extend(ref for ref in projects[project].refs if ref in projects)
     return result
 
 

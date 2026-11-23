@@ -35,6 +35,10 @@ internal static partial class InferenceEndpoints
             if (payload.Messages is null || payload.Messages.Count == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'messages' must contain at least one message.");
 
+            var (firmwareId, firmwarePath, firmwareError) = ResolveFirmwareSelection(payload.Firmware, payload.Model);
+            if (firmwareError is not null)
+                return firmwareError;
+
             var (prompt, systemPrompt, history) = ForwardProofHelper.ExtractChatInputs(payload.System, payload.Messages);
             if (string.IsNullOrWhiteSpace(prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "At least one user message must include non-empty 'content'.");
@@ -96,8 +100,8 @@ internal static partial class InferenceEndpoints
             request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
 
             var turnRequest = new EngineTurnRequest(
-                FirmwarePath: null,
-                ModelName: ModelCatalog.ResolveFirmwareModel(payload.Model),
+                FirmwarePath: firmwarePath,
+                ModelName: firmwareId,
                 Prompt: prompt,
                 Messages: history,
                 SystemPrompt: systemPrompt,
@@ -210,6 +214,10 @@ internal static partial class InferenceEndpoints
                     $"Unknown model '{payload.Model}'. See GET /v1/models for the served catalog.");
             if (string.IsNullOrWhiteSpace(payload.Prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
+
+            var (firmwareId, firmwarePath, firmwareError) = ResolveFirmwareSelection(payload.Firmware, payload.Model);
+            if (firmwareError is not null)
+                return firmwareError;
             if (payload.TopP is not null || payload.TopK is not null
                 || payload.Window is not null || payload.TopicBoost is not null
                 || payload.Echo || payload.Logprobs is not null)
@@ -262,8 +270,8 @@ internal static partial class InferenceEndpoints
             await CatalogConversationAsync(identityStore, scope, payload.Prompt, ct);
 
             var turnRequest = new EngineTurnRequest(
-                FirmwarePath: null,
-                ModelName: ModelCatalog.ResolveFirmwareModel(payload.Model),
+                FirmwarePath: firmwarePath,
+                ModelName: firmwareId,
                 Prompt: payload.Prompt,
                 Messages: null,
                 SystemPrompt: null,
@@ -371,4 +379,29 @@ internal static partial class InferenceEndpoints
 
     private static ForwardTurnStep Step(NativeTurnStep step)
         => new(step.Step, step.Kind, step.Id, step.Text, step.Grounds, step.Continuity, step.Confidence);
+
+    private static (string FirmwareId, string? FirmwarePath, IResult? Error) ResolveFirmwareSelection(
+        string? requestedFirmware,
+        string requestedModel)
+    {
+        if (!string.IsNullOrEmpty(requestedFirmware))
+        {
+            if (!FirmwareCatalog.TryResolve(requestedFirmware, out var selected))
+            {
+                var valid = string.Join(", ", FirmwareCatalog.List().Select(static f => f.Id));
+                return (string.Empty, null, EndpointJson.BadRequest("unknown_firmware",
+                    $"Unknown firmware '{requestedFirmware}'. Valid firmware profiles: {valid}."));
+            }
+            return (selected.Id, selected.Path, null);
+        }
+
+        string firmwareId = ModelCatalog.ResolveFirmwareModel(requestedModel);
+        string? firmwarePath = null;
+        bool allowDefaultDiskLookup = !string.Equals(firmwareId, "program", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_FIRMWARE"));
+        if (allowDefaultDiskLookup && FirmwareCatalog.TryResolve(firmwareId, out var fallback) && fallback.AvailableOnDisk)
+            firmwarePath = fallback.Path;
+
+        return (firmwareId, firmwarePath, null);
+    }
 }

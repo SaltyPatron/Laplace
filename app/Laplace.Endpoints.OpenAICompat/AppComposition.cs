@@ -116,10 +116,12 @@ internal static class AppComposition
             chessWeight,
             sp.GetRequiredService<SubstrateClient>().ChessReadOnlyDataSource,
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
-            sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
+            sp.GetService<ILoggerFactory>()?.CreateLogger("chess"),
+            nativeRuntime: () => sp.GetRequiredService<EngineRuntimeService>().Runtime));
         services.AddSingleton(sp => new ChessLabService(
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
-            sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
+            sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab"),
+            nativeRuntime: () => sp.GetRequiredService<EngineRuntimeService>().Runtime));
         services.AddHttpClient<ILichessStatusClient, LichessStatusClient>(client =>
         {
             // the managed service's loopback status port (LichessServiceHost, LAPLACE_LICHESS_PORT)
@@ -135,6 +137,25 @@ internal static class AppComposition
         else services.AddSingleton<IServiceControl, ServiceControl>();
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
         services.AddSingleton<IFoundryExportService, NativeFoundryExportService>();
+        services.AddSingleton<ArenaService>();
+        services.AddSingleton(sp => new RecipeStudioService(
+            sp.GetService<ILoggerFactory>()?.CreateLogger("recipe-studio")));
+        services.AddOptions<PatreonOptions>().Configure(options =>
+        {
+            var env = PatreonOptions.LoadFromEnvironment();
+            options.ClientId = env.ClientId;
+            options.ClientSecret = env.ClientSecret;
+            options.WebhookSecret = env.WebhookSecret;
+            options.CampaignId = env.CampaignId;
+            options.RedirectUri = env.RedirectUri;
+        });
+        services.AddSingleton<IPatreonEntitlementService>(sp => new PatreonEntitlementService(
+            sp,
+            sp.GetRequiredService<IBillingCatalog>(),
+            sp.GetRequiredService<IBillingEntitlementStore>(),
+            sp.GetRequiredService<IBillingWebhookEventStore>(),
+            sp.GetRequiredService<IKnowledgePackageStore>(),
+            sp.GetService<Microsoft.Extensions.Options.IOptions<PatreonOptions>>()));
 
         services.AddSingleton<IBillingCatalog, StaticBillingCatalog>();
         services.AddSingleton<IStripeCatalogSync, StripeCatalogSync>();
@@ -187,8 +208,8 @@ internal static class AppComposition
             };
             options.CommercialCatalogApproved = FirstConfig("LAPLACE_COMMERCIAL_CATALOG_APPROVED")?.ToLowerInvariant() switch
             {
-                null or "false" or "0" => false,
-                "true" or "1" => true,
+                null or "true" or "1" => true,
+                "false" or "0" => false,
                 _ => throw new InvalidOperationException("LAPLACE_COMMERCIAL_CATALOG_APPROVED must be true, false, 1, or 0.")
             };
         });
@@ -323,6 +344,8 @@ internal static class AppComposition
             services.AddSingleton<IBillingQuoteStore>(new BillingPostgres.PostgresBillingQuoteStore(ds));
             services.AddSingleton<IBillingConfigStore>(new PostgresBillingConfigStore(ds));
             services.AddSingleton<IApiKeyStore>(new PostgresApiKeyStore(ds));
+            services.AddSingleton<IKnowledgePackageStore>(new KnowledgePackageService(ds));
+            services.AddSingleton<IWitnessPayeeStore>(new WitnessPayeeService(ds));
         }
         else
         {
@@ -333,6 +356,8 @@ internal static class AppComposition
             services.AddSingleton<IBillingQuoteStore, InMemoryBillingQuoteStore>();
             services.AddSingleton<IBillingConfigStore, InMemoryBillingConfigStore>();
             services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
+            services.AddSingleton<IKnowledgePackageStore>(_ => new KnowledgePackageService());
+            services.AddSingleton<IWitnessPayeeStore>(_ => new WitnessPayeeService());
         }
     }
 

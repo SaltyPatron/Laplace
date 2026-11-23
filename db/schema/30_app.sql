@@ -655,3 +655,52 @@ AS $$
     FROM app.billing_entitlements e
     WHERE e.tenant = p_tenant AND e.monthly_credits ? p_service;
 $$;
+
+-- =============================================================================
+-- 4. Patreon Entitlement Witnessing, Contributor Payees & Knowledge Packages
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS app.patreon_links (
+    tenant_id         text PRIMARY KEY REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
+    patreon_user_id   text UNIQUE NOT NULL,
+    patreon_member_id text,
+    email             text,
+    tier              text,
+    pledge_cents      bigint NOT NULL DEFAULT 0,
+    status            text NOT NULL DEFAULT 'unlinked',
+    mapped_plan_id    text,
+    granted_packages  text[] NOT NULL DEFAULT '{}'::text[],
+    linked_at         timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app.witness_payees (
+    witness_id    text PRIMARY KEY,
+    owner_tenant  text REFERENCES app.tenants(tenant_id) ON DELETE SET NULL,
+    license_kind  text NOT NULL CHECK (license_kind IN ('royalty_bearing', 'open_license')),
+    display_name  text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS witness_payees_owner
+    ON app.witness_payees (owner_tenant)
+    WHERE owner_tenant IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS app.knowledge_packages (
+    package_id    text PRIMARY KEY,
+    display_name  text NOT NULL,
+    visibility    text NOT NULL CHECK (visibility IN ('public', 'private')),
+    witness_ids   text[] NOT NULL DEFAULT '{}'::text[],
+    min_trust     double precision NOT NULL DEFAULT 0.0,
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app.tenant_knowledge_packages (
+    tenant_id   text NOT NULL REFERENCES app.tenants(tenant_id) ON DELETE CASCADE,
+    package_id  text NOT NULL REFERENCES app.knowledge_packages(package_id) ON DELETE CASCADE,
+    granted_by  text,
+    granted_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, package_id)
+);
+CREATE INDEX IF NOT EXISTS tenant_knowledge_packages_pkg
+    ON app.tenant_knowledge_packages (package_id);

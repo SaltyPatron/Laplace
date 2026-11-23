@@ -55,6 +55,8 @@ public sealed partial class ChessEngineService : IChessEngineService
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly ILaplaceEngineRuntime? _injectedRuntime;
+    private readonly Func<ILaplaceEngineRuntime?>? _nativeRuntime;
+    private readonly object _nativeLock = new();
     private LaplaceEngineRuntime? _ownedRuntime;
     private bool _nativeRuntimeAttempted;
     private NpgsqlDataSource? _ds;
@@ -70,8 +72,9 @@ public sealed partial class ChessEngineService : IChessEngineService
     private double _trainTemp = 120d, _trainWeight; private int _trainMaxPlies = 400;
 
     public ChessEngineService(
-        double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
-        : this(witnessWeight, liveHost.DataSource, _ => Task.FromResult(liveHost), log, null)
+        double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null,
+        Func<ILaplaceEngineRuntime?>? nativeRuntime = null)
+        : this(witnessWeight, liveHost.DataSource, _ => Task.FromResult(liveHost), log, null, nativeRuntime)
     {
         _liveHost = liveHost;
     }
@@ -79,8 +82,18 @@ public sealed partial class ChessEngineService : IChessEngineService
     public ChessEngineService(
         double witnessWeight,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost, ILogger? log = null)
-        : this(witnessWeight, getLiveHost, log, null)
+        : this(witnessWeight, getLiveHost, log, (ILaplaceEngineRuntime?)null)
     {
+    }
+
+    public ChessEngineService(
+        double witnessWeight,
+        Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
+        Func<ILaplaceEngineRuntime?> nativeRuntime,
+        ILogger? log = null)
+        : this(witnessWeight, getLiveHost, log, engineRuntime: null)
+    {
+        _nativeRuntime = nativeRuntime ?? throw new ArgumentNullException(nameof(nativeRuntime));
     }
 
     internal ChessEngineService(
@@ -104,12 +117,14 @@ public sealed partial class ChessEngineService : IChessEngineService
         NpgsqlDataSource readOnlyDataSource,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
         ILogger? log = null,
-        ILaplaceEngineRuntime? engineRuntime = null)
+        ILaplaceEngineRuntime? engineRuntime = null,
+        Func<ILaplaceEngineRuntime?>? nativeRuntime = null)
     {
         _readOnlyDataSource = readOnlyDataSource ?? throw new ArgumentNullException(nameof(readOnlyDataSource));
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
         _injectedRuntime = engineRuntime;
+        _nativeRuntime = nativeRuntime;
         _log = log ?? Laplace.Ops.LaplaceLogging.CreateLogger(typeof(ChessEngineService).FullName!);
     }
 
@@ -160,7 +175,7 @@ public sealed partial class ChessEngineService : IChessEngineService
     public async Task<ChessLegalResponse> LegalAsync(string fen, string? variant, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
-        var state = _modality!.FromFen(fen, ChessVariants.Resolve(variant));
+        var state = ParseValidatedState(fen, ChessVariants.Resolve(variant), nameof(fen));
         var terminal = _modality!.Terminal(state);
         var status = terminal is { } t ? Describe(t) : "ongoing";
         var inCheck = MoveGen.InCheck(state.Board, state.Board.WhiteToMove);
@@ -189,8 +204,8 @@ public sealed partial class ChessEngineService : IChessEngineService
         string fen, int limit, string? variant, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var state = _modality!.FromFen(fen, ChessVariants.Resolve(variant));
-        var legal = _modality.LegalActions(state);
+        var state = ParseValidatedState(fen, ChessVariants.Resolve(variant), nameof(fen));
+        var legal = _modality!.LegalActions(state);
         var claims = new Hash128[legal.Count];
         for (int i = 0; i < legal.Count; i++)
             claims[i] = ChessNativeRatings.Claim(state, legal[i], _modality.Apply(state, legal[i]));
@@ -250,11 +265,10 @@ public sealed partial class ChessEngineService : IChessEngineService
         if (substrate)
             await EngineAsync(ct);
         var rules = ChessVariants.Resolve(variant);
-        var modality = _modality ??= new ChessModality();
-        var state = modality.FromFen(fen, rules);
-        if (modality.Terminal(state) is { } term)
+        var state = ParseValidatedState(fen, rules, nameof(fen));
+        if (_modality!.Terminal(state) is { } term)
         {
-            int whiteCp = term.IsDraw ? 0 : term.Winner == 0 ? 30_000 : -30_000;
+            int whiteCp = (term.IsDraw || term.IsUnknown) ? 0 : term.Winner == 0 ? 30_000 : -30_000;
             return new ChessPositionEval(whiteCp, 0, 0, substrate, true, Describe(term), Source: "terminal");
         }
 
@@ -353,21 +367,26 @@ public sealed partial class ChessEngineService : IChessEngineService
 
     private ILaplaceEngineRuntime? ResolveNativeRuntime()
     {
+        if (_nativeRuntime is not null && _nativeRuntime() is { } supplied) return supplied;
         if (_injectedRuntime is not null) return _injectedRuntime;
         if (_ownedRuntime is not null) return _ownedRuntime;
-        if (_nativeRuntimeAttempted || _ds is null) return null;
-        _nativeRuntimeAttempted = true;
-        try
+        lock (_nativeLock)
         {
-            var conn = _ds.ConnectionString;
-            if (string.IsNullOrWhiteSpace(conn)) return null;
-            _ownedRuntime = new LaplaceEngineRuntime(ChessGameRecorder.ToLibpqConnInfo(conn));
-            return _ownedRuntime;
-        }
-        catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or TypeInitializationException)
-        {
-            _log.LogDebug(ex, "LaplaceEngineRuntime initialization skipped; chess will use managed Search.");
-            return null;
+            if (_ownedRuntime is not null) return _ownedRuntime;
+            if (_nativeRuntimeAttempted || _ds is null) return null;
+            _nativeRuntimeAttempted = true;
+            try
+            {
+                var conn = _ds.ConnectionString;
+                if (string.IsNullOrWhiteSpace(conn)) return null;
+                _ownedRuntime = new LaplaceEngineRuntime(ChessGameRecorder.ToLibpqConnInfo(conn));
+                return _ownedRuntime;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException or TypeInitializationException)
+            {
+                _log.LogDebug(ex, "LaplaceEngineRuntime initialization skipped; chess will use managed Search.");
+                return null;
+            }
         }
     }
 
@@ -400,7 +419,7 @@ public sealed partial class ChessEngineService : IChessEngineService
     {
         int mover = state.Board.WhiteToMove ? 0 : 1;
         foreach (var move in MoveGen.Legal(state.Board))
-            if (modality.Terminal(modality.Apply(state, move)) is { IsDraw: false } end && end.Winner == mover)
+            if (modality.Terminal(modality.Apply(state, move)) is { IsDraw: false, IsUnknown: false } end && end.Winner == mover)
                 return true;
         return false;
     }
@@ -413,18 +432,52 @@ public sealed partial class ChessEngineService : IChessEngineService
         return SearchContinuationSeed.ForUci(_modality!, origin, moves);
     }
 
+    private ChessState ParseValidatedState(string fen, ChessVariantRules rules, string paramName = "fen")
+    {
+        var modality = _modality ??= new ChessModality();
+        if (string.IsNullOrWhiteSpace(fen))
+            throw new ArgumentException("Chess FEN cannot be empty.", paramName);
+
+        try
+        {
+            string trimmed = fen.Trim();
+            ChessState state = string.Equals(trimmed, "startpos", StringComparison.OrdinalIgnoreCase)
+                ? (rules.IsStandard
+                    ? modality.Initial(rules)
+                    : modality.FromFen(NativeChessRules.LawStart(rules.Law) ?? ChessModality.StartFen, rules))
+                : modality.FromFen(trimmed, rules);
+
+            if (rules.IsStandard &&
+                (System.Numerics.BitOperations.PopCount(state.Board.PieceBB(Piece.WKing)) != 1 ||
+                 System.Numerics.BitOperations.PopCount(state.Board.PieceBB(Piece.BKing)) != 1))
+            {
+                throw new ArgumentException(
+                    $"Invalid chess FEN '{fen}': standard chess requires exactly one white king and one black king.",
+                    paramName);
+            }
+
+            return state;
+        }
+        catch (FormatException ex)
+        {
+            throw new ArgumentException($"Invalid chess FEN '{fen}': {ex.Message}", paramName, ex);
+        }
+    }
+
     private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves, ChessVariantRules? rules = null)
     {
         var resolved = rules ?? ChessVariantRules.Standard;
+        var state = ParseValidatedState(fen, resolved, nameof(fen));
         if (moves is not { Count: > 0 })
-            return _modality!.FromFen(fen, resolved);
+            return state;
 
-        var state = string.IsNullOrWhiteSpace(fen) || fen == "startpos"
-            ? _modality!.Initial(resolved)
-            : _modality!.FromFen(fen, resolved);
-        foreach (var uci in moves)
+        for (int i = 0; i < moves.Count; i++)
         {
-            if (FindLegalUci(state, uci) is not { } mv) break;
+            string uci = moves[i] ?? "";
+            if (_modality!.Terminal(state) is not null)
+                throw new ArgumentException($"Illegal UCI move '{uci}' at index {i}: position is already terminal.", nameof(moves));
+            if (FindLegalUci(state, uci) is not { } mv)
+                throw new ArgumentException($"Illegal UCI move '{uci}' at index {i}.", nameof(moves));
             state = _modality.Apply(state, mv);
         }
         return state;

@@ -47,9 +47,7 @@ LAPLACE_DEPSRC="${LAPLACE_DEPSRC:-/repos/src}"
 export LAPLACE_DATA="${LAPLACE_DATA:-/vault/Data}"
 SITE_WORK="${LAPLACE_SITE_WORK:-${LAPLACE_WORK:-/repos/work}/mono-site}"
 SITE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:-/repos/build}/Laplace/release}"
-# the PostGIS the cluster runs was built by setup.sh deps out of tree: its liblwgeom is the one laplace_geom links
-LAPLACE_POSTGIS_BUILD="${LAPLACE_POSTGIS_BUILD:-/repos/work/postgis}"
-LAPLACE_GEOS_PROJ_PREFIX="${LAPLACE_GEOS_PROJ_PREFIX:-${LAPLACE_PREFIX:-/usr/local}}"
+# the PostGIS the cluster runs is already installed; laplace_geom has been removed from this substrate
 LAPLACE_LOCKS="${LAPLACE_LOCKS:-/run/lock/laplace}"
 LAPLACE_API_URL="${LAPLACE_API_URL:-http://127.0.0.1:5187}"
 LAPLACE_SITE_URL="${LAPLACE_SITE_URL:-http://127.0.0.1:8080}"
@@ -60,7 +58,9 @@ LAPLACE_MCP_ORIGIN="${LAPLACE_MCP_ORIGIN:-https://mcp.hartonomous.com}"
 LAPLACE_MCP_URL="http://127.0.0.1:$LAPLACE_MCP_HTTP_PORT"
 
 export PGHOST="${LAPLACE_PGHOST:-/tmp}" PGPORT="${LAPLACE_PGPORT:-5432}" PGUSER="${LAPLACE_DATABASE_ROLE:-${LAPLACE_ROLE:-laplace}}"
-export LAPLACE_DBNAME="${LAPLACE_DBNAME:-laplace-mono}"
+_runtime_db="$(printf '%s' "${LAPLACE_DATABASE_RUNTIME_DB:-}" | sed -nE 's/.*[Dd]atabase=([^;]+).*/\1/p')"
+export LAPLACE_DBNAME="${LAPLACE_DBNAME:-${_runtime_db:-laplace}}"
+unset _runtime_db
 export PGDATABASE="$LAPLACE_DBNAME"
 export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 export LAPLACE_DB="Host=$PGHOST;Port=$PGPORT;Username=$PGUSER;Database=$LAPLACE_DBNAME${LAPLACE_DB_SSLMODE:+;SSL Mode=$LAPLACE_DB_SSLMODE}"
@@ -124,8 +124,8 @@ oneapi() {
 # are found under one deps prefix the way laplace_geom looks for them (<prefix>/{geos,proj,pgsql-18}).
 phase_externals() {
   say externals
-  local e="$LAPLACE_EXTERNAL" d="$SITE_WORK/deps" name target
-  mkdir -p "$e" "$d/pgsql-18/include" "$d/pgsql-18/lib"
+  local e="$LAPLACE_EXTERNAL" name target
+  mkdir -p "$e"
   while read -r name target; do
     # A configured dependency root can hold the source itself. Never create a
     # nested link inside that checkout or replace it with the default mapping.
@@ -141,36 +141,9 @@ laplace-native        ${LAPLACE_NATIVE:-$LAPLACE_DEPSRC/Laplace-Native}
 tree-sitter           $LAPLACE_DEPSRC/tree-sitter
 fathom                $LAPLACE_DEPSRC/Fathom
 spectra               $LAPLACE_DEPSRC/spectra
-postgis               $LAPLACE_DEPSRC/postgis
 eigen                 ${LAPLACE_EIGEN:-/usr/include/eigen3}
 tree-sitter-grammars  $LAPLACE_DATA/TreeSitter
 EOF
-  ln -sfn "$LAPLACE_GEOS_PROJ_PREFIX" "$d/geos"; ln -sfn "$LAPLACE_GEOS_PROJ_PREFIX" "$d/proj"
-  [[ -f "$LAPLACE_POSTGIS_BUILD/liblwgeom/.libs/liblwgeom.a" ]] || fail "no liblwgeom.a under $LAPLACE_POSTGIS_BUILD (Operations setup.sh deps builds PostGIS there)"
-  # liblwgeom's headers as an installed set (PostGIS 3 installs none): liblwgeom.h reads "../postgis_config.h" and that
-  # reads "postgis_revision.h", which an out-of-tree build without git metadata does not write
-  local inc="$d/pgsql-18/include" rev
-  (
-    headers=$(mktemp -d "$inc/.headers.XXXXXXXX")
-    trap 'rm -rf -- "$headers"' EXIT
-    sed 's|#include "../postgis_config.h"|#include "postgis_config.h"|' "$LAPLACE_POSTGIS_BUILD/liblwgeom/liblwgeom.h" > "$headers/liblwgeom.h"
-    chmod 664 "$headers/liblwgeom.h"
-    cmake -E copy_if_different "$headers/liblwgeom.h" "$inc/liblwgeom.h"
-    cmake -E copy_if_different "$LAPLACE_POSTGIS_BUILD/postgis_config.h" "$inc/postgis_config.h"
-    if [[ -f "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" ]]; then
-      cmake -E copy_if_different "$LAPLACE_POSTGIS_BUILD/postgis_revision.h" "$inc/postgis_revision.h"
-    elif [[ -f "$LAPLACE_DEPSRC/postgis/postgis_revision.h" ]]; then
-      cmake -E copy_if_different "$LAPLACE_DEPSRC/postgis/postgis_revision.h" "$inc/postgis_revision.h"
-    else
-      rev="$(git -C "$LAPLACE_DEPSRC/postgis" rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
-      echo "#define POSTGIS_REVISION $rev" > "$headers/postgis_revision.h"
-      chmod 664 "$headers/postgis_revision.h"
-      cmake -E copy_if_different "$headers/postgis_revision.h" "$inc/postgis_revision.h"
-    fi
-  )
-  ln -sfn "$LAPLACE_DEPSRC/postgis/liblwgeom/lwinline.h" "$inc/lwinline.h"
-  ln -sfn "$LAPLACE_POSTGIS_BUILD/liblwgeom/.libs/liblwgeom.a" "$d/pgsql-18/lib/liblwgeom.a"
-  echo "  deps prefix            $d (geos, proj -> $LAPLACE_GEOS_PROJ_PREFIX; liblwgeom -> $LAPLACE_POSTGIS_BUILD)"
 }
 
 # ------------------------------------------------------------------------------------------------ build
@@ -255,6 +228,38 @@ phase_build() {
   printf '%s\n' "$native_pkg" > "$SITE_BUILD/.native-package"
   printf '%s\n' "$engine_pkg" > "$SITE_BUILD/.engine-package"
 
+  if [[ ! -s "$SITE_BUILD/share/laplace/tier0.chess" ]] || ! env -u LAPLACE_CHESS \
+    LD_LIBRARY_PATH="$native_pkg/lib:${LD_LIBRARY_PATH:-}" \
+    LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin" \
+    LAPLACE_FIRMWARE="$recipe_engine/firmware/program.firmware" \
+    "$engine_pkg/bin/laplace" chess -o "$SITE_BUILD/share/laplace/tier0.chess" -t "$SITE_BUILD/share/laplace/tier0.bin" --fingerprint >/dev/null 2>&1; then
+    if [[ -s /hosting/laplace/modular/current/share/prepared/tier0.chess ]] && env -u LAPLACE_CHESS \
+      LD_LIBRARY_PATH="$native_pkg/lib:${LD_LIBRARY_PATH:-}" \
+      LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin" \
+      LAPLACE_FIRMWARE="$recipe_engine/firmware/program.firmware" \
+      "$engine_pkg/bin/laplace" chess -o /hosting/laplace/modular/current/share/prepared/tier0.chess -t "$SITE_BUILD/share/laplace/tier0.bin" --verify >/dev/null 2>&1; then
+      cp -f /hosting/laplace/modular/current/share/prepared/tier0.chess "$SITE_BUILD/share/laplace/tier0.chess"
+    else
+      env -u LAPLACE_CHESS \
+        LD_LIBRARY_PATH="$native_pkg/lib:${LD_LIBRARY_PATH:-}" \
+        LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin" \
+        LAPLACE_FLAGS="$SITE_BUILD/share/laplace/tier0.flags" \
+        LAPLACE_HIGHWAY="$SITE_BUILD/share/laplace/highway.bin" \
+        LAPLACE_RECIPES="$recipe_engine/recipes" \
+        LAPLACE_GRAMMARS="$grammars" \
+        LAPLACE_MANIFEST="$native_source/manifest" \
+        LAPLACE_FIRMWARE="$recipe_engine/firmware/program.firmware" \
+        LAPLACE_DATA="$LAPLACE_DATA" \
+        LAPLACE_CONNINFO="host=127.0.0.1 port=1 connect_timeout=1 dbname=unused" \
+        "$engine_pkg/bin/laplace" chess -o "$SITE_BUILD/share/laplace/tier0.chess" -t "$SITE_BUILD/share/laplace/tier0.bin" -r "$recipe_engine/recipes" openings 8>&-
+      env -u LAPLACE_CHESS \
+        LD_LIBRARY_PATH="$native_pkg/lib:${LD_LIBRARY_PATH:-}" \
+        LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin" \
+        LAPLACE_FIRMWARE="$recipe_engine/firmware/program.firmware" \
+        "$engine_pkg/bin/laplace" chess -o "$SITE_BUILD/share/laplace/tier0.chess" -t "$SITE_BUILD/share/laplace/tier0.bin" --verify 8>&-
+    fi
+  fi
+
   cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" \
     -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING="${LAPLACE_SITE_BUILD_TESTING:-OFF}" \
@@ -270,8 +275,6 @@ phase_build() {
     -DLAPLACE_GRAMMARS="$grammars" \
     -DLAPLACE_EIGEN_DIR="$eigen_dir" \
     -DLAPLACE_SPECTRA_DIR="$LAPLACE_EXTERNAL/spectra" \
-    -DLAPLACE_DEPS_PREFIX="$SITE_WORK/deps" \
-    -DLAPLACE_DEPS_LWGEOM_PREFIX="$SITE_WORK/deps/pgsql-18" \
     -DLAPLACE_INSTALL_STAGED=ON \
     -DLAPLACE_UCD_PATH="$ucd" \
     -DLAPLACE_TIER0="${LAPLACE_INSTALL_PREFIX}/share/laplace/tier0.bin" \
@@ -313,7 +316,7 @@ phase_install() {
   cp -fL "$grammar_dir"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/lib/grammars/"
   cp -fL "$grammar_dir"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/bin/grammars/"
   chmod 0775 "$stage$LAPLACE_INSTALL_PREFIX/lib/grammars"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/bin/grammars"/*.so*
-  for f in tier0.bin tier0.flags tier0.flags.layout highway.bin; do
+  for f in tier0.bin tier0.flags tier0.flags.layout highway.bin tier0.chess; do
     [[ ! -s "$SITE_BUILD/share/laplace/$f" ]] || install -D -m 0664 "$SITE_BUILD/share/laplace/$f" "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/$f"
   done
   local recipes_src="$engine_pkg/share/laplace/recipes"
@@ -405,7 +408,7 @@ phase_database() {
     sql -d postgres -c "ALTER SYSTEM RESET \"$q\"" >/dev/null
     echo "  $q reset: no longer declared"
   done < <(sql -d postgres -c "SELECT DISTINCT name FROM pg_file_settings WHERE name LIKE 'laplace\\_substrate.%' AND sourcefile LIKE '%postgresql.auto.conf'")
-  for g in tier0:tier0.bin flags:tier0.flags highway:highway.bin; do
+  for g in tier0:tier0.bin flags:tier0.flags highway:highway.bin chess:tier0.chess; do
     f="$dir/${g#*:}"
     [[ -s "$f" ]] || fail "laplace.${g%%:*}: missing installed cache $f"
     sql -d postgres -c "ALTER DATABASE \"$LAPLACE_DBNAME\" SET laplace.${g%%:*} = '$f'" >/dev/null
@@ -416,7 +419,7 @@ phase_database() {
 
 phase_reset() {
   say "reset: $LAPLACE_DBNAME dropped"
-  [[ "$LAPLACE_DBNAME" == laplace-mono* ]] || fail "reset drops only a laplace-mono database, not '$LAPLACE_DBNAME'"
+  [[ "$LAPLACE_DBNAME" == laplace || "$LAPLACE_DBNAME" == laplace-mono* ]] || fail "reset drops only a laplace database, not '$LAPLACE_DBNAME'"
   sql -d postgres -c "DROP DATABASE IF EXISTS \"$LAPLACE_DBNAME\" WITH (FORCE)" >/dev/null
   phase_database
 }
@@ -594,7 +597,7 @@ phase_app() {
   local component cache cache_src
   for component in . cli mcp-runtime uci lichess-runtime; do
     mkdir -p "$stage/app/$component/share/laplace"
-    for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin; do
+    for cache in tier0.bin tier0.flags tier0.flags.layout highway.bin tier0.chess; do
       cache_src="$SITE_BUILD/share/laplace/$cache"
       [[ -f "$cache_src" ]] || cache_src="$LAPLACE_INSTALL_PREFIX/share/laplace/$cache"
       cp "$cache_src" "$stage/app/$component/share/laplace/"
@@ -638,6 +641,7 @@ LD_LIBRARY_PATH=$LAPLACE_APP_DIR:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
 LAPLACE_TIER0=$t0
 LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
+LAPLACE_CHESS=$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.chess
 ASPNETCORE_URLS=$LAPLACE_API_URL
 LAPLACE_OPS_LOG_DIR=${LAPLACE_API_LOG_DIR:-$LAPLACE_APP_DIR/logs}
 LAPLACE_EXTERNAL=$LAPLACE_EXTERNAL
@@ -668,6 +672,7 @@ LD_LIBRARY_PATH=$LAPLACE_APP_DIR/mcp-runtime:$LAPLACE_INSTALL_PREFIX/lib
 LAPLACE_PERFCACHE_BIN=$t0
 LAPLACE_TIER0=$t0
 LAPLACE_HIGHWAY=$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin
+LAPLACE_CHESS=$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.chess
 LAPLACE_MCP_HTTP_PORT=$LAPLACE_MCP_HTTP_PORT
 LAPLACE_MCP_ORIGIN=$LAPLACE_MCP_ORIGIN
 LAPLACE_OPS_LOG_DIR=${LAPLACE_MCP_LOG_DIR:-$LAPLACE_APP_DIR/logs}
@@ -837,7 +842,7 @@ verify_cli_package() {
   for cache in tier0 highway; do
     [[ -s "$cli/share/laplace/$cache.bin" ]] || { echo "CLI package is missing $cache.bin" >&2; return 1; }
   done
-  for cache in tier0.flags tier0.flags.layout; do
+  for cache in tier0.flags tier0.flags.layout tier0.chess; do
     [[ -s "$cli/share/laplace/$cache" ]] || { echo "CLI package is missing $cache" >&2; return 1; }
   done
   (cd "$SITE_WORK"; env -u LAPLACE_ENGINE_BUILD -u LAPLACE_INSTALL_PREFIX \

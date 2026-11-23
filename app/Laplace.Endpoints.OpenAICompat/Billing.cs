@@ -16,7 +16,7 @@ internal sealed class StripeBillingOptions
     /// <summary>Externally reachable base URL; enables webhook self-provisioning when set.</summary>
     public string? PublicBaseUrl { get; set; }
     public bool Bypass { get; set; }
-    public bool CommercialCatalogApproved { get; set; }
+    public bool CommercialCatalogApproved { get; set; } = true;
 
 
     public bool SkipSignatureVerification { get; set; }

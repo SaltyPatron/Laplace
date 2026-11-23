@@ -39,7 +39,7 @@ while IFS= read -r setting; do
     q -c "ALTER DATABASE \"$db\" SET $name = \$v\$$value\$v\$"
 done <<<"$settings"
 
-psql -w -X -q -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace CASCADE;" >/dev/null
+psql -w -X -q -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS laplace CASCADE; SELECT public.laplace_ensure_stage();" >/dev/null
 
 declare -a cases=()
 if [[ -f $tests_dir/regression_cases.txt ]]; then
@@ -57,9 +57,10 @@ for f in "$sql_dir"/*.sql; do
 done
 (( ${#cases[@]} > 0 )) || { echo "substrate-regress: no SQL cases found in $sql_dir" >&2; exit 2; }
 
+[[ ! -f "$sql_dir/geometry_cases.sql" ]] || cp "$sql_dir/geometry_cases.sql" "$out/"
 status=0
 for f in "${cases[@]}"; do
-    psql -w -X -q -d "$db" -v ON_ERROR_STOP=1 -f "$f" >/dev/null \
+    (cd "$out" && psql -w -X -q -d "$db" -v ON_ERROR_STOP=1 -f "$f" >/dev/null) \
         || { echo "substrate-regress: psql case $(basename "$f" .sql) failed" >&2; status=1; }
 done
 (( status == 0 )) && echo "substrate-regress: ${#cases[@]} SQL cases passed against installed laplace extension"

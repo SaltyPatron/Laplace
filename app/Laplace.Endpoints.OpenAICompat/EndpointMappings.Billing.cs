@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Microsoft.Extensions.Options;
@@ -491,7 +492,360 @@ internal static class BillingEndpoints
                     ExecutedAt: r.ExecutedAt)).ToArray()));
         })
         .WithTags("billing").Produces<RoyaltiesResponse>();
+
+        MapPatreonEndpoints(app);
+        MapWitnessPayeeEndpoints(app);
+        MapAuthorityPackageEndpoints(app);
     }
+
+    private static void MapPatreonEndpoints(WebApplication app)
+    {
+        app.MapGet("/v1/billing/patreon/status", async (
+            HttpRequest request, ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            var patreon = BillingServiceFallback.GetPatreon(request.HttpContext.RequestServices)!;
+            return Results.Json(await patreon.GetStatusAsync(tenant, ct));
+        })
+        .WithTags("billing")
+        .Produces<PatreonStatusView>();
+
+        app.MapGet("/v1/billing/patreon/connect", async (
+            HttpRequest request, ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = (await resolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+            var patreon = BillingServiceFallback.GetPatreon(request.HttpContext.RequestServices)!;
+            var result = patreon.CreateConnectUrl(tenant, $"{request.Scheme}://{request.Host}");
+            if (!result.Configured)
+            {
+                return EndpointJson.ServiceUnavailable(
+                    "patreon_not_configured",
+                    "Patreon OAuth is not configured on this host (set LAPLACE_PATREON_CLIENT_ID and LAPLACE_PATREON_CLIENT_SECRET or deploy/secrets/patreon.env).");
+            }
+            return Results.Json(result);
+        })
+        .WithTags("billing")
+        .Produces<PatreonConnectResult>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/billing/patreon/callback", async (HttpRequest request, CancellationToken ct) =>
+        {
+            var oauthError = request.Query["error"].ToString();
+            if (!string.IsNullOrWhiteSpace(oauthError))
+                return EndpointJson.BadRequest("patreon_oauth_denied", $"Patreon OAuth returned error '{oauthError}'.");
+
+            var code = request.Query["code"].ToString();
+            var state = request.Query["state"].ToString();
+            var patreon = BillingServiceFallback.GetPatreon(request.HttpContext.RequestServices)!;
+            var result = await patreon.HandleCallbackAsync(code, state, $"{request.Scheme}://{request.Host}", ct);
+            if (!result.Success)
+            {
+                var errorType = result.StatusCode >= 500 ? "service_unavailable" : "invalid_request_error";
+                return Results.Json(
+                    new ErrorResponse(new ErrorBody(errorType, result.ErrorCode!, result.ErrorMessage!)),
+                    statusCode: result.StatusCode);
+            }
+            return Results.Json(result);
+        })
+        .WithTags("billing")
+        .Produces<PatreonCallbackResult>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/v1/billing/webhooks/patreon", async (HttpRequest request, CancellationToken ct) =>
+        {
+            using var reader = new StreamReader(request.Body);
+            var payload = await reader.ReadToEndAsync(ct);
+            var signature = request.Headers["X-Patreon-Signature"].ToString();
+            var eventType = request.Headers["X-Patreon-Event"].ToString();
+            var deliveryId = request.Headers["X-Patreon-Delivery"].ToString();
+            var patreon = BillingServiceFallback.GetPatreon(request.HttpContext.RequestServices)!;
+            var result = await patreon.HandleWebhookAsync(payload, signature, eventType, deliveryId, ct);
+            return Results.Json(result, statusCode: result.Accepted ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+        })
+        .WithTags("billing")
+        .Produces<PatreonWebhookResult>()
+        .Produces<PatreonWebhookResult>(StatusCodes.Status400BadRequest);
+    }
+
+    private static void MapWitnessPayeeEndpoints(WebApplication app)
+    {
+        app.MapGet("/v1/billing/payees", async (
+            string? witness_id,
+            string? owner_tenant,
+            HttpRequest request,
+            ITenantResolver resolver,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(request.HttpContext, ct);
+            bool isOperator = await IsOperatorOrPlatformAdminAsync(request, auth.Value, ct);
+            if (!isOperator && !string.IsNullOrWhiteSpace(owner_tenant)
+                && !string.Equals(owner_tenant.Trim(), tenant.TenantId, StringComparison.Ordinal))
+            {
+                return AuthorizationError(StatusCodes.Status403Forbidden, "tenant_mismatch",
+                    "Workspace callers can only query witness payees for their own workspace.");
+            }
+
+            var payeesStore = BillingServiceFallback.GetPayees(request.HttpContext.RequestServices)!;
+            string? effectiveOwner = isOperator ? owner_tenant : tenant.TenantId;
+            try
+            {
+                var rows = await payeesStore.ListAsync(effectiveOwner, witness_id, ct);
+                return Results.Json(new WitnessPayeeListResponse(tenant.TenantId, rows));
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+        })
+        .WithTags("billing")
+        .Produces<WitnessPayeeListResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+
+        app.MapPost("/v1/billing/payees", async (
+            HttpRequest request,
+            ITenantResolver resolver,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(request.HttpContext, ct);
+            bool isOperator = await IsOperatorOrPlatformAdminAsync(request, auth.Value, ct);
+            if (tenant.AuthKind == "invalid_key")
+                return AuthenticationError("invalid_api_key", "The provided API key is unknown, malformed, or revoked.");
+            if (tenant.AuthKind is not ("browser" or "api_key" or "dev") && !isOperator)
+            {
+                return AuthenticationError("authentication_required",
+                    "Workspace authentication or operator token is required to register witness payees.");
+            }
+
+            var payload = await EndpointJson.ReadJsonAsync<WitnessPayeeRegisterRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+
+            var requestedOwner = !string.IsNullOrWhiteSpace(payload.OwnerTenant)
+                ? payload.OwnerTenant.Trim()
+                : payload.Tenant?.Trim();
+            if (!isOperator && !string.IsNullOrWhiteSpace(requestedOwner)
+                && !string.Equals(requestedOwner, tenant.TenantId, StringComparison.Ordinal))
+            {
+                return AuthorizationError(StatusCodes.Status403Forbidden, "tenant_mismatch",
+                    "Workspace callers can only register witness payees owned by their own workspace.");
+            }
+
+            string? effectiveOwner = isOperator && !string.IsNullOrWhiteSpace(requestedOwner)
+                ? requestedOwner
+                : tenant.TenantId;
+            var payeesStore = BillingServiceFallback.GetPayees(request.HttpContext.RequestServices)!;
+            try
+            {
+                var saved = await payeesStore.UpsertAsync(
+                    payload.WitnessId ?? string.Empty,
+                    effectiveOwner,
+                    payload.LicenseKind ?? "royalty_bearing",
+                    payload.DisplayName,
+                    ct);
+                return Results.Json(saved);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+        })
+        .WithTags("billing")
+        .Accepts<WitnessPayeeRegisterRequest>("application/json")
+        .Produces<WitnessPayeeRecord>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+    }
+
+    private static void MapAuthorityPackageEndpoints(WebApplication app)
+    {
+        app.MapGet("/v1/authority/packages", async (
+            HttpRequest request,
+            ITenantResolver resolver,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(request.HttpContext, ct);
+            bool isOperator = await IsOperatorOrPlatformAdminAsync(request, auth.Value, ct);
+            if (tenant.AuthKind == "invalid_key")
+                return AuthenticationError("invalid_api_key", "The provided API key is unknown, malformed, or revoked.");
+            if (auth.Value.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser" or "dev") && !isOperator)
+            {
+                return AuthenticationError("authentication_required",
+                    "Sign in or provide a Laplace API key to inspect authority packages.");
+            }
+
+            var store = BillingServiceFallback.GetPackages(request.HttpContext.RequestServices)!;
+            var items = await store.ListForTenantAsync(tenant.TenantId, includeAll: isOperator, ct);
+            var views = items.Select(v => new AuthorityPackageView(
+                v.Package.PackageId,
+                v.Package.DisplayName,
+                v.Package.Visibility,
+                v.Package.WitnessIds,
+                v.Package.MinTrust,
+                v.Granted,
+                v.Package.UpdatedAt)).ToArray();
+            return Results.Json(new AuthorityPackageListResponse(tenant.TenantId, isOperator, views));
+        })
+        .WithTags("authority")
+        .Produces<AuthorityPackageListResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized);
+
+        app.MapPost("/v1/authority/packages", async (
+            HttpRequest request,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
+        {
+            if (!await IsOperatorOrPlatformAdminAsync(request, auth.Value, ct))
+            {
+                return AuthorizationError(StatusCodes.Status403Forbidden, "operator_token_required",
+                    "Set LAPLACE_OPERATOR_TOKEN on the server and send X-Laplace-Operator-Token or sign in as a platform administrator.");
+            }
+
+            var payload = await EndpointJson.ReadJsonAsync<AuthorityPackageUpsertRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+
+            var store = BillingServiceFallback.GetPackages(request.HttpContext.RequestServices)!;
+            try
+            {
+                var pkg = await store.UpsertPackageAsync(
+                    payload.PackageId ?? string.Empty,
+                    payload.DisplayName ?? string.Empty,
+                    payload.Visibility ?? "private",
+                    payload.WitnessIds ?? Array.Empty<string>(),
+                    payload.MinTrust ?? 0.0,
+                    ct);
+                return Results.Json(new AuthorityPackageView(
+                    pkg.PackageId, pkg.DisplayName, pkg.Visibility, pkg.WitnessIds, pkg.MinTrust, true, pkg.UpdatedAt));
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+        })
+        .WithTags("authority")
+        .Accepts<AuthorityPackageUpsertRequest>("application/json")
+        .Produces<AuthorityPackageView>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+
+        app.MapPost("/v1/authority/packages/{packageId}/grant", async (
+            string packageId,
+            HttpRequest request,
+            IOptions<LaplaceAuthOptions> auth,
+            CancellationToken ct) =>
+        {
+            if (!await IsOperatorOrPlatformAdminAsync(request, auth.Value, ct))
+            {
+                return AuthorizationError(StatusCodes.Status403Forbidden, "operator_token_required",
+                    "Set LAPLACE_OPERATOR_TOKEN on the server and send X-Laplace-Operator-Token or sign in as a platform administrator.");
+            }
+
+            var payload = await EndpointJson.ReadJsonAsync<AuthorityPackageGrantRequest>(request, ct);
+            if (payload is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
+
+            var targetTenant = !string.IsNullOrWhiteSpace(payload.TenantId)
+                ? payload.TenantId
+                : payload.Tenant;
+            if (string.IsNullOrWhiteSpace(targetTenant))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'tenant_id' is required.");
+
+            var store = BillingServiceFallback.GetPackages(request.HttpContext.RequestServices)!;
+            var actor = PlatformPolicy.UserId(request.HttpContext)?.ToString("D") ?? "operator";
+            try
+            {
+                var grant = await store.GrantPackageAsync(packageId, targetTenant, actor, ct);
+                return Results.Json(new AuthorityPackageGrantResponse(
+                    true, grant.PackageId, grant.TenantId, grant.GrantedBy, grant.GrantedAt));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return EndpointJson.NotFound("package_not_found", ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
+        })
+        .WithTags("authority")
+        .Accepts<AuthorityPackageGrantRequest>("application/json")
+        .Produces<AuthorityPackageGrantResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+        .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+    }
+
+    private static async Task<bool> IsOperatorOrPlatformAdminAsync(
+        HttpRequest request, LaplaceAuthOptions authOptions, CancellationToken ct)
+    {
+        if (OperatorAuth.IsAuthorized(request, authOptions))
+            return true;
+        var platformAuth = request.HttpContext.RequestServices.GetService<PlatformAuthorization>();
+        if (platformAuth is null)
+            return false;
+        if (PlatformPolicy.UserId(request.HttpContext) is not null
+            && !HttpMethods.IsGet(request.Method)
+            && !ApiKeyEnforcementMiddleware.SameOrigin(request))
+            return false;
+        return await platformAuth.AllowsAsync(request.HttpContext, PlatformPolicy.Maintain, ct);
+    }
+
+    private static IResult AuthenticationError(string code, string message) =>
+        Results.Json(new ErrorResponse(new ErrorBody("authentication_error", code, message)),
+            statusCode: StatusCodes.Status401Unauthorized);
+
+    private static IResult AuthorizationError(int statusCode, string code, string message) =>
+        Results.Json(new ErrorResponse(new ErrorBody("authorization_error", code, message)),
+            statusCode: statusCode);
+
+    internal sealed record WitnessPayeeListResponse(
+        [property: JsonPropertyName("tenant")] string Tenant,
+        [property: JsonPropertyName("payees")] IReadOnlyList<WitnessPayeeRecord> Payees);
+
+    internal sealed record WitnessPayeeRegisterRequest(
+        [property: JsonPropertyName("witness_id")] string? WitnessId,
+        [property: JsonPropertyName("owner_tenant")] string? OwnerTenant = null,
+        [property: JsonPropertyName("license_kind")] string? LicenseKind = null,
+        [property: JsonPropertyName("display_name")] string? DisplayName = null,
+        [property: JsonPropertyName("tenant")] string? Tenant = null);
+
+    internal sealed record AuthorityPackageUpsertRequest(
+        [property: JsonPropertyName("package_id")] string? PackageId,
+        [property: JsonPropertyName("display_name")] string? DisplayName = null,
+        [property: JsonPropertyName("visibility")] string? Visibility = null,
+        [property: JsonPropertyName("witness_ids")] IReadOnlyList<string>? WitnessIds = null,
+        [property: JsonPropertyName("min_trust")] double? MinTrust = null);
+
+    internal sealed record AuthorityPackageView(
+        [property: JsonPropertyName("package_id")] string PackageId,
+        [property: JsonPropertyName("display_name")] string DisplayName,
+        [property: JsonPropertyName("visibility")] string Visibility,
+        [property: JsonPropertyName("witness_ids")] IReadOnlyList<string> WitnessIds,
+        [property: JsonPropertyName("min_trust")] double MinTrust,
+        [property: JsonPropertyName("granted")] bool Granted,
+        [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+    internal sealed record AuthorityPackageListResponse(
+        [property: JsonPropertyName("tenant")] string Tenant,
+        [property: JsonPropertyName("include_all")] bool IncludeAll,
+        [property: JsonPropertyName("packages")] IReadOnlyList<AuthorityPackageView> Packages);
+
+    internal sealed record AuthorityPackageGrantRequest(
+        [property: JsonPropertyName("tenant_id")] string? TenantId = null,
+        [property: JsonPropertyName("tenant")] string? Tenant = null);
+
+    internal sealed record AuthorityPackageGrantResponse(
+        [property: JsonPropertyName("granted")] bool Granted,
+        [property: JsonPropertyName("package_id")] string PackageId,
+        [property: JsonPropertyName("tenant_id")] string TenantId,
+        [property: JsonPropertyName("granted_by")] string? GrantedBy,
+        [property: JsonPropertyName("granted_at")] DateTimeOffset GrantedAt);
 
     private static QuoteNextStep NextStep(BillingQuote quote, string note) =>
         new(new ExecuteHeader("X-Laplace-Quote-Id", quote.QuoteId), note);

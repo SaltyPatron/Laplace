@@ -3,6 +3,14 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 source "$root/scripts/lib/database.sh"
 export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
+site_build="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}"
+if [[ ! -s "$site_build/csharp/LaplaceNative.g.cs" ]]; then
+  native_src="${LAPLACE_NATIVE:-/repos/src/Laplace-Native}"
+  [[ -d "$native_src" ]] || native_src="$(dirname "$root")/Laplace-Native"
+  mkdir -p "$site_build/csharp"
+  cmake -DCC=icx -DNODE="$(command -v node)" -DSOURCE="$native_src" -DOUT="$site_build/csharp" -P "$native_src/tools/csharp/generate.cmake"
+fi
+export LaplaceNativeGenerated="$site_build/csharp"
 export LAPLACE_REUSE_INSTALLED_NATIVE=1
 export LAPLACE_NATIVE_TEST_LIBRARY="${LAPLACE_INSTALL_PREFIX:?}/lib/liblaplace.so"
 export LAPLACE_TIER0="${LAPLACE_INSTALL_PREFIX:?}/share/laplace/tier0.bin"

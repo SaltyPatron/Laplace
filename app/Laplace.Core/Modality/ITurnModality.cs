@@ -19,18 +19,36 @@ public interface ITurnModality<TState, TAction>
     GameOutcome? Terminal(TState state);
 }
 
-public readonly record struct GameOutcome(int? Winner)
+public readonly record struct GameOutcome
 {
-    public static GameOutcome Draw => new((int?)null);
-    public static GameOutcome WonBy(int side) => new(side);
-    public bool IsDraw => Winner is null;
+    private readonly bool _isUnknown;
+
+    public GameOutcome(int? winner)
+    {
+        Winner = winner;
+        _isUnknown = false;
+    }
+
+    private GameOutcome(int? winner, bool isUnknown)
+    {
+        Winner = winner;
+        _isUnknown = isUnknown;
+    }
+
+    public int? Winner { get; init; }
+    public bool IsUnknown => _isUnknown;
+
+    public static GameOutcome Draw => new(null, isUnknown: false);
+    public static GameOutcome Unknown => new(null, isUnknown: true);
+    public static GameOutcome WonBy(int side) => new(side, isUnknown: false);
+    public bool IsDraw => !_isUnknown && Winner is null;
 
     /// <summary>
-    /// The PGN result token. One spelling of the three literals: the string is
+    /// The PGN result token. One spelling of the four canonical literals: the string is
     /// content-addressed identity input as well as witnessed HAS_RESULT testimony, and a
     /// second spelling would be a different entity.
     /// </summary>
-    public string ResultToken => Winner is null ? "1/2-1/2" : Winner == 0 ? "1-0" : "0-1";
+    public string ResultToken => _isUnknown ? "*" : Winner is null ? "1/2-1/2" : Winner == 0 ? "1-0" : "0-1";
 }
 
 public enum PlyOutcome
@@ -38,12 +56,14 @@ public enum PlyOutcome
     Loss = 0,
     Draw = 1,
     Win = 2,
+    Neutral = 3,
 }
 
 public static class PlyOutcomeExtensions
 {
     public static PlyOutcome ForMover(this GameOutcome outcome, int mover) =>
-        outcome.Winner is null ? PlyOutcome.Draw
+        outcome.IsUnknown ? PlyOutcome.Neutral
+        : outcome.Winner is null ? PlyOutcome.Draw
         : outcome.Winner == mover ? PlyOutcome.Win
         : PlyOutcome.Loss;
 }

@@ -277,9 +277,47 @@ public sealed class ChessLiveGameHostTests
             aPlayerName: "A", bPlayerName: "B");
 
         Assert.Equal(2, result.Games);
+        Assert.Equal(2, result.Incomplete);
+        Assert.Equal(0, result.Draws);
         Assert.Equal(2, host.GamesCompleted);
         Assert.All(engine.Reads, read => Assert.Equal(ChessGameRecorder.Witness, read.Witness));
         Assert.All(engine.Reads, read => Assert.Contains("[White \"", read.Pgn));
+        Assert.All(engine.Reads, read => Assert.Contains("[Result \"*\"]", read.Pgn));
+    }
+
+    [Fact]
+    [Trait("Tier", "fast")]
+    public async Task PlaySessionAnalysisAndPartialClocks_ArePreservedAcrossCompletion()
+    {
+        using var engine = new RecordingEngine();
+        var host = engine.Host();
+        var sessionId = host.StartPlaySession(recordToSubstrate: true, whitePlayerName: "Alice", blackPlayerName: "Laplace");
+        var session = host.GetPlaySession(sessionId)!;
+
+        var modality = new ChessModality();
+        var s0 = modality.Initial();
+        var m1 = MoveGen.Legal(s0.Board).Single(m => m.ToUci() == "e2e4");
+        var s1 = modality.Apply(s0, m1);
+        var m2 = MoveGen.Legal(s1.Board).Single(m => m.ToUci() == "e7e5");
+        var s2 = modality.Apply(s1, m2);
+
+        var a1 = new ChessLivePlyAnalysis(ScoreCpSideToMove: 24, Depth: 4, Nodes: 120, Pv: ["e2e4"]);
+        session.Moves.Add("e2e4");
+        await host.RecordPlayPlyAsync(sessionId, 1, modality.StateKey(s0), modality.StateKey(s1), "e2e4");
+        await host.RecordPlayPlyAnalysisAsync(sessionId, 1, a1);
+        await host.RecordPlyClockAsync(session.EventId, 1, 180_000);
+
+        session.Moves.Add("e7e5");
+        await host.RecordPlayPlyAsync(sessionId, 2, modality.StateKey(s1), modality.StateKey(s2), "e7e5");
+
+        await host.FinishPlaySessionAsync(sessionId, GameOutcome.Unknown, adjudicated: true, CancellationToken.None);
+
+        var read = Assert.Single(engine.Reads);
+        Assert.Contains("[Result \"*\"]", read.Pgn);
+        Assert.Contains("{[%clk 0:03:00]}", read.Pgn);
+        var retainedAnalysis = host.GetRecordedAnalysis(session.EventId);
+        Assert.NotNull(retainedAnalysis);
+        Assert.Equal(120, retainedAnalysis![1].Nodes);
     }
 
     [Fact]

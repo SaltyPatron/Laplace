@@ -39,7 +39,7 @@ def load_projects(root: Path) -> dict[str, Project]:
             name = _tag_name(element.tag)
             if name == "ProjectReference":
                 include = (element.attrib.get("Include") or "").replace("\\", "/")
-                if not include:
+                if not include or "$(" in include:
                     continue
                 target = (csproj.parent / include).resolve()
                 try:
