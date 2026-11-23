@@ -425,15 +425,11 @@ phase_reset() {
 # Compiler servers may outlive a build. The supervising shell owns the host lock;
 # those servers must not retain its file descriptor after the phase completes.
 dotnet_app() {
-  local np="" ep="" gen=""
-  [[ ! -r "$SITE_BUILD/.native-package" ]] || np=$(<"$SITE_BUILD/.native-package")
-  [[ ! -r "$SITE_BUILD/.engine-package" ]] || ep=$(<"$SITE_BUILD/.engine-package")
-  [[ ! -s "$SITE_BUILD/csharp/LaplaceNative.g.cs" ]] || gen="$SITE_BUILD/csharp"
-  LAPLACE_REUSE_INSTALLED_NATIVE=0 \
-    ${np:+LAPLACE_NATIVE_PACKAGE="$np"} \
-    ${ep:+LAPLACE_ENGINE_PACKAGE="$ep"} \
-    ${gen:+LaplaceNativeGenerated="$gen"} \
-    dotnet "$@" 8>&-
+  local -a env_args=(LAPLACE_REUSE_INSTALLED_NATIVE=0)
+  [[ ! -r "$SITE_BUILD/.native-package" ]] || env_args+=("LAPLACE_NATIVE_PACKAGE=$(<"$SITE_BUILD/.native-package")")
+  [[ ! -r "$SITE_BUILD/.engine-package" ]] || env_args+=("LAPLACE_ENGINE_PACKAGE=$(<"$SITE_BUILD/.engine-package")")
+  [[ ! -s "$SITE_BUILD/csharp/LaplaceNative.g.cs" ]] || env_args+=("LaplaceNativeGenerated=$SITE_BUILD/csharp")
+  env "${env_args[@]}" dotnet "$@" 8>&-
 }
 # This checkout's migrator: the declared schema (db/schema) is read from the checkout, never from the installed release.
 migrations() {

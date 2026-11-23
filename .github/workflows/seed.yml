@@ -307,41 +307,40 @@ jobs:
                     -f scripts/native-ingest-idempotency.sql | sha256sum | cut -d ' ' -f 1
                 else
                   witness_str="$(python3 -c 'import sys; from scripts.ingest_catalog import load_catalog; e=next(x for x in load_catalog()["sources"] if x["name"]==sys.argv[1]); print(e["witness"])' "$canonical_key")"
-                  psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" \
-                    -v ON_ERROR_STOP=1 -v witness="$witness_str" <<'SQL' | sha256sum | cut -d ' ' -f 1
-COPY (
-    WITH witnessed AS MATERIALIZED (
-        SELECT DISTINCT p.entity AS id
-        FROM public.laplace_witness_trust() w
-        JOIN public.physicality p ON p.entity = w.witness
-        WHERE p.path ^@ public.laplace_text_id(:'witness')
-    ),
-    trunks AS MATERIALIZED (
-        SELECT id FROM witnessed
-        UNION
-        SELECT DISTINCT p.entity AS id
-        FROM public.physicality p
-        WHERE p.path ^@ public.laplace_text_id(:'witness')
-          AND NOT EXISTS (SELECT 1 FROM witnessed)
-    ),
-    series AS MATERIALIZED (
-        SELECT to_jsonb(s) AS value
-        FROM public.laplace_contained_series(ARRAY(SELECT id FROM trunks ORDER BY id)) s
-    ),
-    snapshot AS (
-        SELECT 0 AS kind, w.id::text AS id, to_jsonb(w)::text AS value
-        FROM (SELECT a.witness AS id, a.lineage, a.trust, count(*) AS attestations
-              FROM public.attestation a WHERE a.witness IN (SELECT id FROM trunks)
-              GROUP BY a.witness, a.lineage, a.trust) w
-        UNION ALL
-        SELECT 1, s.value->>'claim', jsonb_build_object(
-            'series', s.value, 'standing', to_jsonb(c))::text
-        FROM series s LEFT JOIN public.consensus c
-          ON c.claim = (s.value->>'claim')::public.blake3
-    )
-    SELECT kind, id, value FROM snapshot ORDER BY kind, id, value
-) TO STDOUT (FORMAT binary);
-SQL
+                  sed 's/^                    //' <<'SQL' | psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -v witness="$witness_str" | sha256sum | cut -d ' ' -f 1
+                    COPY (
+                        WITH witnessed AS MATERIALIZED (
+                            SELECT DISTINCT p.entity AS id
+                            FROM public.laplace_witness_trust() w
+                            JOIN public.physicality p ON p.entity = w.witness
+                            WHERE p.path ^@ public.laplace_text_id(:'witness')
+                        ),
+                        trunks AS MATERIALIZED (
+                            SELECT id FROM witnessed
+                            UNION
+                            SELECT DISTINCT p.entity AS id
+                            FROM public.physicality p
+                            WHERE p.path ^@ public.laplace_text_id(:'witness')
+                              AND NOT EXISTS (SELECT 1 FROM witnessed)
+                        ),
+                        series AS MATERIALIZED (
+                            SELECT to_jsonb(s) AS value
+                            FROM public.laplace_contained_series(ARRAY(SELECT id FROM trunks ORDER BY id)) s
+                        ),
+                        snapshot AS (
+                            SELECT 0 AS kind, w.id::text AS id, to_jsonb(w)::text AS value
+                            FROM (SELECT a.witness AS id, a.lineage, a.trust, count(*) AS attestations
+                                  FROM public.attestation a WHERE a.witness IN (SELECT id FROM trunks)
+                                  GROUP BY a.witness, a.lineage, a.trust) w
+                            UNION ALL
+                            SELECT 1, s.value->>'claim', jsonb_build_object(
+                                'series', s.value, 'standing', to_jsonb(c))::text
+                            FROM series s LEFT JOIN public.consensus c
+                              ON c.claim = (s.value->>'claim')::public.blake3
+                        )
+                        SELECT kind, id, value FROM snapshot ORDER BY kind, id, value
+                    ) TO STDOUT (FORMAT binary);
+                  SQL
                 fi
               }
               local before after
