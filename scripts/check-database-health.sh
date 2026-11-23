@@ -48,96 +48,55 @@ fi
 [[ "$probe" == "1" ]] || fail "database '$DB' failed connection probe"
 
 ext=$("${PSQL[@]}" -d "$DB" -tAc \
-  "SELECT extversion FROM pg_extension WHERE extname = 'laplace_substrate'" 2>/dev/null || true)
-[[ -n "$ext" ]] || fail "laplace_substrate extension is not installed in '$DB'"
+  "SELECT extversion FROM pg_extension WHERE extname = 'laplace'" 2>/dev/null || true)
+[[ -n "$ext" ]] || fail "laplace extension is not installed in '$DB'"
 
 source_ext="not-required"
 artifact_scope="installed"
 if [[ "$require_source_match" == 1 ]]; then
-  # Release/build validation proves source, installed extension artifacts, and the
-  # database catalog name the same content-derived extension version.
-  if ! "$SCRIPT_DIR/check-installed-extension-current.py" >/dev/null; then
-    fail "installed laplace_substrate artifacts do not match the current source"
-  fi
-  source_ext=$("$SCRIPT_DIR/check-installed-extension-current.py" --print-source-version)
-  [[ -n "$source_ext" ]] || fail "could not determine the source laplace_substrate version"
+  source_ext=$("${PSQL[@]}" -d "$DB" -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'laplace';" 2>/dev/null || true)
+  [[ -n "$source_ext" ]] || fail "could not determine the available laplace extension version"
   [[ "$ext" == "$source_ext" ]] || \
-    fail "live laplace_substrate version is stale: database=$ext source=$source_ext; extensions have no upgrade path, recreate the substrate database"
+    fail "live laplace extension version is stale: database=$ext available=$source_ext"
   artifact_scope="source"
 else
-  # Developer/operator DB actions intentionally operate on the already-installed
-  # runtime. A checkout may be newer than that runtime and must not turn status,
-  # migrate, repair, remigrate or recreate into an implicit product build. Prove
-  # instead that the exact live extension version still exists in the installed
-  # PostgreSQL extension catalog, then continue with structural schema checks.
   installed_match=$("${PSQL[@]}" -d "$DB" -tAc "
 SELECT count(*)
 FROM pg_extension e
 JOIN pg_available_extension_versions a
   ON a.name = e.extname AND a.version = e.extversion
-WHERE e.extname = 'laplace_substrate';")
+WHERE e.extname = 'laplace';")
   [[ "${installed_match:-0}" != "0" ]] || \
-    fail "live laplace_substrate version $ext is not present in installed extension artifacts; extensions have no upgrade path, recreate the substrate database"
+    fail "live laplace version $ext is not present in installed extension artifacts"
 fi
 
 missing=$("${PSQL[@]}" -d "$DB" -tAc "
 WITH required(name) AS (VALUES
-  ('laplace.entities'),
-  ('laplace.physicalities'),
-  ('laplace.attestations'),
-  ('laplace.consensus'),
-  ('laplace.ingest_run_journal'),
-  ('laplace.ingest_flush_journal')
+  ('public.entity'),
+  ('public.physicality'),
+  ('public.attestation'),
+  ('public.consensus')
 )
 SELECT string_agg(name, ', ' ORDER BY name)
 FROM required
 WHERE to_regclass(name) IS NULL;")
-[[ -z "$missing" ]] || fail "required substrate relations missing: $missing"
+[[ -z "$missing" ]] || fail "required canonical substrate relations missing: $missing"
 
-# Parsed SQL dependencies preserve the registry contract through helper functions.
-# The current relation_bands() delegates its exact counts to the shared operator
-# census; inspecting only its source text falsely rejects a freshly created DB.
-band_dependencies=$("${PSQL[@]}" -d "$DB" -tAc "
-WITH RECURSIVE functions(oid) AS (
-  SELECT 'converse.relation_bands()'::regprocedure::oid
-  UNION
-  SELECT d.refobjid
-  FROM functions f
-  JOIN pg_depend d ON d.classid='pg_proc'::regclass AND d.objid=f.oid
-  WHERE d.refclassid='pg_proc'::regclass
-)
-SELECT EXISTS (SELECT 1 FROM functions WHERE oid=to_regprocedure('laplace.relation_registry()'))
-       AND NOT EXISTS (
-         SELECT 1 FROM pg_depend d
-         WHERE d.classid='pg_proc'::regclass
-           AND d.objid='converse.relation_bands()'::regprocedure
-           AND d.refclassid='pg_class'::regclass
-           AND d.refobjid='laplace.consensus'::regclass
-       );")
-[[ "$band_dependencies" == "t" ]] || \
-  fail "converse.relation_bands() is stale: its dependency graph must reach the relation registry without a direct consensus-tree read"
-if ! "${PSQL[@]}" -d "$DB" -tAc \
-  "SELECT band, name, rank, relation_types, consensus_rows FROM converse.relation_bands() WHERE false;" >/dev/null; then
-  fail "converse.relation_bands() does not expose the required query columns"
+if ! fp=$("${PSQL[@]}" -d "$DB" -tAc "SELECT public.laplace_fingerprint()" 2>/dev/null) || [[ -z "$fp" ]]; then
+  fail "public.laplace_fingerprint() failed or returned empty in '$DB'"
 fi
-
-# Bind the native attestation COPY surface without reading or writing evidence.
-# Table existence and an extension version alone do not prove the installed
-# extension carries the columns required by the current writer.
-if ! "${PSQL[@]}" -d "$DB" -tAc "
-SELECT id, subject_id, type_id, object_id, source_id, context_id, outcome,
-       last_observed_at, observation_count, sum_score_fp1e9,
-       opponent_rd_fp1e9, opponent_rating_fp1e9, fold_replayable, qualifier_mask
-FROM laplace.attestations WHERE false;" >/dev/null; then
-  fail "attestation writer columns are missing; the extension predates the writer, recreate the substrate database"
+if ! hw=$("${PSQL[@]}" -d "$DB" -tAc "SELECT public.laplace_highway_fingerprint()" 2>/dev/null) || [[ -z "$hw" ]]; then
+  fail "public.laplace_highway_fingerprint() failed or returned empty in '$DB'"
 fi
+sub_counts=$("${PSQL[@]}" -d "$DB" -tAc "SELECT count(*) FROM ops.substrate_counts();" 2>/dev/null || true)
+[[ "${sub_counts:-0}" == "4" ]] || fail "ops.substrate_counts() expected 4 rows, got '${sub_counts:-}'"
 
 invalid=$("${PSQL[@]}" -d "$DB" -tAc "
 SELECT count(*)
 FROM pg_index i
 JOIN pg_class c ON c.oid = i.indexrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname IN ('laplace','consensus','converse','lexical','taxonomy','generation','structural','realize','ops')
+WHERE n.nspname IN ('public','ops','stage')
   AND NOT i.indisvalid;")
 if [[ "${invalid:-0}" != "0" ]]; then
   "${PSQL[@]}" -d "$DB" -P pager=off -c "
@@ -146,7 +105,7 @@ if [[ "${invalid:-0}" != "0" ]]; then
   FROM pg_index i
   JOIN pg_class c ON c.oid = i.indexrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('laplace','consensus','converse','lexical','taxonomy','generation','structural','realize','ops')
+  WHERE n.nspname IN ('public','ops','stage')
     AND NOT i.indisvalid
   ORDER BY 1, 2;" || true
   fail "$invalid invalid substrate index(es)"
@@ -156,7 +115,7 @@ unvalidated=$("${PSQL[@]}" -d "$DB" -tAc "
 SELECT count(*)
 FROM pg_constraint c
 JOIN pg_namespace n ON n.oid = c.connamespace
-WHERE n.nspname IN ('laplace','consensus','converse','lexical','taxonomy','generation','structural','realize','ops')
+WHERE n.nspname IN ('public','ops','stage')
   AND NOT c.convalidated;")
 if [[ "${unvalidated:-0}" != "0" ]]; then
   "${PSQL[@]}" -d "$DB" -P pager=off -c "
@@ -164,32 +123,10 @@ if [[ "${unvalidated:-0}" != "0" ]]; then
          c.conrelid::regclass AS relation
   FROM pg_constraint c
   JOIN pg_namespace n ON n.oid = c.connamespace
-  WHERE n.nspname IN ('laplace','consensus','converse','lexical','taxonomy','generation','structural','realize','ops')
+  WHERE n.nspname IN ('public','ops','stage')
     AND NOT c.convalidated
   ORDER BY 1, 2;" || true
   fail "$unvalidated unvalidated substrate constraint(s)"
 fi
 
-# Active ingest progress is independent of structural database health. Report
-# current ownership without requiring unrelated ingestion to finish.
-running=$("${PSQL[@]}" -d "$DB" -tAc \
-  "SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running'")
-if [[ "${running:-0}" != "0" ]]; then
-  "${PSQL[@]}" -d "$DB" -P pager=off -c "
-  SELECT source_name, status, input_units_done, input_units_total,
-         now() - started_at AS elapsed, error
-  FROM laplace.ingest_run_journal
-  WHERE status = 'running'
-  ORDER BY started_at;" || true
-  echo "DB_HEALTH_OBSERVATION running_ingests=$running"
-fi
-
-# Use the installed health operation as a second, extension-owned index verdict.
-# This is structural inspection only; it does not depend on seeded content.
-op_invalid=$("${PSQL[@]}" -d "$DB" -tAc "SELECT count(*) FROM ops.index_health();")
-if [[ "${op_invalid:-0}" != "0" ]]; then
-  "${PSQL[@]}" -d "$DB" -P pager=off -c "SELECT * FROM ops.index_health();" || true
-  fail "ops.index_health reports $op_invalid invalid index(es)"
-fi
-
-echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext artifact_scope=$artifact_scope relation_bands=registry_dependency required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"
+echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext artifact_scope=$artifact_scope required_relations=4 invalid_indexes=0 unvalidated_constraints=0 seed_state=not_required"

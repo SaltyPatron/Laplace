@@ -22,6 +22,7 @@ def recipe_root() -> Path:
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
     runtime = Path(os.environ.get("LAPLACE_INGEST_RUNTIME", str(prefix / "app" / "cli")))
     candidates = [Path(explicit)] if explicit else [
+        runtime / "share" / "laplace" / "recipes",
         runtime / "native" / "recipe-engine" / "share" / "laplace" / "recipes",
         prefix / "share" / "laplace" / "recipes",
         Path(os.environ.get("LAPLACE_SRC", ROOT.parent)) / "Laplace-Engine" / "recipes",

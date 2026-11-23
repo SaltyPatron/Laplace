@@ -35,7 +35,7 @@
     <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
     <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
     <ProjectReference Include="..\Laplace.Mcp\Laplace.Mcp.csproj" />
-    <ProjectReference Include="..\..\..\Laplace-Native\bindings\csharp\Laplace.Native.Interop.csproj"
+    <ProjectReference Include="$(LaplaceNativeInteropProject)"
                       AdditionalProperties="LaplaceNativeGenerated=$(LaplaceNativeGenerated)" />
   </ItemGroup>
 

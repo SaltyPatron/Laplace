@@ -11,16 +11,16 @@ runs:
   using: composite
   steps:
     - name: Check out the qualified Operations controller once per job
-      if: env.LAPLACE_STORAGE_READY != '84c50ef7479adcd1b556dbb20a853b75e387eb15'
+      if: env.LAPLACE_STORAGE_READY != '4b98dab50ceb4d24533e984474cb823d4491c29a'
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       with:
         repository: SaltyPatron/Laplace-Operations
-        ref: 84c50ef7479adcd1b556dbb20a853b75e387eb15
+        ref: 4b98dab50ceb4d24533e984474cb823d4491c29a
         path: .ci-dependencies/Laplace-Operations
         token: ${{ inputs.checkout-token }}
         persist-credentials: false
     - shell: bash
-      run: echo 'LAPLACE_STORAGE_READY=84c50ef7479adcd1b556dbb20a853b75e387eb15' >> "$GITHUB_ENV"
+      run: echo 'LAPLACE_STORAGE_READY=4b98dab50ceb4d24533e984474cb823d4491c29a' >> "$GITHUB_ENV"
     - name: Run the common storage owner
       uses: ./.ci-dependencies/Laplace-Operations/storage
       with:

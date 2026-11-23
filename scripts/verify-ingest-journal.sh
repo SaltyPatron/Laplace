@@ -31,6 +31,23 @@ fi
 
 PSQL=(psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -tAc)
 
+has_journal=$("${PSQL[@]}" "SELECT to_regclass('laplace.ingest_run_journal') IS NOT NULL;")
+if [[ "$has_journal" != t ]]; then
+  witness="$(python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source, load_catalog; key=canonical_source(sys.argv[1]); cat=load_catalog()["sources"]; entry=next((e for e in cat if e["name"]==key), None); gates=json.load(open("scripts/decomposer-gates.json"))["sources"].get(key, {}); w=(entry["witness"] if entry and entry.get("witness") else (gates.get("witness", [None])[0] or "")); print(w)' "$SOURCE")"
+  if [[ -z "$witness" ]]; then
+    echo "error: no journal table and no catalog witness resolved for source=${SOURCE} on ${DB}" >&2
+    exit 1
+  fi
+  WITNESS_SQL=${witness//\'/\'\'}
+  present=$("${PSQL[@]}" "SELECT EXISTS (SELECT 1 FROM public.physicality p WHERE p.path ^@ public.laplace_text_id('${WITNESS_SQL}'));")
+  if [[ "$present" != t ]]; then
+    echo "error: no witness trunk present for source=${SOURCE} witness=${witness} on ${DB}" >&2
+    exit 1
+  fi
+  echo "WITNESS_TRUNK source=${SOURCE} db=${DB} witness=${witness} status=ok"
+  exit 0
+fi
+
 # Fully-qualify — a leading SET under -tAc prints "SET" as the first result row.
 SOURCE_SQL=${SOURCE//\'/\'\'}
 row=$("${PSQL[@]}" "

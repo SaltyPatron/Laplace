@@ -15,8 +15,8 @@ SELECT to_regclass('laplace.highway_mask_pending') IS NOT NULL
    AND to_regclass('laplace.highway_mask_population_state') IS NOT NULL
    AND to_regprocedure('laplace.highway_mask_pending_drain(integer)') IS NOT NULL
    AND to_regprocedure('laplace.highway_mask_rebuild(integer)') IS NOT NULL
-   AND to_regprocedure('laplace.highway_mask_drain(integer)') IS NOT NULL AS installed \gset
-\if :installed
+   AND to_regprocedure('laplace.highway_mask_drain(integer)') IS NOT NULL AS legacy_installed \gset
+\if :legacy_installed
 SELECT consensus.highway_ready() AS ready \gset
 \if :ready
 SELECT NOT EXISTS(SELECT 1 FROM laplace.highway_mask_population_state
@@ -38,7 +38,12 @@ SELECT (SELECT complete FROM laplace.highway_mask_population_state WHERE singlet
        (SELECT count(*) FROM laplace.highway_mask_pending) AS pending_pairs,
        (SELECT count(*) FROM laplace.highway_mask_dirty) AS pending_clears;
 \else
+SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'laplace') AS modular_installed \gset
+\if :modular_installed
+SELECT * FROM public.laplace_highway_audit();
+\else
 DO $$ BEGIN RAISE EXCEPTION 'Highway reconciliation surface is not installed'; END $$;
+\endif
 \endif
 \else
 DO $$ BEGIN RAISE EXCEPTION 'Highway reconciliation batch must be >= 1'; END $$;

@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="ZstdSharp.Port" />
-    <ProjectReference Include="..\..\..\Laplace-Native\bindings\csharp\Laplace.Native.Interop.csproj"
+    <ProjectReference Include="$(LaplaceNativeInteropProject)"
                       AdditionalProperties="LaplaceNativeGenerated=$(LaplaceNativeGenerated)" />
   </ItemGroup>
 

@@ -71,7 +71,7 @@
     </ItemGroup>
 
     <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
-      <_LinuxEngineSo Include="$(LAPLACE_ENGINE_PACKAGE)\lib\liblaplace_engine_abi.so*" Condition="'$(LAPLACE_ENGINE_PACKAGE)' != ''" />
+      <_LinuxEngineSo Include="$(LAPLACE_ENGINE_PACKAGE)/lib/liblaplace_engine_abi.so*" Condition="'$(LAPLACE_ENGINE_PACKAGE)' != ''" />
       <_LinuxEngineSo Include="$(LaplacePackagesRoot)/laplace-engine/$(_LaplaceEnginePin)-*/lib/liblaplace_engine_abi.so*" Condition="'$(LAPLACE_ENGINE_PACKAGE)' == '' And '$(_LaplaceEnginePin)' != ''" />
       <_LinuxEngineBin Include="$(LAPLACE_ENGINE_PACKAGE)/bin/laplace" Condition="'$(LAPLACE_ENGINE_PACKAGE)' != '' And Exists('$(LAPLACE_ENGINE_PACKAGE)/bin/laplace')" />
       <_LinuxEngineBin Include="$(LaplacePackagesRoot)/laplace-engine/$(_LaplaceEnginePin)-*/bin/laplace" Condition="'@(_LinuxEngineBin)' == '' And '$(_LaplaceEnginePin)' != ''" />
@@ -105,18 +105,28 @@
       <_RecipesSourceDir Condition="'$(_RecipesSourceDir)' == '' And Exists('$(LaplaceRepoRoot)/../Laplace-Engine/recipes')">$([System.IO.Path]::GetFullPath('$(LaplaceRepoRoot)/../Laplace-Engine/recipes'))</_RecipesSourceDir>
     </PropertyGroup>
 
+    <ItemGroup Condition="'$(OS)' == 'Windows_NT' And '$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\grammars')">
+      <_WindowsGrammarFile Include="$(_ResolvedEngineBinDir)\grammars\*.dll" />
+    </ItemGroup>
+
     <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
       <None Include="@(LaplaceWindowsRuntimeFile)"
             Link="%(Filename)%(Extension)"
             CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
-      <None Include="$(_ResolvedEngineBinDir)\grammars\*.dll"
-            Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\grammars')"
+      <None Include="@(_WindowsGrammarFile)"
             Link="grammars\%(Filename)%(Extension)"
             CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
 
+    <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+      <_LinuxGrammarDir Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/lib/grammars')">$(_ResolvedEnginePackageDir)/lib/grammars</_LinuxGrammarDir>
+      <_LinuxGrammarDir Condition="'$(_LinuxGrammarDir)' == '' And '$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/bin/grammars')">$(_ResolvedEnginePackageDir)/bin/grammars</_LinuxGrammarDir>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(OS)' != 'Windows_NT' And '$(_LinuxGrammarDir)' != ''">
+      <_LinuxGrammarFile Include="$(_LinuxGrammarDir)/*.so*" />
+    </ItemGroup>
     <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
       <None Include="@(LaplaceNativeArtifact)"
             Link="%(Filename)%(Extension)"
@@ -126,8 +136,7 @@
             Link="%(Filename)%(Extension)"
             CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />
-      <None Include="$(_ResolvedEnginePackageDir)/lib/grammars/*.so*"
-            Condition="'$(_ResolvedEnginePackageDir)' != '' And Exists('$(_ResolvedEnginePackageDir)/lib/grammars')"
+      <None Include="@(_LinuxGrammarFile)"
             Link="grammars/%(Filename)%(Extension)"
             CopyToOutputDirectory="PreserveNewest"
             CopyToPublishDirectory="PreserveNewest" />

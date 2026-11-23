@@ -104,9 +104,9 @@ jobs:
                          JOIN pg_class c ON c.oid=i.indexrelid
                          JOIN pg_class t ON t.oid=i.indrelid
                          JOIN pg_namespace n ON n.oid=c.relnamespace
-                         WHERE n.nspname='laplace' AND NOT i.indisvalid
-                         ORDER BY CASE t.relname WHEN 'consensus' THEN 0 WHEN 'entities' THEN 1
-                                  WHEN 'physicalities' THEN 2 ELSE 3 END, c.relname")"
+                         WHERE n.nspname IN ('public','ops') AND NOT i.indisvalid
+                         ORDER BY CASE t.relname WHEN 'consensus' THEN 0 WHEN 'entity' THEN 1
+                                  WHEN 'physicality' THEN 2 WHEN 'attestation' THEN 3 ELSE 4 END, c.relname")"
             [[ -n "$invalid" ]] || { echo "::notice::no invalid indexes — nothing to do"; return 0; }
             rc=0
             while IFS=$'\t' read -r idx def; do
@@ -119,7 +119,7 @@ jobs:
             remaining="$(P "SELECT count(*) FROM pg_index i
                              JOIN pg_class t ON t.oid=i.indrelid
                              JOIN pg_namespace n ON n.oid=t.relnamespace
-                             WHERE n.nspname='laplace' AND NOT i.indisvalid")"
+                             WHERE n.nspname IN ('public','ops') AND NOT i.indisvalid")"
             echo "invalid indexes remaining: $remaining"
             [[ "$rc" -eq 0 && "$remaining" == "0" ]]
           }

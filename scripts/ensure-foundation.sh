@@ -119,11 +119,16 @@ if [[ ${#CHAIN[@]} -gt 0 ]]; then
 fi
 
 echo "foundation journal (latest per source)"
-psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
-  "SELECT DISTINCT ON (source_name) source_name, status, files_done, files_total,
-          entities, attestations, ended_at
-   FROM laplace.ingest_run_journal
-   ORDER BY source_name, started_at DESC;"
+if [[ "$(psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('laplace.ingest_run_journal') IS NOT NULL;")" == t ]]; then
+  psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
+    "SELECT DISTINCT ON (source_name) source_name, status, files_done, files_total,
+            entities, attestations, ended_at
+     FROM laplace.ingest_run_journal
+     ORDER BY source_name, started_at DESC;"
+else
+  psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
+    "SELECT name, readings, parts FROM public.laplace_witnesses_named() ORDER BY readings DESC NULLS LAST LIMIT 25;"
+fi
 
 remaining=0
 for cli in "${FOUNDATION[@]}"; do

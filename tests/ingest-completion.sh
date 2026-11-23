@@ -16,31 +16,35 @@ locks="${LAPLACE_LOCKS:-/run/lock/laplace}"
 host_lock_hold exclusive 9 "$locks/ingest-completion.lock" "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}"
 host_lock_hold shared 8 "${LAPLACE_HOST_LOCK:-$locks/host-resource.lock}" "${LAPLACE_HOST_LOCK_WAIT_SECONDS:-600}"
 major=$(pg_config --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')
-export PGOPTIONS="-c dynamic_library_path=$prefix/lib/postgresql/$major:\$libdir -c extension_control_path=$prefix/share/postgresql/$major:\$system -c session_preload_libraries=laplace_substrate"
+export PGOPTIONS="-c dynamic_library_path=$prefix/lib/postgresql/$major:\$libdir -c extension_control_path=$prefix/share/postgresql/$major:\$system"
 export LAPLACE_DB="$LAPLACE_DB;Options=$PGOPTIONS"
 export LAPLACE_REUSE_INSTALLED_NATIVE=1
+export LAPLACE_NATIVE_TEST_LIBRARY="$prefix/lib/liblaplace.so"
 export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
 output="${LAPLACE_BUILD:?}/laplace-mono/ingest-completion"
 results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/ingest-completion-results"
-dotnet test "$root/app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" \
+mkdir -p "$results"
+psql -X -v ON_ERROR_STOP=1 -c "SELECT public.laplace_ensure_stage();" >/dev/null
+invalid_idx="$(psql -X -v ON_ERROR_STOP=1 -tAc "
+  SELECT count(*)
+  FROM pg_index i
+  JOIN pg_class c ON c.oid = i.indexrelid
+  JOIN pg_class t ON t.oid = i.indrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = 'public'
+    AND t.relname IN ('entity', 'physicality', 'attestation', 'consensus')
+    AND (NOT i.indisvalid OR NOT i.indisready);")"
+[[ "${invalid_idx:-0}" == "0" ]] || {
+  echo "Invalid canonical substrate index count: ${invalid_idx}" >&2
+  exit 1
+}
+dotnet test "$root/app/Laplace.Data.Tests/Laplace.Data.Tests.csproj" \
   -c Release --nologo -p:LAPLACE_BUILD_ROOT="$output" \
-  --filter 'FullyQualifiedName~WriterCompletionTests' \
-  --logger 'trx;LogFileName=completion.trx' --results-directory "$results" 8>&- 9>&-
-# Exercise Native reader contracts through the installed migration and real COPY/merge pipeline.
-dotnet test "$root/app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj" \
-  -c Release --nologo --no-build -p:LAPLACE_BUILD_ROOT="$output" \
-  --filter 'FullyQualifiedName~NativeSqlCatalogPreparationTests.CompareReadsNativeClaimsWhenCompatibilityEntitiesAreAbsent|FullyQualifiedName~NativeSqlCatalogPreparationTests.CanonicalMigrationRestoresNativeFunctionBindings|FullyQualifiedName~NativeSqlCatalogPreparationTests.ExecutorReadersPreserveSupportStandingAndCompleteFacetPaging' \
+  --filter 'FullyQualifiedName~ReadPathArchitectureGateTests' \
   --logger 'trx;LogFileName=native-reads.trx' --results-directory "$results" 8>&- 9>&-
-python3 - "$results/completion.trx" <<'PY'
-import sys, xml.etree.ElementTree as ET
-root = ET.parse(sys.argv[1]).getroot()
-counters = root.find('.//{*}Counters')
-if counters is None or int(counters.attrib['passed']) != 2 or int(counters.attrib['total']) != 2:
-    raise SystemExit('Both completion tests must execute and pass.')
-PY
 python3 - "$results/native-reads.trx" <<'PY'
 import sys, xml.etree.ElementTree as ET
 c = ET.parse(sys.argv[1]).getroot().find('.//{*}Counters')
-if c is None or int(c.attrib['passed']) != 3 or int(c.attrib['total']) != 3:
-    raise SystemExit('All three installed Native reader/binding regressions must execute and pass.')
+if c is None or int(c.attrib['total']) < 1 or c.attrib['passed'] != c.attrib['total']:
+    raise SystemExit(f"All installed Native read-path architecture gates must execute and pass: {c.attrib if c is not None else None}")
 PY

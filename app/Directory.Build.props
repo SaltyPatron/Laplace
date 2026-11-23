@@ -17,6 +17,7 @@
     <LAPLACE_BUILD Condition="'$(LAPLACE_BUILD)' == ''">$(MSBuildThisFileDirectory)../../build</LAPLACE_BUILD>
     <LaplacePackagesRoot>$(LAPLACE_BUILD)/packages</LaplacePackagesRoot>
     <_LaplaceLockFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../Laplace-Operations/components.lock.tsv'))</_LaplaceLockFile>
+    <_LaplaceLockFile Condition="!Exists('$(_LaplaceLockFile)') AND '$(LAPLACE_OPERATIONS)' != '' AND Exists('$(LAPLACE_OPERATIONS)/components.lock.tsv')">$(LAPLACE_OPERATIONS)/components.lock.tsv</_LaplaceLockFile>
     <_LaplaceLockText Condition="Exists('$(_LaplaceLockFile)')">$([System.IO.File]::ReadAllText('$(_LaplaceLockFile)'))</_LaplaceLockText>
     <_LaplaceNativePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^native\tLaplace-Native\t([0-9a-f]+)').Groups[1].Value)</_LaplaceNativePin>
     <_LaplaceEnginePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^engine\tLaplace-Engine\t([0-9a-f]+)').Groups[1].Value)</_LaplaceEnginePin>
@@ -25,8 +26,12 @@
     <LaplaceNativeVersion Condition="'$(LaplaceNativeVersion)' == ''">0.1.0</LaplaceNativeVersion>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND '$(LAPLACE_NATIVE_PACKAGE)' != '' AND Exists('$(LAPLACE_NATIVE_PACKAGE)/csharp/LaplaceNative.g.cs')">$(LAPLACE_NATIVE_PACKAGE)/csharp</LaplaceNativeGenerated>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp</LaplaceNativeGenerated>
+    <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/package/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/package/csharp</LaplaceNativeGenerated>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/build/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/build/csharp</LaplaceNativeGenerated>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == ''">$(MSBuildThisFileDirectory)../../../Laplace-Native/build/csharp</LaplaceNativeGenerated>
+    <LaplaceNativeInteropProject Condition="'$(LAPLACE_NATIVE)' != '' AND Exists('$(LAPLACE_NATIVE)/bindings/csharp/Laplace.Native.Interop.csproj')">$(LAPLACE_NATIVE)/bindings/csharp/Laplace.Native.Interop.csproj</LaplaceNativeInteropProject>
+    <LaplaceNativeInteropProject Condition="'$(LaplaceNativeInteropProject)' == '' AND Exists('$(MSBuildThisFileDirectory)../../Laplace-Native/bindings/csharp/Laplace.Native.Interop.csproj')">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../Laplace-Native/bindings/csharp/Laplace.Native.Interop.csproj'))</LaplaceNativeInteropProject>
+    <LaplaceNativeInteropProject Condition="'$(LaplaceNativeInteropProject)' == '' AND Exists('/repos/src/Laplace-Native/bindings/csharp/Laplace.Native.Interop.csproj')">/repos/src/Laplace-Native/bindings/csharp/Laplace.Native.Interop.csproj</LaplaceNativeInteropProject>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
     <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>

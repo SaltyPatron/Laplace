@@ -12,8 +12,10 @@ if [[ -n "${LAPLACE_RECIPES:-}" ]]; then
     RECIPE_ROOT="$LAPLACE_RECIPES"
 else
     prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-    packaged="${LAPLACE_INGEST_RUNTIME:-${LAPLACE_APP_DIR:-$prefix/app}/cli}/native/recipe-engine/share/laplace/recipes"
-    if [[ -f "$packaged/order" ]]; then RECIPE_ROOT="$packaged"
+    runtime_dir="${LAPLACE_INGEST_RUNTIME:-${LAPLACE_APP_DIR:-$prefix/app}/cli}"
+    packaged="$runtime_dir/native/recipe-engine/share/laplace/recipes"
+    if [[ -f "$runtime_dir/share/laplace/recipes/order" ]]; then RECIPE_ROOT="$runtime_dir/share/laplace/recipes"
+    elif [[ -f "$packaged/order" ]]; then RECIPE_ROOT="$packaged"
     elif [[ -f "$prefix/share/laplace/recipes/order" ]]; then RECIPE_ROOT="$prefix/share/laplace/recipes"
     else RECIPE_ROOT="${LAPLACE_SRC:-$ROOT/..}/Laplace-Engine/recipes"
     fi
@@ -58,7 +60,7 @@ if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" ]]; then
     INGEST_RUNTIME="$LAPLACE_INGEST_RUNTIME"
 elif [[ -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" ]]; then
     INGEST_RUNTIME="${LAPLACE_APP_DIR:-$PREFIX/app}/cli"
-elif [[ -f "$INGEST_ROOT/current/Laplace.Cli.dll" && -f "$INGEST_ROOT/current/liblaplace_core.so" ]]; then
+elif [[ -f "$INGEST_ROOT/current/Laplace.Cli.dll" && -f "$INGEST_ROOT/current/liblaplace.so" ]]; then
     INGEST_RUNTIME="$INGEST_ROOT/current"
 else
     # Compatibility only for a host that has not completed one versioned
@@ -75,8 +77,10 @@ if [[ "$INGEST_RUNTIME" == "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" ]]; then
 fi
 if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" || -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cli" || -f "$INGEST_RUNTIME/Laplace.Cli.dll" ]]; then
     DLL="$INGEST_RUNTIME/Laplace.Cli.dll"
-    CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"
-    ENGINE_NATIVE="$PREFIX/lib/liblaplace_core.so"
+    CLI_NATIVE="$INGEST_RUNTIME/liblaplace.so"
+    ENGINE_NATIVE="$PREFIX/lib/liblaplace.so"
+    CLI_ENGINE_ABI="$INGEST_RUNTIME/liblaplace_engine_abi.so"
+    ENGINE_ABI="$PREFIX/lib/liblaplace_engine_abi.so"
     export LD_LIBRARY_PATH="$INGEST_RUNTIME:$PREFIX/lib:${LD_LIBRARY_PATH:-}"
     if [[ -f "$INGEST_RUNTIME/.runtime-lease" ]]; then
         exec {ingest_runtime_lease}<"$INGEST_RUNTIME/.runtime-lease"
@@ -85,15 +89,19 @@ if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" || -d "${LAPLACE_APP_DIR:-$PREFIX/app}/cl
     INGEST_USES_PREFIX=1
 else
     INGEST_USES_PREFIX=0
-    export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH="${LAPLACE_BUILD:-$ROOT/build}/Laplace-Native/icx-release:${LAPLACE_BUILD:-$ROOT/build}/Laplace-Engine/icx-release:${LD_LIBRARY_PATH:-}"
     if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
         DLL="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
-        CLI_NATIVE="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
-        ENGINE_NATIVE="$ROOT/build/engine/core/liblaplace_core.so"
+        CLI_NATIVE="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace.so"
+        ENGINE_NATIVE="$PREFIX/lib/liblaplace.so"
+        CLI_ENGINE_ABI="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_engine_abi.so"
+        ENGINE_ABI="$PREFIX/lib/liblaplace_engine_abi.so"
     else
         DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
-        CLI_NATIVE="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
-        ENGINE_NATIVE="$ROOT/build/engine/core/liblaplace_core.so"
+        CLI_NATIVE="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace.so"
+        ENGINE_NATIVE="$PREFIX/lib/liblaplace.so"
+        CLI_ENGINE_ABI="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_engine_abi.so"
+        ENGINE_ABI="$PREFIX/lib/liblaplace_engine_abi.so"
     fi
 fi
 
@@ -133,6 +141,12 @@ require_cli() {
         echo "::error::rebuild/install the product; ingest never repairs or compiles runtime artifacts" >&2
         return 1
     }
+    if [[ -f "$ENGINE_ABI" || -f "$CLI_ENGINE_ABI" ]]; then
+        [[ -f "$ENGINE_ABI" && -f "$CLI_ENGINE_ABI" ]] && cmp -s "$ENGINE_ABI" "$CLI_ENGINE_ABI" || {
+            echo "::error::ingest CLI engine ABI differs from the installed prefix (engine=$ENGINE_ABI cli=$CLI_ENGINE_ABI)" >&2
+            return 1
+        }
+    fi
     [[ "${INGEST_USES_PREFIX:-0}" != 1 ]] || {
         echo "::notice::ingest runtime $INGEST_RUNTIME (installed prefix)"
         # Changing this file is install+live, not ninja ALL / web / Chess.Tests.
@@ -159,12 +173,11 @@ require_cli() {
         }
         git -C "$ROOT" diff --quiet "$prepared" "$current" -- \
             CMakeLists.txt cmake Directory.Packages.props global.json \
-            engine/core \
             app/Directory.Build.props \
+            app/Directory.Build.targets \
             app/Laplace.Cli \
             app/Laplace.Core \
-            app/Laplace.Decomposers \
-            app/Laplace.Substrate \
+            app/Laplace.Data \
             app/Laplace.Ops \
             app/Laplace.Chess || {
                 echo "::error::prepared ingest runtime is stale for this checkout (built $prepared, selected $current)" >&2

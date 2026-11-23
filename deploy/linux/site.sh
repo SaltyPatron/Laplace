@@ -184,25 +184,91 @@ phase_build() {
   local grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
   local operations_source="${LAPLACE_OPERATIONS:-$LAPLACE_DEPSRC/Laplace-Operations}"
   local operations_contract="$SITE_BUILD/operations-build-contract"
+  local native_source="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}"
+  local eigen_dir="$LAPLACE_EXTERNAL/eigen"
+  [[ -f "$eigen_dir/Eigen/Core" ]] || eigen_dir=/usr/include/eigen3
   bash "$ROOT/scripts/ci/materialize-operations-contract.sh" "$operations_source" "$operations_contract"
   export LAPLACE_OPERATIONS="$operations_contract"
   local grammar_source="${LAPLACE_GRAMMAR_SRC:-$LAPLACE_EXTERNAL/tree-sitter-grammars}"
   grammar_source=$(cd "$grammar_source" && pwd -P)
+  if [[ ! -f "$grammars/libtree-sitter-json.so" ]]; then
+    LAPLACE_GRAMMAR_SRC="$grammar_source" \
+    LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
+      bash "$operations_contract/grammars.sh" "$grammars"
+  fi
   LAPLACE_GRAMMAR_SRC="$grammar_source" \
   LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
     bash "$recipe_engine/tools/build_grammars.sh" "$recipe_engine/recipes/formats/grammars" "$grammars"
+
+  local native_pkg
+  native_pkg=$(LAPLACE_SRC="$LAPLACE_DEPSRC" \
+    LAPLACE_BUILD="${LAPLACE_BUILD:-/repos/build}" \
+    LAPLACE_ICU_DIR="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
+    LAPLACE_COREMATH="${LAPLACE_COREMATH:-$LAPLACE_DEPSRC/core-math}" \
+    LAPLACE_BLAKE3_DIR="${LAPLACE_BLAKE3_DIR:-$LAPLACE_DEPSRC/blake3/c}" \
+    LAPLACE_EIGEN_DIR="$eigen_dir" \
+    LAPLACE_SPECTRA_DIR="$LAPLACE_EXTERNAL/spectra" \
+    bash "$operations_source/native-package.sh" "$native_source") 8>&-
+
+  mkdir -p "$SITE_BUILD/csharp"
+  if [[ -s "${LAPLACE_BUILD:-/repos/build}/Laplace-Native/package/csharp/LaplaceNative.g.cs" && -s "${LAPLACE_BUILD:-/repos/build}/Laplace-Native/package/csharp/Abi.g.cs" ]]; then
+    cp -f "${LAPLACE_BUILD:-/repos/build}/Laplace-Native/package/csharp/"*.g.cs "$SITE_BUILD/csharp/"
+  else
+    cmake -DCC=icx -DNODE="$(command -v node)" -DSOURCE="$native_source" -DOUT="$SITE_BUILD/csharp" -P "$native_source/tools/csharp/generate.cmake" 8>&-
+  fi
+
+  mkdir -p "$SITE_BUILD/share/laplace"
+  local native_sha prepared_inputs
+  native_sha=$(git -c "safe.directory=$native_source" -C "$native_source" rev-parse HEAD)
+  prepared_inputs="${LAPLACE_BUILD%/agents/*}/native-prepared-inputs/$native_sha"
+  if [[ -s "$prepared_inputs/tier0.bin" && -s "$prepared_inputs/tier0.flags" && ( -s "$prepared_inputs/tier0.highway" || -s "$prepared_inputs/highway.bin" ) ]]; then
+    cp -f "$prepared_inputs/tier0.bin" "$SITE_BUILD/share/laplace/tier0.bin"
+    cp -f "$prepared_inputs/tier0.flags" "$SITE_BUILD/share/laplace/tier0.flags"
+    [[ ! -s "$prepared_inputs/tier0.flags.layout" ]] || cp -f "$prepared_inputs/tier0.flags.layout" "$SITE_BUILD/share/laplace/tier0.flags.layout"
+    if [[ -s "$prepared_inputs/highway.bin" ]]; then
+      cp -f "$prepared_inputs/highway.bin" "$SITE_BUILD/share/laplace/highway.bin"
+    else
+      cp -f "$prepared_inputs/tier0.highway" "$SITE_BUILD/share/laplace/highway.bin"
+    fi
+  else
+    LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin" \
+    LAPLACE_FLAGS="$SITE_BUILD/share/laplace/tier0.flags" \
+    LAPLACE_HIGHWAY="$SITE_BUILD/share/laplace/highway.bin" \
+      bash "$operations_source/native-inputs.sh" prepare "$native_source" 8>&-
+    [[ -s "$SITE_BUILD/share/laplace/highway.bin" || ! -s "$SITE_BUILD/share/laplace/tier0.highway" ]] \
+      || cp -f "$SITE_BUILD/share/laplace/tier0.highway" "$SITE_BUILD/share/laplace/highway.bin"
+  fi
+
+  local engine_pkg
+  engine_pkg=$(LAPLACE_SRC="$LAPLACE_DEPSRC" \
+    LAPLACE_BUILD="${LAPLACE_BUILD:-/repos/build}" \
+    LAPLACE_ICU_DIR="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
+    LAPLACE_PG_DIR="$LAPLACE_PG_PREFIX" \
+    LAPLACE_TREESITTER="${LAPLACE_TREESITTER:-$LAPLACE_DEPSRC/tree-sitter}" \
+    LAPLACE_GRAMMARS="$grammars" \
+    bash "$operations_source/package.sh" laplace-engine "$recipe_engine" \
+      "LaplaceNative_DIR=$native_pkg/lib/cmake/LaplaceNative" \
+      "LAPLACE_TIER0=$SITE_BUILD/share/laplace/tier0.bin" \
+      "LAPLACE_RECIPES=$recipe_engine/recipes" \
+      "LAPLACE_INSTALL_RECIPE_RESOURCES=ON" \
+      "LAPLACE_CONNINFO=") 8>&-
+  printf '%s\n' "$native_pkg" > "$SITE_BUILD/.native-package"
+  printf '%s\n' "$engine_pkg" > "$SITE_BUILD/.engine-package"
+
   cmake -U 'ICU_*' -S "$ROOT" -B "$SITE_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/toolchains/intel-oneapi.cmake" \
     -DLAPLACE_REQUIRE_MKL=ON -DBUILD_TESTING="${LAPLACE_SITE_BUILD_TESTING:-OFF}" \
     -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
     -DLAPLACE_PG_PREFIX="$LAPLACE_PG_PREFIX" \
+    -DLaplaceNative_DIR="$native_pkg/lib/cmake/LaplaceNative" \
+    -DLAPLACE_ICU_DIR="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
     -DICU_ROOT="${LAPLACE_ICU_DIR:-${LAPLACE_DEPS:-/repos/deps}/icu78}" \
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
-    -DLAPLACE_NATIVE="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}" \
+    -DLAPLACE_NATIVE="$native_source" \
     -DLAPLACE_OPERATIONS="$operations_contract" \
     -DLAPLACE_RECIPE_ENGINE_SOURCE="$recipe_engine" \
     -DLAPLACE_GRAMMARS="$grammars" \
-    -DLAPLACE_EIGEN_DIR="$LAPLACE_EXTERNAL/eigen" \
+    -DLAPLACE_EIGEN_DIR="$eigen_dir" \
     -DLAPLACE_SPECTRA_DIR="$LAPLACE_EXTERNAL/spectra" \
     -DLAPLACE_DEPS_PREFIX="$SITE_WORK/deps" \
     -DLAPLACE_DEPS_LWGEOM_PREFIX="$SITE_WORK/deps/pgsql-18" \
@@ -212,7 +278,7 @@ phase_build() {
     -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" 8>&-
-  LD_LIBRARY_PATH="$SITE_BUILD:$LAPLACE_INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}" \
+  LD_LIBRARY_PATH="$SITE_BUILD:$native_pkg/lib:$LAPLACE_INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}" \
     cmake --build "$SITE_BUILD" --target all 8>&-
   [[ -s "$SITE_BUILD/share/laplace/tier0.bin" || -s "$LAPLACE_INSTALL_PREFIX/share/laplace/tier0.bin" ]] || fail "tier-0 perf-cache not produced"
   [[ -s "$SITE_BUILD/share/laplace/highway.bin" || -s "$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin" ]] || fail "highway perf-cache not produced"
@@ -229,8 +295,38 @@ phase_install() {
   oneapi
   [[ -d "$LAPLACE_INSTALL_PREFIX" && -w "$LAPLACE_INSTALL_PREFIX" ]] || fail "$LAPLACE_INSTALL_PREFIX is missing or not writable: sudo deploy/linux/site-host.sh"
   local stage f rel n=0
+  local native_pkg engine_pkg recipe_engine native_source grammars
+  native_pkg=$(<"$SITE_BUILD/.native-package")
+  engine_pkg=$(<"$SITE_BUILD/.engine-package")
+  recipe_engine="${LAPLACE_RECIPE_ENGINE_SOURCE:-$LAPLACE_DEPSRC/Laplace-Engine}"
+  native_source="${LAPLACE_NATIVE:-$LAPLACE_EXTERNAL/laplace-native}"
+  grammars="${LAPLACE_GRAMMARS:-/repos/build/grammars}"
   stage="$(mktemp -d "$SITE_WORK/.install.XXXXXX")"
   DESTDIR="$stage" cmake --install "$SITE_BUILD" >/dev/null 8>&-
+  install -D -m 0775 "$engine_pkg/bin/laplace" "$stage$LAPLACE_INSTALL_PREFIX/bin/laplace"
+  mkdir -p "$stage$LAPLACE_INSTALL_PREFIX/lib" "$stage$LAPLACE_INSTALL_PREFIX/lib/grammars" "$stage$LAPLACE_INSTALL_PREFIX/bin/grammars" "$stage$LAPLACE_INSTALL_PREFIX/share/laplace"
+  cp -a "$native_pkg"/lib/liblaplace.so* "$stage$LAPLACE_INSTALL_PREFIX/lib/"
+  cp -a "$engine_pkg"/lib/liblaplace_engine_abi.so* "$stage$LAPLACE_INSTALL_PREFIX/lib/"
+  local grammar_dir="$engine_pkg/bin/grammars"
+  compgen -G "$grammar_dir/*.so*" >/dev/null || grammar_dir="$engine_pkg/lib/grammars"
+  compgen -G "$grammar_dir/*.so*" >/dev/null || grammar_dir="$grammars"
+  cp -fL "$grammar_dir"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/lib/grammars/"
+  cp -fL "$grammar_dir"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/bin/grammars/"
+  chmod 0775 "$stage$LAPLACE_INSTALL_PREFIX/lib/grammars"/*.so* "$stage$LAPLACE_INSTALL_PREFIX/bin/grammars"/*.so*
+  for f in tier0.bin tier0.flags tier0.flags.layout highway.bin; do
+    [[ ! -s "$SITE_BUILD/share/laplace/$f" ]] || install -D -m 0664 "$SITE_BUILD/share/laplace/$f" "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/$f"
+  done
+  local recipes_src="$engine_pkg/share/laplace/recipes"
+  [[ -f "$recipes_src/order" ]] || recipes_src="$recipe_engine/recipes"
+  mkdir -p "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/recipes"
+  cp -a "$recipes_src/." "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/recipes/"
+  local firmware_src="$engine_pkg/share/laplace/firmware"
+  [[ -d "$firmware_src" ]] || firmware_src="$recipe_engine/firmware"
+  mkdir -p "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/firmware"
+  cp -a "$firmware_src/." "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/firmware/"
+  mkdir -p "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/manifest"
+  cp -a "$native_source/manifest/." "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/manifest/"
+  rm -rf "$LAPLACE_INSTALL_PREFIX/lib/cmake/LaplaceNative"
   # The recipe tree is data no process maps, and the Engine loads every .recipe in a source's directory: it is
   # replaced whole, so a recipe removed from Laplace-Engine is gone from the installation too.
   [[ -d "$stage$LAPLACE_INSTALL_PREFIX/share/laplace/recipes" ]] && rm -rf "$LAPLACE_INSTALL_PREFIX/share/laplace/recipes"
@@ -328,7 +424,17 @@ phase_reset() {
 # ------------------------------------------------------------------------------------------------ migrate + extensions
 # Compiler servers may outlive a build. The supervising shell owns the host lock;
 # those servers must not retain its file descriptor after the phase completes.
-dotnet_app() { LAPLACE_REUSE_INSTALLED_NATIVE=0 dotnet "$@" 8>&-; }
+dotnet_app() {
+  local np="" ep="" gen=""
+  [[ ! -r "$SITE_BUILD/.native-package" ]] || np=$(<"$SITE_BUILD/.native-package")
+  [[ ! -r "$SITE_BUILD/.engine-package" ]] || ep=$(<"$SITE_BUILD/.engine-package")
+  [[ ! -s "$SITE_BUILD/csharp/LaplaceNative.g.cs" ]] || gen="$SITE_BUILD/csharp"
+  LAPLACE_REUSE_INSTALLED_NATIVE=0 \
+    ${np:+LAPLACE_NATIVE_PACKAGE="$np"} \
+    ${ep:+LAPLACE_ENGINE_PACKAGE="$ep"} \
+    ${gen:+LaplaceNativeGenerated="$gen"} \
+    dotnet "$@" 8>&-
+}
 # This checkout's migrator: the declared schema (db/schema) is read from the checkout, never from the installed release.
 migrations() {
   local out="$SITE_WORK/migrations"
@@ -496,6 +602,17 @@ phase_app() {
       cache_src="$SITE_BUILD/share/laplace/$cache"
       [[ -f "$cache_src" ]] || cache_src="$LAPLACE_INSTALL_PREFIX/share/laplace/$cache"
       cp "$cache_src" "$stage/app/$component/share/laplace/"
+    done
+  done
+  install -m 0775 "$LAPLACE_INSTALL_PREFIX/bin/laplace" "$stage/app/cli/laplace"
+  mkdir -p "$stage/app/cli/grammars"
+  cp -fL "$LAPLACE_INSTALL_PREFIX/lib/grammars/"*.so* "$stage/app/cli/grammars/"
+  for component in . cli mcp-runtime; do
+    for cache in recipes firmware manifest; do
+      if [[ -d "$LAPLACE_INSTALL_PREFIX/share/laplace/$cache" ]]; then
+        mkdir -p "$stage/app/$component/share/laplace/$cache"
+        cp -a "$LAPLACE_INSTALL_PREFIX/share/laplace/$cache/." "$stage/app/$component/share/laplace/$cache/"
+      fi
     done
   done
   mkdir -p "$stage/app/cli/third-party-licenses"
@@ -898,7 +1015,10 @@ phase_checks() {
   say "checks against the deployed $LAPLACE_DBNAME${LAPLACE_APP_DBNAME:+ and $LAPLACE_APP_DBNAME}"
   # The substrate's regression suite, against the extensions this delivery installed, in a scratch database that
   # takes $LAPLACE_DBNAME's extension settings.
-  PG_CONFIG="$LAPLACE_PG_PREFIX/bin/pg_config" LAPLACE_REGRESS_DB="laplace_regress_substrate_${GITHUB_RUN_ID:-$$}"     bash "$ROOT/tests/substrate-regress.sh" "$LAPLACE_DBNAME" || fail "laplace_substrate regression suite failed"
+  PG_CONFIG="$LAPLACE_PG_PREFIX/bin/pg_config" \
+    LAPLACE_POSTGRES_TESTS="${LAPLACE_POSTGRES_SOURCE:-$(dirname "$ROOT")/Laplace-postgres}/tests" \
+    LAPLACE_REGRESS_DB="laplace_regress_substrate_${GITHUB_RUN_ID:-$$}" \
+    bash "$ROOT/tests/substrate-regress.sh" "$LAPLACE_DBNAME" || fail "laplace_substrate regression suite failed"
   local results="${RUNNER_TEMP:-$SITE_WORK}/authority-results"
   LAPLACE_TEST_APP_DB="${LAPLACE_APP_DB:-$LAPLACE_DB}" dotnet_app test     "$ROOT/app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj" -c Release --nologo     -p:LAPLACE_BUILD_ROOT="$SITE_BUILD/authority" -p:OpenApiGenerateDocuments=false     --filter 'FullyQualifiedName~PlatformInitialRoleDatabaseTests|FullyQualifiedName~PlatformOwner|FullyQualifiedName~BrowserDataProtectionTests'     --logger 'trx;LogFileName=authority.trx' --results-directory "$results" || fail "platform authority checks failed"
   python3 - "$results/authority.trx" <<'PY2'

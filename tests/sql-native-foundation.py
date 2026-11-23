@@ -14,9 +14,26 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-# Only what is a property of this installation: its extensions and their module binding. The closed-world semantic
-# cases run in the installed server's regression database (extension/laplace_substrate/tests/CMakeLists.txt).
 CASES = ("bootstrap",)
+BOOTSTRAP_SQL = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'laplace') THEN
+        RAISE EXCEPTION 'laplace extension is not installed';
+    END IF;
+    IF to_regclass('public.entity') IS NULL OR to_regclass('public.physicality') IS NULL
+       OR to_regclass('public.attestation') IS NULL OR to_regclass('public.consensus') IS NULL THEN
+        RAISE EXCEPTION 'canonical 4-table substrate relations are missing';
+    END IF;
+    IF coalesce(length(public.laplace_fingerprint()), 0) = 0
+       OR coalesce(length(public.laplace_highway_fingerprint()), 0) = 0 THEN
+        RAISE EXCEPTION 'laplace perfcache fingerprints are unavailable';
+    END IF;
+    IF (SELECT count(*) FROM ops.substrate_counts()) <> 4 THEN
+        RAISE EXCEPTION 'ops.substrate_counts() did not return 4 canonical metrics';
+    END IF;
+END $$;
+"""
 
 
 def main():
@@ -40,9 +57,8 @@ def main():
     try:
         for name in CASES:
             started = time.monotonic()
-            sql = ROOT / "extension/laplace_substrate/tests/sql" / (name + ".sql")
             result = run("psql", ["-X", "--no-password", "--dbname=" + database,
-                "--set=ON_ERROR_STOP=1", "--file=" + str(sql)], args.results / (name + ".log"))
+                "--set=ON_ERROR_STOP=1", "--file=-"], args.results / (name + ".log"), sql=BOOTSTRAP_SQL)
             receipt["cases"].append({"name": name, "exit_code": result,
                 "elapsed_ms": round((time.monotonic() - started) * 1000)})
             print(f"{name}: {'passed' if result == 0 else 'FAILED'}", flush=True)

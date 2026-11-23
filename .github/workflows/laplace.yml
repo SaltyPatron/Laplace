@@ -70,7 +70,7 @@ on:
       - ".github/workflows/laplace.yml"
 
 permissions:
-  contents: read
+  contents: write
   actions: read
   id-token: write   # the database host is started through GCP workload identity federation: a short-lived token, no stored key
 
@@ -155,7 +155,7 @@ jobs:
         # Delivery staging remains owned across separate build/publish steps.
         run: deploy/linux/site.sh externals build
 
-      - name: Verify Native recipe records and file coverage without PostgreSQL
+      - name: Verify Native identity, composition, interop and read-path contracts without PostgreSQL
         env:
           LAPLACE_DB: Host=127.0.0.1;Port=1;Username=unavailable;Database=unavailable;Timeout=1
           PGHOST: 127.0.0.1
@@ -163,28 +163,34 @@ jobs:
         run: |
           set -euo pipefail
           source scripts/lib/installation.sh
-          export LAPLACE_ENGINE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}/engine"
+          SITE_BUILD="${LAPLACE_SITE_BUILD:-${LAPLACE_BUILD:?}/Laplace/release}"
+          export LAPLACE_NATIVE_PACKAGE="$(<"$SITE_BUILD/.native-package")"
+          export LAPLACE_ENGINE_PACKAGE="$(<"$SITE_BUILD/.engine-package")"
+          export LaplaceNativeGenerated="$SITE_BUILD/csharp"
+          export LAPLACE_NATIVE_TEST_LIBRARY="$LAPLACE_NATIVE_PACKAGE/lib/liblaplace.so"
           export LAPLACE_REUSE_INSTALLED_NATIVE=0
           export LAPLACE_RECIPES="$LAPLACE_RECIPE_ENGINE_SOURCE/recipes"
-          export LAPLACE_TIER0="$LAPLACE_ENGINE_BUILD/core/perfcache/tier0.bin"
+          export LAPLACE_TIER0="$SITE_BUILD/share/laplace/tier0.bin"
           export LAPLACE_PERFCACHE_BIN="$LAPLACE_TIER0"
-          export LAPLACE_FLAGS="$LAPLACE_ENGINE_BUILD/core/perfcache/tier0.flags"
-          export LAPLACE_HIGHWAY="$LAPLACE_ENGINE_BUILD/core/perfcache/highway.bin"
+          export LAPLACE_FLAGS="$SITE_BUILD/share/laplace/tier0.flags"
+          export LAPLACE_HIGHWAY="$SITE_BUILD/share/laplace/highway.bin"
           results="$RUNNER_TEMP/native-recipe-results"
-          for project in Laplace.Decomposers.Tests Laplace.Substrate.Tests; do
-            dotnet test "app/$project/$project.csproj" -c Release --nologo \
-              -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
-              --filter 'FullyQualifiedName~NativeSourceAdmissionTests|FullyQualifiedName~NativeAlignedLayerTests|FullyQualifiedName~UnicodeSourceSemanticsTests|FullyQualifiedName~NativeXmlRecipeTests|FullyQualifiedName~NativeRangeOperandTests|FullyQualifiedName~NativeWordFrameNetTests|FullyQualifiedName~UnicodeDecomposerTests|FullyQualifiedName~UcdNormalizationQcTests|FullyQualifiedName~NativeRecipeConcurrencyTests|FullyQualifiedName~RecipeLawGateTests|FullyQualifiedName~SelectedRecipeSemanticsTests|FullyQualifiedName~SourceGenerationRegressionTests|FullyQualifiedName~UnicodeSourceNameGateTests|FullyQualifiedName~NativeUnicodeTableTests|FullyQualifiedName~CorpusParsingHasNoManagedJsonCompilerOrUnicodeParser' \
-              --logger "trx;LogFileName=$project.trx" --results-directory "$results"
-          done
+          dotnet test "app/Laplace.Core.Tests/Laplace.Core.Tests.csproj" -c Release --nologo \
+            -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
+            --filter 'FullyQualifiedName~ContentAddressingLawTests|FullyQualifiedName~NativeIdentityParityTests|FullyQualifiedName~NativeCompositionParityTests|FullyQualifiedName~NativeHighwayParityTests|FullyQualifiedName~NativeScalarFloorParityTests|FullyQualifiedName~NativeInteropTests|FullyQualifiedName~TrajectoryTests' \
+            --logger "trx;LogFileName=Laplace.Core.Tests.trx" --results-directory "$results"
+          dotnet test "app/Laplace.Data.Tests/Laplace.Data.Tests.csproj" -c Release --nologo \
+            -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/native-recipes" \
+            --filter 'FullyQualifiedName~ReadPathArchitectureGateTests' \
+            --logger "trx;LogFileName=Laplace.Data.Tests.trx" --results-directory "$results"
           python3 - "$results" <<'PY'
           from pathlib import Path
           import sys, xml.etree.ElementTree as ET
-          for project in ('Laplace.Decomposers.Tests', 'Laplace.Substrate.Tests'):
+          for project in ('Laplace.Core.Tests', 'Laplace.Data.Tests'):
               path = Path(sys.argv[1]) / (project + '.trx')
               counters = ET.parse(path).getroot().find('.//{*}Counters').attrib
               if int(counters['total']) == 0 or int(counters['passed']) != int(counters['total']):
-                  raise SystemExit(f'Native recipe checks did not all execute and pass: {project} {counters}')
+                  raise SystemExit(f'Native modular checks did not all execute and pass: {project} {counters}')
           PY
 
       - name: Install into /opt/laplace
@@ -223,6 +229,7 @@ jobs:
 
       - name: Retain ingestion completion results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ingest-completion-${{ github.sha }}
@@ -241,6 +248,8 @@ jobs:
 
       - name: Retain the verified production package
         if: github.event_name == 'push' || inputs.promote
+        id: upload_bundle
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-site-${{ github.sha }}
@@ -250,6 +259,19 @@ jobs:
           retention-days: 7
           compression-level: 1
 
+      - name: Publish verified production bundle via ephemeral prerelease when artifact quota is full
+        if: (github.event_name == 'push' || inputs.promote) && steps.upload_bundle.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_TAR: ${{ steps.bundle.outputs.path }}
+          TAG: ci-site-bundle-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          (cd "$(dirname "$BUNDLE_TAR")" && sha256sum "$(basename "$BUNDLE_TAR")" > "$(basename "$BUNDLE_TAR").sha256")
+          gh release delete "$TAG" --cleanup-tag -y >/dev/null 2>&1 || true
+          gh release create "$TAG" "$BUNDLE_TAR" "${BUNDLE_TAR}.sha256" \
+            --prerelease --title "CI bundle ${{ github.sha }}" --notes "Ephemeral staging-to-production bundle"
+
       - name: Clean staging delivery work after package upload
         if: always()
         uses: ./.github/actions/storage
@@ -258,6 +280,7 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain staging cleanup receipt
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-staging-${{ github.run_id }}
@@ -389,6 +412,7 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cloud cleanup receipt
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-cloud-${{ github.run_id }}
@@ -456,10 +480,23 @@ jobs:
           echo "path=$b" >> "$GITHUB_OUTPUT"
 
       - name: Receive the verified bundle from hart-server
+        id: download_bundle
+        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: laplace-site-${{ github.sha }}
           path: ${{ steps.bundle.outputs.path }}
+
+      - name: Receive verified bundle from ephemeral prerelease fallback
+        if: steps.download_bundle.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_DIR: ${{ steps.bundle.outputs.path }}
+          TAG: ci-site-bundle-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --dir "$BUNDLE_DIR" --clobber
+          (cd "$BUNDLE_DIR" && sha256sum -c laplace-site.tar.sha256 && rm -f laplace-site.tar.sha256)
 
       - name: Receive, migrate application database, publish, restart
         run: deploy/linux/site.sh receive migrate_app publish restart
@@ -471,6 +508,13 @@ jobs:
         if: failure()
         run: deploy/linux/site.sh status
 
+      - name: Delete ephemeral bundle prerelease if created
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ci-site-bundle-${{ github.sha }}
+        run: gh release delete "$TAG" --cleanup-tag -y >/dev/null 2>&1 || true
+
       - name: Clean received production package after readback
         if: always()
         uses: ./.github/actions/storage
@@ -479,6 +523,7 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain production cleanup receipt
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-production-${{ github.run_id }}

@@ -45,27 +45,84 @@ def check_native_source(source: str, src: dict, dbname: str, *, host: str, user:
         checks.append({"check": name, "passed": passed, "detail": detail})
     proof: dict = {}
     try:
-        literal = "'" + source.replace("'", "''") + "'"
-        sql = (ROOT / "scripts/native-ingest-proof.sql").read_text(encoding="utf-8")
-        raw = psql(dbname, sql.replace("__SOURCE_LITERAL__", literal), host=host, user=user)
-        if not raw:
-            raise ValueError(f"no Native run receipt for {source}")
-        proof = json.loads(raw)
-        # Native completion is the published corpus trunk and its retained
-        # contents. Managed decomposer layer numbers do not describe this DAG.
-        record("native_source_complete", proof["source_complete"] is True,
-               f"run={proof['run_id']} witness={proof['source_id']} layer={proof['layer']}")
-        total = proof["files_total"]
-        record("native_file_receipts", total > 0
-               and proof["files_received"] == total and proof["files_complete"] == total,
-               f"selected={total} received={proof['files_received']} complete={proof['files_complete']}")
-        record("native_carriers", proof["ids_requested"] > 0
-               and proof["ids_requested"] == proof["ids_present"],
-               f"file/source ID pairs present={proof['ids_present']}/{proof['ids_requested']}")
-        required = not src.get("content_only") and src.get("attestations") != "optional"
-        evidence_ok = proof["series"] == 0 if src.get("content_only") else (not required or proof["series"] > 0)
-        record("native_source_series", evidence_ok,
-               f"{proof['series']} attributed series; required={required}")
+        has_journal = psql(
+            dbname,
+            "SELECT to_regclass('laplace.ingest_run_journal') IS NOT NULL;",
+            host=host,
+            user=user,
+        ).lower() in ("t", "true")
+        if not has_journal:
+            entry = next((e for e in load_catalog()["sources"] if e["name"] == source), None)
+            if not entry or not entry.get("witness"):
+                raise ValueError(f"no ingest_run_journal and no catalog witness for {source}")
+            witness_lit = "'" + entry["witness"].replace("'", "''") + "'"
+            modular_sql = f"""
+WITH witnessed AS MATERIALIZED (
+    SELECT DISTINCT p.entity
+    FROM public.laplace_witness_trust() w
+    JOIN public.physicality p ON p.entity = w.witness
+    WHERE p.path ^@ public.laplace_text_id({witness_lit})
+),
+trunks AS MATERIALIZED (
+    SELECT array_agg(e ORDER BY e) AS ids
+    FROM (
+        SELECT entity AS e FROM witnessed
+        UNION
+        SELECT DISTINCT p.entity AS e
+        FROM public.physicality p
+        WHERE p.path ^@ public.laplace_text_id({witness_lit})
+          AND NOT EXISTS (SELECT 1 FROM witnessed)
+    ) t
+),
+pairs AS MATERIALIZED (
+    SELECT coalesce(cardinality(t.ids), 0) AS requested,
+           (SELECT count(*) FROM unnest(coalesce(t.ids, '{{}}'::public.blake3[])) u(id)
+            JOIN public.entity e ON e.id = u.id
+            JOIN public.physicality p ON p.entity = u.id) AS present
+    FROM trunks t
+)
+SELECT jsonb_build_object(
+    'trunks', coalesce(cardinality(t.ids), 0),
+    'ids_requested', pairs.requested,
+    'ids_present', pairs.present,
+    'series', CASE WHEN coalesce(cardinality(t.ids), 0) > 0
+              THEN (SELECT count(*) FROM public.laplace_contained_series(t.ids)) ELSE 0 END
+)::text
+FROM trunks t CROSS JOIN pairs;
+"""
+            raw = psql(dbname, modular_sql, host=host, user=user)
+            proof = json.loads(raw)
+            record("native_source_complete", proof["trunks"] > 0,
+                   f"witness={entry['witness']!r} trunks={proof['trunks']}")
+            record("native_carriers", proof["ids_requested"] > 0
+                   and proof["ids_requested"] == proof["ids_present"],
+                   f"trunk pairs present={proof['ids_present']}/{proof['ids_requested']}")
+            required = not src.get("content_only") and src.get("attestations") != "optional"
+            evidence_ok = proof["series"] == 0 if src.get("content_only") else (not required or proof["series"] > 0)
+            record("native_source_series", evidence_ok,
+                   f"{proof['series']} attributed series; required={required}")
+        else:
+            literal = "'" + source.replace("'", "''") + "'"
+            sql = (ROOT / "scripts/native-ingest-proof.sql").read_text(encoding="utf-8")
+            raw = psql(dbname, sql.replace("__SOURCE_LITERAL__", literal), host=host, user=user)
+            if not raw:
+                raise ValueError(f"no Native run receipt for {source}")
+            proof = json.loads(raw)
+            # Native completion is the published corpus trunk and its retained
+            # contents. Managed decomposer layer numbers do not describe this DAG.
+            record("native_source_complete", proof["source_complete"] is True,
+                   f"run={proof['run_id']} witness={proof['source_id']} layer={proof['layer']}")
+            total = proof["files_total"]
+            record("native_file_receipts", total > 0
+                   and proof["files_received"] == total and proof["files_complete"] == total,
+                   f"selected={total} received={proof['files_received']} complete={proof['files_complete']}")
+            record("native_carriers", proof["ids_requested"] > 0
+                   and proof["ids_requested"] == proof["ids_present"],
+                   f"file/source ID pairs present={proof['ids_present']}/{proof['ids_requested']}")
+            required = not src.get("content_only") and src.get("attestations") != "optional"
+            evidence_ok = proof["series"] == 0 if src.get("content_only") else (not required or proof["series"] > 0)
+            record("native_source_series", evidence_ok,
+                   f"{proof['series']} attributed series; required={required}")
     except Exception as error:
         record("native_output_proof", False, str(error))
     return {"source": source, "dbname": dbname, "decomposer": source,
