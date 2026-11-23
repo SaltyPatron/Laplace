@@ -65,9 +65,12 @@ on:
       - "!scripts/test-benchmark-suite.py"
       - "!vault-data-inventory.tsv"
       - "!vault-data-directories.list"
-      # Re-include the pinned Native closure after .github/**. The shared
-      # ci_product_scope policy also invalidates candidates for this input.
+      # Re-include the pinned Native closure and delivery-invoked test gates.
+      # The shared ci_product_scope policy also invalidates candidates for this input.
       - ".github/workflows/laplace.yml"
+      - "tests/ingest-completion.sh"
+      - "tests/database-names.sh"
+      - "tests/substrate-regress.sh"
 
 permissions:
   contents: write

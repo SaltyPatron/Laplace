@@ -22,7 +22,7 @@ export LAPLACE_HIGHWAY="$LAPLACE_INSTALL_PREFIX/share/laplace/highway.bin"
 results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/database-name-results"
 for project in Laplace.Endpoints.Lichess.Tests Laplace.Chess.Tests; do
   dotnet test "$root/app/$project/$project.csproj" -c Release --nologo \
-    -p:LAPLACE_BUILD_ROOT="${LAPLACE_BUILD:?}/laplace-mono/database-names" \
+    -p:LAPLACE_BUILD_ROOT="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/database-names-build" \
     --filter 'FullyQualifiedName~LichessControlTests|FullyQualifiedName~UciClientTests.ReadinessCarriesTheActualDatabaseIdentity' \
     --logger "trx;LogFileName=$project.trx" --results-directory "$results"
 done

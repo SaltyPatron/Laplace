@@ -29,7 +29,7 @@ if [[ ! -s "$site_build/csharp/LaplaceNative.g.cs" ]]; then
   cmake -DCC=icx -DNODE="$(command -v node)" -DSOURCE="$native_src" -DOUT="$site_build/csharp" -P "$native_src/tools/csharp/generate.cmake" 8>&- 9>&-
 fi
 export LaplaceNativeGenerated="$site_build/csharp"
-output="${LAPLACE_BUILD:?}/laplace-mono/ingest-completion"
+output="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/ingest-completion-build"
 results="${RUNNER_TEMP:-${LAPLACE_SCRATCH_ROOT:?}}/ingest-completion-results"
 mkdir -p "$results"
 psql -X -v ON_ERROR_STOP=1 -c "SELECT public.laplace_ensure_stage();" >/dev/null
