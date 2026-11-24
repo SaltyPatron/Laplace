@@ -144,10 +144,29 @@ internal static class IdentityEndpoints
         return value;
     }
 
-    private static bool IsPublicOrigin(HttpRequest request, Uri origin) =>
-        string.Equals(request.Scheme, origin.Scheme, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(request.Host.Host, origin.Host, StringComparison.OrdinalIgnoreCase)
-        && request.Host.Port == (origin.IsDefaultPort ? null : origin.Port);
+    private static bool IsPublicOrigin(HttpRequest request, Uri origin)
+    {
+        var forwardedProto = request.Headers["X-Forwarded-Proto"].FirstOrDefault();
+        var scheme = !string.IsNullOrWhiteSpace(forwardedProto)
+            ? forwardedProto.Split(',', 2)[0].Trim()
+            : request.Scheme;
+
+        var forwardedHost = request.Headers["X-Forwarded-Host"].FirstOrDefault();
+        var host = !string.IsNullOrWhiteSpace(forwardedHost)
+            ? HostString.FromUriComponent(forwardedHost.Split(',', 2)[0].Trim())
+            : request.Host;
+
+        static int? EffectivePort(string s, int? port) =>
+            (string.Equals(s, "https", StringComparison.OrdinalIgnoreCase) && port == 443)
+            || (string.Equals(s, "http", StringComparison.OrdinalIgnoreCase) && port == 80)
+                ? null
+                : port;
+
+        var expectedPort = origin.IsDefaultPort ? (int?)null : origin.Port;
+        return string.Equals(scheme, origin.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(host.Host, origin.Host, StringComparison.OrdinalIgnoreCase)
+            && EffectivePort(scheme, host.Port) == expectedPort;
+    }
 
     private static bool TryIdentity(
         ClaimsPrincipal principal, out Guid userId, out string tenantId)

@@ -34,3 +34,22 @@ public sealed record ExploreBrowseResponse(
     [property: JsonPropertyName("query")] string Query,
     [property: JsonPropertyName("hits")] IReadOnlyList<ExploreBrowseHit> Hits,
     [property: JsonPropertyName("receipt")] ExploreBrowseReceipt Receipt);
+
+public sealed record ExploreLeaderboardHit(
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("tier")] short Tier,
+    [property: JsonPropertyName("confidence")] double Confidence,
+    [property: JsonPropertyName("rating")] double Rating,
+    [property: JsonPropertyName("deviation")] double Deviation,
+    [property: JsonPropertyName("matches")] long Matches,
+    [property: JsonPropertyName("parts_json")] string PartsJson);
+
+public sealed record ExploreLeaderboardResponse(
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("limit")] int Limit,
+    [property: JsonPropertyName("sort")] string Sort,
+    [property: JsonPropertyName("tier"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] short? Tier,
+    [property: JsonPropertyName("elapsed_us")] long ElapsedUs,
+    [property: JsonPropertyName("hits")] IReadOnlyList<ExploreLeaderboardHit> Hits);

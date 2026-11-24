@@ -7,6 +7,7 @@ import { StrandList } from '../domain/Strand/StrandList';
 import { useAppStore } from '../store';
 import { useReadResource } from '../ui/hooks/useReadResource';
 import { ErrorText, LoadingText } from '../ui/primitives/Text';
+import { Button } from '../ui/primitives/Button';
 import { Tab, TabList } from '../ui/primitives/Tabs';
 import { UnstyledButton } from '../ui/primitives/UnstyledButton';
 import { useEntityLabels } from '../shell/inspector';
@@ -23,19 +24,37 @@ function useQuote() {
 function FacetBody({ id, lens }: { id: string; lens: FacetLens }) {
   const { tenant } = useAppStore();
   const quoteId = useQuote();
-  const read = useReadResource({ key: JSON.stringify(['facet', id, lens.facet, tenant, quoteId]),
-    read: (signal) => readFacet(id, lens.facet, { limit: 100 }, { tenant, quoteId, signal }) });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [prevCursors, setPrevCursors] = useState<(string | null)[]>([]);
+  const limit = lens.facet === 'appears-in' ? 50 : 100;
+  const read = useReadResource({
+    key: JSON.stringify(['facet', id, lens.facet, cursor, tenant, quoteId]),
+    read: (signal) => readFacet(id, lens.facet, { limit, ...(cursor ? { cursor } : {}) }, { tenant, quoteId, signal }),
+  });
   if (read.error instanceof FacetUnavailable) return <p className={styles.note}>This view needs a backend read that is not deployed yet.</p>;
   if (read.error instanceof PaymentRequiredError) return <GatePrompt serviceId="inspect" label="Reading this view uses the inspection service." onReady={() => void read.reload()} />;
   if (read.error) return <ErrorText requestId={requestIdOf(read.error)}>{plainMessage(read.error)} <UnstyledButton className={styles.link} onClick={() => void read.reload()}>Try again</UnstyledButton></ErrorText>;
   if (!read.data) return <LoadingText>Reading…</LoadingText>;
   const facet = read.data;
+  const hasPaging = prevCursors.length > 0 || facet.cursor != null;
   return <>
     <p className={styles.summary}>
       {facet.total != null ? `${facet.total.toLocaleString()} ${facet.total === 1 ? 'result' : 'results'}` : `${facet.items.length.toLocaleString()}+ results`}
       {facet.sources.length > 0 && ` · from ${facet.sources.length} ${facet.sources.length === 1 ? 'source' : 'sources'}`}
     </p>
     <StrandList subjectId={id} subjectLabel={facet.entity.label} strands={facet.items} groupByKind={lens.groupByKind} empty={lens.empty} />
+    {hasPaging && <div className={styles.pager}>
+      <Button variant="ghost" disabled={prevCursors.length === 0} onClick={() => {
+        const previous = prevCursors[prevCursors.length - 1] ?? null;
+        setPrevCursors((stack) => stack.slice(0, -1));
+        setCursor(previous);
+      }}>Previous</Button>
+      <Button variant="ghost" disabled={!facet.cursor} onClick={() => {
+        if (!facet.cursor) return;
+        setPrevCursors((stack) => [...stack, cursor]);
+        setCursor(facet.cursor);
+      }}>Next</Button>
+    </div>}
   </>;
 }
 

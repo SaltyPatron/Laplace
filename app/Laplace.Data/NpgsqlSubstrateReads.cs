@@ -64,9 +64,9 @@ public static partial class NpgsqlSubstrateReads
                 SELECT rating, deviation, matches
                 FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 256::bigint, NULL, '{}'::public.blake3[], 0::smallint)
             )
-            SELECT count(*) FILTER (WHERE matches >= 2 AND public.laplace_confidence(rating, deviation, 2) >= 1500)::bigint,
-                   count(*) FILTER (WHERE matches >= 2 AND abs(public.laplace_confidence(rating, deviation, 2) - 1500) < 50)::bigint,
-                   count(*) FILTER (WHERE matches >= 2 AND public.laplace_confidence(rating, deviation, 2) <= 1450)::bigint,
+            SELECT count(*) FILTER (WHERE matches >= 2 AND rating > 1510 AND public.laplace_confidence(rating, deviation, 2::double precision) >= 0.52)::bigint,
+                   count(*) FILTER (WHERE matches >= 2 AND rating BETWEEN 1480 AND 1510)::bigint,
+                   count(*) FILTER (WHERE matches >= 2 AND rating < 1480)::bigint,
                    count(*) FILTER (WHERE matches < 2)::bigint
             FROM claims
             """;
@@ -105,7 +105,7 @@ public static partial class NpgsqlSubstrateReads
                    mu
             FROM parsed
             WHERE cardinality(parts) >= 2
-            ORDER BY mu DESC
+            ORDER BY mu DESC NULLS LAST
             LIMIT greatest(0, $3)
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql,
@@ -155,7 +155,7 @@ public static partial class NpgsqlSubstrateReads
                    p.matches,
                    d.geo,
                    CASE WHEN p.mu IS NULL THEN 'unattested'
-                        WHEN p.mu >= 1500 THEN 'supported'
+                        WHEN p.mu >= 0.5 THEN 'supported'
                         ELSE 'contested' END
             FROM dist d
             LEFT JOIN parts p ON true
@@ -197,7 +197,7 @@ public static partial class NpgsqlSubstrateReads
                    matches
             FROM claims
             WHERE cardinality(parts) >= 2
-            ORDER BY eff_mu DESC, matches DESC
+            ORDER BY eff_mu DESC NULLS LAST, matches DESC
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -230,7 +230,7 @@ public static partial class NpgsqlSubstrateReads
                    matches
             FROM claims
             WHERE cardinality(parts) >= 2
-            ORDER BY eff_mu DESC, matches DESC
+            ORDER BY eff_mu DESC NULLS LAST, matches DESC
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -253,12 +253,12 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             WITH tops AS MATERIALIZED (
                 SELECT c.claim,
-                       public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
+                       public.laplace_confidence(c.rating, c.deviation, 2::double precision)::numeric AS eff_mu,
                        c.matches AS witnesses
                 FROM public.consensus c
                 WHERE c.matches > 0
-                ORDER BY public.laplace_confidence(c.rating, c.deviation, 2) DESC, c.matches DESC
-                LIMIT greatest(0, $1) * 4
+                ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC, c.matches DESC, c.claim
+                LIMIT greatest(0, $1) * 8
             ),
             parts AS MATERIALIZED (
                 SELECT t.claim, t.eff_mu, t.witnesses,
@@ -281,7 +281,7 @@ public static partial class NpgsqlSubstrateReads
                    eff_mu,
                    witnesses
             FROM triples
-            ORDER BY eff_mu DESC, witnesses DESC
+            ORDER BY eff_mu DESC NULLS LAST, witnesses DESC
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql,
             static r => new TopRelationEdgeRow(

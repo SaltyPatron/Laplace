@@ -322,9 +322,15 @@ test('[CHESS-2] board coordinates shown', async ({ page }) => {
 });
 
 test('[CHESS-3] player profile is formatted', async ({ page }) => {
-  // The player index reads only on a search; the page is the name as the games write it.
+  // The player index reads only on a search; fall back to Chess.com handles when FIDE/GM PGNs are absent.
   await open(page, '/chess?q=Nakamura', 5000);
-  await page.getByRole('link', { name: /Nakamura, Hikaru/ }).first().click();
+  const nakamura = page.getByRole('link', { name: /Nakamura, Hikaru/ }).first();
+  if (await nakamura.count()) {
+    await nakamura.click();
+  } else {
+    await open(page, '/chess?q=Hikaru', 5000);
+    await page.getByRole('link', { name: /Hikaru/ }).first().click();
+  }
   await page.waitForTimeout(5000);
   const text = await mainText(page);
   expect(text).not.toMatch(/\b1\d{9}\b/);

@@ -27,6 +27,8 @@ export function GraphLegend({
   onToggleRelation,
   beliefMode,
   walkSteps,
+  isFullscreen = false,
+  onToggleFullscreen,
 }: {
   dim: Dim;
   onDimChange?: (d: Dim) => void;
@@ -49,6 +51,8 @@ export function GraphLegend({
   onToggleRelation: (type: string) => void;
   beliefMode: boolean;
   walkSteps: number;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }) {
   return (
     <>
@@ -102,6 +106,15 @@ export function GraphLegend({
           </Field>
         ) : null}
         {toolbar}
+        {onToggleFullscreen ? (
+          <ToggleButton
+            pressed={isFullscreen}
+            onClick={onToggleFullscreen}
+            aria-label={isFullscreen ? 'Exit fullscreen graph' : 'Enter fullscreen graph'}
+          >
+            {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          </ToggleButton>
+        ) : null}
         <Muted className={styles.legend}>
           {`${nodeCount.toLocaleString()} ${nodeCount === 1 ? 'subject' : 'subjects'} · ${linkCount.toLocaleString()} ${linkCount === 1 ? 'strand' : 'strands'} · reaches ${maxHop} ${maxHop === 1 ? 'hop' : 'hops'} out`}
           {expanded ? '' : ' · expand to walk further'}

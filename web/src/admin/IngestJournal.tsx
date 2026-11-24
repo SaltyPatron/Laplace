@@ -157,7 +157,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
           >
             {expandedRun === run.run_id ? 'Hide files' : 'File receipts'}
           </Button>
-          {OPEN_INGEST_STATES.has(run.status.toLowerCase()) && canManage
+          {OPEN_INGEST_STATES.has(run.status.toLowerCase()) && !/^[0-9a-f]{32}$/i.test(run.run_id) && canManage
             ? (
               <Button
                 variant="ghost"
@@ -167,7 +167,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
                 Close journal…
               </Button>
             )
-            : <span className={styles.progressPct}>{run.ended_at ? `Ended ${new Date(run.ended_at).toLocaleString()}` : OPEN_INGEST_STATES.has(run.status.toLowerCase()) ? 'In progress' : 'Closed'}</span>}
+            : <span className={styles.progressPct}>{run.ended_at ? `Ended ${new Date(run.ended_at).toLocaleString()}` : OPEN_INGEST_STATES.has(run.status.toLowerCase()) ? 'In progress' : 'Admitted'}</span>}
         </div>
       ),
     },
@@ -177,26 +177,26 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
 
   return (
     <>
-      <Panel title="Ingestion runs" expandable>
+      <Panel title="Admitted witnesses & testimony" expandable>
         <div className={styles.toolbar}>
           <label className={styles.liveLabel}>
             <Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />
             Live · {REFRESH_MS / 1000}s
           </label>
           <label className={styles.limitLabel}>
-            Runs
+            Witnesses
             <Select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
               {[10, 25, 50, 100, 500].map((value) => <option key={value} value={value}>{value}</option>)}
             </Select>
           </label>
           <Button variant="ghost" onClick={() => void runsRead.refresh()}>Refresh</Button>
         </div>
-        <ReadStatus label="Ingestion runs" resource={runsRead} />
-        {open != null && <Muted>{open} open · {runsRead.data?.rows.length ?? 0} returned. Older runs may exist.</Muted>}
+        <ReadStatus label="Admitted witnesses" resource={runsRead} />
+        {open != null && <Muted>{open} open · {runsRead.data?.rows.length ?? 0} returned.</Muted>}
         {runsRead.data && (
           <ResultWorkspace
             scopeKey={JSON.stringify(['ingest-runs', tenant])}
-            label="Ingestion run receipts"
+            label="Admitted witness receipts"
             snapshot={runsRead.data}
             columns={columns}
             rowLabel={(run) => `${run.source_name} run ${run.run_id}`}

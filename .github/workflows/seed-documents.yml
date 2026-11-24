@@ -18,8 +18,8 @@ on:
       database:
         description: "target database"
         type: choice
-        options: [laplace-mono]
-        default: laplace-mono
+        options: [laplace, laplace-mono]
+        default: laplace
       run_idempotency:
         description: "re-ingest and prove no double-count"
         type: boolean

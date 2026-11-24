@@ -4,6 +4,7 @@ import { MOUSE, type Sprite, type SpriteMaterial } from 'three';
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
 import { useVisualizationPalette } from '../visualizationPalette';
+import { useInPlaceFullscreen } from '../glome/useInPlaceFullscreen';
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
@@ -76,6 +77,7 @@ export function ConsensusGraph({
   const ref2d = useRef<Fg2dApi | null>(null);
   const ref3d = useRef<Fg3dApi | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const { containerRef, isFullscreen, cssFullscreen, toggleFullscreen } = useInPlaceFullscreen<HTMLDivElement>();
   const [size, setSize] = useState({ width: 0, height: 0 });
   const fittedKey = useRef<string>('');
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -303,7 +305,14 @@ export function ConsensusGraph({
   }
 
   return (
-    <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
+    <div
+      ref={containerRef}
+      className={[
+        styles.root,
+        fill ? styles.rootFill : '',
+        cssFullscreen ? styles.fullscreen : '',
+      ].filter(Boolean).join(' ')}
+    >
       <GraphLegend
         dim={dim}
         onDimChange={onDimChange}
@@ -326,6 +335,8 @@ export function ConsensusGraph({
         onToggleRelation={toggleRelation}
         beliefMode={beliefMode}
         walkSteps={walkPath.length}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
       />
       <div
         className={fill ? `${styles.shell} ${styles.shellFill}` : styles.shell}

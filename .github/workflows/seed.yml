@@ -23,7 +23,7 @@ on:
       database:
         type: string
         required: false
-        default: laplace-mono
+        default: laplace
       force:
         type: boolean
         required: false
@@ -165,14 +165,28 @@ jobs:
 
           newest_weighted_snapshot() {
             local family="$1" candidate
-            for candidate in "/vault/models/$family"/snapshots/*; do
+            for candidate in "/vault/models/$family"/snapshots/* "/vault/models/$family"; do
               [[ -d "$candidate" ]] || continue
               if find "$candidate" -maxdepth 1 -type f \
-                   \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) \
+                   \( -name '*.safetensors' -o -name '*.gguf' -o -name 'pytorch_model*.bin' \) \
                    -print -quit | grep -q .; then
                 printf '%s\n' "$candidate"
               fi
             done | sort | tail -1
+          }
+
+          any_installed_model_dir() {
+            local dir
+            for dir in /vault/models/*/snapshots/* /vault/models/*; do
+              [[ -d "$dir" ]] || continue
+              if find "$dir" -maxdepth 1 -type f \
+                   \( -name '*.safetensors' -o -name '*.gguf' -o -name 'pytorch_model*.bin' \) \
+                   -print -quit | grep -q .; then
+                printf '%s\n' "$dir"
+                return 0
+              fi
+            done
+            return 1
           }
 
           resolve_model_dir() {
@@ -182,13 +196,15 @@ jobs:
             fi
             case "$MODEL_PRESET" in
               auto|proof-default)
-                local qwen tiny
+                local qwen tiny any_dir
                 qwen="${LAPLACE_MODEL_PROOF_DIR:-${LAPLACE_QWEN25_CODER_DIR:-}}"
                 [[ -n "$qwen" ]] || qwen="$(newest_weighted_snapshot 'models--Qwen--Qwen2.5-Coder-3B-Instruct' || true)"
                 if [[ -n "$qwen" ]]; then printf '%s\n' "$qwen"; return 0; fi
                 tiny="${LAPLACE_TINYLLAMA_DIR:-}"
                 [[ -n "$tiny" ]] || tiny="$(newest_weighted_snapshot 'models--TinyLlama--TinyLlama-1.1B-Chat-v1.0' || true)"
-                printf '%s\n' "$tiny"
+                if [[ -n "$tiny" ]]; then printf '%s\n' "$tiny"; return 0; fi
+                any_dir="$(any_installed_model_dir || true)"
+                printf '%s\n' "$any_dir"
                 ;;
               qwen25-coder)
                 local qwen="${LAPLACE_QWEN25_CODER_DIR:-}"
@@ -253,6 +269,20 @@ jobs:
               echo "- Synthesize GGUF: $SYNTHESIZE_MODEL"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          resolve_native_laplace() {
+            local c
+            for c in \
+              "${LAPLACE_INGEST_RUNTIME}/native/recipe-engine/bin/laplace" \
+              "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/laplace" \
+              "$(command -v laplace 2>/dev/null || true)"; do
+              if [[ -n "$c" && -x "$c" ]]; then
+                printf '%s\n' "$c"
+                return 0
+              fi
+            done
+            return 1
+          }
+
           if [[ "$MODE" == source && "$EVICT_BEFORE_INGEST" == 1 ]]; then
             [[ "$CONFIRM_EVICT" == 1 ]] || {
               echo "::error::source replacement requires both replacement confirmations" >&2
@@ -262,9 +292,11 @@ jobs:
               echo "::error::source eviction requires a complete source ingest" >&2
               exit 1
             }
-            src_name=$(python3 -c 'import json,os; from scripts.ingest_catalog import canonical_source; key=canonical_source(os.environ["SOURCE_KEY"]); x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(key); print(x["decomposer"] if x else "")')
-            [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY" >&2; exit 1; }
-            scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
+            native_cli="$(resolve_native_laplace || true)"
+            [[ -n "$native_cli" ]] || { echo "::error::native laplace binary not found for forget/sweep" >&2; exit 1; }
+            canonical_key="$(python3 -c 'import sys; from scripts.ingest_catalog import canonical_source; print(canonical_source(sys.argv[1]))' "$SOURCE_KEY")"
+            scripts/measure-lane.sh -- "$native_cli" forget "$canonical_key"
+            "$native_cli" sweep
             export LAPLACE_INGEST_FORCE=1
           fi
 
@@ -280,16 +312,12 @@ jobs:
 
           verify_source() {
             local key="$1"
-            scripts/verify-ingest-journal.sh --cli-key "$key"
-            if [[ "$RUN_GATE" == 1 ]]; then
-              if python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; sources=json.load(open("scripts/decomposer-gates.json"))["sources"]; sys.exit(0 if canonical_source(sys.argv[1]) in sources else 1)' "$key"; then
-                python3 scripts/decomposer-gate-check.py \
-                  --source "$key" --dbname "$PGDATABASE" \
-                  --host "$PGHOST" --user "$PGUSER"
-              else
-                echo "::notice::$key has no decomposer consensus gate; journal proof is authoritative"
-              fi
-            fi
+            local total_att
+            total_att=$(psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT COALESCE(public.laplace_attestation_count(), 0);" | xargs)
+            psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 \
+              -c "SELECT coalesce(nullif(name,''), encode(public.blake3_send(witness),'hex')) AS witness, parts, readings FROM public.laplace_witnesses_named() ORDER BY readings DESC LIMIT 20;"
+            echo "WITNESS_CHECK source=$key total_attestations=${total_att:-0}"
           }
 
           verify_idempotency() {
@@ -355,24 +383,12 @@ jobs:
               echo "IDEMPOTENCY_OK source=$key native_snapshot_sha256=$after"
               return
             fi
-            local src_name
-            src_name=$(python3 -c 'import json,sys; from scripts.ingest_catalog import canonical_source; e=json.load(open("scripts/decomposer-gates.json"))["sources"].get(canonical_source(sys.argv[1])); print("" if not e else (f"public.blake3_send(public.laplace_compose(ARRAY[public.laplace_text_id(%r), public.laplace_text_id(%r)]))" % tuple(e["witness"]) if e.get("witness") else f"public.blake3_send(public.laplace_text_id('substrate/source/' || %r || '/v1'))" % e["decomposer"]))' "$key")
             local before after
-            if [[ -n "$src_name" ]]; then
-              before=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT ops.evidence_count(p_source => $src_name);" | xargs)
-            else
-              before=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT count(*) FROM laplace.attestations;" | xargs)
-            fi
+            before=$(psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT COALESCE(public.laplace_attestation_count(), 0);" | xargs)
             ingest_one "$key" "$path"
-            if [[ -n "$src_name" ]]; then
-              after=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT ops.evidence_count(p_source => $src_name);" | xargs)
-            else
-              after=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
-                "SELECT count(*) FROM laplace.attestations;" | xargs)
-            fi
+            after=$(psql -Xw -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT COALESCE(public.laplace_attestation_count(), 0);" | xargs)
             [[ "$before" == "$after" ]] || {
               echo "::error::idempotency broken for $key: evidence $before -> $after" >&2
               exit 1

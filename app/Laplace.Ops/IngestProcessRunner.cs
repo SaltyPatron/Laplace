@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using Laplace.Engine.Core;
 using Serilog;
 using Serilog.Context;
@@ -16,15 +17,49 @@ namespace Laplace.Ops;
 /// </summary>
 public static class IngestProcessRunner
 {
-    private sealed class OwnedProcess(CapturedProcess process, StartReceipt receipt, Serilog.ILogger log)
+    private sealed class LiveOutputBuffer
+    {
+        private const int LiveTailLimit = 65536;
+        private readonly object _gate = new();
+        private readonly StringBuilder _stdout = new();
+        private readonly StringBuilder _stderr = new();
+
+        public void Append(string stream, string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            lock (_gate)
+            {
+                var target = string.Equals(stream, "stderr", StringComparison.OrdinalIgnoreCase)
+                    ? _stderr : _stdout;
+                target.AppendLine(text);
+                if (target.Length > LiveTailLimit)
+                    target.Remove(0, target.Length - LiveTailLimit);
+            }
+        }
+
+        public (string Stdout, string Stderr) Snapshot()
+        {
+            lock (_gate)
+                return (_stdout.ToString(), _stderr.ToString());
+        }
+    }
+
+    private sealed class OwnedProcess(
+        CapturedProcess process,
+        StartReceipt receipt,
+        LiveOutputBuffer output,
+        Serilog.ILogger log)
     {
         public CapturedProcess Process { get; } = process;
         public StartReceipt Receipt { get; } = receipt;
+        public LiveOutputBuffer Output { get; } = output;
         public Serilog.ILogger Log { get; } = log;
         public TaskCompletionSource<CompletionReceipt> Observed { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int StopRequested;
     }
+
+    public sealed record ActiveProcessSnapshot(StartReceipt Start, string Stdout, string Stderr);
     private static readonly ConcurrentDictionary<int, OwnedProcess> OwnedProcesses = new();
     private static readonly ConcurrentQueue<CompletionReceipt> Completed = new();
 
@@ -102,11 +137,13 @@ public static class IngestProcessRunner
         // Clone request context now; completion and stop can run after the request ends.
         var log = Log.ForContext(LogContext.Clone()).ForContext("SourceContext", typeof(IngestProcessRunner).FullName)
             .ForContext("ProcessRunId", runId).ForContext("Source", source);
+        var outputBuf = new LiveOutputBuffer();
         CapturedProcess process;
         try
         {
             process = CapturedProcess.Start(start, output: (stream, text) =>
             {
+                outputBuf.Append(stream, text);
                 log.Write(stream == "stderr" ? Serilog.Events.LogEventLevel.Warning
                     : Serilog.Events.LogEventLevel.Information,
                     "INGEST_CHILD_OUTPUT run={ProcessRunId} stream={ChildStream} {ChildOutput}", runId, stream, text);
@@ -119,7 +156,7 @@ public static class IngestProcessRunner
         }
         var receipt = new StartReceipt(process.Id, source, path, start.FileName,
             arguments?.ToArray() ?? start.ArgumentList.ToArray(), DateTimeOffset.UtcNow) { ProcessRunId = runId };
-        var owned = new OwnedProcess(process, receipt, log.ForContext("ChildProcessId", process.Id));
+        var owned = new OwnedProcess(process, receipt, outputBuf, log.ForContext("ChildProcessId", process.Id));
         if (!OwnedProcesses.TryAdd(process.Id, owned))
         {
             // Retain observation even if a previous exit's terminal receipt is being finalized.
@@ -136,6 +173,16 @@ public static class IngestProcessRunner
     public static IReadOnlyList<StartReceipt> ActiveProcesses() => OwnedProcesses.Values
         .Where(owned => !owned.Process.Completion.IsCompleted).Select(owned => owned.Receipt)
         .OrderByDescending(receipt => receipt.StartedAt).ToArray();
+
+    public static IReadOnlyList<ActiveProcessSnapshot> ActiveProcessSnapshots() => OwnedProcesses.Values
+        .Where(owned => !owned.Process.Completion.IsCompleted)
+        .Select(owned =>
+        {
+            var (stdout, stderr) = owned.Output.Snapshot();
+            return new ActiveProcessSnapshot(owned.Receipt, stdout, stderr);
+        })
+        .OrderByDescending(snap => snap.Start.StartedAt)
+        .ToArray();
 
     public static IReadOnlyList<CompletionReceipt> CompletedProcesses() => Completed.ToArray()
         .OrderByDescending(receipt => receipt.EndedAt).ToArray();

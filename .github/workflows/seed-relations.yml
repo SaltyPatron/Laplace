@@ -18,8 +18,8 @@ on:
       database:
         description: "Target database"
         type: choice
-        options: [laplace-mono]
-        default: laplace-mono
+        options: [laplace, laplace-mono]
+        default: laplace
       replace_existing_source:
         description: "DESTRUCTIVE: retract the complete selected source before re-ingesting it"
         type: boolean

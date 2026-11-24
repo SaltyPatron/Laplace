@@ -1,4 +1,4 @@
-export type ContentMode = 'text' | 'code';
+export type ContentMode = 'text' | 'code' | 'media';
 export interface ContentPayload {
   name: string;
   path: string;

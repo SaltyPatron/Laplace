@@ -152,4 +152,27 @@
     gap: var(--space-3);
     overflow-x: auto;
   }
+
+  .boardControls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .boardSortLabel {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .boardPager {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
 }

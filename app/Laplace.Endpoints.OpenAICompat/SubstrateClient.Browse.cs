@@ -7,10 +7,31 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal sealed partial class SubstrateClient
 {
+    public Task<ExploreBrowseResponse> ExploreBrowseAsync(
+        string query,
+        string queryRootIdHex,
+        IReadOnlyList<string> queryMemberIdsHex,
+        int offset,
+        int limit,
+        int candidateCapacity,
+        CancellationToken ct) =>
+        ExploreBrowseAsync(
+            query,
+            queryRootIdHex,
+            queryMemberIdsHex,
+            Array.Empty<string>(),
+            discover: true,
+            offset,
+            limit,
+            candidateCapacity,
+            ct);
+
     public async Task<ExploreBrowseResponse> ExploreBrowseAsync(
         string query,
         string queryRootIdHex,
         IReadOnlyList<string> queryMemberIdsHex,
+        IReadOnlyList<string> variantRootIdsHex,
+        bool discover,
         int offset,
         int limit,
         int candidateCapacity,
@@ -36,6 +57,18 @@ internal sealed partial class SubstrateClient
             .Select(static id => id!)
             .ToArray();
 
+        var variantRoots = directId
+            ? Array.Empty<byte[]>()
+            : variantRootIdsHex
+                .Where(static h => !string.IsNullOrWhiteSpace(h))
+                .Select(static h => h.ToLowerInvariant())
+                .Where(h => !string.Equals(h, rootHex, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(TryParseIdHex)
+                .Where(static id => id is not null)
+                .Select(static id => id!)
+                .ToArray();
+
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 0, 200);
         candidateCapacity = Math.Clamp(candidateCapacity, 0, 32768);
@@ -45,7 +78,7 @@ internal sealed partial class SubstrateClient
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             var rows = await NpgsqlBrowseReads.NamedEntitiesAsync(
-                conn, members, root, offset, limit, candidateCapacity, ct, TranslateReadError);
+                conn, members, root, variantRoots, discover, offset, limit, candidateCapacity, ct, TranslateReadError);
             clock.Stop();
 
             var hits = rows.Select(static r => new ExploreBrowseHit(
@@ -80,6 +113,42 @@ internal sealed partial class SubstrateClient
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
             throw new SubstrateUnavailableException("Browse query failed.", ex);
+        }
+    }
+
+    public async Task<ExploreLeaderboardResponse> ExploreLeaderboardAsync(
+        int offset,
+        int limit,
+        string sort,
+        short? tier,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            var page = await NpgsqlBrowseReads.LeaderboardAsync(
+                conn, offset, limit, sort, tier, ct, TranslateReadError);
+            var hits = page.Rows.Select(static r => new ExploreLeaderboardHit(
+                r.IdHex,
+                r.Label,
+                r.Tier,
+                r.Confidence,
+                r.Rating,
+                r.Deviation,
+                r.Matches,
+                r.PartsJson)).ToList();
+            return new ExploreLeaderboardResponse(
+                Object: "laplace.explore.leaderboard",
+                Offset: page.Offset,
+                Limit: page.Limit,
+                Sort: page.Sort,
+                Tier: page.Tier,
+                ElapsedUs: page.ElapsedUs,
+                Hits: hits);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Leaderboard query failed.", ex);
         }
     }
 }

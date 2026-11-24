@@ -282,11 +282,40 @@ public sealed record ExploreContainerRow(
     [property: JsonPropertyName("entity_label")] string EntityLabel,
     [property: JsonPropertyName("tier")] short Tier,
     [property: JsonPropertyName("type")] string? Type,
-    [property: JsonPropertyName("hops")] int Hops);
+    [property: JsonPropertyName("hops")] int Hops,
+    [property: JsonPropertyName("source_id_hex")] string? SourceIdHex = null,
+    [property: JsonPropertyName("source_label")] string? SourceLabel = null);
 
 public sealed record ExploreContainersResponse(
     [property: JsonPropertyName("id_hex")] string IdHex,
-    [property: JsonPropertyName("containers")] IReadOnlyList<ExploreContainerRow> Containers);
+    [property: JsonPropertyName("containers")] IReadOnlyList<ExploreContainerRow> Containers,
+    [property: JsonPropertyName("total_count")] long? TotalCount = null,
+    [property: JsonPropertyName("offset")] int Offset = 0);
+
+public sealed record ShapePoint4D(
+    [property: JsonPropertyName("ordinal")] int Ordinal,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M);
+
+public sealed record ExploreShapeSide(
+    [property: JsonPropertyName("reference")] string Reference,
+    [property: JsonPropertyName("entity_id_hex")] string EntityIdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("tier")] short Tier,
+    [property: JsonPropertyName("exists")] bool Exists,
+    [property: JsonPropertyName("points")] IReadOnlyList<ShapePoint4D> Points);
+
+public sealed record ExploreShapeComparisonResponse(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("created")] long Created,
+    [property: JsonPropertyName("x")] ExploreShapeSide X,
+    [property: JsonPropertyName("y")] ExploreShapeSide Y,
+    [property: JsonPropertyName("frechet_distance")] double? FrechetDistance,
+    [property: JsonPropertyName("dtw_distance")] double? DtwDistance,
+    [property: JsonPropertyName("hausdorff_distance")] double? HausdorffDistance);
 
 public sealed record ExploreContainersDetailResponse(
     [property: JsonPropertyName("id")] string Id,

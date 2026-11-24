@@ -83,13 +83,15 @@ internal sealed partial class SubstrateClient
             foreach (var row in await NpgsqlSubstrateReads.SourceCountsApproxAsync(
                 conn, ct, timeoutSeconds: 10))
             {
+                var cli = WitnessCatalog.CliForSourceKey(row.Source);
+                var (stage, layer, role) = WitnessCatalog.DescribeSource(cli, row.Source);
                 var mapped = new ExploreSourceRow(
                     Key: row.Source,
                     Evidence: row.Evidence,
-                    Content: null,
-                    Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(row.Source)),
-                    Layer: null,
-                    Role: null,
+                    Content: row.Content,
+                    Stage: stage,
+                    Layer: layer,
+                    Role: role,
                     IdHex: row.IdHex);
                 sources.Add(mapped);
                 liveByKey[row.Source] = mapped;
@@ -448,31 +450,79 @@ internal sealed partial class SubstrateClient
         }
     }
 
+    public Task<ExploreContainersResponse?> ExploreContainersAsync(
+        string idHex, int maxHops, int limit, CancellationToken ct) =>
+        ExploreContainersAsync(idHex, maxHops, limit, 0, ct);
+
     public async Task<ExploreContainersResponse?> ExploreContainersAsync(
-        string idHex, int maxHops, int limit, CancellationToken ct)
+        string idHex, int maxHops, int limit, int offset, CancellationToken ct)
     {
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
         maxHops = Math.Max(0, maxHops);
         limit = Math.Max(0, limit);
+        offset = Math.Max(0, offset);
 
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
-            var containerRows = await NpgsqlSubstrateReads.ContainersAsync(conn, id, maxHops, limit, ct);
+            var containerRows = await NpgsqlSubstrateReads.ContainersAsync(conn, id, maxHops, limit, ct, offset: offset);
             var labels = await ReadDisplayLabelsAsync(
                 conn, containerRows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
             var containers = containerRows
                 .Select(r => new ExploreContainerRow(
-                    r.IdHex, DisplayLabel(labels, r.IdHex, r.Label), r.Tier, r.Type, r.Hops))
+                    r.IdHex, DisplayLabel(labels, r.IdHex, r.Label), r.Tier, r.Type, r.Hops,
+                    r.SourceIdHex, r.SourceLabel))
                 .ToList();
+            long? totalCount = containerRows.Count > 0 ? containerRows[0].TotalCount : 0L;
 
-            return new ExploreContainersResponse(idHex.ToLowerInvariant(), containers);
+            return new ExploreContainersResponse(idHex.ToLowerInvariant(), containers, totalCount, offset);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
             throw new SubstrateUnavailableException("Explore containers query failed.", ex);
+        }
+    }
+
+    public async Task<ExploreShapeComparisonResponse?> ExploreShapeAsync(
+        string xRef, string yRef, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            var rx = await NpgsqlSubstrateReads.ExploreResolveAsync(conn, xRef, ct);
+            var ry = await NpgsqlSubstrateReads.ExploreResolveAsync(conn, yRef, ct);
+            if (rx is null || ry is null) return null;
+
+            var xr = rx.Value;
+            var yr = ry.Value;
+            var labels = await ReadDisplayLabelsAsync(
+                conn, [Convert.ToHexStringLower(xr.Id), Convert.ToHexStringLower(yr.Id)], ct);
+            labels.TryGetValue(Convert.ToHexStringLower(xr.Id), out var xInfo);
+            labels.TryGetValue(Convert.ToHexStringLower(yr.Id), out var yInfo);
+
+            var curveRows = await NpgsqlSubstrateReads.CompareShapeCurvesAsync(conn, xr.Id, yr.Id, ct);
+
+            var xPts = curveRows.Where(static r => r.Side == 1)
+                .Select(static r => new ShapePoint4D(r.Ordinal, r.X, r.Y, r.Z, r.M)).ToList();
+            var yPts = curveRows.Where(static r => r.Side == 2)
+                .Select(static r => new ShapePoint4D(r.Ordinal, r.X, r.Y, r.Z, r.M)).ToList();
+
+            var firstMetric = curveRows.FirstOrDefault();
+            return new ExploreShapeComparisonResponse(
+                Id: $"shape-{Guid.NewGuid():N}",
+                Object: "laplace.explore.shape",
+                Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                X: new ExploreShapeSide(xRef, Convert.ToHexStringLower(xr.Id), xr.Label, xInfo.Tier ?? 0, xr.Exists, xPts),
+                Y: new ExploreShapeSide(yRef, Convert.ToHexStringLower(yr.Id), yr.Label, yInfo.Tier ?? 0, yr.Exists, yPts),
+                FrechetDistance: firstMetric.Frechet,
+                DtwDistance: firstMetric.Dtw,
+                HausdorffDistance: firstMetric.Hausdorff);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
+        {
+            throw new SubstrateUnavailableException("Explore shape comparison query failed.", ex);
         }
     }
 }

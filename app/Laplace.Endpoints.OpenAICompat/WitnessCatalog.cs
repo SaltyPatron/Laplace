@@ -66,34 +66,80 @@ internal sealed class WitnessCatalog
         return seg.ToLowerInvariant();
     }
 
+    public (string Stage, string? Layer, string? Role) DescribeSource(string cli, string? sourceKey = null)
+    {
+        foreach (var stage in _root.Cadence.OrderBy(s => s.Order))
+        {
+            foreach (var src in stage.Sources)
+            {
+                if (string.Equals(src.Cli, cli, StringComparison.OrdinalIgnoreCase))
+                    return (stage.Stage ?? "admitted", src.Layer, src.Role ?? src.Links);
+            }
+        }
+
+        if (sourceKey is not null && sourceKey.Contains("recipe", StringComparison.OrdinalIgnoreCase))
+            return ("recipes", "recipes", "Recipe-admitted witness");
+
+        return ("admitted", "substrate", "Live witness testimony");
+    }
+
     public IReadOnlyList<ExploreStageRow> BuildStages(IReadOnlyDictionary<string, ExploreSourceRow> liveByKey)
     {
         var liveByCli = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in liveByKey.Values)
             liveByCli[CliForSourceKey(row.Key)] = row;
 
-        var output = new List<ExploreStageRow>(_root.Cadence.Count);
+        var matchedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var output = new List<ExploreStageRow>(_root.Cadence.Count + 1);
         foreach (var stage in _root.Cadence.OrderBy(s => s.Order))
         {
             var sources = new List<ExploreStageSourceRow>();
             foreach (var src in stage.Sources)
             {
                 var cli = src.Cli ?? "";
-                liveByCli.TryGetValue(cli, out var live);
+                if (!liveByCli.TryGetValue(cli, out var live))
+                    continue;
+
+                matchedKeys.Add(live.Key);
                 sources.Add(new ExploreStageSourceRow(
                     Cli: cli,
-                    Layer: src.Layer ?? live?.Layer,
-                    Role: src.Role ?? src.Links ?? live?.Role,
+                    Layer: src.Layer ?? live.Layer,
+                    Role: src.Role ?? src.Links ?? live.Role,
                     Links: src.Links,
-                    SourceKey: live?.Key,
-                    Evidence: live?.Evidence));
+                    SourceKey: live.Key,
+                    Evidence: live.Evidence));
             }
+
+            if (sources.Count == 0)
+                continue;
 
             output.Add(new ExploreStageRow(
                 Stage: stage.Stage ?? "",
                 Order: stage.Order,
                 Law: stage.Law,
                 Sources: sources));
+        }
+
+        var extraSources = liveByKey.Values
+            .Where(row => !matchedKeys.Contains(row.Key))
+            .OrderByDescending(row => row.Evidence ?? 0)
+            .ThenBy(row => row.Key, StringComparer.Ordinal)
+            .Select(row => new ExploreStageSourceRow(
+                Cli: CliForSourceKey(row.Key),
+                Layer: row.Layer ?? "substrate",
+                Role: row.Role ?? "Live witness testimony",
+                Links: null,
+                SourceKey: row.Key,
+                Evidence: row.Evidence))
+            .ToList();
+
+        if (extraSources.Count > 0)
+        {
+            output.Add(new ExploreStageRow(
+                Stage: "admitted",
+                Order: 99,
+                Law: "Admitted corpus, recipe, and runtime witnesses present in the live substrate.",
+                Sources: extraSources));
         }
 
         return output;

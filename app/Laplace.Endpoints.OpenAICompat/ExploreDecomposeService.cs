@@ -58,6 +58,38 @@ internal sealed class ExploreDecomposeService
             Nodes: nodes);
     }
 
+    public (IReadOnlyList<string> VariantRootIdsHex, IReadOnlyList<string> MemberIdsHex) ExpandBrowseVariants(string query)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(query);
+        var lower = query.ToLowerInvariant();
+        var upper = query.ToUpperInvariant();
+        var title = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(lower);
+
+        List<string> roots = new();
+        List<string> members = new();
+        HashSet<string> seenText = new(StringComparer.Ordinal) { query };
+        HashSet<string> seenRoots = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seenMembers = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var candidate in new[] { lower, upper, title })
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || !seenText.Add(candidate))
+                continue;
+
+            var decomposed = Decompose(candidate);
+            if (seenRoots.Add(decomposed.RootIdHex))
+                roots.Add(decomposed.RootIdHex);
+
+            foreach (var node in decomposed.Nodes)
+            {
+                if (node.Tier >= 1 && seenMembers.Add(node.IdHex))
+                    members.Add(node.IdHex);
+            }
+        }
+
+        return (roots, members);
+    }
+
     public UnicodeCloudResponse UnicodeCloud()
     {
         EnsurePerfcache();

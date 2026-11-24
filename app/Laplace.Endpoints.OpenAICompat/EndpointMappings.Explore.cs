@@ -20,6 +20,7 @@ internal static partial class ExploreEndpoints
             int? offset,
             int? limit,
             int? capacity,
+            string? mode,
             ExploreDecomposeService decompose,
             ISubstrateClient substrate,
             CancellationToken ct) =>
@@ -28,21 +29,27 @@ internal static partial class ExploreEndpoints
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'q' is required.");
 
             var query = q.Trim();
+            bool discover = !string.Equals(mode, "direct", StringComparison.OrdinalIgnoreCase);
             DecomposeResponse decomposition;
+            IReadOnlyList<string> variantRootIds = Array.Empty<string>();
+            IReadOnlyList<string> variantMemberIds = Array.Empty<string>();
             try
             {
                 decomposition = decompose.Decompose(query);
+                if (discover)
+                    (variantRootIds, variantMemberIds) = decompose.ExpandBrowseVariants(query);
             }
             catch (InvalidOperationException ex)
             {
                 return Unavailable(app, "decompose_unavailable", ex);
             }
 
-            // Browse members are the word-tier ids the native text spine emitted for
-            // the query, not a tokenization or substring scan of rendered text.
+            // Browse members are multi-tier ids the native text spine emitted for the
+            // query and its invariant case variants, not substring scanning.
             var memberIds = decomposition.Nodes
-                .Where(static n => n.Tier == 1)
+                .Where(static n => n.Tier >= 1)
                 .Select(static n => n.IdHex)
+                .Concat(variantMemberIds)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
@@ -50,6 +57,8 @@ internal static partial class ExploreEndpoints
                 query,
                 decomposition.RootIdHex,
                 memberIds,
+                variantRootIds,
+                discover,
                 Math.Max(0, offset ?? 0),
                 Math.Clamp(limit ?? 50, 0, 200),
                 Math.Clamp(capacity ?? 2048, 0, 32768),
@@ -69,6 +78,28 @@ internal static partial class ExploreEndpoints
         })
         .WithTags("explore")
         .Produces<ExploreCatalogResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/leaderboard", async (
+            int? offset,
+            int? limit,
+            string? sort,
+            short? tier,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            var normalizedSort = string.IsNullOrWhiteSpace(sort) ? "standing" : sort.Trim().ToLowerInvariant();
+            var page = await substrate.ExploreLeaderboardAsync(
+                Math.Max(0, offset ?? 0),
+                Math.Clamp(limit ?? 25, 1, 200),
+                normalizedSort,
+                tier,
+                ct);
+            return Results.Json(page);
+        })
+        .RequireRateLimiting("public-query")
+        .WithTags("explore")
+        .Produces<ExploreLeaderboardResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/explore/resolve", async (string? reference, ISubstrateClient substrate, CancellationToken ct) =>
@@ -421,6 +452,7 @@ internal static partial class ExploreEndpoints
             string idHex,
             int? max_hops,
             int? limit,
+            int? offset,
             ISubstrateClient substrate,
             IBillingOrchestrator billing,
             CancellationToken ct) =>
@@ -428,7 +460,7 @@ internal static partial class ExploreEndpoints
             return await RunGatedExploreAsync(request, billing, "visualization.deep_export", ct, async gateQuote =>
             {
                 var containers = await substrate.ExploreContainersAsync(
-                    idHex, max_hops ?? 2, limit ?? 200, ct);
+                    idHex, max_hops ?? 2, limit ?? 200, Math.Max(0, offset ?? 0), ct);
                 if (containers is null)
                     return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
 
@@ -445,6 +477,43 @@ internal static partial class ExploreEndpoints
         .WithTags("explore")
         .Produces<ExploreContainersDetailResponse>()
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/v1/explore/shape", async (
+            string? x,
+            string? y,
+            ExploreDecomposeService decompose,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
+
+            var comparison = await substrate.ExploreShapeAsync(x.Trim(), y.Trim(), ct);
+            if (comparison is null)
+                return EndpointJson.BadRequest("invalid_request_error", "Could not resolve shape targets.");
+
+            // Fill trajectory points from deterministic decomposition when an unrecorded or Tier-0 term lacks a DB curve.
+            ExploreShapeSide WithFallbackPoints(ExploreShapeSide side)
+            {
+                if (side.Points.Count > 0) return side;
+                var trace = decompose.ComputeTrace(side.Reference);
+                var pts = new List<ShapePoint4D>(Math.Max(1, trace.Trajectory.Length / 4));
+                for (int i = 0; i + 3 < trace.Trajectory.Length; i += 4)
+                    pts.Add(new ShapePoint4D((i / 4) + 1, trace.Trajectory[i], trace.Trajectory[i + 1], trace.Trajectory[i + 2], trace.Trajectory[i + 3]));
+                if (pts.Count == 0)
+                    pts.Add(new ShapePoint4D(1, trace.X, trace.Y, trace.Z, trace.M));
+                return side with { Points = pts };
+            }
+
+            return Results.Json(comparison with
+            {
+                X = WithFallbackPoints(comparison.X),
+                Y = WithFallbackPoints(comparison.Y),
+            });
+        })
+        .WithTags("explore")
+        .Produces<ExploreShapeComparisonResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/explore/entities/{idHex}/graph", async (

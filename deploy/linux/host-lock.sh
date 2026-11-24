@@ -11,12 +11,45 @@
 #   host_lock_hold shared|exclusive FD PATH [WAIT]
 #     FD the descriptor that holds the lock after (opened on PATH unless it is already); WAIT seconds, 0 for an
 #     immediate refusal, wait (or none) to wait as long as it takes. 0 held; 3 the deadline expired, nothing held; 2 misused.
+if [[ -z "${_laplace_mono_hl_loaded:-}" ]]; then
+  _laplace_mono_hl_loaded=1
+  _laplace_hl_salty=${SALTY_SUITE_ROOT:-}
+  if [[ -z "$_laplace_hl_salty" && -n "${LAPLACE_SRC:-}" && -f "$LAPLACE_SRC/Salty-Suite/host-lock/host-lock.sh" ]]; then
+    _laplace_hl_salty="$LAPLACE_SRC/Salty-Suite"
+  elif [[ -z "$_laplace_hl_salty" && -n "${BASH_SOURCE[0]:-}" ]]; then
+    _laplace_hl_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    if [[ -f "$_laplace_hl_dir/../../../Salty-Suite/host-lock/host-lock.sh" ]]; then
+      _laplace_hl_salty="$_laplace_hl_dir/../../../Salty-Suite"
+    fi
+  fi
+  if [[ -n "$_laplace_hl_salty" && -f "$_laplace_hl_salty/host-lock/host-lock.sh" ]]; then
+    _laplace_hl_saved=$(declare -f host_lock || true)
+    # shellcheck disable=SC1091
+    . "$_laplace_hl_salty/host-lock/host-lock.sh"
+    _laplace_hl_salty_fn=$(declare -f host_lock)
+    eval "_salty_host_lock${_laplace_hl_salty_fn#host_lock}"
+    unset -f host_lock
+    if [[ -n "$_laplace_hl_saved" ]]; then
+      eval "$_laplace_hl_saved"
+    fi
+    unset _laplace_hl_saved _laplace_hl_salty_fn
+  fi
+fi
 host_lock_hold() {
   local mode=$1 fd=$2 path=$3 wait=${4:-} flag mask start said=
   case "$mode" in shared) flag=-s ;; exclusive) flag=-x ;; *) echo "host_lock_hold: invalid host lock mode: $mode" >&2; return 2 ;; esac
   [[ "$fd" =~ ^[0-9]+$ && "$fd" != 7 ]] || { echo "host_lock_hold: FD is a descriptor number, not 7 (the turnstile's)" >&2; return 2; }
   [[ "$wait" != wait ]] || wait=
   [[ -z "$wait" || "$wait" =~ ^[0-9]+$ ]] || { echo "host_lock_hold: WAIT must be a nonnegative integer or wait" >&2; return 2; }
+  if declare -f _salty_host_lock >/dev/null 2>&1; then
+    local _rc=0
+    _salty_host_lock "$mode" "$fd" "$path" "$wait" || _rc=$?
+    case "$_rc" in
+      1) echo "cannot open host lock: $path (check ownership and group write permission)" >&2 ;;
+      3) echo "host lock deadline expired: $path" >&2 ;;
+    esac
+    return "$_rc"
+  fi
   if [[ /proc/self/fd/$fd -ef "$path" ]]; then flock "$flag" -n "$fd" && return 0
   else
     mask=$(umask); umask 002

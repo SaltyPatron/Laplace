@@ -41,6 +41,9 @@ internal static class UserContentEndpointMappings
         app.MapPost("/v1/content/code/raw", (HttpContext http, ITenantResolver tenants,
                 SubstrateClient substrate, CancellationToken ct) => AdmitRawAsync(http, tenants, substrate, ct));
 
+        app.MapPost("/v1/content/media/raw", (HttpContext http, ITenantResolver tenants,
+                SubstrateClient substrate, CancellationToken ct) => AdmitRawAsync(http, tenants, substrate, ct, requireUtf8: false));
+
         app.MapGet("/v1/content/{idHex}/raw", async (HttpContext http, string idHex, ITenantResolver tenants,
             SubstrateClient substrate, CancellationToken ct) =>
         {
@@ -57,7 +60,9 @@ internal static class UserContentEndpointMappings
             if (error is not null) return error;
             var file = await ReadAsync(substrate, participant!, idHex, ct);
             if (file is null) return Results.NotFound();
-            string text = Encoding.UTF8.GetString(file.Content);
+            string text;
+            try { text = StrictUtf8.GetString(file.Content); }
+            catch (DecoderFallbackException) { text = ""; }
             const int PreviewChars = 131072;
             if (compact == true && text.Length > PreviewChars)
             {
@@ -82,7 +87,7 @@ internal static class UserContentEndpointMappings
     }
 
     private static async Task<IResult> AdmitRawAsync(HttpContext http, ITenantResolver tenants,
-        SubstrateClient substrate, CancellationToken ct)
+        SubstrateClient substrate, CancellationToken ct, bool requireUtf8 = true)
     {
         if (!string.IsNullOrEmpty(http.Request.Query["modified_at"].ToString())) return TimesRefused();
         byte[] bytes;
@@ -93,8 +98,11 @@ internal static class UserContentEndpointMappings
             bytes = body.ToArray();
         }
         if (bytes.Length == 0) return Invalid("invalid_content", "content is empty");
-        try { _ = StrictUtf8.GetCharCount(bytes); }
-        catch (DecoderFallbackException) { return Invalid("invalid_content", "raw content must contain valid UTF-8 text bytes"); }
+        if (requireUtf8)
+        {
+            try { _ = StrictUtf8.GetCharCount(bytes); }
+            catch (DecoderFallbackException) { return Invalid("invalid_content", "raw content must contain valid UTF-8 text bytes"); }
+        }
         return await AdmitAsync(http, http.Request.Query["name"].ToString(), http.Request.Query["path"].ToString(), bytes,
             http.Request.Query["user"].ToString(), tenants, substrate, ct);
     }

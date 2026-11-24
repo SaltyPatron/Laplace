@@ -108,14 +108,59 @@ export function exploreMembers(idHex: string, limit = 100, opts: ApiOptions = {}
   }>(`/v1/explore/entities/${idHex}/members?limit=${limit}`, opts);
 }
 
-export function exploreContainers(idHex: string, maxHops = 3, limit = 50, opts: ApiOptions = {}) {
+export interface ShapePoint4D {
+  ordinal: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+}
+
+export interface ExploreShapeSide {
+  reference: string;
+  entity_id_hex: string;
+  label: string;
+  tier: number;
+  exists: boolean;
+  points: ShapePoint4D[];
+}
+
+export interface ExploreShapeComparisonResponse {
+  id: string;
+  object: string;
+  created: number;
+  x: ExploreShapeSide;
+  y: ExploreShapeSide;
+  frechet_distance: number | null;
+  dtw_distance: number | null;
+  hausdorff_distance: number | null;
+}
+
+export function exploreShape(x: string, y: string, opts: ApiOptions = {}) {
+  return apiGet<ExploreShapeComparisonResponse>(
+    `/v1/explore/shape?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`,
+    opts,
+  );
+}
+
+export function exploreContainers(idHex: string, maxHops = 3, limit = 50, opts: ApiOptions = {}, offset = 0) {
   return apiGet<{
     containers: {
       id_hex: string;
-      containers: { entity_id_hex: string; entity_label: string; tier: number; type: string | null; hops: number }[];
+      containers: {
+        entity_id_hex: string;
+        entity_label: string;
+        tier: number;
+        type: string | null;
+        hops: number;
+        source_id_hex?: string | null;
+        source_label?: string | null;
+      }[];
+      total_count?: number | null;
+      offset?: number;
     };
     billing?: BillingReceipt | null;
-  }>(`/v1/explore/entities/${idHex}/containers?max_hops=${maxHops}&limit=${limit}`, opts);
+  }>(`/v1/explore/entities/${idHex}/containers?max_hops=${maxHops}&limit=${limit}&offset=${offset}`, opts);
 }
 
 export function exploreConsensusGraph(

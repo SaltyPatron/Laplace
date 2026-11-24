@@ -125,6 +125,7 @@ jobs:
           repository: SaltyPatron/Laplace-Native
           ref: main
           path: .ci-dependencies/Laplace-Native
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -132,6 +133,7 @@ jobs:
           repository: SaltyPatron/Laplace-postgres
           ref: main
           path: .ci-dependencies/Laplace-postgres
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -139,6 +141,7 @@ jobs:
           repository: SaltyPatron/Laplace-Engine
           ref: main
           path: .ci-dependencies/Laplace-Engine
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
 
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
@@ -232,7 +235,6 @@ jobs:
 
       - name: Retain ingestion completion results
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ingest-completion-${{ github.sha }}
@@ -252,7 +254,6 @@ jobs:
       - name: Retain the verified production package
         if: github.event_name == 'push' || inputs.promote
         id: upload_bundle
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-site-${{ github.sha }}
@@ -262,19 +263,6 @@ jobs:
           retention-days: 7
           compression-level: 1
 
-      - name: Publish verified production bundle via ephemeral prerelease when artifact quota is full
-        if: (github.event_name == 'push' || inputs.promote) && steps.upload_bundle.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUNDLE_TAR: ${{ steps.bundle.outputs.path }}
-          TAG: ci-site-bundle-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          (cd "$(dirname "$BUNDLE_TAR")" && sha256sum "$(basename "$BUNDLE_TAR")" > "$(basename "$BUNDLE_TAR").sha256")
-          gh release delete "$TAG" --cleanup-tag -y >/dev/null 2>&1 || true
-          gh release create "$TAG" "$BUNDLE_TAR" "${BUNDLE_TAR}.sha256" \
-            --prerelease --title "CI bundle ${{ github.sha }}" --notes "Ephemeral staging-to-production bundle"
-
       - name: Clean staging delivery work after package upload
         if: always()
         uses: ./.github/actions/storage
@@ -283,7 +271,6 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain staging cleanup receipt
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-staging-${{ github.run_id }}
@@ -365,6 +352,7 @@ jobs:
           repository: SaltyPatron/Laplace-Native
           ref: main
           path: .ci-dependencies/Laplace-Native
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
       - name: Check out canonical Native PostgreSQL
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -372,6 +360,7 @@ jobs:
           repository: SaltyPatron/Laplace-postgres
           ref: main
           path: .ci-dependencies/Laplace-postgres
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
       - name: Check out canonical recipe Engine
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -379,6 +368,7 @@ jobs:
           repository: SaltyPatron/Laplace-Engine
           ref: main
           path: .ci-dependencies/Laplace-Engine
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
 
       - name: Provide the pinned Rust compiler for the Tree-sitter generator
@@ -415,7 +405,6 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cloud cleanup receipt
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-cloud-${{ github.run_id }}
@@ -484,22 +473,10 @@ jobs:
 
       - name: Receive the verified bundle from hart-server
         id: download_bundle
-        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: laplace-site-${{ github.sha }}
           path: ${{ steps.bundle.outputs.path }}
-
-      - name: Receive verified bundle from ephemeral prerelease fallback
-        if: steps.download_bundle.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUNDLE_DIR: ${{ steps.bundle.outputs.path }}
-          TAG: ci-site-bundle-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          gh release download "$TAG" --dir "$BUNDLE_DIR" --clobber
-          (cd "$BUNDLE_DIR" && sha256sum -c laplace-site.tar.sha256 && rm -f laplace-site.tar.sha256)
 
       - name: Receive, migrate application database, publish, restart
         run: deploy/linux/site.sh receive migrate_app publish restart
@@ -511,13 +488,6 @@ jobs:
         if: failure()
         run: deploy/linux/site.sh status
 
-      - name: Delete ephemeral bundle prerelease if created
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ci-site-bundle-${{ github.sha }}
-        run: gh release delete "$TAG" --cleanup-tag -y >/dev/null 2>&1 || true
-
       - name: Clean received production package after readback
         if: always()
         uses: ./.github/actions/storage
@@ -526,7 +496,6 @@ jobs:
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain production cleanup receipt
         if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-production-${{ github.run_id }}

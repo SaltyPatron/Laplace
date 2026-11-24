@@ -97,6 +97,40 @@ internal interface ISubstrateClient
         CancellationToken ct) =>
         throw new NotSupportedException("This substrate client does not implement Browse.");
 
+    Task<ExploreBrowseResponse> ExploreBrowseAsync(
+        string query,
+        string queryRootIdHex,
+        IReadOnlyList<string> queryMemberIdsHex,
+        IReadOnlyList<string> variantRootIdsHex,
+        bool discover,
+        int offset,
+        int limit,
+        int candidateCapacity,
+        CancellationToken ct) =>
+        ExploreBrowseAsync(
+            query,
+            queryRootIdHex,
+            queryMemberIdsHex,
+            offset,
+            limit,
+            candidateCapacity,
+            ct);
+
+    Task<ExploreLeaderboardResponse> ExploreLeaderboardAsync(
+        int offset,
+        int limit,
+        string sort,
+        short? tier,
+        CancellationToken ct) =>
+        Task.FromResult(new ExploreLeaderboardResponse(
+            Object: "laplace.explore.leaderboard",
+            Offset: Math.Max(0, offset),
+            Limit: Math.Clamp(limit, 1, 200),
+            Sort: sort,
+            Tier: tier,
+            ElapsedUs: 0,
+            Hits: Array.Empty<ExploreLeaderboardHit>()));
+
     Task<ExploreEntityPreviewResponse?> ExploreEntityPreviewAsync(string idHex, CancellationToken ct);
 
     Task<ExploreEntityResponse?> ExploreEntityAsync(
@@ -118,6 +152,12 @@ internal interface ISubstrateClient
     Task<ExplorePeersResponse?> ExplorePeersAsync(string idHex, int limit, CancellationToken ct);
 
     Task<ExploreContainersResponse?> ExploreContainersAsync(string idHex, int maxHops, int limit, CancellationToken ct);
+
+    Task<ExploreContainersResponse?> ExploreContainersAsync(string idHex, int maxHops, int limit, int offset, CancellationToken ct) =>
+        ExploreContainersAsync(idHex, maxHops, limit, ct);
+
+    Task<ExploreShapeComparisonResponse?> ExploreShapeAsync(string xRef, string yRef, CancellationToken ct) =>
+        Task.FromResult<ExploreShapeComparisonResponse?>(null);
 
     Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, int maxNodes, CancellationToken ct);

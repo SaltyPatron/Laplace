@@ -6,6 +6,7 @@ import {
 import { apiGet, apiPost } from '../api/client';
 import { useInPlaceFullscreen } from '../explore/glome/useInPlaceFullscreen';
 import { useAppStore } from '../store';
+import { listIngestSources, startIngest } from './ingestControlApi';
 import styles from './RecipeStudio.module.css';
 
 interface EstateRecipe { name: string; fileName: string; relativePath: string; grammar: string; format: string; like: string; matches: string[] }
@@ -28,6 +29,10 @@ interface InspectResult extends CliOutcome {
   records: InspectRecord[]; claims: string[]; obligations: string[];
 }
 interface DraftResult { recipe_dsl: string; lint: LintResult }
+interface AdmitResult extends CliOutcome {
+  filename: string; source: string; witness: string; trust_class: string;
+  lint: LintResult; executed: boolean;
+}
 
 const DEFAULT_SAMPLE_NAME = 'sample-lexicon.tsv';
 const DEFAULT_SAMPLE_TEXT = 'word\tpos\tgloss\ndog\tn\ta domesticated carnivorous mammal\nrun\tv\tmove swiftly on foot\n';
@@ -47,10 +52,24 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
     key: JSON.stringify(['recipe-studio-catalog', tenant]),
     read: (signal) => apiGet<StudioCatalog>('/v1/recipe-studio/catalog', { tenant, signal }),
   });
+  const liveSourcesRead = useReadResource({
+    key: JSON.stringify(['recipe-studio-live-sources', tenant]),
+    read: (signal) => listIngestSources({ tenant, signal }),
+  });
+  const admittedByName = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of liveSourcesRead.data?.entries ?? []) {
+      if (entry.admitted_attestations != null)
+        map.set(entry.name.toLowerCase(), entry.admitted_attestations);
+    }
+    return map;
+  }, [liveSourcesRead.data]);
 
   const [query, setQuery] = useState('');
   const [stageFilter, setStageFilter] = useState<'all' | 'staged_on_disk' | 'not_staged' | 'held'>('all');
   const [planBusy, setPlanBusy] = useState<string | null>(null);
+  const [ingestBusy, setIngestBusy] = useState<string | null>(null);
+  const [ingestStartedMsg, setIngestStartedMsg] = useState<string | null>(null);
   const [planResult, setPlanResult] = useState<(CliOutcome & { source: string }) | null>(null);
   const [estateErr, setEstateErr] = useState<string | null>(null);
   const [maintNotice, setMaintNotice] = useState<(CliOutcome & { action: string; source?: string }) | null>(null);
@@ -64,7 +83,8 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
   const [recipeDsl, setRecipeDsl] = useState(DEFAULT_DSL);
   const [lintResult, setLintResult] = useState<LintResult | null>(null);
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
-  const [studioBusy, setStudioBusy] = useState<'draft' | 'lint' | 'inspect' | null>(null);
+  const [admitResult, setAdmitResult] = useState<AdmitResult | null>(null);
+  const [studioBusy, setStudioBusy] = useState<'draft' | 'lint' | 'inspect' | 'admit' | null>(null);
   const [studioErr, setStudioErr] = useState<string | null>(null);
 
   const filteredSources = useMemo(() => {
@@ -83,6 +103,15 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
     try { setPlanResult(await apiPost<CliOutcome & { source: string }>('/v1/admin/ingest/plan', { source }, { tenant })); }
     catch (e) { setEstateErr(e instanceof Error ? e.message : String(e)); }
     finally { setPlanBusy(null); }
+  }
+  async function runStartEstateIngest(source: string) {
+    setIngestBusy(source); setEstateErr(null); setIngestStartedMsg(null);
+    try {
+      const rec = await startIngest({ source }, { tenant });
+      setIngestStartedMsg(`Started ${rec.source} (pid ${rec.pid}).`);
+      void liveSourcesRead.refresh();
+    } catch (e) { setEstateErr(e instanceof Error ? e.message : String(e)); }
+    finally { setIngestBusy(null); }
   }
   async function runForget(source: string) {
     setMaintBusy(true); setEstateErr(null);
@@ -128,11 +157,21 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
     finally { setStudioBusy(null); }
   }
   async function runInspect() {
-    setStudioBusy('inspect'); setStudioErr(null);
+    setStudioBusy('inspect'); setStudioErr(null); setAdmitResult(null);
     try {
       const res = await apiPost<InspectResult>('/v1/recipe-studio/inspect',
         { filename, sample: sampleText, recipe_dsl: recipeDsl }, { tenant });
       setInspectResult(res); setLintResult(res.lint);
+    } catch (e) { setStudioErr(e instanceof Error ? e.message : String(e)); }
+    finally { setStudioBusy(null); }
+  }
+  async function runAdmit() {
+    setStudioBusy('admit'); setStudioErr(null);
+    try {
+      const res = await apiPost<AdmitResult>('/v1/recipe-studio/admit',
+        { filename, sample: sampleText, recipe_dsl: recipeDsl }, { tenant });
+      setAdmitResult(res); setLintResult(res.lint);
+      if (res.ok) void liveSourcesRead.refresh();
     } catch (e) { setStudioErr(e instanceof Error ? e.message : String(e)); }
     finally { setStudioBusy(null); }
   }
@@ -166,6 +205,7 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
           </div>
         </>}
         {estateErr && <ErrorText role="alert">{estateErr}</ErrorText>}
+        {ingestStartedMsg && <Banner variant="info">{ingestStartedMsg}</Banner>}
         {maintNotice && <Banner variant={maintNotice.ok ? 'info' : 'warning'}>
           <strong>{maintNotice.action === 'sweep' ? 'Sweep' : `Forget ${maintNotice.source}`}</strong> exited {maintNotice.exit_code ?? 'timeout'} in {maintNotice.elapsed_ms}ms:
           <pre className={styles.preBox}>{maintNotice.stdout || maintNotice.stderr || '(no output)'}</pre>
@@ -175,7 +215,9 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
             <Table>
               <thead><tr><th scope="col">#</th><th scope="col">Source</th><th scope="col">Class</th><th scope="col">Recipes</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
               <tbody>
-                {filteredSources.map((src) => (
+                {filteredSources.map((src) => {
+                  const admitted = admittedByName.get(src.name.toLowerCase());
+                  return (
                   <tr key={src.name}>
                     <Td>{src.order}</Td>
                     <Td>
@@ -191,15 +233,18 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
                     </div></Td>
                     <Td>
                       <Badge className={stageBadgeClass(src.stageStatus)}>{src.stageStatus}</Badge>
+                      {admitted != null && <Badge className={styles.statusStaged}>{admitted.toLocaleString()} attested</Badge>}
                       {src.held && <span className={styles.subMeta}>{src.held}</span>}
                       {src.matchedPath && <code className={styles.subMeta}>{src.matchedPath}</code>}
                     </Td>
                     <Td><div className={styles.toolbar}>
                       {canIngest && <Button variant="ghost" size="sm" loading={planBusy === src.name} disabled={!estateRead.data?.cli_available || planBusy !== null} onClick={() => void runPlan(src.name)}>Plan</Button>}
+                      {canIngest && src.stagedOnDisk && <Button size="sm" loading={ingestBusy === src.name} disabled={!estateRead.data?.cli_available || ingestBusy !== null} onClick={() => void runStartEstateIngest(src.name)}>Start ingest</Button>}
                       {canMaintain && <Button variant="ghost" size="sm" disabled={!estateRead.data?.cli_available || maintBusy} onClick={() => { setEstateErr(null); setForgetTarget(src); }}>Forget…</Button>}
                     </div></Td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </Table>
           </div>
@@ -250,11 +295,30 @@ export function RecipeStudio({ canIngest = false, canMaintain = false }: { canIn
               <div className={styles.toolbar}>
                 <Button variant="ghost" loading={studioBusy === 'lint'} disabled={studioBusy !== null || !recipeDsl.trim()} onClick={() => void runLint()}>Lint Recording Law</Button>
                 <Button loading={studioBusy === 'inspect'} disabled={studioBusy !== null || !recipeDsl.trim() || !filename.trim()} onClick={() => void runInspect()}>Run --claims --no-load</Button>
+                {canIngest && (
+                  <Button loading={studioBusy === 'admit'} disabled={studioBusy !== null || !recipeDsl.trim() || !filename.trim()} onClick={() => void runAdmit()}>
+                    Admit sample to live DB
+                  </Button>
+                )}
               </div>
             </div>
           </div>
           {studioBusy && <LoadingText>Running {studioBusy}…</LoadingText>}
           {studioErr && <ErrorText role="alert">{studioErr}</ErrorText>}
+          {admitResult && (
+            <section className={styles.drawer} aria-label="Live database sample admission result">
+              <div className={styles.badgeRow}>
+                <strong>{`Live Admit (${admitResult.source})`}</strong>
+                <Badge className={admitResult.ok ? styles.statusStaged : styles.statusError}>
+                  {admitResult.executed ? (admitResult.timed_out ? 'timed out' : `exit ${admitResult.exit_code}`) : 'blocked by lint'}
+                </Badge>
+                <Badge>{admitResult.trust_class}</Badge>
+                <Muted>{`${admitResult.witness} · ${admitResult.elapsed_ms}ms`}</Muted>
+              </div>
+              {admitResult.stdout && <pre className={styles.preBox}>{admitResult.stdout}</pre>}
+              {admitResult.stderr && <pre className={styles.preBox}>{admitResult.stderr}</pre>}
+            </section>
+          )}
           {lintResult && (
             <section className={styles.drawer} aria-label="Recording Law linter report">
               <div className={styles.badgeRow}>

@@ -14,7 +14,7 @@ public static partial class NpgsqlSubstrateReads
             return Task.FromResult<IReadOnlyList<LexiconRelationRow>>(Array.Empty<LexiconRelationRow>());
 
         const string sql = """
-            SELECT l.entity,
+            SELECT public.blake3_send(l.entity),
                    l.content,
                    false,
                    l.content IS NOT NULL AND lower(l.content) = ANY(coalesce($2::text[], ARRAY[]::text[])),

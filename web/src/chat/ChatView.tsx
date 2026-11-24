@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import {
   Badge,
   Banner,
   Button,
-  ConsensusBadge,
   Muted,
   Select,
   TextArea,
@@ -18,16 +16,14 @@ import { apiGet } from '../api/client';
 import {
   COMPUTE_ENVELOPES,
   FIRMWARE_PROFILES,
-  summarizeWitnessShares,
   type ComputeEnvelopePreset,
   type FirmwareProfile,
 } from '../api/forwardProof';
 
 import { asNum, useAppStore } from '../store';
 
+import { ChatTranscript } from './ChatTranscript';
 import { ReceiptPanel } from './ReceiptPanel';
-import { ForwardPassProofPanel } from './ForwardPassProofPanel';
-import { classifyTurn, lastStage } from './turnState';
 import { useChatTurns } from './useChatTurns';
 
 import styles from './ChatView.module.css';
@@ -288,118 +284,12 @@ export function ChatView() {
 
 
 
-        <div className={styles.transcript} ref={transcriptRef}>
-
-          {messages.length === 0 && (
-
-            <div className={styles.empty}>
-
-              <h2>Ask a question.</h2>
-
-              <p>Answers are composed only from what sources have attested. Each answer shows how well supported it is, and you can open the evidence behind it.</p>
-
-            </div>
-
-          )}
-
-          {messages.map((m, i) => (
-
-            <div key={i} className={`${styles.message} ${m.role === 'user' ? styles.user : styles.assistant}`}>
-
-              {m.role === 'user' ? <div>{m.content}</div> : (() => {
-                const outcome = classifyTurn(m);
-                if (outcome.state === 'pending') return <div className={styles.messageEmpty} role="status">Working on an answer…</div>;
-                if (outcome.state === 'answered') return <div>{m.content}</div>;
-                return <div className={styles.outcome} data-turn-state={outcome.state} role="status">
-                  <strong>{outcome.state === 'abstained' ? 'No answer: not enough evidence.' : outcome.stage ? `Couldn’t answer: stopped at the ${outcome.stage} step.` : 'Couldn’t answer this one.'}</strong>
-                  <span className={styles.messageEmpty}>{outcome.state === 'abstained' ? outcome.reason : outcome.message}</span>
-                  {i === messages.length - 1 && !busy && <Button size="sm" variant="ghost" onClick={() => void retryWithQuote()}>Try again</Button>}
-                </div>;
-              })()}
-
-              {m.provenance.length > 0 && (
-
-                <div className={styles.badges}>
-
-                  {m.provenance.map((p, j) => (
-
-                    <ConsensusBadge
-
-                      key={j}
-
-                      tone="chat"
-
-                      ordUsed={p.ordUsed}
-
-                      mu={p.effMu}
-
-                      witnesses={p.witnesses}
-
-                    />
-
-                  ))}
-
-                </div>
-
-              )}
-
-              {/* A reply whose content chunk carried `laplace: {}` has no receipt to
-                  bind μ/witness badges to; that absence is stated, so it is not read
-                  as a reply with zero witnesses. */}
-              {m.role === 'assistant' && !m.streaming && !m.error && m.content && m.provenance.length === 0 && (
-
-                <Muted className={styles.noReceipts}>
-
-                  no receipt returned for this reply — look the terms up in Evidence →
-
-                </Muted>
-
-              )}
-
-              {m.forwardProof && (() => {
-                const proof = m.forwardProof;
-                const stage = lastStage(proof);
-                const dbProbes = proof.work?.db_probes ?? proof.db_probes;
-                const wallUs = proof.work?.wall_us ?? proof.wall_us;
-                const shares = summarizeWitnessShares(proof.witness_shares);
-                return (
-                  <details className={styles.trace}>
-                    <summary>
-                      OODA &amp; Reasoning trace
-                      {proof.disposition ? ` · ${proof.disposition}` : ''}
-                      {stage ? ` · reached ${stage}` : ''}
-                      {proof.top_salience != null ? ` · salience ${Number(proof.top_salience).toFixed(2)}` : ''}
-                      {dbProbes != null ? ` · ${dbProbes} probes` : ''}
-                      {wallUs != null ? ` · ${wallUs} µs` : ''}
-                      {shares.count > 0 ? ` · Σ share_bp ${shares.sumBp}/${shares.expectedBp}` : ''}
-                    </summary>
-                    <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>Open the full trace page</Link>
-                    <ForwardPassProofPanel proof={proof} />
-                  </details>
-                );
-              })()}
-
-              {m.performance && (
-                <div className={styles.performance}>
-                  substrate {m.performance.substrateMs.toFixed(1)} ms
-                  {' · '}first {m.performance.firstResultMs?.toFixed(1) ?? '—'} ms
-                  {' · '}total {m.performance.elapsedMs.toFixed(1)} ms
-                  {' · '}{m.performance.outputWords} words
-                  {' · '}{m.performance.outputCodepoints} codepoints
-                  {m.performance.generatedTokens != null
-                    ? ` · ${m.performance.generatedTokens} trajectory tokens`
-                    : ''}
-                  {m.performance.generatedTokensPerSecond != null
-                    ? ` · ${m.performance.generatedTokensPerSecond.toFixed(1)} trajectory tokens/s`
-                    : ''}
-                </div>
-              )}
-
-            </div>
-
-          ))}
-
-        </div>
+        <ChatTranscript
+          messages={messages}
+          transcriptRef={transcriptRef}
+          busy={busy}
+          onRetry={() => void retryWithQuote()}
+        />
 
 
 

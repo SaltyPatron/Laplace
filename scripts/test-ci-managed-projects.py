@@ -29,9 +29,9 @@ class ManagedProjectImpactTests(unittest.TestCase):
         )
 
     def test_test_only_change_does_not_pull_unrelated_projects(self):
-        target = "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
+        target = "app/Laplace.Data.Tests/Laplace.Data.Tests.csproj"
         value = plan_changed(
-            ROOT, ["app/Laplace.Substrate.Tests/Abstractions/DecomposerArchitectureGateTests.cs"]
+            ROOT, ["app/Laplace.Data.Tests/ReadPathArchitectureGateTests.cs"]
         )
         self.assertEqual([target], value["changed_projects"])
         # Publication builds production roots only; the test project is built by
@@ -42,10 +42,10 @@ class ManagedProjectImpactTests(unittest.TestCase):
     def test_test_only_source_change_builds_exact_class_filter(self):
         value = test_filter_for_paths(
             ROOT,
-            ["app/Laplace.Decomposers.Tests/Unicode/UnicodeDecomposerTests.cs"],
+            ["app/Laplace.Data.Tests/ReadPathArchitectureGateTests.cs"],
         )
         self.assertIn(
-            "FullyQualifiedName~Laplace.Decomposers.Unicode.Tests.UnicodeDecomposerTests",
+            "FullyQualifiedName~Laplace.Data.Tests.ReadPathArchitectureGateTests",
             value,
         )
 
@@ -57,7 +57,7 @@ class ManagedProjectImpactTests(unittest.TestCase):
         self.assertEqual(
             "",
             test_filter_for_paths(
-                ROOT, ["app/Laplace.Decomposers.Tests/Laplace.Decomposers.Tests.csproj"]
+                ROOT, ["app/Laplace.Data.Tests/Laplace.Data.Tests.csproj"]
             ),
         )
 

@@ -59,8 +59,44 @@ internal sealed partial class SubstrateClient
         var rows = await NpgsqlSubstrateReads.ResolveRefsWithLabelsAsync(
             _dataSource, stored, ct, TranslateReadError).ConfigureAwait(false);
         for (int i = 0; i < rows.Count; i++)
-            if (rows[i] is { } row) result[positions[i]] = (row.Id, row.Label);
+        {
+            if (rows[i] is { } row)
+            {
+                result[positions[i]] = (row.Id, row.Label);
+            }
+            else
+            {
+                var tokens = ExtractSalientCandidateTokens(stored[i]);
+                if (tokens.Count >= 2)
+                {
+                    var fallback = await NpgsqlSubstrateReads.ResolveSalientWordAsync(
+                        _dataSource, tokens, ct, TranslateReadError).ConfigureAwait(false);
+                    if (fallback is not null)
+                        result[positions[i]] = (fallback.Id, fallback.Label);
+                }
+            }
+        }
         return result;
+    }
+
+    private static IReadOnlyList<string> ExtractSalientCandidateTokens(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        var list = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        int i = 0;
+        while (i < text.Length)
+        {
+            while (i < text.Length && (char.IsWhiteSpace(text[i]) || char.IsPunctuation(text[i]))) i++;
+            int start = i;
+            while (i < text.Length && !char.IsWhiteSpace(text[i]) && !char.IsPunctuation(text[i])) i++;
+            if (i > start)
+            {
+                var tok = text[start..i];
+                if (seen.Add(tok)) list.Add(tok);
+            }
+        }
+        return list;
     }
 
     /// <summary>

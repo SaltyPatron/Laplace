@@ -26,6 +26,7 @@ jobs:
           repository: SaltyPatron/Laplace-Engine
           ref: main
           path: .ci-dependencies/Laplace-Engine
+          token: ${{ secrets.LAPLACE_CHECKOUT }}
           persist-credentials: false
       - name: Validate workflow syntax and operator ownership
         run: |

@@ -135,6 +135,21 @@ internal sealed record RecipeDraftResult(
     string? Format,
     RecipeLintResult Lint);
 
+internal sealed record RecipeAdmitResult(
+    [property: JsonPropertyName("object")] string Object,
+    string Filename,
+    string Source,
+    string Witness,
+    [property: JsonPropertyName("trust_class")] string TrustClass,
+    RecipeLintResult Lint,
+    bool Executed,
+    bool Ok,
+    [property: JsonPropertyName("exit_code")] int? ExitCode,
+    [property: JsonPropertyName("timed_out")] bool TimedOut,
+    [property: JsonPropertyName("elapsed_ms")] double ElapsedMs,
+    string Stdout,
+    string Stderr);
+
 /// <summary>
 /// Discovers the corpus estate (<c>recipes/order</c>, <c>source</c>, <c>*.recipe</c>, grammars,
 /// and <c>LAPLACE_DATA</c> staging), runs safe native CLI <c>--plan</c> / <c>forget</c> / <c>sweep</c>,
@@ -636,20 +651,146 @@ internal sealed class RecipeStudioService(ILogger? logger = null)
         string recipeDsl,
         CancellationToken ct = default)
     {
+        var (cleanName, lint, cli) = await RunSampleRecipeCliAsync(
+            filename,
+            sampleText,
+            recipeDsl,
+            sourceName: "studio",
+            witnessLabel: "Recipe Studio",
+            trustClass: "UserCuratedResource",
+            maxBytes: 2 * 1024 * 1024,
+            offlineConnInfo: true,
+            dryRunClaims: true,
+            timeout: InspectTimeout,
+            skipOnLintError: false,
+            ct).ConfigureAwait(false);
+
+        var parsed = ParseInspectStdout(cli!.Stdout);
+        return new RecipeInspectResult(
+            Object: "recipe_studio.inspect",
+            Filename: cleanName,
+            Lint: lint,
+            Executed: true,
+            Ok: cli.Ok,
+            ExitCode: cli.ExitCode,
+            TimedOut: cli.TimedOut,
+            ElapsedMs: cli.ElapsedMs,
+            RecordsCount: parsed.RecordsCount,
+            ClaimsCount: parsed.ClaimsCount,
+            UnresolvedObligationsCount: parsed.UnresolvedObligationsCount,
+            CompositionsCount: parsed.CompositionsCount,
+            Records: parsed.Records,
+            Claims: parsed.Claims,
+            Obligations: parsed.Obligations,
+            Stdout: cli.Stdout,
+            Stderr: cli.Stderr);
+    }
+
+    public async Task<RecipeAdmitResult> AdmitAsync(
+        string filename,
+        string sampleText,
+        string recipeDsl,
+        string? sourceName = null,
+        string? witnessName = null,
+        CancellationToken ct = default)
+    {
+        string cleanName = SanitizeSampleFilename(filename);
+        var preLint = LintRecipe(recipeDsl ?? "", cleanName);
+        string rawSlug = !string.IsNullOrWhiteSpace(sourceName)
+            ? sourceName.Trim()
+            : (!string.IsNullOrWhiteSpace(preLint.Summary.Name) ? preLint.Summary.Name.Trim() : "studio");
+        string safeSlug = SafeSourceRegex.IsMatch(rawSlug)
+            ? rawSlug
+            : Regex.Replace(rawSlug.ToLowerInvariant(), "[^a-z0-9._-]+", "-").Trim('-', '.');
+        if (string.IsNullOrWhiteSpace(safeSlug) || !SafeSourceRegex.IsMatch(safeSlug))
+            safeSlug = "studio";
+
+        string witnessLabel = !string.IsNullOrWhiteSpace(witnessName)
+            ? witnessName.Trim().Replace('\r', ' ').Replace('\n', ' ')
+            : $"Recipe Studio ({safeSlug})";
+        string trustClass = !string.IsNullOrWhiteSpace(preLint.Summary.TrustClass)
+            ? preLint.Summary.TrustClass.Trim()
+            : "UserCuratedResource";
+
+        var (_, lint, cli) = await RunSampleRecipeCliAsync(
+            cleanName,
+            sampleText,
+            recipeDsl ?? "",
+            sourceName: safeSlug,
+            witnessLabel: witnessLabel,
+            trustClass: trustClass,
+            maxBytes: 8 * 1024 * 1024,
+            offlineConnInfo: false,
+            dryRunClaims: false,
+            timeout: TimeSpan.FromMinutes(2),
+            skipOnLintError: true,
+            ct).ConfigureAwait(false);
+
+        if (cli is null)
+        {
+            return new RecipeAdmitResult(
+                Object: "recipe_studio.admit",
+                Filename: cleanName,
+                Source: safeSlug,
+                Witness: witnessLabel,
+                TrustClass: trustClass,
+                Lint: lint,
+                Executed: false,
+                Ok: false,
+                ExitCode: null,
+                TimedOut: false,
+                ElapsedMs: 0,
+                Stdout: "",
+                Stderr: string.Join('\n', lint.Errors));
+        }
+
+        return new RecipeAdmitResult(
+            Object: "recipe_studio.admit",
+            Filename: cleanName,
+            Source: safeSlug,
+            Witness: witnessLabel,
+            TrustClass: trustClass,
+            Lint: lint,
+            Executed: true,
+            Ok: cli.Ok,
+            ExitCode: cli.ExitCode,
+            TimedOut: cli.TimedOut,
+            ElapsedMs: cli.ElapsedMs,
+            Stdout: cli.Stdout,
+            Stderr: cli.Stderr);
+    }
+
+    private async Task<(string CleanName, RecipeLintResult Lint, StudioCliResult? Cli)> RunSampleRecipeCliAsync(
+        string filename,
+        string sampleText,
+        string recipeDsl,
+        string sourceName,
+        string witnessLabel,
+        string trustClass,
+        int maxBytes,
+        bool offlineConnInfo,
+        bool dryRunClaims,
+        TimeSpan timeout,
+        bool skipOnLintError,
+        CancellationToken ct)
+    {
         string cleanName = SanitizeSampleFilename(filename);
         if (string.IsNullOrWhiteSpace(recipeDsl))
             throw new ArgumentException("Recipe DSL is required.", nameof(recipeDsl));
         if (sampleText is null)
             throw new ArgumentException("Sample content is required.", nameof(sampleText));
-        if (Encoding.UTF8.GetByteCount(sampleText) > 2 * 1024 * 1024)
-            throw new ArgumentException("Sample content exceeds the 2 MiB studio dry-run limit.", nameof(sampleText));
+        if (Encoding.UTF8.GetByteCount(sampleText) > maxBytes)
+            throw new ArgumentException($"Sample content exceeds the {maxBytes / (1024 * 1024)} MiB studio limit.", nameof(sampleText));
 
         var lint = LintRecipe(recipeDsl, cleanName);
+        if (skipOnLintError && !lint.Valid)
+            return (cleanName, lint, null);
+
         string tempRoot = Path.Combine(Path.GetTempPath(), "laplace-recipe-studio-" + Guid.NewGuid().ToString("N"));
         try
         {
             string tempRecipes = Path.Combine(tempRoot, "recipes");
-            string tempSourceDir = Path.Combine(tempRecipes, "studio");
+            string tempSourceDir = Path.Combine(tempRecipes, sourceName);
             string tempSampleDir = Path.Combine(tempRoot, "sample");
             string tempSampleFile = Path.Combine(tempSampleDir, cleanName);
 
@@ -658,53 +799,36 @@ internal sealed class RecipeStudioService(ILogger? logger = null)
 
             MirrorSharedRecipeAssets(tempRecipes);
 
+            var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
             await File.WriteAllTextAsync(
                 Path.Combine(tempSourceDir, "source"),
-                "name studio\nwitness Recipe Studio\nclass UserCuratedResource\n",
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                $"name {sourceName}\nwitness {witnessLabel}\nclass {trustClass}\n",
+                utf8NoBom,
                 ct).ConfigureAwait(false);
 
             string normalizedDsl = recipeDsl.Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!normalizedDsl.EndsWith('\n')) normalizedDsl += '\n';
             await File.WriteAllTextAsync(
-                Path.Combine(tempSourceDir, "studio.recipe"),
+                Path.Combine(tempSourceDir, $"{sourceName}.recipe"),
                 normalizedDsl,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                utf8NoBom,
                 ct).ConfigureAwait(false);
 
-            await File.WriteAllTextAsync(
-                tempSampleFile,
-                sampleText,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(tempSampleFile, sampleText, utf8NoBom, ct).ConfigureAwait(false);
+
+            List<string> args = dryRunClaims
+                ? ["ingest", "--claims", "--no-load", "-r", tempRecipes, "-s", sourceName, tempSampleFile]
+                : ["ingest", "-r", tempRecipes, "-s", sourceName, tempSampleFile];
 
             var cli = await RunNativeCliAsync(
-                ["ingest", "--claims", "--no-load", "-r", tempRecipes, "-s", "studio", tempSampleFile],
-                offlineConnInfo: true,
-                InspectTimeout,
+                args,
+                offlineConnInfo,
+                timeout,
                 ct,
                 workingDirectory: tempRoot,
                 recipesOverride: tempRecipes).ConfigureAwait(false);
 
-            var parsed = ParseInspectStdout(cli.Stdout);
-            return new RecipeInspectResult(
-                Object: "recipe_studio.inspect",
-                Filename: cleanName,
-                Lint: lint,
-                Executed: true,
-                Ok: cli.Ok,
-                ExitCode: cli.ExitCode,
-                TimedOut: cli.TimedOut,
-                ElapsedMs: cli.ElapsedMs,
-                RecordsCount: parsed.RecordsCount,
-                ClaimsCount: parsed.ClaimsCount,
-                UnresolvedObligationsCount: parsed.UnresolvedObligationsCount,
-                CompositionsCount: parsed.CompositionsCount,
-                Records: parsed.Records,
-                Claims: parsed.Claims,
-                Obligations: parsed.Obligations,
-                Stdout: cli.Stdout,
-                Stderr: cli.Stderr);
+            return (cleanName, lint, cli);
         }
         finally
         {

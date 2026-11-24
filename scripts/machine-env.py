@@ -1,12 +1,30 @@
 #!/usr/bin/env python3
 """Read machine declarations as data; process values precede installation values."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import shlex
 import hashlib
+
+
+def _load_salty_machine_env():
+    candidates = []
+    if os.environ.get('SALTY_SUITE_ROOT'):
+        candidates.append(Path(os.environ['SALTY_SUITE_ROOT']) / 'machine-env/machine_env.py')
+    if os.environ.get('LAPLACE_SRC'):
+        candidates.append(Path(os.environ['LAPLACE_SRC']) / 'Salty-Suite/machine-env/machine_env.py')
+    candidates.append(Path(__file__).resolve().parents[2] / 'Salty-Suite/machine-env/machine_env.py')
+    for candidate in candidates:
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location('salty_suite_machine_env', candidate)
+            if spec is not None and spec.loader is not None:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
+    return None
 
 
 LEGACY_DATABASE_KEYS = {
@@ -45,19 +63,29 @@ def parse(content, process):
     values = canonical_process(process)
     # Emit translated process settings as well: consumers import only this output.
     declarations = {new: values[new] for old, new in LEGACY_DATABASE_KEYS.items() if process.get(old)}
-    seen = set()
     configured = {}
-    for item in assignment_lexer(content):
-        match = re.fullmatch(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*', item, re.S)
-        if not match:
-            raise ValueError('Invalid machine configuration assignment')
-        name, value = match.groups()
-        if name.upper() in seen:
-            raise ValueError('Duplicate machine configuration key: ' + name)
-        seen.add(name.upper())
+    salty = _load_salty_machine_env()
+    if salty is not None:
+        try:
+            entries = salty.parse_env_text(content)
+        except salty.ConfigError as exc:
+            raise ValueError(str(exc)) from exc
+    else:
+        seen = set()
+        entries = []
+        for item in assignment_lexer(content):
+            match = re.fullmatch(r'\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*', item, re.S)
+            if not match:
+                raise ValueError('Invalid machine configuration assignment')
+            name, value = match.groups()
+            if name.upper() in seen:
+                raise ValueError('Duplicate machine configuration key: ' + name)
+            seen.add(name.upper())
+            if '\0' in value:
+                raise ValueError('NUL in machine configuration key: ' + name)
+            entries.append((name, value))
+    for name, value in entries:
         name = LEGACY_DATABASE_KEYS.get(name, name)
-        if '\0' in value:
-            raise ValueError('NUL in machine configuration key: ' + name)
         if name in configured and configured[name] != value:
             raise ValueError('Conflicting configuration aliases for: ' + name)
         configured[name] = value

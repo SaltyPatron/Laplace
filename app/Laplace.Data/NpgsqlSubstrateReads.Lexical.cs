@@ -16,7 +16,14 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             WITH hypernym AS (
-                SELECT ARRAY[public.laplace_text_id('IS_A'), public.laplace_text_id('hypernym')] AS rels
+                SELECT ARRAY[
+                    public.laplace_text_id('IS_A'),
+                    public.laplace_text_id('hypernym'),
+                    public.laplace_text_id('instance hypernym'),
+                    public.laplace_text_id('is a'),
+                    public.laplace_text_id('subclass of'),
+                    public.laplace_text_id('instance of')
+                ] AS rels
             ),
             self_row AS (
                 SELECT 'self'::text AS dir, 0 AS ord, encode($1, 'hex') AS id_hex,
@@ -27,13 +34,33 @@ public static partial class NpgsqlSubstrateReads
                 SELECT 'up'::text AS dir, p.hops AS ord,
                        encode(public.blake3_send(p.id), 'hex') AS id_hex,
                        coalesce(public.laplace_label_text(public.blake3_send(p.id), false), encode(public.blake3_send(p.id), 'hex')) AS label,
-                       public.laplace_confidence(p.rating, p.deviation, 2)::numeric AS eff_mu
+                       public.laplace_confidence(p.rating, p.deviation, 2::double precision)::numeric AS eff_mu
                 FROM hypernym h,
                      public.laplace_pull(ARRAY[public.blake3_from_bytea($1)], NULL, greatest(1, $2), greatest(1, $3)::bigint, 256::bigint, h.rels) p
+            ),
+            down_claims AS (
+                SELECT row_number() OVER (
+                    ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC NULLS LAST, c.matches DESC
+                )::int AS ord,
+                       public.laplace_parts(c.path) AS pts,
+                       public.laplace_confidence(c.rating, c.deviation, 2::double precision)::numeric AS eff_mu
+                FROM hypernym h,
+                     public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 2::smallint, h.rels) c
+                LIMIT greatest(0, $3)
+            ),
+            down_rows AS (
+                SELECT 'down'::text AS dir, d.ord,
+                       encode(public.blake3_send(d.pts[1]), 'hex') AS id_hex,
+                       coalesce(public.laplace_label_text(public.blake3_send(d.pts[1]), false), encode(public.blake3_send(d.pts[1]), 'hex')) AS label,
+                       d.eff_mu
+                FROM down_claims d
+                WHERE cardinality(d.pts) >= 2 AND d.pts[1] <> public.blake3_from_bytea($1)
             )
             SELECT dir, ord, id_hex, label, eff_mu FROM self_row
             UNION ALL
             SELECT dir, ord, id_hex, label, eff_mu FROM up_rows
+            UNION ALL
+            SELECT dir, ord, id_hex, label, eff_mu FROM down_rows
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql,
             static r => new TaxonomyTreeRow(
@@ -99,9 +126,9 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             SELECT coalesce(public.laplace_label_text(public.blake3_send(c.entity), false), encode(public.blake3_send(c.entity), 'hex')),
                    coalesce(public.laplace_label_text(public.blake3_send(c.rel), false), 'peer'),
-                   public.laplace_confidence(c.rating, c.deviation, 2)
+                   public.laplace_confidence(c.rating, c.deviation, 2::double precision)
             FROM public.laplace_couple(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, '{}'::public.blake3[], 0::smallint, 0.0, greatest(1, $2)) c
-            ORDER BY public.laplace_confidence(c.rating, c.deviation, 2) DESC
+            ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC NULLS LAST
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -237,21 +264,31 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.laplace_resolve_ref($1) AS tid
             ),
             rel AS (
-                SELECT ARRAY[public.laplace_text_id('translation_of'), public.laplace_text_id('has_translation')] AS rels
+                SELECT ARRAY[
+                    public.laplace_text_id('translation_of'),
+                    public.laplace_text_id('has_translation'),
+                    public.laplace_text_id('cili'),
+                    public.laplace_text_id('synonym'),
+                    public.laplace_text_id('equivalent')
+                ] AS rels
             ),
-            pulled AS (
+            pulled AS MATERIALIZED (
                 SELECT p.id, p.rating, p.deviation, p.claim
                 FROM anchor a, rel r,
                      public.laplace_pull(ARRAY[public.blake3_from_bytea(a.tid)], NULL, 2, greatest(1, $2)::bigint, 256::bigint, r.rels) p
-                WHERE a.tid IS NOT NULL
+                WHERE a.tid IS NOT NULL AND p.claim IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
             )
             SELECT coalesce(public.laplace_label_text(public.blake3_send(p.id), false), encode(public.blake3_send(p.id), 'hex')),
                    ''::text,
-                   public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
+                   public.laplace_confidence(p.rating, p.deviation, 2::double precision)::numeric,
                    coalesce(s.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) s ON s.claim = p.claim
-            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2) DESC
+            LEFT JOIN standings s ON s.claim = p.claim
+            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2::double precision) DESC NULLS LAST
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql,

@@ -47,16 +47,25 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             WITH root_info AS (
-                SELECT public.laplace_resolve_ref($1) AS root_raw
+                SELECT public.laplace_resolve_ref($1) AS root_raw,
+                       public.laplace_text_id($1) AS text_id
+            ),
+            root_phys AS (
+                SELECT ph.path
+                FROM root_info ri
+                LEFT JOIN LATERAL public.laplace_physicalities(ARRAY[coalesce(public.blake3_from_bytea(ri.root_raw), ri.text_id)]) ph
+                    ON coalesce(public.blake3_from_bytea(ri.root_raw), ri.text_id) IS NOT NULL
             ),
             parts AS MATERIALIZED (
                 SELECT p.id
-                FROM unnest(coalesce(public.laplace_parts($1), ARRAY[]::public.blake3[])) AS p(id)
+                FROM root_info ri
+                LEFT JOIN root_phys rp ON true,
+                     unnest(coalesce(public.laplace_parts(rp.path), CASE WHEN coalesce(public.blake3_from_bytea(ri.root_raw), ri.text_id) IS NOT NULL THEN ARRAY[coalesce(public.blake3_from_bytea(ri.root_raw), ri.text_id)] ELSE ARRAY[]::public.blake3[] END)) AS p(id)
                 WHERE p.id IS NOT NULL
             ),
             coupled AS MATERIALIZED (
                 SELECT row_number() OVER (
-                    ORDER BY public.laplace_confidence(c.rating, c.deviation, 2) DESC, c.occ
+                    ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC NULLS LAST, c.occ
                 )::int AS step,
                 c.entity, c.route, c.rating, c.deviation, c.via, c.rel
                 FROM public.laplace_couple(

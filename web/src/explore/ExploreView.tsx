@@ -19,6 +19,7 @@ const loadConstellation = () => import('./glome/ConstellationView');
 const loadHighway = () => import('./highway/HighwayLanding');
 const loadLayer = () => import('./highway/LayerPage');
 const loadMatchup = () => import('./matchup/MatchupView');
+const loadShape = () => import('./shape/ShapeCompareView');
 const loadMesh = () => import('./mesh/MeshView');
 const loadWalk = () => import('./walk/WalkPanel');
 const loadQuery = () => import('../query/QueryConsole');
@@ -38,6 +39,7 @@ const ConstellationView = lazy(() => loadConstellation().then((m) => ({ default:
 const HighwayLanding = lazy(() => loadHighway().then((m) => ({ default: m.HighwayLanding })));
 const LayerPage = lazy(() => loadLayer().then((m) => ({ default: m.LayerPage })));
 const MatchupView = lazy(() => loadMatchup().then((m) => ({ default: m.MatchupView })));
+const ShapeCompareView = lazy(() => loadShape().then((m) => ({ default: m.ShapeCompareView })));
 const MeshView = lazy(() => loadMesh().then((m) => ({ default: m.MeshView })));
 const WalkPanel = lazy(() => loadWalk().then((m) => ({ default: m.WalkPanel })));
 const QueryConsole = lazy(() => loadQuery().then((m) => ({ default: m.QueryConsole })));
@@ -82,6 +84,7 @@ function ExploreBreadcrumb() {
   if (pathname.startsWith('/explore/walk')) segments.push({ label: 'Reasoning trace' });
   if (pathname === '/explore/mesh' || pathname.startsWith('/explore/mesh/')) segments.push({ label: 'Mesh', to: '/explore/mesh' });
   if (pathname === '/explore/matchup' || pathname.startsWith('/explore/matchup/')) segments.push({ label: 'Matchup', to: '/explore/matchup' });
+  if (pathname === '/explore/shape' || pathname.startsWith('/explore/shape/')) segments.push({ label: 'Shape', to: '/explore/shape' });
   if (pathname.startsWith('/explore/audit')) segments.push({ label: 'Audit' });
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
@@ -129,6 +132,7 @@ export function ExploreView({ page }: { page?: ExplorePage }) {
           <Route path="mesh/:id" element={<MeshView />} />
           <Route path="matchup" element={<MatchupView />} />
           <Route path="matchup/:x/:y" element={<MatchupView />} />
+          <Route path="shape" element={<ShapeCompareView />} />
           <Route path="audit" element={<AuditPanel />} />
           <Route path="architecture" element={<ArchitectureView />} />
           <Route path="*" element={<Navigate to="/explore" replace />} />

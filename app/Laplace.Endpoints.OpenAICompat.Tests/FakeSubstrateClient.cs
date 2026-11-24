@@ -403,8 +403,20 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
 
     public Task<ExploreContainersResponse?> ExploreContainersAsync(
         string idHex, int maxHops, int limit, CancellationToken ct) =>
+        ExploreContainersAsync(idHex, maxHops, limit, 0, ct);
+
+    public Task<ExploreContainersResponse?> ExploreContainersAsync(
+        string idHex, int maxHops, int limit, int offset, CancellationToken ct) =>
         Task.FromResult<ExploreContainersResponse?>(new ExploreContainersResponse(
-            idHex, [new ExploreContainerRow(WhaleIdHex, "whale document", 4, "Document", 1)]));
+            idHex, [new ExploreContainerRow(WhaleIdHex, "whale document", 4, "Document", 1, WordNetIdHex, "Open English WordNet")],
+            1, offset));
+
+    public Task<ExploreShapeComparisonResponse?> ExploreShapeAsync(string xRef, string yRef, CancellationToken ct) =>
+        Task.FromResult<ExploreShapeComparisonResponse?>(new ExploreShapeComparisonResponse(
+            $"shape-{Guid.NewGuid():N}", "laplace.explore.shape", 1700000000,
+            new ExploreShapeSide(xRef, WhaleIdHex, xRef, 1, true, [new ShapePoint4D(1, 0.1, 0.2, 0.3, 0.4), new ShapePoint4D(2, 0.2, 0.3, 0.4, 0.5)]),
+            new ExploreShapeSide(yRef, CetaceanIdHex, yRef, 1, true, [new ShapePoint4D(1, 0.15, 0.25, 0.35, 0.45), new ShapePoint4D(2, 0.25, 0.35, 0.45, 0.55)]),
+            0.0707, 0.1414, 0.0707));
 
     public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, int maxNodes, CancellationToken ct) =>

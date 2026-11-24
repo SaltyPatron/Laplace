@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Checkbox, Muted, Panel, ReadStatus, Table, Td, Th, useReadResource } from '@ui';
+import { Button, Checkbox, Muted, Panel, ReadStatus, Select, Table, Td, Th, useReadResource } from '@ui';
 import { queryHomeLeaders, queryLeaders } from '../../query/api';
 import type { RelationBand } from '../../query/types';
 import { exploreCatalog } from '../api';
 import { EntityLink } from '../components/EntityLink';
 import { StatCard } from '../components/StatCard';
+import { exploreLeaderboard } from './api';
 import styles from './Browse.module.css';
 
 type LeaderRowExtended = {
@@ -32,10 +33,18 @@ export function LeaderboardsPanel({
   bands: RelationBand[];
 }) {
   const [selectedBands, setSelectedBands] = useState<number[]>([]);
+  const [sort, setSort] = useState<'standing' | 'rating' | 'matches'>('standing');
+  const [boardOffset, setBoardOffset] = useState(0);
+  const boardLimit = 25;
 
   const catalog = useReadResource({
     key: JSON.stringify(['browse-catalog-tables', tenant, quoteId]),
     read: (signal) => exploreCatalog({ tenant, quoteId, signal }),
+  });
+
+  const consensusBoard = useReadResource({
+    key: JSON.stringify(['browse-consensus-board', tenant, quoteId, sort, boardOffset]),
+    read: (signal) => exploreLeaderboard({ offset: boardOffset, limit: boardLimit, sort }, { tenant, quoteId, signal }),
   });
 
   const leaders = useReadResource({
@@ -126,6 +135,74 @@ export function LeaderboardsPanel({
               ))}
             </div>
           </fieldset>
+        )}
+
+        <ReadStatus label="Indexed 4-table consensus leaderboard" resource={consensusBoard} />
+        <div className={styles.boardControls}>
+          <label className={styles.boardSortLabel}>
+            <span>Global rank order</span>
+            <Select
+              aria-label="Global consensus leaderboard sort"
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value as 'standing' | 'rating' | 'matches');
+                setBoardOffset(0);
+              }}
+            >
+              <option value="standing">Glicko-2 conservative standing (idx)</option>
+              <option value="rating">Raw rating (mu)</option>
+              <option value="matches">Witness count</option>
+            </Select>
+          </label>
+          <div className={styles.boardPager}>
+            <Button
+              variant="ghost"
+              disabled={boardOffset === 0}
+              onClick={() => setBoardOffset((prev) => Math.max(0, prev - boardLimit))}
+            >
+              Previous
+            </Button>
+            <Muted>{`offset ${boardOffset.toLocaleString()}`}</Muted>
+            <Button
+              variant="ghost"
+              disabled={(consensusBoard.data?.hits.length ?? 0) < boardLimit}
+              onClick={() => setBoardOffset((prev) => prev + boardLimit)}
+            >
+              Next
+            </Button>
+            {consensusBoard.data && (
+              <Muted>{`${consensusBoard.data.elapsed_us.toLocaleString()} us`}</Muted>
+            )}
+          </div>
+        </div>
+
+        {consensusBoard.data && consensusBoard.data.hits.length > 0 && (
+          <div className={styles.leaderTables}>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>#</Th>
+                  <Th>Concept / claim</Th>
+                  <Th>Tier</Th>
+                  <Th>Confidence</Th>
+                  <Th>Rating ± RD</Th>
+                  <Th>Witnesses</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {consensusBoard.data.hits.map((hit, idx) => (
+                  <tr key={hit.id_hex}>
+                    <Td>{boardOffset + idx + 1}</Td>
+                    <Td><EntityLink idHex={hit.id_hex} label={hit.label || hit.id_hex} /></Td>
+                    <Td>{hit.tier}</Td>
+                    <Td>{Number(hit.confidence).toFixed(3)}</Td>
+                    <Td>{`${Number(hit.rating).toFixed(1)} ± ${Number(hit.deviation).toFixed(1)}`}</Td>
+                    <Td>{Number(hit.matches).toLocaleString()}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
         )}
 
         <ReadStatus label="Consensus leaderboards" resource={leaders} />

@@ -370,13 +370,11 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH audit AS (SELECT * FROM public.laplace_highway_audit())
-            SELECT count(*) > 0,
-                   coalesce(sum(attested), 0) > 0,
+            SELECT public.laplace_highway_fingerprint() IS NOT NULL,
+                   EXISTS (SELECT 1 FROM public.entity WHERE mask <> 0::bit(64)),
                    now(),
                    0::bigint,
                    0::bigint
-            FROM audit
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql,
             static r => new HighwayPopulationRow(

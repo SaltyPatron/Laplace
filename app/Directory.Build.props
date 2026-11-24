@@ -21,8 +21,10 @@
     <_LaplaceLockText Condition="Exists('$(_LaplaceLockFile)')">$([System.IO.File]::ReadAllText('$(_LaplaceLockFile)'))</_LaplaceLockText>
     <_LaplaceNativePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^native\tLaplace-Native\t([0-9a-f]+)').Groups[1].Value)</_LaplaceNativePin>
     <_LaplaceEnginePin Condition="'$(_LaplaceLockText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_LaplaceLockText)', '(?m)^engine\tLaplace-Engine\t([0-9a-f]+)').Groups[1].Value)</_LaplaceEnginePin>
+    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == '' AND '$(OS)' == 'Windows_NT' AND '$(LAPLACE_BUILD_ROOT)' != ''">$(LAPLACE_BUILD_ROOT)\build-win</LAPLACE_ENGINE_BUILD>
     <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == '' AND '$(OS)' == 'Windows_NT'">$(LAPLACE_BUILD)\Laplace-Engine\icx-release</LAPLACE_ENGINE_BUILD>
     <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == ''">$(LAPLACE_BUILD)/Laplace-Engine/icx-release</LAPLACE_ENGINE_BUILD>
+    <LaplaceBuildWin Condition="'$(LaplaceBuildWin)' == ''">$(LAPLACE_ENGINE_BUILD)</LaplaceBuildWin>
     <LaplaceNativeVersion Condition="'$(LaplaceNativeVersion)' == ''">0.1.0</LaplaceNativeVersion>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND '$(LAPLACE_NATIVE_PACKAGE)' != '' AND Exists('$(LAPLACE_NATIVE_PACKAGE)/csharp/LaplaceNative.g.cs')">$(LAPLACE_NATIVE_PACKAGE)/csharp</LaplaceNativeGenerated>
     <LaplaceNativeGenerated Condition="'$(LaplaceNativeGenerated)' == '' AND Exists('$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp/LaplaceNative.g.cs')">$(LAPLACE_BUILD)/Laplace-Native/icx-release/csharp</LaplaceNativeGenerated>

@@ -44,7 +44,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
   const columns: ResultColumn<VisibleItem>[] = [
     { key: 'name', label: 'Artifact' },
     { key: 'path', label: 'Relative path', render: (item) => item.status === 'queued' ? <Input aria-label={`Relative path for ${item.name}`} value={item.path} disabled={state.running} onChange={(event) => queue.edit(item.id, { path: event.target.value, mode: item.mode })} /> : item.path },
-    { key: 'mode', label: 'Admission', render: (item) => item.status === 'queued' ? <Select aria-label={`Admission mode for ${item.name}`} value={item.mode} disabled={state.running} onChange={(event) => queue.edit(item.id, { path: item.path, mode: event.target.value as ContentMode })}><option value="text">Text</option><option value="code">Code / structured</option></Select> : item.mode },
+    { key: 'mode', label: 'Admission', render: (item) => item.status === 'queued' ? <Select aria-label={`Admission mode for ${item.name}`} value={item.mode} disabled={state.running} onChange={(event) => queue.edit(item.id, { path: item.path, mode: event.target.value as ContentMode })}><option value="text">Text</option><option value="code">Code / structured</option><option value="media">Binary / media</option></Select> : item.mode },
     { key: 'bytes', label: 'Selected bytes' },
     { key: 'status', label: 'Progress', render: (item) => <>{item.status}{item.error && <ErrorText>{item.error}</ErrorText>}</> },
     { key: 'file_id', label: 'Admitted data', render: (item) => item.file_id ? <><Button variant="ghost" size="sm" onClick={() => openReceipt(item.file_id!)}>Read admitted bytes</Button><Link className={styles.receipt} to={`/explore/entity/${item.content_id}`}>Explore content</Link><code className={styles.receipt}>{item.file_id}</code></> : 'No admission receipt' },
@@ -58,10 +58,10 @@ function DataWorkspace({ tenant }: { tenant: string }) {
       <Link to="/explore/sources">Browse sources</Link>{' · '}<Link to="/operator?section=ingest">Ingestion runs</Link>{' · '}<Link to="/operator?section=recipes">Recipe Studio</Link>{' · '}<Link to="/operator?section=ops">Installed operations</Link></header>
     <div className={styles.inputs}>
       <Panel title="Select local files"><div className={styles.stack}>
-        <Field label="Admission mode" help="Text accepts valid UTF-8 documents. Code / structured uses the server's registered grammar for each relative path extension; unsupported grammars are reported, not guessed.">
-          <Select value={mode} onChange={(event) => setMode(event.target.value as ContentMode)}><option value="text">Text</option><option value="code">Code / structured source</option></Select>
+        <Field label="Admission mode" help="Text accepts valid UTF-8 documents. Code / structured uses the server's registered grammar for each relative path extension. Binary / media admits PNG, WAV, video, Parquet, and raw binary artifacts without UTF-8 rejection.">
+          <Select value={mode} onChange={(event) => setMode(event.target.value as ContentMode)}><option value="text">Text</option><option value="code">Code / structured source</option><option value="media">Binary / media</option></Select>
         </Field>
-        <Field label="Files" help="Selection does not upload anything. Original UTF-8 bytes, including line endings and a byte-order mark, are sent only when you start admission.">
+        <Field label="Files" help="Selection does not upload anything. Raw bytes (UTF-8 or binary media) are sent only when you start admission.">
           <Input type="file" multiple onChange={(event) => {
             for (const file of Array.from(event.target.files ?? [])) queue.add({ name: file.name, path: file.webkitRelativePath || file.name, mode,
               bytes: file.size,

@@ -8,7 +8,7 @@ if [[ "${LAPLACE_SETUP_USE_CMAKE:-true}" == true ]]; then
   source "${LAPLACE_ONEAPI_SETVARS:-/opt/intel/oneapi/setvars.sh}" --force >/dev/null 2>&1
   set -u
 fi
-export LD_LIBRARY_PATH="$laplace_ci_root/build/engine/core:$laplace_ci_root/build/engine/dynamics:$laplace_ci_root/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib:${LD_LIBRARY_PATH:-}"
 export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
 export DOTNET_CLI_USE_MSBUILD_SERVER=0 MSBUILDUSESERVER=0
 laplace_ci_cpus="$(nproc 2>/dev/null || echo 1)"

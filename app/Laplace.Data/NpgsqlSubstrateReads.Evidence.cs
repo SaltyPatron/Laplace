@@ -48,7 +48,7 @@ public static partial class NpgsqlSubstrateReads
                 WHERE cardinality(c.parts) >= 2
             ),
             testi AS MATERIALIZED (
-                SELECT t.claim, t.source, t.games::double precision AS games, t.tokens::double precision AS tokens,
+                SELECT t.claim, t.source, t.occurrences::double precision AS games, t.tokens::double precision AS tokens,
                        t.score, t.trust, t.dependence_root, t."position"
                 FROM public.laplace_testimony(ARRAY(SELECT claim FROM parsed)) t
             ),
@@ -62,6 +62,10 @@ public static partial class NpgsqlSubstrateReads
             lbls AS MATERIALIZED (
                 SELECT l.entity, l.content
                 FROM public.laplace_labels(ARRAY(SELECT id FROM ids_to_label)) l
+            ),
+            wnames AS MATERIALIZED (
+                SELECT w.witness, w.name
+                FROM public.laplace_witnesses_named() w
             )
             SELECT encode(public.blake3_send(p.claim), 'hex'),
                    CASE WHEN p.rel_id IS NULL THEN NULL ELSE encode(public.blake3_send(p.rel_id), 'hex') END,
@@ -70,13 +74,13 @@ public static partial class NpgsqlSubstrateReads
                    coalesce((SELECT content FROM lbls WHERE entity = p.peer_id LIMIT 1), encode(public.blake3_send(p.peer_id), 'hex')),
                    p.eff_mu,
                    encode(public.blake3_send(t.source), 'hex'),
-                   coalesce((SELECT content FROM lbls WHERE entity = t.source LIMIT 1), encode(public.blake3_send(t.source), 'hex')),
+                   coalesce((SELECT wn.name FROM wnames wn WHERE wn.witness = t.source LIMIT 1), (SELECT content FROM lbls WHERE entity = t.source LIMIT 1), encode(public.blake3_send(t.source), 'hex')),
                    t.games, t.tokens, t.score, t.trust,
                    CASE WHEN t.dependence_root IS NULL THEN NULL ELSE encode(public.blake3_send(t.dependence_root), 'hex') END,
                    t."position"
             FROM parsed p
             JOIN testi t ON t.claim = p.claim
-            ORDER BY p.eff_mu DESC, t.trust DESC, t.claim
+            ORDER BY p.eff_mu DESC NULLS LAST, t.trust DESC NULLS LAST, t.claim
             LIMIT greatest(0, $2)
             """;
 
@@ -156,7 +160,7 @@ public static partial class NpgsqlSubstrateReads
             FROM claims c
             JOIN testi t ON t.claim = c.claim
             WHERE cardinality(c.parts) >= 2
-            ORDER BY c.i, t.occurrences DESC
+            ORDER BY c.i, t.occurrences DESC NULLS LAST
             """;
 
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -198,9 +202,13 @@ public static partial class NpgsqlSubstrateReads
                     greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
                 LIMIT greatest(0, $3)
             ),
+            wnames AS MATERIALIZED (
+                SELECT w.witness, w.name
+                FROM public.laplace_witnesses_named() w
+            ),
             testi AS MATERIALIZED (
                 SELECT t.claim,
-                       string_agg(DISTINCT coalesce(public.laplace_label_text(public.blake3_send(t.source), true), encode(public.blake3_send(t.source), 'hex')), ', ' ORDER BY coalesce(public.laplace_label_text(public.blake3_send(t.source), true), encode(public.blake3_send(t.source), 'hex'))) AS src_labels,
+                       string_agg(DISTINCT coalesce((SELECT wn.name FROM wnames wn WHERE wn.witness = t.source LIMIT 1), public.laplace_label_text(public.blake3_send(t.source), true), encode(public.blake3_send(t.source), 'hex')), ', ' ORDER BY coalesce((SELECT wn.name FROM wnames wn WHERE wn.witness = t.source LIMIT 1), public.laplace_label_text(public.blake3_send(t.source), true), encode(public.blake3_send(t.source), 'hex'))) AS src_labels,
                        count(DISTINCT t.source)::bigint AS witnesses
                 FROM public.laplace_testimony(ARRAY(SELECT claim FROM claims)) t
                 GROUP BY t.claim
@@ -227,7 +235,7 @@ public static partial class NpgsqlSubstrateReads
             FROM anchor_check ac
             LEFT JOIN facts f ON true
             WHERE ac.entity_id IS NOT NULL
-            ORDER BY coalesce(f.eff_mu, -1e9) DESC
+            ORDER BY coalesce(f.eff_mu, -1e9) DESC NULLS LAST
             LIMIT greatest(1, $3)
             """;
 

@@ -10,6 +10,9 @@ internal static class CoreEndpoints
         app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "laplace")))
             .WithTags("core").Produces<HealthResponse>();
 
+        app.MapGet("/health/live", () => Results.Json(new HealthResponse("ok", "laplace")))
+            .WithTags("core").Produces<HealthResponse>();
+
 
 
         app.MapGet("/health/ready", async (ISubstrateClient substrate, Laplace.Ops.PersistentLogHealth logHealth, CancellationToken ct) =>

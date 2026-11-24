@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-db="${LAPLACE_DBNAME:-${PGDATABASE:-laplace-mono}}"
+db="${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}"
 bash "$root/scripts/check-database-health.sh" --installed-runtime "$db"
 count="$(psql -X -v ON_ERROR_STOP=1 -d "$db" -tAc "SELECT count(*) FROM ops.substrate_counts();")"
 [[ "${count:-0}" == "4" ]] || {

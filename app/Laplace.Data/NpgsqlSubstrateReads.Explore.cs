@@ -258,28 +258,191 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue(limit);
             }, ct: ct, label: "structural_neighbors", onError: onError);
 
-    public readonly record struct ContainerRow(string IdHex, short Tier, string? Type, int Hops, string Label);
+    public readonly record struct ContainerRow(
+        string IdHex, short Tier, string? Type, int Hops, string Label,
+        long TotalCount = 0, string? SourceIdHex = null, string? SourceLabel = null);
 
     public static async Task<IReadOnlyList<ContainerRow>> ContainersAsync(
         NpgsqlConnection conn, byte[] id, int hops, int limit, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
+        NpgsqlRead.ErrorTranslator? onError = null, int offset = 0)
     {
         const string sql = """
-            SELECT encode(public.blake3_send(a.entity), 'hex'), a.tier, NULL::text, a.hops,
-                   coalesce(public.laplace_label_text(public.blake3_send(a.entity), false), encode(public.blake3_send(a.entity), 'hex'))
-            FROM public.laplace_above(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2), greatest(1, $3)::bigint) a
+            WITH target AS MATERIALIZED (
+                SELECT public.blake3_from_bytea($1) AS bid
+            ),
+            raw_abv AS MATERIALIZED (
+                SELECT a.entity, a.tier, a.hops
+                FROM target t,
+                     public.laplace_above(ARRAY[t.bid], greatest(1, $2), greatest(1, $3 + $4 + 1)::bigint) a
+                ORDER BY a.hops ASC, a.tier ASC, a.entity ASC
+            ),
+            hc AS MATERIALIZED (
+                SELECT coalesce(sum(h.claims + h.observations), 0)::bigint AS est_total
+                FROM target t,
+                     public.laplace_holder_counts(ARRAY[t.bid]) h
+            ),
+            cnt AS MATERIALIZED (
+                SELECT count(*)::bigint AS fetched_cnt FROM raw_abv
+            ),
+            paged AS MATERIALIZED (
+                SELECT entity, tier, hops
+                FROM raw_abv
+                OFFSET greatest(0, $4)
+                LIMIT greatest(1, $3)
+            ),
+            wnames AS MATERIALIZED (
+                SELECT w.witness, w.record_id, w.name
+                FROM public.laplace_witnesses_named() w
+            )
+            SELECT encode(public.blake3_send(p.entity), 'hex'),
+                   p.tier,
+                   NULL::text,
+                   p.hops,
+                   coalesce(public.laplace_label_text(public.blake3_send(p.entity), false), encode(public.blake3_send(p.entity), 'hex')),
+                   CASE WHEN $4 = 0 AND (SELECT fetched_cnt FROM cnt) <= $3
+                        THEN (SELECT fetched_cnt FROM cnt)
+                        ELSE greatest((SELECT est_total FROM hc), (SELECT fetched_cnt FROM cnt))
+                   END,
+                   src.source_id_hex,
+                   src.source_label
+            FROM paged p
+            LEFT JOIN LATERAL (
+                WITH cand AS MATERIALIZED (
+                    SELECT p.entity AS e
+                    UNION
+                    SELECT a2.entity
+                    FROM public.laplace_above(ARRAY[p.entity], 4, 20) a2
+                )
+                SELECT coalesce(encode(public.blake3_send(wn.witness), 'hex'), encode(public.blake3_send(s.trunk), 'hex')) AS source_id_hex,
+                       coalesce(wn.name, encode(public.blake3_send(s.trunk), 'hex')) AS source_label
+                FROM (
+                    SELECT s.trunk, s.trust
+                    FROM public.laplace_attested_series(ARRAY(SELECT c.e FROM cand c)) s
+                    WHERE s.trunk IS NOT NULL
+                    UNION ALL
+                    SELECT wn.witness AS trunk, 1.0::double precision AS trust
+                    FROM cand c
+                    JOIN wnames wn ON wn.witness = c.e OR wn.record_id = c.e
+                ) s
+                LEFT JOIN wnames wn ON wn.witness = s.trunk
+                ORDER BY (wn.name IS NOT NULL) DESC, s.trust DESC NULLS LAST
+                LIMIT 1
+            ) src ON true
             """;
         return await NpgsqlRead.ReadRowsAsync(conn, sql,
             static r => new ContainerRow(
                 r.GetString(0), r.GetInt16(1),
                 r.IsDBNull(2) ? null : r.GetString(2),
-                r.GetInt32(3), r.GetString(4)),
+                r.GetInt32(3), r.GetString(4),
+                r.GetInt64(5),
+                r.IsDBNull(6) ? null : r.GetString(6),
+                r.IsDBNull(7) ? null : r.GetString(7)),
             p =>
             {
                 p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = id });
                 p.AddWithValue(hops);
                 p.AddWithValue(limit);
+                p.AddWithValue(Math.Max(0, offset));
             }, ct: ct, label: "containers", onError: onError).ConfigureAwait(false);
+    }
+
+    public static async Task<NpgsqlSubstrateReads.ResolvedRefRow?> ResolveSalientWordAsync(
+        NpgsqlDataSource dataSource, IReadOnlyList<string> words,
+        CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        if (words.Count == 0) return null;
+        var prepared = words.Select(w => (Id: Laplace.Engine.Core.Hash128.Text(w).ToBytes(), Surface: w)).ToArray();
+        const string sql = """
+            WITH resolved AS MATERIALIZED (
+                SELECT ordinal, id, label, present
+                FROM public.laplace_resolve_refs($1, $2)
+                WHERE present
+            ),
+            scored AS MATERIALIZED (
+                SELECT s.id, s.salience, s.info_bits
+                FROM public.laplace_salience(ARRAY(SELECT public.blake3_from_bytea(r.id) FROM resolved r)) s
+            )
+            SELECT r.id, r.label, sc.salience, sc.info_bits
+            FROM resolved r
+            JOIN scored sc ON sc.id = public.blake3_from_bytea(r.id)
+            ORDER BY sc.salience DESC, sc.info_bits DESC, r.ordinal
+            LIMIT 1
+            """;
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, sql,
+            static r => (
+                Id: r.GetFieldValue<byte[]>(0),
+                Label: r.GetString(1),
+                Salience: r.GetDouble(2),
+                InfoBits: r.GetDouble(3)),
+            p =>
+            {
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea, Value = prepared.Select(x => x.Id).ToArray() });
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text, Value = prepared.Select(x => x.Surface).ToArray() });
+            }, ct: ct, label: "resolve_salient_word", onError: onError).ConfigureAwait(false);
+        if (rows.Count == 0) return null;
+        var top = rows[0];
+        return top.Salience >= 0.30 && top.InfoBits > 0.0
+            ? new NpgsqlSubstrateReads.ResolvedRefRow(top.Id, top.Label)
+            : null;
+    }
+
+    public readonly record struct ShapeCurvePointRow(
+        int Side, int Ordinal, double X, double Y, double Z, double M,
+        double? Frechet, double? Dtw, double? Hausdorff);
+
+    public static Task<IReadOnlyList<ShapeCurvePointRow>> CompareShapeCurvesAsync(
+        NpgsqlConnection conn, byte[] xId, byte[] yId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        const string sql = """
+            WITH pair AS MATERIALIZED (
+                SELECT 1 AS side, public.blake3_from_bytea($1) AS bid
+                UNION ALL
+                SELECT 2 AS side, public.blake3_from_bytea($2) AS bid
+            ),
+            curves AS MATERIALIZED (
+                SELECT p.side, p.bid, ST_GeomFromEWKB(c.curve_ewkb) AS geom
+                FROM pair p
+                LEFT JOIN public.laplace_curves(ARRAY[public.blake3_from_bytea($1), public.blake3_from_bytea($2)]) c
+                  ON c.entity = p.bid
+            ),
+            metrics AS MATERIALIZED (
+                SELECT CASE WHEN a.geom IS NOT NULL AND b.geom IS NOT NULL
+                            THEN public.laplace_frechet4d(a.geom, b.geom) END AS frechet,
+                       CASE WHEN a.geom IS NOT NULL AND b.geom IS NOT NULL
+                            THEN public.laplace_dtw4d(a.geom, b.geom) END AS dtw,
+                       CASE WHEN a.geom IS NOT NULL AND b.geom IS NOT NULL
+                            THEN public.laplace_hausdorff4d(a.geom, b.geom) END AS hausdorff
+                FROM (SELECT geom FROM curves WHERE side = 1 LIMIT 1) a
+                CROSS JOIN (SELECT geom FROM curves WHERE side = 2 LIMIT 1) b
+            )
+            SELECT c.side,
+                   (dp.path)[1]::int,
+                   ST_X(dp.geom)::float8,
+                   ST_Y(dp.geom)::float8,
+                   ST_Z(dp.geom)::float8,
+                   ST_M(dp.geom)::float8,
+                   m.frechet,
+                   m.dtw,
+                   m.hausdorff
+            FROM curves c
+            CROSS JOIN metrics m
+            CROSS JOIN LATERAL ST_DumpPoints(c.geom) AS dp
+            WHERE c.geom IS NOT NULL
+            ORDER BY c.side, (dp.path)[1]::int
+            """;
+        return NpgsqlRead.ReadRowsAsync(conn, sql,
+            static r => new ShapeCurvePointRow(
+                r.GetInt32(0), r.GetInt32(1),
+                r.GetDouble(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5),
+                r.IsDBNull(6) ? null : r.GetDouble(6),
+                r.IsDBNull(7) ? null : r.GetDouble(7),
+                r.IsDBNull(8) ? null : r.GetDouble(8)),
+            p =>
+            {
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = xId });
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = yId });
+            }, ct: ct, label: "compare_shape_curves", onError: onError);
     }
 
     public readonly record struct EmbeddingLookupRow(
@@ -315,16 +478,19 @@ public static partial class NpgsqlSubstrateReads
             ),
             coupled AS MATERIALIZED (
                 SELECT row_number() OVER (
-                    ORDER BY public.laplace_confidence(c.rating, c.deviation, 2) DESC
+                    ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC NULLS LAST
                 ) AS ord,
-                c.rel, c.entity, public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
-                s.matches AS witnesses
+                c.rel, c.entity, c.via,
+                public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu
                 FROM public.laplace_couple(
                     ARRAY(SELECT DISTINCT id FROM seed_ids),
                     greatest(8, $2)::bigint,
                     '{}'::public.blake3[], 0::smallint, 0.0, greatest(1, $2)) c
-                LEFT JOIN public.laplace_standings(ARRAY[c.via]) s ON s.claim = c.via
                 WHERE $3 AND $2 > 0
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT via FROM coupled WHERE via IS NOT NULL)) s
             )
             SELECT 0, 0::bigint, id_raw, x, y, z, m, radius, path_len,
                    NULL::text, NULL::text, NULL::numeric, NULL::bigint
@@ -335,8 +501,9 @@ public static partial class NpgsqlSubstrateReads
                    coalesce(public.laplace_label_text(public.blake3_send(c.rel), false), 'related'),
                    coalesce(public.laplace_label_text(public.blake3_send(c.entity), false), encode(public.blake3_send(c.entity), 'hex')),
                    c.eff_mu,
-                   coalesce(c.witnesses, 1)::bigint
+                   coalesce(st.matches, 1)::bigint
             FROM coupled c
+            LEFT JOIN standings st ON st.claim = c.via
             ORDER BY 1, 2
             """;
 
@@ -371,22 +538,30 @@ public static partial class NpgsqlSubstrateReads
         CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
+            WITH pulled AS MATERIALIZED (
+                SELECT p.via, p.relation, p.id, p.hops, p.rating, p.deviation, p.claim
+                FROM public.laplace_pull(
+                    ARRAY[public.blake3_from_bytea($1)],
+                    NULL,
+                    greatest(1, $2),
+                    greatest(1, $3)::bigint,
+                    greatest(1, $4)::bigint) p
+                WHERE p.via IS NOT NULL AND p.claim IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
+            )
             SELECT encode(public.blake3_send(p.via), 'hex'),
                    coalesce(encode(public.blake3_send(p.relation), 'hex'), repeat('0', 32)),
                    encode(public.blake3_send(p.id), 'hex'),
                    p.hops::smallint,
                    public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint,
-                   public.laplace_confidence(p.rating, p.deviation, 2)::float8,
-                   (public.laplace_confidence(p.rating, p.deviation, 2) < 1450)
-            FROM public.laplace_pull(
-                ARRAY[public.blake3_from_bytea($1)],
-                NULL,
-                greatest(1, $2),
-                greatest(1, $3)::bigint,
-                greatest(1, $4)::bigint) p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) s ON s.claim = p.claim
-            WHERE p.via IS NOT NULL
+                   public.laplace_confidence(p.rating, p.deviation, 2::double precision)::float8,
+                   (p.rating < 1450 OR public.laplace_confidence(p.rating, p.deviation, 2::double precision) < 0.35)
+            FROM pulled p
+            LEFT JOIN standings s ON s.claim = p.claim
             """;
 
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -433,8 +608,8 @@ public static partial class NpgsqlSubstrateReads
                    rating::numeric, deviation::numeric, volatility::numeric,
                    public.laplace_confidence(rating, deviation, 2)::numeric,
                    matches,
-                   public.laplace_confidence(rating, deviation, 2)::float8,
-                   (public.laplace_confidence(rating, deviation, 2) < 1450)
+                   public.laplace_confidence(rating, deviation, 2::double precision)::float8,
+                   (rating < 1450 OR public.laplace_confidence(rating, deviation, 2::double precision) < 0.35)
             FROM parsed
             WHERE cardinality(pts) >= 2
             """;

@@ -43,8 +43,8 @@ jobs:
           LAPLACE_SETUP_USE_CMAKE: 'false'
           LAPLACE_SETUP_REQUIRE_BUILT_REVISION: 'false'
           LAPLACE_DB_HEALTH_SCOPE: installed
-          LAPLACE_DBNAME: laplace-mono
-          PGDATABASE: laplace-mono
+          LAPLACE_DBNAME: laplace
+          PGDATABASE: laplace
         run: |
           set -euo pipefail
           source scripts/ci-environment.sh

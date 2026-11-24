@@ -36,7 +36,7 @@ try {
     { name: 'entity', path: '/explore/entity/a929c9834b79516e7c85fa83e7dac137',
       requests: ['/v1/capabilities', '/v1/explore/entities/a929c9834b79516e7c85fa83e7dac137'], heading: 'Argentina' },
     { name: 'matchup', path: '/explore/matchup/pancake/quark',
-      requests: ['/v1/explore/matchup', '/v1/explore/matchup/verdict'] },
+      requests: ['/v1/explore/matchup', '/v1/explore/lexicon'] },
   ]) {
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);

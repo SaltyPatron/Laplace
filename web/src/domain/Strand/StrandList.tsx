@@ -40,9 +40,12 @@ function StrandRow({ strand, side, highlight }: { strand: Strand; side: 'to' | '
       {strand.via && <span className={styles.muted}>in <EntityChip id={strand.via.id} label={strand.via.label} /></span>}
     </div>
     <div className={styles.side}>
+      {strand.kind === 'contained-in' && strand.spiders[0] && (
+        <span className={styles.muted} data-source={strand.spiders[0].witness.id}>{strand.spiders[0].witness.label}</span>
+      )}
       {STATE_LABEL[strand.state] && <span className={styles.state} data-state={strand.state}>{STATE_LABEL[strand.state]}</span>}
       <StandingMeter strength={strand.strength} state={strand.state} />
-      {strand.spiders.length > 0 && <UnstyledButton type="button" className={styles.witnessButton} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      {strand.kind !== 'contained-in' && strand.spiders.length > 0 && <UnstyledButton type="button" className={styles.witnessButton} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {strand.spiders.length} {strand.spiders.length === 1 ? 'source' : 'sources'}{games ? ` · ${games} ${games === 1 ? 'game' : 'games'}` : ''}
       </UnstyledButton>}
     </div>

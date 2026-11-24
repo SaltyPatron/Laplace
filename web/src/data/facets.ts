@@ -132,14 +132,32 @@ async function adapt(id: string, facet: FacetName, q: FacetQuery, opts: ApiOptio
       return envelope(from, facet, items);
     }
     case 'appears-in': {
-      const limit = q.limit ?? 100;
-      const [e, read] = await Promise.all([entity(id, opts), exploreContainers(id, 1, limit, opts)]);
+      const limit = q.limit ?? 50;
+      const offset = q.cursor ? Math.max(0, Number.parseInt(q.cursor, 10) || 0) : 0;
+      const [e, read] = await Promise.all([entity(id, opts), exploreContainers(id, 1, limit, opts, offset)]);
       const from = ref(e.id_hex, e.label, e.tier ?? 0, e.type);
-      const items = read.containers.containers.map<Strand>((c) => ({
-        from, to: ref(c.entity_id_hex, c.entity_label, c.tier, c.type), kind: 'contained-in', strength: null,
-        uncertainty: null, state: 'structural', spiders: [],
-      }));
-      return envelope(from, facet, items, items.length >= limit);
+      const items = read.containers.containers.map<Strand>((c) => {
+        const sourceId = c.source_id_hex || 'recorded-source';
+        const sourceLabel = c.source_label || 'Recorded corpus';
+        return {
+          from,
+          to: ref(c.entity_id_hex, c.entity_label, c.tier, c.type),
+          kind: 'contained-in',
+          strength: null,
+          uncertainty: null,
+          state: 'structural',
+          spiders: [{ witness: ref(sourceId, sourceLabel), trust: '—', count: 1 }],
+        };
+      });
+      const total = read.containers.total_count ?? null;
+      const nextOffset = offset + items.length;
+      const hasMore = total != null ? nextOffset < total : items.length >= limit;
+      const env = envelope(from, facet, items, hasMore, total);
+      return {
+        ...env,
+        total: total ?? env.total,
+        cursor: hasMore ? String(nextOffset) : null,
+      };
     }
     case 'means': {
       const e = await entity(id, opts);

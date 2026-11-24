@@ -12,6 +12,7 @@
   .panel { display: grid; gap: var(--space-3); }
   .question { margin: 0; color: var(--color-text-muted); }
   .summary { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-medium); }
+  .pager { display: flex; gap: var(--space-2); align-items: center; }
   .note { margin: 0; color: var(--color-text-muted); }
   .link { border: 0; background: none; padding: 0; color: var(--color-accent); font: inherit; cursor: pointer; text-decoration: underline; }
 }

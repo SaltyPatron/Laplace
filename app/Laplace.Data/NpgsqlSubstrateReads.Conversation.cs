@@ -19,14 +19,22 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             WITH anchor AS (
                 SELECT public.laplace_resolve_ref($1) AS tid
+            ),
+            coupled AS MATERIALIZED (
+                SELECT c.entity, c.via, c.rating, c.deviation
+                FROM anchor a,
+                     public.laplace_couple(ARRAY[public.blake3_from_bytea(a.tid)], 32::bigint, '{}'::public.blake3[], 0::smallint, 0.0, 24) c
+                WHERE a.tid IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT via FROM coupled WHERE via IS NOT NULL)) s
             )
             SELECT coalesce(public.laplace_label_text(public.blake3_send(c.entity), false), encode(public.blake3_send(c.entity), 'hex')),
                    public.laplace_confidence(c.rating, c.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint
-            FROM anchor a,
-                 public.laplace_couple(ARRAY[public.blake3_from_bytea(a.tid)], 32::bigint, '{}'::public.blake3[], 0::smallint, 0.0, 24) c
-            LEFT JOIN public.laplace_standings(ARRAY[c.via]) s ON s.claim = c.via
-            WHERE a.tid IS NOT NULL
+            FROM coupled c
+            LEFT JOIN standings s ON s.claim = c.via
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql, MapConverseReply,
             p => p.AddWithValue(prompt),
@@ -50,20 +58,25 @@ public static partial class NpgsqlSubstrateReads
             WITH mid AS (
                 SELECT CASE WHEN $4 IS NULL OR $4 = '' THEN NULL ELSE ARRAY[public.laplace_text_id($4)] END AS rels
             ),
-            pulled AS (
+            pulled AS MATERIALIZED (
                 SELECT p.id, p.rating, p.deviation, p.claim
                 FROM mid,
                      public.laplace_pull(
                          ARRAY[public.blake3_from_bytea($2)],
                          CASE WHEN $3 IS NULL THEN NULL ELSE ARRAY[public.blake3_from_bytea($3)] END,
                          3, 32::bigint, 256::bigint, mid.rels) p
+                WHERE p.claim IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
             )
             SELECT coalesce(public.laplace_label_text(public.blake3_send(p.id), false), encode(public.blake3_send(p.id), 'hex')),
                    public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) s ON s.claim = p.claim
-            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2) DESC
+            LEFT JOIN standings s ON s.claim = p.claim
+            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2::double precision) DESC NULLS LAST
             LIMIT 40
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql, MapConverseReply,
@@ -84,16 +97,29 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH parts AS (
-                SELECT coalesce(public.laplace_parts($1), ARRAY[]::public.blake3[]) AS ids
+            WITH tid AS (
+                SELECT public.laplace_text_id($1) AS id
+            ),
+            phys AS (
+                SELECT ph.path
+                FROM tid t
+                LEFT JOIN LATERAL public.laplace_physicalities(ARRAY[t.id]) ph ON t.id IS NOT NULL
+            ),
+            parts AS (
+                SELECT coalesce(
+                    public.laplace_parts(p.path),
+                    CASE WHEN t.id IS NOT NULL THEN ARRAY[t.id] ELSE ARRAY[]::public.blake3[] END
+                ) AS ids
+                FROM tid t
+                LEFT JOIN phys p ON true
             )
             SELECT encode(public.blake3_send(f.next), 'hex'),
                    repeat('0', 32),
-                   f.times::numeric,
-                   f.paths,
+                   coalesce(f.times, 0)::numeric,
+                   coalesce(f.paths, 0)::bigint,
                    coalesce(public.laplace_label_text(public.blake3_send(f.next), false), encode(public.blake3_send(f.next), 'hex'))
             FROM parts, public.laplace_forward(parts.ids, 32::bigint) f
-            ORDER BY f.paths DESC, f.times DESC NULLS LAST
+            ORDER BY f.paths DESC NULLS LAST, f.times DESC NULLS LAST
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -117,11 +143,18 @@ public static partial class NpgsqlSubstrateReads
             WITH seed AS (
                 SELECT public.blake3_from_bytea(public.laplace_resolve_ref($1)) AS id
             ),
-            pulled AS (
+            pulled AS MATERIALIZED (
                 SELECT p.hops, p.chain, p.claims, p.id, p.rating, p.deviation, p.cost
                 FROM seed s,
                      public.laplace_pull(ARRAY[s.id], NULL, greatest(1, $2), greatest(1, $3)::bigint, 512::bigint) p
                 WHERE s.id IS NOT NULL
+                  AND p.claims IS NOT NULL
+                  AND cardinality(p.claims) > 0
+                  AND p.claims[cardinality(p.claims)] IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claims[cardinality(claims)] FROM pulled)) s
             )
             SELECT p.hops,
                    ARRAY(SELECT encode(public.blake3_send(x), 'hex') FROM unnest(coalesce(p.chain, ARRAY[]::public.blake3[])) AS x),
@@ -132,7 +165,7 @@ public static partial class NpgsqlSubstrateReads
                    p.cost::numeric,
                    coalesce(st.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claims[cardinality(p.claims)]]) st ON true
+            LEFT JOIN standings st ON st.claim = p.claims[cardinality(p.claims)]
             ORDER BY p.hops, p.cost
             LIMIT greatest(1, $3) * 8
             """;
@@ -167,11 +200,15 @@ public static partial class NpgsqlSubstrateReads
             mid AS (
                 SELECT CASE WHEN $3 IS NULL OR $3 = '' THEN NULL ELSE ARRAY[public.laplace_text_id($3)] END AS rels
             ),
-            pulled AS (
+            pulled AS MATERIALIZED (
                 SELECT p.hops, p.chain, p.rating, p.deviation, p.cost, p.claim
                 FROM seed s, mid m,
                      public.laplace_pull(ARRAY[s.id], NULL, greatest(1, $4), greatest(1, $5)::bigint, 512::bigint, m.rels) p
-                WHERE s.id IS NOT NULL
+                WHERE s.id IS NOT NULL AND p.claim IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
             )
             SELECT p.hops,
                    array_to_string(ARRAY(
@@ -182,7 +219,7 @@ public static partial class NpgsqlSubstrateReads
                    p.cost::numeric,
                    coalesce(st.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) st ON st.claim = p.claim
+            LEFT JOIN standings st ON st.claim = p.claim
             ORDER BY p.hops, p.cost
             LIMIT 100
             """;
@@ -239,12 +276,20 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
+            WITH coupled AS MATERIALIZED (
+                SELECT c.entity, c.via, c.rating, c.deviation
+                FROM public.laplace_couple(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, '{}'::public.blake3[], 0::smallint, 0.0, greatest(1, $2)) c
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT via FROM coupled WHERE via IS NOT NULL)) s
+            )
             SELECT coalesce(public.laplace_label_text(public.blake3_send(c.entity), false), encode(public.blake3_send(c.entity), 'hex')),
                    public.laplace_confidence(c.rating, c.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint
-            FROM public.laplace_couple(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, '{}'::public.blake3[], 0::smallint, 0.0, greatest(1, $2)) c
-            LEFT JOIN public.laplace_standings(ARRAY[c.via]) s ON s.claim = c.via
-            ORDER BY public.laplace_confidence(c.rating, c.deviation, 2) DESC
+            FROM coupled c
+            LEFT JOIN standings s ON s.claim = c.via
+            ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC NULLS LAST
             LIMIT greatest(0, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql, MapConverseReply,
@@ -269,10 +314,15 @@ public static partial class NpgsqlSubstrateReads
             WITH mid AS (
                 SELECT CASE WHEN $2 IS NULL OR $2 = '' THEN NULL ELSE ARRAY[public.laplace_text_id($2)] END AS rels
             ),
-            pulled AS (
+            pulled AS MATERIALIZED (
                 SELECT p.chain, p.rating, p.deviation, p.claim
                 FROM mid m,
                      public.laplace_pull(ARRAY[public.blake3_from_bytea($1)], NULL, greatest(1, $3), greatest(1, $4)::bigint, 512::bigint, m.rels) p
+                WHERE p.claim IS NOT NULL
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
             )
             SELECT array_to_string(ARRAY(
                        SELECT coalesce(public.laplace_label_text(public.blake3_send(x), false), encode(public.blake3_send(x), 'hex'))
@@ -281,8 +331,8 @@ public static partial class NpgsqlSubstrateReads
                    public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) s ON s.claim = p.claim
-            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2) DESC
+            LEFT JOIN standings s ON s.claim = p.claim
+            ORDER BY public.laplace_confidence(p.rating, p.deviation, 2::double precision) DESC NULLS LAST
             LIMIT greatest(0, $5)
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql, MapConverseReply,
@@ -302,13 +352,17 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH pulled AS (
+            WITH pulled AS MATERIALIZED (
                 SELECT p.chain, p.rating, p.deviation, p.claim, p.cost
                 FROM public.laplace_pull(
                     ARRAY[public.blake3_from_bytea($1)],
                     ARRAY[public.blake3_from_bytea($2)],
                     greatest(1, $3), 64::bigint, 1024::bigint) p
                 WHERE p.goal
+            ),
+            standings AS MATERIALIZED (
+                SELECT s.claim, s.matches
+                FROM public.laplace_standings(ARRAY(SELECT DISTINCT claim FROM pulled WHERE claim IS NOT NULL)) s
             )
             SELECT array_to_string(ARRAY(
                        SELECT coalesce(public.laplace_label_text(public.blake3_send(x), false), encode(public.blake3_send(x), 'hex'))
@@ -317,7 +371,7 @@ public static partial class NpgsqlSubstrateReads
                    public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint
             FROM pulled p
-            LEFT JOIN public.laplace_standings(ARRAY[p.claim]) s ON s.claim = p.claim
+            LEFT JOIN standings s ON s.claim = p.claim
             ORDER BY p.cost ASC
             LIMIT 20
             """;
@@ -340,7 +394,7 @@ public static partial class NpgsqlSubstrateReads
                    f.times::numeric,
                    f.paths
             FROM public.laplace_forward(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint) f
-            ORDER BY f.paths DESC, f.times DESC NULLS LAST
+            ORDER BY f.paths DESC NULLS LAST, f.times DESC NULLS LAST
             LIMIT greatest(1, $2)
             """;
         return NpgsqlRead.ReadRowsAsync(dataSource, sql, MapConverseReply,

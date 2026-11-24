@@ -4,7 +4,7 @@ export interface BrowseHit {
   tier: number;
   type: string;
   matched_name_id_hex: string;
-  match_kind: 'name' | 'surface' | 'contains_all' | 'constituent';
+  match_kind: 'exact' | 'case_variant' | 'member' | 'name' | 'surface' | 'contains_all' | 'constituent';
   rating?: number | null;
   rd?: number | null;
   eff_mu?: number | null;
@@ -33,4 +33,25 @@ export interface BrowseResponse {
   query: string;
   hits: BrowseHit[];
   receipt: BrowseReceipt;
+}
+
+export interface LeaderboardHit {
+  id_hex: string;
+  label: string;
+  tier: number;
+  confidence: number;
+  rating: number;
+  deviation: number;
+  matches: number;
+  parts_json: string;
+}
+
+export interface LeaderboardResponse {
+  object: string;
+  offset: number;
+  limit: number;
+  sort: string;
+  tier?: number | null;
+  elapsed_us: number;
+  hits: LeaderboardHit[];
 }
