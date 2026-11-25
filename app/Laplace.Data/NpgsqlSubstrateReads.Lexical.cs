@@ -348,20 +348,77 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH claims AS (
-                SELECT public.laplace_parts(c.path) AS pts,
-                       public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
-                       c.matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
-                LIMIT 24
+            WITH lexical_defs AS MATERIALIZED (
+                SELECT DISTINCT ON (pr.pts[cardinality(pr.pts)])
+                       ps.pts[cardinality(ps.pts)] AS sense_id,
+                       pr.pts[cardinality(pr.pts)] AS synset_id,
+                       pd.pts[cardinality(pd.pts)] AS def_id,
+                       public.laplace_confidence(cd.rating, cd.deviation, 2)::numeric AS eff_mu,
+                       cd.matches
+                FROM public.laplace_claims_each(
+                    ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                    ARRAY[public.laplace_text_id('lexical sense')]) cs,
+                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps,
+                     public.laplace_claims_each(
+                         ARRAY[ps.pts[cardinality(ps.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[public.laplace_text_id('reference')]) cr,
+                     LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr,
+                     public.laplace_claims_each(
+                         ARRAY[pr.pts[cardinality(pr.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[public.laplace_text_id('definition of the synset')]) cd,
+                     LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
+                WHERE cardinality(ps.pts) >= 2
+                  AND cardinality(pr.pts) >= 2
+                  AND cardinality(pd.pts) >= 2
+                ORDER BY pr.pts[cardinality(pr.pts)],
+                         public.laplace_confidence(cd.rating, cd.deviation, 2) DESC,
+                         cd.matches DESC
+            ),
+            direct_defs AS MATERIALIZED (
+                SELECT pd.pts[1] AS sense_id,
+                       pd.pts[1] AS synset_id,
+                       pd.pts[cardinality(pd.pts)] AS def_id,
+                       public.laplace_confidence(cd.rating, cd.deviation, 2)::numeric AS eff_mu,
+                       cd.matches
+                FROM public.laplace_claims_each(
+                    ARRAY[public.blake3_from_bytea($1)], 12::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                    ARRAY[public.laplace_text_id('definition of the synset')]) cd,
+                     LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
+                WHERE cardinality(pd.pts) >= 2
+                  AND NOT EXISTS (SELECT 1 FROM lexical_defs)
+            ),
+            combined_defs AS MATERIALIZED (
+                SELECT sense_id, synset_id, def_id, eff_mu, matches FROM lexical_defs
+                UNION ALL
+                SELECT sense_id, synset_id, def_id, eff_mu, matches FROM direct_defs
+            ),
+            fallback_claims AS (
+                SELECT pts[1] AS sense_id,
+                       pts[cardinality(pts)] AS synset_id,
+                       pts[cardinality(pts)] AS def_id,
+                       eff_mu,
+                       matches
+                FROM (
+                    SELECT public.laplace_parts(c.path) AS pts,
+                           public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
+                           c.matches
+                    FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
+                    WHERE NOT EXISTS (SELECT 1 FROM combined_defs)
+                    LIMIT 24
+                ) raw
+                WHERE cardinality(pts) >= 2
+            ),
+            picked AS (
+                SELECT sense_id, synset_id, def_id, eff_mu, matches FROM combined_defs
+                UNION ALL
+                SELECT sense_id, synset_id, def_id, eff_mu, matches FROM fallback_claims
             )
-            SELECT encode(public.blake3_send(pts[1]), 'hex'),
-                   encode(public.blake3_send(pts[cardinality(pts)]), 'hex'),
-                   coalesce(public.laplace_label_text(public.blake3_send(pts[cardinality(pts)]), false), encode(public.blake3_send(pts[cardinality(pts)]), 'hex')),
+            SELECT encode(public.blake3_send(sense_id), 'hex'),
+                   encode(public.blake3_send(synset_id), 'hex'),
+                   coalesce(public.laplace_label_text(public.blake3_send(def_id), false), encode(public.blake3_send(def_id), 'hex')),
                    eff_mu,
                    matches
-            FROM claims
-            WHERE cardinality(pts) >= 2
+            FROM picked
             ORDER BY eff_mu DESC, matches DESC
             LIMIT 12
             """;

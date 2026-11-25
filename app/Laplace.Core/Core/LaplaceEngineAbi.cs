@@ -510,11 +510,17 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
         }
 
         string baseDir = AppContext.BaseDirectory;
+        string highwayCandidate = Path.Combine(baseDir, "share", "laplace", "highway.bin");
+        if (!File.Exists(highwayCandidate))
+        {
+            string altHighway = Path.Combine(baseDir, "share", "laplace", "tier0.highway");
+            if (File.Exists(altHighway)) highwayCandidate = altHighway;
+        }
         (string EnvName, string Candidate, bool IsDir)[] entries =
         [
             ("LAPLACE_TIER0", Path.Combine(baseDir, "share", "laplace", "tier0.bin"), false),
             ("LAPLACE_FLAGS", Path.Combine(baseDir, "share", "laplace", "tier0.flags"), false),
-            ("LAPLACE_HIGHWAY", Path.Combine(baseDir, "share", "laplace", "highway.bin"), false),
+            ("LAPLACE_HIGHWAY", highwayCandidate, false),
             ("LAPLACE_FIRMWARE", Path.Combine(baseDir, "share", "laplace", "firmware", "program.firmware"), false),
             ("LAPLACE_MANIFEST", Path.Combine(baseDir, "share", "laplace", "manifest"), true),
             ("LAPLACE_RECIPES", Path.Combine(baseDir, "share", "laplace", "recipes"), true),

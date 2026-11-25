@@ -323,16 +323,26 @@ public static class LaplaceInstall
             if (!File.Exists(path)) throw new FileNotFoundException("The selected Native highway cache does not exist.", path);
             return path;
         }
-        var bundled = Path.Combine(AppContext.BaseDirectory, "share", "laplace", "highway.bin");
-        if (File.Exists(bundled)) return bundled;
+        foreach (var fileName in new[] { "highway.bin", "tier0.highway" })
+        {
+            var bundled = Path.Combine(AppContext.BaseDirectory, "share", "laplace", fileName);
+            if (File.Exists(bundled)) return bundled;
+        }
 
         if (TryResolveEngineBuildRoot(out var build))
         {
-            var packaged = Path.Combine(build, "core", "perfcache", "highway.bin");
-            if (File.Exists(packaged)) return Path.GetFullPath(packaged);
+            foreach (var fileName in new[] { "highway.bin", "tier0.highway" })
+            {
+                var packaged = Path.Combine(build, "core", "perfcache", fileName);
+                if (File.Exists(packaged)) return Path.GetFullPath(packaged);
+            }
         }
-        var sibling = Path.Combine(Path.GetDirectoryName(ResolveT0Perfcache())!, "highway.bin");
-        if (File.Exists(sibling)) return Path.GetFullPath(sibling);
+        var t0Dir = Path.GetDirectoryName(ResolveT0Perfcache())!;
+        foreach (var fileName in new[] { "tier0.highway", "highway.bin" })
+        {
+            var sibling = Path.Combine(t0Dir, fileName);
+            if (File.Exists(sibling)) return Path.GetFullPath(sibling);
+        }
         var prefix = Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX");
         var installed = Path.Combine(string.IsNullOrWhiteSpace(prefix) ? InstallRoot : prefix, "share", "laplace", "highway.bin");
         if (File.Exists(installed)) return Path.GetFullPath(installed);
