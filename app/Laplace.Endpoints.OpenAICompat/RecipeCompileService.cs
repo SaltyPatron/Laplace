@@ -10,7 +10,11 @@ internal sealed record RecipeCompileResult(
     string Structure,
     string HiddenSize,
     int NumLayers,
-    string CompileMode);
+    string CompileMode,
+    int NumHeads = 0,
+    int NumKvHeads = 0,
+    int IntermediateSize = 0,
+    bool TieEmbeddings = false);
 
 internal interface IRecipeCompileService
 {
@@ -46,6 +50,8 @@ internal sealed class RecipeCompileService : IRecipeCompileService
             throw new InvalidOperationException("recipe requires a non-empty layers[] array");
 
         int layerIdx = 0;
+        int firstNumHeads = 0;
+        int firstNumKvHeads = 0;
         foreach (var layer in layersEl.EnumerateArray())
         {
             int kv = layer.TryGetProperty("kv_heads", out var kvh) && kvh.ValueKind == JsonValueKind.Number
@@ -56,8 +62,14 @@ internal sealed class RecipeCompileService : IRecipeCompileService
                 throw new InvalidOperationException($"layer {layerIdx} has no heads[]");
             foreach (var h in headsEl.EnumerateArray())
                 ValidateOperator(h);
-            if (headsEl.GetArrayLength() % kv != 0)
+            int headCount = headsEl.GetArrayLength();
+            if (headCount % kv != 0)
                 throw new InvalidOperationException($"layer {layerIdx} heads count must be divisible by kv_heads");
+            if (layerIdx == 0)
+            {
+                firstNumHeads = headCount;
+                firstNumKvHeads = kv;
+            }
             if (layer.TryGetProperty("ffn", out var ffnEl))
                 ValidateOperator(ffnEl);
             if (layer.TryGetProperty("experts", out var expEl) && expEl.ValueKind == JsonValueKind.Array)
@@ -65,6 +77,15 @@ internal sealed class RecipeCompileService : IRecipeCompileService
                     ValidateOperator(ex);
             layerIdx++;
         }
+
+        int intermediateSize = 0;
+        if (root.TryGetProperty("intermediate_size", out var iszEl) && iszEl.ValueKind == JsonValueKind.Number)
+        {
+            intermediateSize = iszEl.GetInt32();
+            if (intermediateSize <= 0)
+                throw new InvalidOperationException("intermediate_size must be positive when specified.");
+        }
+        bool tieEmbeddings = root.TryGetProperty("tie_embeddings", out var teEl) && teEl.ValueKind == JsonValueKind.True;
 
         if (root.TryGetProperty("num_layers", out var nl) && nl.ValueKind == JsonValueKind.Number
             && nl.GetInt32() != layerIdx)
@@ -85,7 +106,11 @@ internal sealed class RecipeCompileService : IRecipeCompileService
             Structure: structure,
             HiddenSize: hidden,
             NumLayers: layerIdx,
-            CompileMode: compile);
+            CompileMode: compile,
+            NumHeads: firstNumHeads,
+            NumKvHeads: firstNumKvHeads,
+            IntermediateSize: intermediateSize,
+            TieEmbeddings: tieEmbeddings);
     }
 
     private static void ValidateOperator(JsonElement op)

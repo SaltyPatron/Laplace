@@ -18,7 +18,7 @@ on:
       database:
         description: "target database"
         type: choice
-        options: [laplace, laplace-mono]
+        options: [laplace]
         default: laplace
       force:
         description: "Ladder only: re-ingest every rung instead of completing only missing work"

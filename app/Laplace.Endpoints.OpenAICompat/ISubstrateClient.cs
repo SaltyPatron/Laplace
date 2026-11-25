@@ -171,6 +171,10 @@ internal interface ISubstrateClient
         IEnumerable<Hash128> wordIds, CancellationToken ct) =>
         Task.FromResult<IReadOnlyDictionary<Hash128, Hash128[]>?>(null);
 
+    Task<IReadOnlyDictionary<Hash128, double>?> ResolveWordSalienceAsync(
+        IReadOnlyList<Hash128> wordIds, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyDictionary<Hash128, double>?>(null);
+
     Task<IReadOnlyList<RoyaltyAttributionShare>> ResolveSourceAttributionAsync(
         IReadOnlyList<string> claimIdsHex,
         IReadOnlyList<string>? scopeWitnessIdsHex,

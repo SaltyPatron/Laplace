@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The monorepo's site on a machine Laplace-Operations declares (hart-server): the engine, its perf-caches and the
 # PostgreSQL extensions built against the Operations cluster, installed under $LAPLACE_INSTALL_PREFIX, the database
-# laplace-mono made and migrated, the API + SPA published to $LAPLACE_APP_DIR and restarted, and read back.
+# laplace made and migrated, the API + SPA published to $LAPLACE_APP_DIR and restarted, and read back.
 #
 # Installation, publication, maintenance and qualification share the declared
 # PostgreSQL installation, storage roots and setup-owned restart triggers.

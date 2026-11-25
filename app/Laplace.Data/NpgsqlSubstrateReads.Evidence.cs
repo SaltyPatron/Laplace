@@ -12,7 +12,7 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             WITH claims AS (
                 SELECT entity AS claim
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 256, NULL, '{}'::public.blake3[], 0::smallint)
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 256, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 0::smallint)
             )
             SELECT count(*)::bigint
             FROM public.laplace_testimony(ARRAY(SELECT claim FROM claims))
@@ -36,7 +36,7 @@ public static partial class NpgsqlSubstrateReads
             claims AS MATERIALIZED (
                 SELECT c.entity AS claim, public.laplace_parts(c.path) AS parts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu
-                FROM public.laplace_claims_each(ARRAY[(SELECT tid FROM target)], greatest(1, $2)::bigint, NULL, '{}'::public.blake3[],
+                FROM public.laplace_claims_each(ARRAY[(SELECT tid FROM target)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[],
                     CASE WHEN $3 THEN 2::smallint ELSE 1::smallint END) c
                 LIMIT greatest(0, $2)
             ),
@@ -111,7 +111,7 @@ public static partial class NpgsqlSubstrateReads
             ),
             claims AS MATERIALIZED (
                 SELECT c.i, c.entity AS claim
-                FROM public.laplace_claims_each(ARRAY(SELECT id FROM inputs), 128, NULL, '{}'::public.blake3[], 0::smallint) c
+                FROM public.laplace_claims_each(ARRAY(SELECT id FROM inputs), 128, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 0::smallint) c
             ),
             cnt AS (
                 SELECT cl.i, count(t.claim)::bigint AS cnt
@@ -144,7 +144,7 @@ public static partial class NpgsqlSubstrateReads
                 SELECT c.i, c.entity AS claim, public.laplace_parts(c.path) AS parts
                 FROM public.laplace_claims_each(
                     ARRAY(SELECT public.blake3_from_bytea(raw_id) FROM unnest($1::bytea[]) AS raw_id),
-                    greatest(1, $2)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                    greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
             ),
             testi AS MATERIALIZED (
                 SELECT claim, source, context, outcome, occurrences
@@ -199,7 +199,7 @@ public static partial class NpgsqlSubstrateReads
                        c.matches
                 FROM public.laplace_claims_each(
                     ARRAY(SELECT public.blake3_from_bytea(id_raw) FROM anchor_check WHERE entity_id IS NOT NULL),
-                    greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                    greatest(1, $3)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
                 LIMIT greatest(0, $3)
             ),
             wnames AS MATERIALIZED (

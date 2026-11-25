@@ -17,10 +17,11 @@ public static partial class NpgsqlSubstrateReads
             SELECT c.entity AS claim, public.laplace_parts(c.path) AS parts,
                    public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                    c.matches AS witnesses
-            FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(16, $2 * 2)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+            FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(16, $2 * 2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
         ),
         parsed AS (
-            SELECT parts[2] AS rel_id, parts[cardinality(parts)] AS obj_id, eff_mu, witnesses
+            SELECT CASE WHEN cardinality(parts) >= 3 THEN parts[2] ELSE public.laplace_text_id('member') END AS rel_id,
+                   parts[cardinality(parts)] AS obj_id, eff_mu, witnesses
             FROM claims
             WHERE cardinality(parts) >= 2
         )
@@ -62,7 +63,7 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             WITH claims AS (
                 SELECT rating, deviation, matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 256::bigint, NULL, '{}'::public.blake3[], 0::smallint)
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], 256::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 0::smallint)
             )
             SELECT count(*) FILTER (WHERE matches >= 2 AND rating > 1510 AND public.laplace_confidence(rating, deviation, 2::double precision) >= 0.52)::bigint,
                    count(*) FILTER (WHERE matches >= 2 AND rating BETWEEN 1480 AND 1510)::bigint,
@@ -88,19 +89,22 @@ public static partial class NpgsqlSubstrateReads
                 SELECT 0 AS side,
                        coalesce(public.laplace_label_text($1, false), encode($1, 'hex')) AS holder,
                        c.path, public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS mu
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $3)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
                 UNION ALL
                 SELECT 1 AS side,
                        coalesce(public.laplace_label_text($2, false), encode($2, 'hex')) AS holder,
                        c.path, public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS mu
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($2)], greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($2)], greatest(1, $3)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
             ),
             parsed AS (
                 SELECT holder, public.laplace_parts(path) AS parts, mu
                 FROM both_claims
             )
             SELECT holder,
-                   coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex')),
+                   CASE
+                       WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
+                       ELSE 'member'
+                   END,
                    coalesce(public.laplace_label_text(public.blake3_send(parts[cardinality(parts)]), false), encode(public.blake3_send(parts[cardinality(parts)]), 'hex')),
                    mu
             FROM parsed
@@ -138,7 +142,7 @@ public static partial class NpgsqlSubstrateReads
             direct AS (
                 SELECT c.path, c.rating, c.deviation, c.matches
                 FROM public.laplace_claims_each(
-                    ARRAY[public.blake3_from_bytea($1)], 64::bigint, NULL, '{}'::public.blake3[],
+                    ARRAY[public.blake3_from_bytea($1)], 64::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[],
                     1::smallint, NULL, 0::bigint, ARRAY[public.blake3_from_bytea($2)]) c
                 ORDER BY c.matches DESC
                 LIMIT 1
@@ -188,9 +192,12 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.laplace_parts(c.path) AS parts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
             )
-            SELECT coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex')),
+            SELECT CASE
+                       WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
+                       ELSE 'member'
+                   END,
                    coalesce(public.laplace_label_text(public.blake3_send(parts[cardinality(parts)]), false), encode(public.blake3_send(parts[cardinality(parts)]), 'hex')),
                    encode(public.blake3_send(parts[cardinality(parts)]), 'hex'),
                    eff_mu,
@@ -221,10 +228,13 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.laplace_parts(c.path) AS parts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, NULL, '{}'::public.blake3[], 2::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 2::smallint) c
             )
             SELECT encode(public.blake3_send(parts[1]), 'hex'),
-                   coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex')),
+                   CASE
+                       WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
+                       ELSE 'member'
+                   END,
                    coalesce(public.laplace_label_text(public.blake3_send(parts[1]), false), encode(public.blake3_send(parts[1]), 'hex')),
                    eff_mu,
                    matches

@@ -79,7 +79,7 @@ export function ChatTranscript({
                   {wallUs != null ? ` · ${wallUs} µs` : ''}
                   {shares.count > 0 ? ` · Σ share_bp ${shares.sumBp}/${shares.expectedBp}` : ''}
                 </summary>
-                <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>Open the full trace page</Link>
+                <Link className={styles.forwardProofLink} to={`/explore/walk?turn=${i}`}>Open the full trace page</Link>
                 <ForwardPassProofPanel proof={proof} />
               </details>
             );

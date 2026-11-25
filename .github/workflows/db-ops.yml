@@ -16,7 +16,7 @@ on:
         default: status
         options: [status, migrate, repair, reindex, remigrate, recreate]
       database:
-        description: "substrate uses the existing database controls; application selects accounts, sessions, keys and billing only"
+        description: "substrate = canonical 'laplace' database; application = accounts, sessions, keys and billing only"
         type: choice
         required: true
         default: substrate
@@ -96,6 +96,12 @@ jobs:
             bash scripts/check-database-health.sh "$PGDATABASE"
           }
 
+          sync_cache() {
+            if command -v laplace >/dev/null 2>&1; then
+              laplace deploy --configure-server-cache
+            fi
+          }
+
           reindex_invalid() {
             P(){ psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc "$1"; }
             local invalid rc remaining idx def def_recursive
@@ -153,11 +159,13 @@ jobs:
             migrate)
               bash deploy/linux/site.sh database extensions
               bash scripts/db-migrations.sh up
+              sync_cache
               health
               ;;
             repair)
               bash deploy/linux/site.sh database extensions
               bash scripts/db-migrations.sh up
+              sync_cache
               health
               ;;
             reindex)
@@ -167,10 +175,12 @@ jobs:
             remigrate)
               bash scripts/db-migrations.sh reset --yes
               bash scripts/db-migrations.sh up
+              sync_cache
               health
               ;;
             recreate)
               bash scripts/db-migrations.sh nuke --yes
+              sync_cache
               health
               ;;
             *)

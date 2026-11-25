@@ -22,6 +22,7 @@ try {
   const receipt = { file_id: 'a'.repeat(32), content_id: 'c'.repeat(32), metadata_id: 'd'.repeat(32), source_id: 'e'.repeat(32), source: 'fixture', path: 'exact.txt', bytes: original.length };
   await page.route('**/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/v1/content') return route.fulfill({ json: { source: 'fixture', items: [] } });
     if (path === '/v1/content/text/raw') {
       const request = route.request();
       calls.push({ body: request.postDataBuffer(), query: new URL(request.url()).searchParams, contentType: request.headers()['content-type'] });

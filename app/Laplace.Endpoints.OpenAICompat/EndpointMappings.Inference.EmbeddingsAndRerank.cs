@@ -120,10 +120,10 @@ internal static partial class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            GeometricTextScorer.Trace queryTrace;
+            NativeTextDecomposition.Trace queryTrace;
             try
             {
-                queryTrace = GeometricTextScorer.ComputeTrace(payload.Query);
+                queryTrace = NativeTextDecomposition.ComputeTrace(payload.Query);
             }
             catch (InvalidOperationException ex)
             {
@@ -131,24 +131,26 @@ internal static partial class InferenceEndpoints
             }
 
             var semanticPeers = await substrate.ResolveSemanticPeersAsync(queryTrace.WordIds, ct);
+            var salience = await substrate.ResolveWordSalienceAsync(queryTrace.WordIds, ct);
 
             var ranked = new List<RerankResultItem>(docs.Count);
             for (var i = 0; i < docs.Count; i++)
             {
                 var docText = docs[i];
-                var docTrace = GeometricTextScorer.ComputeTrace(docText);
-                var s = GeometricTextScorer.ScoreCandidate(queryTrace, docTrace, semanticPeers);
+                var docTrace = NativeTextDecomposition.ComputeTrace(docText);
+                var planes = ScoreCandidatePlanes(
+                    payload.Query, docText, queryTrace, docTrace, semanticPeers, salience);
 
                 ranked.Add(new RerankResultItem(
                     Index: i,
-                    RelevanceScore: Math.Round(s.RelevanceScore, 6),
+                    RelevanceScore: Math.Round(planes.WordOverlap, 6),
                     Document: payload.ReturnDocuments ? new RerankDocumentView(docText) : null,
                     Laplace: new RerankProvenance(
                         EntityId: docTrace.RootIdHex,
-                        FrechetDistance: Math.Round(s.FrechetDistance, 6),
-                        CentroidDistance: Math.Round(s.CentroidDistance, 6),
-                        WordOverlap: Math.Round(s.WordOverlap, 6),
-                        SharedWords: s.SharedWords,
+                        FrechetDistance: Math.Round(planes.FrechetDistance, 6),
+                        CentroidDistance: Math.Round(planes.CentroidDistance, 6),
+                        WordOverlap: Math.Round(planes.WordOverlap, 6),
+                        SharedWords: planes.SharedWords,
                         QueryWords: queryTrace.WordIds.Length,
                         DocumentWords: docTrace.WordIds.Length)));
             }
@@ -156,6 +158,10 @@ internal static partial class InferenceEndpoints
             ranked.Sort(static (a, b) =>
             {
                 var cmp = b.RelevanceScore.CompareTo(a.RelevanceScore);
+                if (cmp != 0) return cmp;
+                cmp = a.Laplace.FrechetDistance.CompareTo(b.Laplace.FrechetDistance);
+                if (cmp != 0) return cmp;
+                cmp = a.Laplace.CentroidDistance.CompareTo(b.Laplace.CentroidDistance);
                 return cmp != 0 ? cmp : a.Index.CompareTo(b.Index);
             });
 
@@ -185,6 +191,9 @@ internal static partial class InferenceEndpoints
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
             if (string.IsNullOrWhiteSpace(payload.Query))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'query' must be a non-empty string.");
+            if (payload.Reindex)
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "Field 'reindex=true' is not supported over HTTP; run 'laplace ingest' on the substrate.");
 
             var gate = await QuoteGate.RequireQuoteAsync(request, billing, "embeddings", ct);
             if (!gate.Allowed)
@@ -193,10 +202,10 @@ internal static partial class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
 
-            GeometricTextScorer.Trace queryTrace;
+            NativeTextDecomposition.Trace queryTrace;
             try
             {
-                queryTrace = GeometricTextScorer.ComputeTrace(payload.Query);
+                queryTrace = NativeTextDecomposition.ComputeTrace(payload.Query);
             }
             catch (InvalidOperationException ex)
             {
@@ -207,12 +216,14 @@ internal static partial class InferenceEndpoints
             var offset = Math.Max(0, payload.Offset ?? 0);
             var symbols = await substrate.SearchCodeSymbolsAsync(payload.Query, payload.Path, limit, offset, ct);
             var semanticPeers = await substrate.ResolveSemanticPeersAsync(queryTrace.WordIds, ct);
+            var salience = await substrate.ResolveWordSalienceAsync(queryTrace.WordIds, ct);
 
             var rows = symbols.Select(sym =>
             {
-                var docTrace = GeometricTextScorer.ComputeTrace($"{sym.Kind} {sym.Name}\n{sym.Snippet}");
-                var score = GeometricTextScorer.ScoreCandidate(
-                    queryTrace, docTrace, semanticPeers);
+                var docText = $"{sym.Kind} {sym.Name}\n{sym.Snippet}";
+                var docTrace = NativeTextDecomposition.ComputeTrace(docText);
+                var planes = ScoreCandidatePlanes(
+                    payload.Query, docText, queryTrace, docTrace, semanticPeers, salience);
                 return new
                 {
                     file_id = sym.FileIdHex,
@@ -222,14 +233,16 @@ internal static partial class InferenceEndpoints
                     ordinal = sym.Ordinal,
                     language = sym.Language,
                     snippet = sym.Snippet,
-                    relevance_score = Math.Round(score.RelevanceScore, 6),
-                    frechet_distance = Math.Round(score.FrechetDistance, 6),
-                    centroid_distance = Math.Round(score.CentroidDistance, 6),
-                    word_overlap = Math.Round(score.WordOverlap, 6),
-                    shared_words = score.SharedWords,
+                    relevance_score = Math.Round(planes.WordOverlap, 6),
+                    frechet_distance = Math.Round(planes.FrechetDistance, 6),
+                    centroid_distance = Math.Round(planes.CentroidDistance, 6),
+                    word_overlap = Math.Round(planes.WordOverlap, 6),
+                    shared_words = planes.SharedWords,
                 };
             })
             .OrderByDescending(r => r.relevance_score)
+            .ThenBy(r => r.frechet_distance)
+            .ThenBy(r => r.centroid_distance)
             .ThenBy(r => r.path, StringComparer.Ordinal)
             .ToArray();
 
@@ -389,5 +402,58 @@ internal static partial class InferenceEndpoints
             }
         }
         return words;
+    }
+
+    private readonly record struct CandidatePlanes(
+        double WordOverlap,
+        double FrechetDistance,
+        double CentroidDistance,
+        int SharedWords);
+
+    private static CandidatePlanes ScoreCandidatePlanes(
+        string queryText,
+        string docText,
+        NativeTextDecomposition.Trace queryTrace,
+        NativeTextDecomposition.Trace docTrace,
+        IReadOnlyDictionary<Hash128, Hash128[]>? semanticPeers,
+        IReadOnlyDictionary<Hash128, double>? salience)
+    {
+        if (string.Equals(queryText, docText, StringComparison.Ordinal))
+            return new CandidatePlanes(1.0, 0.0, 0.0, queryTrace.WordCounts.Count);
+
+        var docWordSet = docTrace.WordIds.ToHashSet();
+        int directShared = 0;
+        double matchedWeight = 0.0;
+        double totalWeight = 0.0;
+
+        foreach (var (qid, count) in queryTrace.WordCounts)
+        {
+            double info = salience is not null && salience.TryGetValue(qid, out var s) && s > 0.0 ? s : 1.0;
+            double w = count * info;
+            totalWeight += w;
+
+            if (docWordSet.Contains(qid))
+            {
+                directShared++;
+                matchedWeight += w;
+                continue;
+            }
+            if (semanticPeers is not null && semanticPeers.TryGetValue(qid, out var peers))
+            {
+                foreach (var peer in peers)
+                {
+                    if (docWordSet.Contains(peer))
+                    {
+                        matchedWeight += w * 0.65;
+                        break;
+                    }
+                }
+            }
+        }
+
+        double wordOverlap = totalWeight > 0.0 ? Math.Clamp(matchedWeight / totalWeight, 0.0, 1.0) : 0.0;
+        double frechetDist = NativeTextDecomposition.NativeFrechet4d(queryTrace.Trajectory, docTrace.Trajectory);
+        double centroidDist = NativeTextDecomposition.NativeDistance4d(queryTrace, docTrace);
+        return new CandidatePlanes(wordOverlap, frechetDist, centroidDist, directShared);
     }
 }

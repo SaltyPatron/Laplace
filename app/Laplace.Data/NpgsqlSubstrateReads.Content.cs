@@ -118,6 +118,44 @@ public static partial class NpgsqlSubstrateReads
             ct: ct, label: "packed_trajectory_vertices", onError: onError);
     }
 
+    public readonly record struct WitnessedContentRow(
+        string FileIdHex, string Label, short Tier, long Bytes);
+
+    public static Task<IReadOnlyList<WitnessedContentRow>> ListWitnessedContentAsync(
+        NpgsqlDataSource dataSource, byte[] witnessIdBytes, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        const string sql = """
+            SELECT encode(public.blake3_send(hc.entity), 'hex') AS file_id_hex,
+                   coalesce(public.laplace_label_text(public.blake3_send(hc.entity), false), encode(public.blake3_send(hc.entity), 'hex')) AS label,
+                   coalesce(hc.tier, 0::smallint) AS tier,
+                   coalesce(octet_length(public.laplace_label_text(public.blake3_send(hc.entity), false)), 0)::bigint AS bytes
+            FROM public.laplace_held_closure(
+                ARRAY[public.blake3_from_bytea($1)],
+                0::smallint, -1::bigint, 4, 2048) hc
+            WHERE hc.entity IS NOT NULL
+              AND hc.level > 0
+              AND (hc.is_file OR (hc.level = 1 AND NOT coalesce(hc.is_metadata, false)))
+            ORDER BY hc.is_file DESC, hc.level ASC, hc.node_idx DESC
+            LIMIT greatest(1, least($2, 200))
+            """;
+        return NpgsqlRead.ReadRowsAsync(dataSource, sql,
+            static r => new WitnessedContentRow(
+                r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.GetInt16(2),
+                r.IsDBNull(3) ? 0L : r.GetInt64(3)),
+            p =>
+            {
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = witnessIdBytes });
+                p.AddWithValue(Math.Clamp(limit, 1, 200));
+            },
+            timeoutSeconds: 30,
+            ct: ct,
+            label: "list_witnessed_content",
+            onError: onError);
+    }
+
     public readonly record struct RealizedTrajectoryVertexRow(
         int Ordinal, double X, double Y, double Z, double M,
         string ChildIdHex, string ChildLabel, double Radius);

@@ -147,10 +147,7 @@ try {
   await page.getByRole('textbox', { name: 'Search knowledge', exact: true }).fill('fixture');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(3);
-  // Read failures are summarized; the per-read detail sits behind a disclosure.
-  await page.getByText('Some results could not be read', { exact: false }).click();
-  await expect(page.getByText('Translation fixture unavailable', { exact: false }).first()).toBeVisible();
-  assert.deepEqual([...new Set(queryReads.map(read => read.shape))].sort(), ['band_facts', 'define', 'describe', 'translate']);
+  assert.deepEqual([...new Set(queryReads.map(read => read.shape))].sort(), ['define', 'describe']);
   await page.locator('[data-collection-master]').getByRole('link', { name: 'Fixture combined answer.', exact: true }).click();
   assert.match(new URL(page.url()).searchParams.get('answer'), /^answer:[a-f0-9]{64}$/);
   assert.ok(!page.url().includes('Fixture+combined+answer'));
@@ -218,6 +215,9 @@ try {
   assert.ok(queryReads.some(read => read.shape === 'related' && read.relation_type === 'IS_A'));
   assert.ok(queryReads.some(read => read.shape === 'translate' && read.lang === 'fr'));
   assert.ok(!queryReads.some(read => read.shape === 'generate'));
+  // Read failures are summarized; the per-read detail sits behind a disclosure.
+  await page.getByText('Some results could not be read', { exact: false }).click();
+  await expect(page.getByText('Translation fixture unavailable', { exact: false }).first()).toBeVisible();
   await page.getByRole('group', { name: 'Type', exact: true }).getByRole('checkbox', { name: 'answer', exact: false }).click();
   await expect(page.locator('[data-collection-master] tbody tr')).toHaveCount(1);
   await page.locator('[data-collection-master]').getByRole('link', { name: 'Fixture combined answer.', exact: true }).click();

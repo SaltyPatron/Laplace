@@ -24,7 +24,7 @@ on:
       database:
         description: "Target database"
         type: choice
-        options: [laplace, laplace-mono]
+        options: [laplace]
         default: laplace
       replace_existing_source:
         description: "DESTRUCTIVE, derived operations only: retract the complete derived source first"

@@ -406,15 +406,22 @@ public sealed partial class SubstrateTools : IMcpTools
         if (Opt(args, "topic2") is { } t2Ref && !string.IsNullOrWhiteSpace(t2Ref))
             topic2 = NpgsqlSubstrateReads.ResolveRefAsync(_dbReadOnly, t2Ref, default).GetAwaiter().GetResult();
 
-        var rows = NpgsqlSubstrateReads.RecallIntentAsync(
-            _dbReadOnly, shape, topic, topic2, Opt(args, "relation_type"), Opt(args, "lang"), null, default)
-            .GetAwaiter().GetResult();
-        return JsonRows(rows.Select(r => new JsonObject
+        try
         {
-            ["reply"] = r.Reply,
-            ["eff_mu"] = r.EffMu,
-            ["witnesses"] = r.Witnesses,
-        }));
+            var rows = NpgsqlSubstrateReads.RecallIntentAsync(
+                _dbReadOnly, shape, topic, topic2, Opt(args, "relation_type"), Opt(args, "lang"), null, default)
+                .GetAwaiter().GetResult();
+            return JsonRows(rows.Select(r => new JsonObject
+            {
+                ["reply"] = r.Reply,
+                ["eff_mu"] = r.EffMu,
+                ["witnesses"] = r.Witnesses,
+            }));
+        }
+        catch (ArgumentException ex)
+        {
+            return (ex.Message, true);
+        }
     }
 
     private (string, bool) Taxonomy(JsonObject? args)

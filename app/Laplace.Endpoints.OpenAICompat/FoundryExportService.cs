@@ -80,23 +80,50 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
                 nameof(format));
         var ext = requested.ToLowerInvariant();
 
+        if (!string.IsNullOrWhiteSpace(tokenizerDir))
+            throw new ArgumentException(
+                "Parameter 'tokenizer_dir' is unsupported: Mold-a-Model exports exclusively use the canonical open 'laplace-blake3-v1' Merkle vocabulary.",
+                nameof(tokenizerDir));
+
         string effectiveModel = string.IsNullOrWhiteSpace(modelName) ? "laplace-molded" : modelName.Trim();
         uint effHidden = hiddenDim;
         uint effLayers = numLayers;
+        uint effHeads = numHeads;
+        uint effKvHeads = 0;
+        uint effFfnDim = 0;
+        bool tiedEmbeddings = false;
 
         if (!string.IsNullOrWhiteSpace(recipeJson))
         {
             var compiled = _recipes.Compile(recipeJson);
+            if (!string.Equals(compiled.Structure, "dense", StringComparison.Ordinal))
+                throw new ArgumentException(
+                    $"Recipe structure '{compiled.Structure}' is not supported for native export (supported: 'dense').",
+                    nameof(recipeJson));
+
             if (string.IsNullOrWhiteSpace(modelName))
                 effectiveModel = compiled.Name;
             if (effHidden == 0 && uint.TryParse(compiled.HiddenSize, out var parsedHidden))
                 effHidden = parsedHidden;
             if (effLayers == 0 && compiled.NumLayers > 0)
                 effLayers = (uint)compiled.NumLayers;
+            if (effHeads == 0 && compiled.NumHeads > 0)
+                effHeads = (uint)compiled.NumHeads;
+            if (compiled.NumKvHeads > 0)
+                effKvHeads = (uint)compiled.NumKvHeads;
+            if (compiled.IntermediateSize > 0)
+                effFfnDim = (uint)compiled.IntermediateSize;
+            tiedEmbeddings = compiled.TieEmbeddings;
         }
-        else if (string.IsNullOrWhiteSpace(recipeIdPrefix))
+        else if (!string.IsNullOrWhiteSpace(recipeIdPrefix))
         {
-            throw new ArgumentException("Field 'recipe' is required unless 'recipe_id_prefix' is set.");
+            throw new ArgumentException(
+                "Lookup by 'recipe_id_prefix' is not supported on export; supply the compiled 'recipe' JSON directly.",
+                nameof(recipeIdPrefix));
+        }
+        else
+        {
+            throw new ArgumentException("Field 'recipe' is required.");
         }
 
         var engine = _runtime.Runtime
@@ -120,8 +147,12 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
             MaxVocab: maxVocab,
             HiddenDim: effHidden,
             NLayers: effLayers,
-            NHeads: numHeads,
-            F16Weights: f16Weights);
+            NHeads: effHeads,
+            F16Weights: f16Weights,
+            Format: string.Equals(ext, "safetensors", StringComparison.Ordinal) ? 1 : 0,
+            NKvHeads: effKvHeads,
+            FfnDim: effFfnDim,
+            TiedEmbeddings: tiedEmbeddings);
 
         ct.ThrowIfCancellationRequested();
         var res = await Task.Run(() => engine.MoldCheckpoint(moldReq), ct).ConfigureAwait(false);

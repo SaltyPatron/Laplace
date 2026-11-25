@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, LoadingText, Muted, Panel, ReadStatus, Select, UnstyledButton } from '@ui';
 import { useSectionParam } from '../layout/useSectionParam';
 import { useAppStore } from '../store';
@@ -9,7 +9,6 @@ import styles from './Admin.module.css';
 
 const IngestControl = lazy(() => import('./IngestControl').then((m) => ({ default: m.IngestControl })));
 const IngestJournal = lazy(() => import('./IngestJournal').then((m) => ({ default: m.IngestJournal })));
-const RecipeStudio = lazy(() => import('./RecipeStudio').then((m) => ({ default: m.RecipeStudio })));
 const Activity = lazy(() => import('./Activity').then((m) => ({ default: m.Activity })));
 const OpConsole = lazy(() => import('./OpConsole').then((m) => ({ default: m.OpConsole })));
 const Repair = lazy(() => import('./Repair').then((m) => ({ default: m.Repair })));
@@ -17,11 +16,10 @@ const Agents = lazy(() => import('./Agents').then((m) => ({ default: m.Agents })
 const Services = lazy(() => import('./Services').then((m) => ({ default: m.Services })));
 const AccessManagement = lazy(() => import('./AccessManagement').then((m) => ({ default: m.AccessManagement })));
 const PlatformDirectory = lazy(() => import('./AccessManagement').then((m) => ({ default: m.PlatformDirectory })));
-const SECTIONS = ['overview', 'ingest', 'recipes', 'activity', 'services', 'access', 'workspaces', 'clients', 'ops', 'repair', 'agents'] as const;
+const SECTIONS = ['overview', 'ingest', 'activity', 'services', 'access', 'workspaces', 'clients', 'ops', 'repair', 'agents'] as const;
 type Section = typeof SECTIONS[number];
 const tools: { id: Section; label: string; description: string; permission: string }[] = [
   { id: 'ingest', label: 'Ingestion', description: 'Choose a source, start a run, and follow its progress.', permission: 'platform.read' },
-  { id: 'recipes', label: 'Recipe Studio', description: 'Manage the corpus estate, draft recipes, check Recording Law invariants, and dry-run claims.', permission: 'platform.read' },
   { id: 'activity', label: 'System activity', description: 'Inspect active database work and long-running requests.', permission: 'platform.read' },
   { id: 'services', label: 'Services', description: 'Check and manage the MCP and Lichess services on this host.', permission: 'platform.read' },
   { id: 'access', label: 'People & roles', description: 'Find people by email and manage platform permissions.', permission: 'platform.access.manage' },
@@ -33,6 +31,8 @@ const tools: { id: Section; label: string; description: string; permission: stri
 ];
 export function AdminView() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  if (searchParams.get('section') === 'recipes') return <Navigate to="/foundry" replace />;
   const [section, setSection] = useSectionParam('section', [...SECTIONS], 'overview');
   const { authReady, authUser, authProviders, devPrincipal, servicePrincipal } = useAppStore();
   const access = useAccess();
@@ -64,6 +64,7 @@ export function AdminView() {
         <span className={styles.navGroup}>Your workspace</span>
         <Link to="/settings?section=workspace">Workspace settings</Link><Link to="/settings?section=members">Members & invitations</Link>
         <Link to="/settings?section=clients">API clients</Link><Link to="/settings?section=permissions">Roles & permissions</Link>
+        <Link to="/foundry">Foundry &amp; Recipe Studio</Link>
         {available.length > 0 && <span className={styles.navGroup}>Platform</span>}
         {available.map((tool) => <UnstyledButton key={tool.id} aria-current={section === tool.id ? 'page' : undefined} onClick={() => setSection(tool.id)}>{tool.label}</UnstyledButton>)}
       </nav>
@@ -85,7 +86,6 @@ export function AdminView() {
               {section === 'ingest' ? <><div className={styles.toolbar}><Link to="/data">Upload local files</Link><Link to="/explore/warehouse">Browse admitted sources</Link><Muted>Server ingestion affects the shared substrate.</Muted></div>
                 {permissions.includes('ingestion.manage') && <IngestControl onStarted={() => setRevision((value) => value + 1)} />}
                 <IngestJournal refreshSignal={revision} canManage={permissions.includes('ingestion.manage')} /></>
-                : section === 'recipes' ? <RecipeStudio canIngest={permissions.includes('ingestion.manage')} canMaintain={permissions.includes('platform.maintain')} />
                 : section === 'activity' ? <Activity canManage={permissions.includes('platform.maintain')} />
                 : section === 'services' ? <Services canManage={permissions.includes('services.manage')} />
                 : section === 'access' ? <AccessManagement roles={access.data?.roles ?? []} onChanged={() => void access.refresh()} />

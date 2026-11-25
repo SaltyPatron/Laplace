@@ -11,11 +11,13 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
+    private readonly EngineRuntimeService? _engineRuntime;
 
-    public SubstrateClient() : this(null) { }
+    public SubstrateClient() : this(null, null) { }
 
-    internal SubstrateClient(string? baseConnectionString)
+    internal SubstrateClient(string? baseConnectionString, EngineRuntimeService? engineRuntime = null)
     {
+        _engineRuntime = engineRuntime;
         _dataSource = baseConnectionString is null
             ? LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
             {
@@ -46,6 +48,56 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     public Task<IReadOnlyDictionary<Hash128, Hash128[]>?> ResolveSemanticPeersAsync(
         IEnumerable<Hash128> wordIds, CancellationToken ct) =>
         Laplace.Mcp.SubstrateTools.ResolveSemanticPeersOptionalAsync(_dataSourceReadOnly, wordIds, ct);
+
+    public async Task<IReadOnlyDictionary<Hash128, double>?> ResolveWordSalienceAsync(
+        IReadOnlyList<Hash128> wordIds, CancellationToken ct)
+    {
+        if (wordIds.Count == 0)
+            return new Dictionary<Hash128, double>();
+        try
+        {
+            return await NpgsqlSubstrateReads.ComputeSalienceAsync(
+                _dataSourceReadOnly, wordIds, ct, TranslateSubstrateError).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException or SubstrateUnavailableException or SubstrateQueryException)
+        {
+            if (ct.IsCancellationRequested) throw;
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex, "Word salience lookup failed; continuing without salience weighting.");
+            return null;
+        }
+    }
+
+    public async Task<IReadOnlyList<CodeSymbolHit>> SearchCodeSymbolsAsync(
+        string query, string? path, int limit, int offset, CancellationToken ct)
+    {
+        var trace = NativeTextDecomposition.ComputeTrace(query);
+        var termBytes = trace.WordIds
+            .Where(static id => id != default)
+            .Distinct()
+            .Take(64)
+            .Select(static id => id.ToBytes())
+            .ToArray();
+        if (termBytes.Length == 0)
+            return Array.Empty<CodeSymbolHit>();
+
+        var rows = await NpgsqlSubstrateReads.SearchCodeFilesAsync(
+            _dataSourceReadOnly, termBytes, path, limit, offset, ct, TranslateSubstrateError).ConfigureAwait(false);
+
+        return rows.Select(static r =>
+        {
+            string fileName = Path.GetFileName(r.FilePath);
+            string ext = Path.GetExtension(r.FilePath).TrimStart('.');
+            int matchedCount = System.Numerics.BitOperations.PopCount((ulong)r.MatchedKeys);
+            return new CodeSymbolHit(
+                FileIdHex: r.FileIdHex,
+                FilePath: r.FilePath,
+                Kind: $"tier-{r.UnitTier}",
+                Name: string.IsNullOrEmpty(fileName) ? r.UnitIdHex[..Math.Min(12, r.UnitIdHex.Length)] : fileName,
+                Ordinal: matchedCount,
+                Snippet: r.Snippet,
+                Language: ext);
+        }).ToArray();
+    }
 
 
 

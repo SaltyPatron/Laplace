@@ -45,3 +45,13 @@ public sealed record UserContentExportResponse(
     [property: JsonPropertyName("content_base64")] string ContentBase64,
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("bytes")] long Bytes);
+
+public sealed record UserContentListItem(
+    [property: JsonPropertyName("file_id")] string FileId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("tier")] short Tier,
+    [property: JsonPropertyName("bytes")] long Bytes);
+
+public sealed record UserContentListResponse(
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("items")] IReadOnlyList<UserContentListItem> Items);

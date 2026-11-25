@@ -89,7 +89,9 @@ internal static class AppComposition
             .Configure<BrowserTicketStore>((options, tickets) => options.SessionStore = tickets);
 
         services.AddSingleton<ITenantResolver, ApiKeyTenantResolver>();
-        services.AddSingleton<SubstrateClient>();
+        services.AddSingleton(sp => new SubstrateClient(
+            baseConnectionString: null,
+            engineRuntime: sp.GetRequiredService<EngineRuntimeService>()));
         services.AddSingleton<ISubstrateClient>(sp => sp.GetRequiredService<SubstrateClient>());
         services.AddSingleton(sp =>
         {

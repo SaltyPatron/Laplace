@@ -28,20 +28,24 @@ public static partial class NpgsqlSubstrateReads
                        public.laplace_parts(c.path) AS pts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches AS witnesses
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, NULL, '{}'::public.blake3[], 1::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
             ),
             in_claims AS (
                 SELECT 'down'::text AS dir,
                        public.laplace_parts(c.path) AS pts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches AS witnesses
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $3)::bigint, NULL, '{}'::public.blake3[], 2::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $3)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 2::smallint) c
             ),
             all_links AS (
-                SELECT dir, pts[cardinality(pts)] AS peer_id, pts[2] AS rel_id, eff_mu, witnesses
+                SELECT dir, pts[cardinality(pts)] AS peer_id,
+                       CASE WHEN cardinality(pts) >= 3 THEN pts[2] ELSE public.laplace_text_id('member') END AS rel_id,
+                       eff_mu, witnesses
                 FROM out_claims WHERE cardinality(pts) >= 2
                 UNION ALL
-                SELECT dir, pts[1] AS peer_id, pts[2] AS rel_id, eff_mu, witnesses
+                SELECT dir, pts[1] AS peer_id,
+                       CASE WHEN cardinality(pts) >= 3 THEN pts[2] ELSE public.laplace_text_id('member') END AS rel_id,
+                       eff_mu, witnesses
                 FROM in_claims WHERE cardinality(pts) >= 2
             )
             SELECT dir, id_hex, label, relation, hub_type, eff_mu, witnesses FROM self_row
@@ -558,8 +562,8 @@ public static partial class NpgsqlSubstrateReads
                    p.hops::smallint,
                    public.laplace_confidence(p.rating, p.deviation, 2)::numeric,
                    coalesce(s.matches, 1)::bigint,
-                   public.laplace_confidence(p.rating, p.deviation, 2::double precision)::float8,
-                   (p.rating < 1450 OR public.laplace_confidence(p.rating, p.deviation, 2::double precision) < 0.35)
+                   public.laplace_confidence(p.rating, p.deviation, 0::double precision)::float8,
+                   (p.rating < 1450.0)
             FROM pulled p
             LEFT JOIN standings s ON s.claim = p.claim
             """;
@@ -595,7 +599,7 @@ public static partial class NpgsqlSubstrateReads
                 SELECT DISTINCT c.entity AS claim, c.path, c.rating, c.deviation, c.volatility, c.matches
                 FROM public.laplace_claims_each(
                     ARRAY(SELECT id FROM node_ids),
-                    32::bigint, NULL, '{}'::public.blake3[], 1::smallint,
+                    32::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     NULL, 0::bigint, ARRAY(SELECT id FROM node_ids)) c
             ),
             parsed AS (
@@ -603,13 +607,13 @@ public static partial class NpgsqlSubstrateReads
                 FROM claims
             )
             SELECT encode(public.blake3_send(pts[1]), 'hex'),
-                   encode(public.blake3_send(pts[2]), 'hex'),
+                   encode(public.blake3_send(CASE WHEN cardinality(pts) >= 3 THEN pts[2] ELSE public.laplace_text_id('member') END), 'hex'),
                    encode(public.blake3_send(pts[cardinality(pts)]), 'hex'),
                    rating::numeric, deviation::numeric, volatility::numeric,
                    public.laplace_confidence(rating, deviation, 2)::numeric,
                    matches,
-                   public.laplace_confidence(rating, deviation, 2::double precision)::float8,
-                   (rating < 1450 OR public.laplace_confidence(rating, deviation, 2::double precision) < 0.35)
+                   public.laplace_confidence(rating, deviation, 0::double precision)::float8,
+                   (rating < 1450.0)
             FROM parsed
             WHERE cardinality(pts) >= 2
             """;

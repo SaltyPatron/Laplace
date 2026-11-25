@@ -20,7 +20,6 @@ const loadPlay = () => import('./chess/ChessView');
 const loadLab = () => import('./chess/lab/LabView');
 const loadChess = () => import('./chess/db/ChessDbView');
 const loadExplore = () => import('./explore/ExploreView');
-const loadForwardProof = () => import('./forward/ForwardProofView');
 const loadOperator = () => import('./admin/AdminView');
 const loadData = () => import('./data/DataView');
 const loadFoundry = () => import('./foundry/FoundryView');
@@ -36,8 +35,12 @@ const ChessView = lazy(() => loadPlay().then((m) => ({ default: m.ChessView })))
 const LabView = lazy(() => loadLab().then((m) => ({ default: m.LabView })));
 const ChessDbView = lazy(() => loadChess().then((m) => ({ default: m.ChessDbView })));
 const ExploreView = lazy(() => loadExplore().then((m) => ({ default: m.ExploreView })));
-const ForwardProofView = lazy(() => loadForwardProof().then((m) => ({ default: m.ForwardProofView })));
 const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
+
+function ForwardProofRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/explore/walk${search}`} replace />;
+}
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
 const FoundryView = lazy(() => loadFoundry().then((m) => ({ default: m.FoundryView })));
 const CodeView = lazy(() => loadCode().then((m) => ({ default: m.CodeView })));
@@ -101,7 +104,7 @@ function Shell() {
           <Route path="/topic/:ref" element={<ExploreView page="topic" />} />
           <Route path="/proof" element={<ExploreView page="proof" />} />
           <Route path="/unicode" element={<ExploreView page="unicode" />} />
-          <Route path="/forward-proof" element={<ForwardProofView />} />
+          <Route path="/forward-proof" element={<ForwardProofRedirect />} />
           <Route path="/chess/*" element={<ChessSection><ChessDbView /></ChessSection>} />
           <Route path="/play" element={<ChessSection><ChessView /></ChessSection>} />
           <Route path="/lab/*" element={<ChessSection><LabView /></ChessSection>} />

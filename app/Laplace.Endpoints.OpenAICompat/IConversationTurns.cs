@@ -132,7 +132,7 @@ internal sealed class EngineConversationTurns : IConversationTurns
                 ? new string('0', 32)
                 : result.PromptId.ToHex();
 
-            var steps = BuildSteps(response, responseIdHex, result.TopSalience, result.MeanConfidence);
+            var steps = MapNativeSteps(result, response, responseIdHex);
             foreach (var s in steps)
                 step?.Invoke(s);
 
@@ -152,8 +152,8 @@ internal sealed class EngineConversationTurns : IConversationTurns
                 PromptId: promptIdHex,
                 ResponseId: string.IsNullOrEmpty(responseIdHex) ? null : responseIdHex,
                 TurnId: turnIdHex,
-                Ordinal: 1,
-                TurnsBefore: 0,
+                Ordinal: result.Ordinal > 0 ? result.Ordinal : 1,
+                TurnsBefore: result.TurnsBefore,
                 Response: response,
                 Disposition: result.Disposition,
                 Witnessed: witnessed,
@@ -171,28 +171,40 @@ internal sealed class EngineConversationTurns : IConversationTurns
         }
     }
 
-    private static IReadOnlyList<NativeTurnStep> BuildSteps(
-        string response, string responseIdHex, double topSalience, double meanConfidence)
+    private static IReadOnlyList<NativeTurnStep> MapNativeSteps(
+        EngineTurnResponse result, string response, string responseIdHex)
     {
+        if (result.Steps is { Count: > 0 } nativeSteps)
+        {
+            var mapped = new List<NativeTurnStep>(nativeSteps.Count);
+            foreach (var ns in nativeSteps)
+            {
+                mapped.Add(new NativeTurnStep(
+                    Step: ns.Step,
+                    Kind: string.IsNullOrEmpty(ns.Kind) ? "answers" : ns.Kind,
+                    Id: ns.EntityId == Hash128.Zero ? new string('0', 32) : ns.EntityId.ToHex(),
+                    Text: ns.Text,
+                    Grounds: ns.Grounds,
+                    Continuity: ns.Continuity,
+                    Confidence: ns.Confidence));
+            }
+            return mapped;
+        }
+
         if (string.IsNullOrEmpty(response))
             return Array.Empty<NativeTurnStep>();
 
-        var parts = response.Split(' ');
-        var list = new List<NativeTurnStep>(parts.Length);
-        string stepId = string.IsNullOrEmpty(responseIdHex) ? new string('0', 32) : responseIdHex;
-        for (int i = 0; i < parts.Length; i++)
-        {
-            string piece = i == 0 ? parts[i] : " " + parts[i];
-            list.Add(new NativeTurnStep(
-                Step: i + 1,
-                Kind: "answers",
-                Id: stepId,
-                Text: piece,
-                Grounds: topSalience,
-                Continuity: i,
-                Confidence: meanConfidence));
-        }
-        return list;
+        return
+        [
+            new NativeTurnStep(
+                Step: 1,
+                Kind: result.OodaRoundsRun > 0 ? "ooda" : "answers",
+                Id: string.IsNullOrEmpty(responseIdHex) ? new string('0', 32) : responseIdHex,
+                Text: response,
+                Grounds: result.TopSalience,
+                Continuity: 0,
+                Confidence: result.MeanConfidence),
+        ];
     }
 
     private SemaphoreSlim Gate(string participant, string session) =>

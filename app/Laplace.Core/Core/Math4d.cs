@@ -114,7 +114,7 @@ public static unsafe class Math4d
         int n = target.Length / 4;
         if (m == 0 || n == 0) return double.PositiveInfinity;
 
-        double fullDist = DiscreteFrechetManaged(query, m, target, n, freeTargetEndpoints: false);
+        double fullDist = Frechet(query, target);
         if (fullDist <= 1e-9 || (m == 1 && n == 1))
             return fullDist;
 
@@ -281,14 +281,8 @@ public static unsafe class Math4d
         return bestEnd;
     }
 
-    private static double Dist4d(ReadOnlySpan<double> a, ReadOnlySpan<double> b)
-    {
-        double dx = a[0] - b[0];
-        double dy = a[1] - b[1];
-        double dz = a[2] - b[2];
-        double dm = a[3] - b[3];
-        return Math.Sqrt(dx * dx + dy * dy + dz * dz + dm * dm);
-    }
+    private static double Dist4d(ReadOnlySpan<double> a, ReadOnlySpan<double> b) =>
+        Distance(a, b);
 
     public static int ComputeSparseEigenmap(
         ReadOnlySpan<int> rows,

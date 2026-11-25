@@ -8,12 +8,14 @@ using Laplace.Native;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Deterministic native geometric trace, Fréchet curve comparison, and UCD <c>tier0.flags</c>
-/// metadata inspection backed by <c>Laplace.Native</c> and <c>Laplace.Engine.Core</c>.
-/// Replaces the removed legacy <c>WorkspaceCodeIndex</c> prototype.
+/// Thin managed wrapper over <c>Laplace.Native</c> / <c>Laplace.Engine.Core</c> for
+/// deterministic text decomposition, 4D coordinate resolution, native Fréchet/distance
+/// metrics (<c>lp_frechet4</c>, <c>lp_distance4</c>), and <c>tier0.flags</c> inspection.
 /// </summary>
-internal static class GeometricTextScorer
+internal static class NativeTextDecomposition
 {
+    private const int MaxFrechetPoints = 64;
+
     internal sealed record Trace(
         Hash128 RootId,
         string RootIdHex,
@@ -24,14 +26,7 @@ internal static class GeometricTextScorer
         double Radius,
         double[] Trajectory,
         Hash128[] WordIds,
-        IReadOnlyDictionary<Hash128, double> WordWeights);
-
-    internal sealed record ScoreResult(
-        double RelevanceScore,
-        double FrechetDistance,
-        double CentroidDistance,
-        double WordOverlap,
-        int SharedWords);
+        IReadOnlyDictionary<Hash128, int> WordCounts);
 
     internal sealed record CodepointFlagFacet(
         string? GeneralCategory,
@@ -49,7 +44,8 @@ internal static class GeometricTextScorer
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         CodepointPerfcache.LoadDefault();
 
-        using var tree = TextDecomposer.Run(text);
+        byte[] utf8 = Encoding.UTF8.GetBytes(text);
+        using var tree = TextDecomposer.Run(utf8);
         HashComposer.Run(tree, &ResolvePerfcache);
 
         var unitIdx = tree.NaturalUnitIndex();
@@ -61,19 +57,27 @@ internal static class GeometricTextScorer
         double cm = root.Coord[3];
         double radius = Math.Sqrt(cx * cx + cy * cy + cz * cz + cm * cm);
 
-        var wordList = new List<(uint Off, Hash128 Id, double X, double Y, double Z, double M)>();
-        var weights = new Dictionary<Hash128, double>();
+        var nodeCoords = new Dictionary<Hash128, (double X, double Y, double Z, double M)>(tree.NodeCount);
         for (uint i = 0; i < tree.NodeCount; i++)
         {
             var n = tree.GetNode(i);
-            if (n.Tier != EntityTiers.Word) continue;
-            var id = n.Id;
-            wordList.Add((n.TextRangeOff, id, n.Coord[0], n.Coord[1], n.Coord[2], n.Coord[3]));
-            weights[id] = weights.TryGetValue(id, out var prev) ? prev + 1.0 : 1.0;
+            nodeCoords.TryAdd(n.Id, (n.Coord[0], n.Coord[1], n.Coord[2], n.Coord[3]));
         }
-        wordList.Sort(static (a, b) => a.Off.CompareTo(b.Off));
 
-        if (wordList.Count == 0)
+        // Native UAX #29 segments: keep word segments holding a letter or digit
+        // (tier is bottom-up composition depth and does not select words; see TextDecomposer.WordSegments).
+        var allSegments = TextDecomposer.WordSegments(utf8);
+        var wordSegments = new List<TextDecomposer.WordSegment>(allSegments.Length);
+        foreach (var seg in allSegments)
+        {
+            if (HasLetterOrDigit(utf8.AsSpan(seg.Offset, seg.Length)))
+                wordSegments.Add(seg);
+        }
+
+        if (wordSegments.Count == 0 && allSegments.Length > 0)
+            wordSegments.AddRange(allSegments);
+
+        if (wordSegments.Count == 0)
         {
             var atoms = new List<(uint Off, double X, double Y, double Z, double M)>();
             for (uint i = 0; i < tree.NodeCount; i++)
@@ -98,18 +102,24 @@ internal static class GeometricTextScorer
                 radius,
                 trajAtoms,
                 Array.Empty<Hash128>(),
-                weights);
+                new Dictionary<Hash128, int>());
         }
 
-        var trajectory = new double[wordList.Count * 4];
-        var wordIds = new Hash128[wordList.Count];
-        for (int i = 0; i < wordList.Count; i++)
+        var trajectory = new double[wordSegments.Count * 4];
+        var orderedWordIds = new List<Hash128>(wordSegments.Count);
+        var counts = new Dictionary<Hash128, int>(wordSegments.Count);
+        for (int i = 0; i < wordSegments.Count; i++)
         {
-            wordIds[i] = wordList[i].Id;
-            trajectory[i * 4] = wordList[i].X;
-            trajectory[i * 4 + 1] = wordList[i].Y;
-            trajectory[i * 4 + 2] = wordList[i].Z;
-            trajectory[i * 4 + 3] = wordList[i].M;
+            var id = wordSegments[i].Id;
+            orderedWordIds.Add(id);
+            counts[id] = counts.TryGetValue(id, out var prev) ? prev + 1 : 1;
+            if (nodeCoords.TryGetValue(id, out var pt))
+            {
+                trajectory[i * 4] = pt.X;
+                trajectory[i * 4 + 1] = pt.Y;
+                trajectory[i * 4 + 2] = pt.Z;
+                trajectory[i * 4 + 3] = pt.M;
+            }
         }
 
         return new Trace(
@@ -118,56 +128,37 @@ internal static class GeometricTextScorer
             cx, cy, cz, cm,
             radius,
             trajectory,
-            wordIds,
-            weights);
+            orderedWordIds.ToArray(),
+            counts);
     }
 
-    public static ScoreResult ScoreCandidate(
-        Trace query,
-        Trace candidate,
-        IReadOnlyDictionary<Hash128, Hash128[]>? semanticPeers = null)
+    private static bool HasLetterOrDigit(ReadOnlySpan<byte> utf8)
     {
-        var qSet = query.WordIds.ToHashSet();
-        var dSet = candidate.WordIds.ToHashSet();
-
-        int directShared = 0;
-        double weightedHits = 0.0;
-        double queryTotal = Math.Max(1.0, query.WordWeights.Values.Sum());
-
-        foreach (var (qid, weight) in query.WordWeights)
+        int i = 0;
+        while (i < utf8.Length)
         {
-            if (dSet.Contains(qid))
-            {
-                directShared++;
-                weightedHits += weight;
-                continue;
-            }
-            if (semanticPeers is not null && semanticPeers.TryGetValue(qid, out var peers))
-            {
-                foreach (var peer in peers)
-                {
-                    if (dSet.Contains(peer))
-                    {
-                        weightedHits += weight * 0.65;
-                        break;
-                    }
-                }
-            }
+            if (Rune.DecodeFromUtf8(utf8[i..], out var rune, out int consumed) != System.Buffers.OperationStatus.Done || consumed <= 0)
+                return false;
+            if (Rune.IsLetterOrDigit(rune))
+                return true;
+            i += consumed;
         }
+        return false;
+    }
 
-        double overlap = Math.Clamp(weightedHits / queryTotal, 0.0, 1.0);
-        double dx = query.Cx - candidate.Cx;
-        double dy = query.Cy - candidate.Cy;
-        double dz = query.Cz - candidate.Cz;
-        double dm = query.Cm - candidate.Cm;
-        double centroidDist = Math.Sqrt(dx * dx + dy * dy + dz * dz + dm * dm);
+    public static double NativeFrechet4d(double[] a, double[] b)
+    {
+        int lenA = Math.Min(a.Length - (a.Length % 4), MaxFrechetPoints * 4);
+        int lenB = Math.Min(b.Length - (b.Length % 4), MaxFrechetPoints * 4);
+        if (lenA == 0 || lenB == 0) return 2.0;
+        return Math4d.Frechet(a.AsSpan(0, lenA), b.AsSpan(0, lenB));
+    }
 
-        double frechetDist = DiscreteFrechet4d(query.Trajectory, candidate.Trajectory);
-        double geomScore = 1.0 / (1.0 + centroidDist);
-        double curveScore = 1.0 / (1.0 + frechetDist);
-
-        double score = overlap * 0.60 + curveScore * 0.25 + geomScore * 0.15;
-        return new ScoreResult(score, frechetDist, centroidDist, overlap, directShared);
+    public static double NativeDistance4d(Trace a, Trace b)
+    {
+        ReadOnlySpan<double> pa = [a.Cx, a.Cy, a.Cz, a.Cm];
+        ReadOnlySpan<double> pb = [b.Cx, b.Cy, b.Cz, b.Cm];
+        return Math4d.Distance(pa, pb);
     }
 
     public static CodepointFlagFacet InspectCodepointFlags(uint codepoint)
@@ -203,52 +194,13 @@ internal static class GeometricTextScorer
         }
         catch (DllNotFoundException)
         {
-            // Managed Unicode fallback when laplace native library is unavailable.
+            // Managed Unicode fallback only when the native library cannot be loaded.
         }
 
         if (gc is null && Rune.TryCreate(codepoint, out var rune))
             gc = ShortCategoryCode(Rune.GetUnicodeCategory(rune));
 
         return new CodepointFlagFacet(gc, sc, hex);
-    }
-
-    private static double DiscreteFrechet4d(double[] a, double[] b)
-    {
-        int na = a.Length / 4;
-        int nb = b.Length / 4;
-        if (na == 0 || nb == 0) return 2.0;
-
-        // Bound quadratic DP cost on long inputs.
-        na = Math.Min(na, 64);
-        nb = Math.Min(nb, 64);
-
-        var dp = new double[na, nb];
-        dp[0, 0] = Dist4(a, 0, b, 0);
-        for (int i = 1; i < na; i++)
-            dp[i, 0] = Math.Max(dp[i - 1, 0], Dist4(a, i, b, 0));
-        for (int j = 1; j < nb; j++)
-            dp[0, j] = Math.Max(dp[0, j - 1], Dist4(a, 0, b, j));
-
-        for (int i = 1; i < na; i++)
-        {
-            for (int j = 1; j < nb; j++)
-            {
-                double prev = Math.Min(dp[i - 1, j], Math.Min(dp[i - 1, j - 1], dp[i, j - 1]));
-                dp[i, j] = Math.Max(prev, Dist4(a, i, b, j));
-            }
-        }
-        return dp[na - 1, nb - 1];
-    }
-
-    private static double Dist4(double[] a, int i, double[] b, int j)
-    {
-        int ia = i * 4;
-        int ib = j * 4;
-        double d0 = a[ia] - b[ib];
-        double d1 = a[ia + 1] - b[ib + 1];
-        double d2 = a[ia + 2] - b[ib + 2];
-        double d3 = a[ia + 3] - b[ib + 3];
-        return Math.Sqrt(d0 * d0 + d1 * d1 + d2 * d2 + d3 * d3);
     }
 
     private static unsafe void EnsureFlagsMapped()

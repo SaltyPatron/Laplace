@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Muted, Panel, Stack } from '@ui';
 import { apiPost, type ApiOptions } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
 import { GatePrompt } from '../components/GatePrompt';
 import { relationWords } from '../../domain/Strand/StrandList';
+import { ForwardPassProofPanel } from '../../chat/ForwardPassProofPanel';
 import styles from './WalkPanel.module.css';
 
 /** Exact receipt shape emitted by /v1/explain/report's canonical forward pass. */
@@ -38,7 +40,9 @@ interface ForwardTraceStep {
 }
 
 export function WalkPanel() {
-  const { tenant, quoteId } = useAppStore();
+  const { tenant, quoteId, session, messages } = useAppStore();
+  const [search] = useSearchParams();
+  const requestedTurn = Number(search.get('turn') ?? '-1');
   const exploreQuote = useExploreStore((s) => s.quoteId);
   const setWalkPath = useExploreStore((s) => s.setWalkPath);
   const [prompt, setPrompt] = useState('How does lightning work?');
@@ -51,6 +55,18 @@ export function WalkPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ran, setRan] = useState(false);
+
+  const chatTurns = messages.flatMap((message, index) => {
+    if (message.role !== 'assistant' || !message.forwardProof) return [];
+    const promptMsg = [...messages.slice(0, index)].reverse().find((m) => m.role === 'user');
+    return [{
+      index,
+      prompt: promptMsg?.content ?? '',
+      response: message.content,
+      proof: message.forwardProof,
+      performance: message.performance,
+    }];
+  });
 
   const quote = exploreQuote || quoteId;
 
@@ -157,6 +173,23 @@ export function WalkPanel() {
         </Stack>
       )}
       {err ? <ErrorText>{err}</ErrorText> : null}
+      {chatTurns.length > 0 ? (
+        <Stack gap={3}>
+          <h3>Session Chat forward receipts</h3>
+          <Muted>Receipts produced by Chat turns in session <code>{session ?? 'active'}</code> (<Link to="/chat">Back to Chat</Link>).</Muted>
+          {chatTurns.map((turn, ordinal) => (
+            <details key={turn.index} open={requestedTurn === turn.index || (requestedTurn < 0 && ordinal === chatTurns.length - 1)}>
+              <summary>
+                Turn {ordinal + 1}: {turn.prompt || '(prompt)'} {turn.proof.turn_id ? `· ${turn.proof.turn_id}` : ''}
+              </summary>
+              <Stack gap={2}>
+                <Muted>Response: {turn.response || 'no realized response'}</Muted>
+                <ForwardPassProofPanel proof={turn.proof} />
+              </Stack>
+            </details>
+          ))}
+        </Stack>
+      ) : null}
     </Panel>
   );
 }

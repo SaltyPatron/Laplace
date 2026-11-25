@@ -71,16 +71,37 @@ public sealed class LiveSubstrateQueriesTests
         Assert.True(record.Confirmed + record.Contested + record.Refuted + record.Thin >= 0);
 
         var web = await NpgsqlSubstrateReads.ExploreWebAsync(
-            conn, dogId, hops: 1, fanout: 6, maxNodes: 32, timeoutSeconds: 10, CancellationToken.None);
-        Assert.NotNull(web);
+            conn, dogId, hops: 2, fanout: 12, maxNodes: 64, timeoutSeconds: 10, CancellationToken.None);
+        Assert.NotEmpty(web);
+        Assert.All(web, edge =>
+        {
+            Assert.True(edge.CompleteWeight > 0.5, $"Positive claim weight should use mu (got {edge.CompleteWeight})");
+            Assert.False(edge.Refuted);
+        });
+        var induced = await NpgsqlSubstrateReads.ExploreInducedEdgesAsync(
+            conn, [dogId, await ResolveTextIdAsync(conn, "fake")], timeoutSeconds: 10, CancellationToken.None);
+        Assert.All(induced, edge =>
+        {
+            if (edge.Rating >= 1500m) Assert.False(edge.Refuted);
+            if (edge.Rating >= 1500m) Assert.True(edge.CompleteWeight > 0.5);
+            Assert.NotEqual(edge.TypeIdHex, edge.ObjectIdHex);
+        });
 
         var taxonomy = await NpgsqlSubstrateReads.TaxonomyTreeAsync(
-            ds, dogId, depth: 2, childLimit: 10, CancellationToken.None);
-        Assert.NotNull(taxonomy);
+            ds, dogId, depth: 3, childLimit: 10, CancellationToken.None);
+        Assert.Contains(taxonomy, t => t.Dir == "self");
+        Assert.Contains(taxonomy, t => t.Dir == "up");
+        Assert.Contains(taxonomy, t => t.Dir == "down");
+        Assert.Contains(taxonomy, t => t.Dir == "up" && t.Label.Contains("canid", StringComparison.OrdinalIgnoreCase));
 
         var translations = await NpgsqlSubstrateReads.TranslationsAsync(
             ds, "dog", limit: 10, CancellationToken.None);
         Assert.NotNull(translations);
+        Assert.All(translations, t =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(t.Translation));
+            Assert.False(string.IsNullOrWhiteSpace(t.Language));
+        });
 
         var completions = await NpgsqlSubstrateReads.CompletionsAsync(
             conn, "dog", limit: 5, CancellationToken.None);
@@ -113,11 +134,67 @@ public sealed class LiveSubstrateQueriesTests
             ds, "define", salient.Id, null, null, null, null, CancellationToken.None);
         Assert.Contains(photoIntent, r => r.Reply.Contains("synthesis of compounds", StringComparison.OrdinalIgnoreCase));
 
+        // Verify RelationBandsAsync returns real bands 1..5 with real GIN holder counts (not hardcoded 233).
+        var bands = await NpgsqlSubstrateReads.RelationBandsAsync(ds, CancellationToken.None);
+        Assert.Equal(5, bands.Count);
+        Assert.All(bands, b => Assert.NotEqual(233L, b.RelationTypes));
+        Assert.Contains(bands, b => b.Band == 1 && b.ConsensusRows > 0);
+        Assert.Contains(bands, b => b.Band == 2 && b.ConsensusRows > 0);
+        Assert.Contains(bands, b => b.Band == 3 && b.ConsensusRows > 0);
+
+        // Verify RecallIntentAsync dispatches distinct real operators per shape and fails loud on invalid shapes/args.
+        var whatIsDog = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "what_is", dogId, null, null, null, null, CancellationToken.None);
+        Assert.NotEmpty(whatIsDog);
+        Assert.Contains(whatIsDog, r => r.Reply.Contains("canid", StringComparison.OrdinalIgnoreCase));
+
+        var relatedDog = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "related", dogId, null, "lexical sense", null, null, CancellationToken.None);
+        Assert.NotEmpty(relatedDog);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            NpgsqlSubstrateReads.RecallIntentAsync(ds, "related", dogId, null, null, null, null, CancellationToken.None));
+
+        var canineId = await ResolveTextIdAsync(conn, "canine");
+        var isADogCanine = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "is_a", dogId, canineId, null, null, null, CancellationToken.None);
+        Assert.NotEmpty(isADogCanine);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            NpgsqlSubstrateReads.RecallIntentAsync(ds, "is_a", dogId, null, null, null, null, CancellationToken.None));
+
+        var reasonDogCat = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "reason", dogId, catId, null, null, null, CancellationToken.None);
+        Assert.Contains(reasonDogCat, r => r.Reply.Contains(" -> ", StringComparison.Ordinal));
+
+        var walkDog = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "walk", dogId, null, null, null, null, CancellationToken.None);
+        Assert.Contains(walkDog, r => r.Reply.Contains(" -> ", StringComparison.Ordinal));
+
+        _ = await NpgsqlSubstrateReads.RecallIntentAsync(
+            ds, "complete", dogId, null, null, null, null, CancellationToken.None);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            NpgsqlSubstrateReads.RecallIntentAsync(ds, "nonexistent_shape", dogId, null, null, null, null, CancellationToken.None));
+
+        // Verify BandFactsAsync filters distinctly by band and fails loud on invalid band IDs.
+        var band1Facts = await NpgsqlSubstrateReads.BandFactsAsync(ds, dogId, bands: [1], limit: 10, CancellationToken.None);
+        var band2Facts = await NpgsqlSubstrateReads.BandFactsAsync(ds, dogId, bands: [2], limit: 10, CancellationToken.None);
+        Assert.NotEmpty(band1Facts);
+        Assert.NotEmpty(band2Facts);
+        Assert.NotEqual(
+            band1Facts.Select(x => x.Reply).OrderBy(x => x, StringComparer.Ordinal),
+            band2Facts.Select(x => x.Reply).OrderBy(x => x, StringComparer.Ordinal));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            NpgsqlSubstrateReads.BandFactsAsync(ds, dogId, bands: [999], limit: 10, CancellationToken.None));
+
         _ = await NpgsqlSubstrateReads.RecallSessionAsync(conn, "photosynthesis", null, CancellationToken.None);
-        _ = await NpgsqlSubstrateReads.ExplainTraceStepsAsync(conn, "photosynthesis", depth: 2, beam: 8, CancellationToken.None);
+
+        var hotTrace = await NpgsqlSubstrateReads.ForwardTraceStepsAsync(
+            ds, "The opposite of hot is", steps: 24, maxStride: 5, spread: 0.0, topK: 10, hops: 2, fanout: 10, CancellationToken.None);
+        Assert.NotEmpty(hotTrace);
+        Assert.Contains(hotTrace, r => r.Event == "route" && r.OrderedContextCount > 0);
+        Assert.Contains(hotTrace, r => r.Event == "emit" && r.OrderedContextCount > 0);
+
         _ = await NpgsqlSubstrateReads.WalkBranchesAsync(ds, "photosynthesis", null, null, depth: 2, breadth: 8, CancellationToken.None);
-        _ = await NpgsqlSubstrateReads.BandFactsAsync(ds, dogId, bands: null, limit: 10, CancellationToken.None);
-        _ = await NpgsqlSubstrateReads.WalkBranchesBeamAsync(ds, dogId, relationType: null, bands: null, depth: 2, breadth: 8, limit: 10, CancellationToken.None);
+        _ = await NpgsqlSubstrateReads.WalkBranchesBeamAsync(ds, dogId, relationType: null, bands: [2], depth: 2, breadth: 8, limit: 10, CancellationToken.None);
     }
 
     [SkippableFact]
@@ -169,6 +246,7 @@ public sealed class LiveSubstrateQueriesTests
                    c.deviation,
                    c.matches
             FROM public.consensus c
+            WHERE c.matches > 0
             ORDER BY public.laplace_confidence(c.rating, c.deviation, 2::double precision) DESC, c.matches DESC, c.claim
             LIMIT 25
             """,
@@ -177,8 +255,8 @@ public sealed class LiveSubstrateQueriesTests
         using var doc = JsonDocument.Parse(planJson);
         var root = doc.RootElement[0];
         double executionMs = root.GetProperty("Execution Time").GetDouble();
-        Assert.Contains("consensus_standing", planJson, StringComparison.OrdinalIgnoreCase);
-        Assert.True(executionMs < 50.0, $"Expected consensus_standing index scan < 50 ms, measured {executionMs:F2} ms.");
+        Assert.Contains("laplace_confidence_matches_claim_idx", planJson, StringComparison.OrdinalIgnoreCase);
+        Assert.True(executionMs < 50.0, $"Expected laplace_confidence_matches_claim_idx index scan < 50 ms, measured {executionMs:F2} ms.");
     }
 
     [SkippableFact]

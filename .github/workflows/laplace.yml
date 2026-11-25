@@ -4,7 +4,7 @@ run-name: "Deliver — ${{ github.event_name == 'push' && 'production' || inputs
 # Linux product changes on main are built, installed, migrated and published on hart-server (the machine Laplace-Operations
 # declares; the staging host) by this repository's runner (Laplace-Operations' agents.sh: labels laplace,Laplace,
 # staging; no sudo), with deploy/linux/site.sh: the engine and extensions against the Operations cluster, the database
-# laplace-mono, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
+# laplace, the API + SPA at /opt/laplace/app behind nginx :8080. The machine's root part is
 # deploy/linux/site-host.sh, run once by a person. Seeding is an operation (product-operator.yml), never part of a delivery;
 # this workflow has no manual dispatch (manual dispatch belongs in product-operator.yml).
 #
@@ -202,7 +202,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions current (no upgrade path), migrations
+      - name: Database laplace, extensions current (no upgrade path), migrations
         run: |
           deploy/linux/site.sh database extensions migrate
 
@@ -234,7 +234,7 @@ jobs:
         run: bash tests/database-names.sh
 
       - name: Retain ingestion completion results
-        if: always()
+        if: always() && vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ingest-completion-${{ github.sha }}
@@ -252,7 +252,7 @@ jobs:
         run: deploy/linux/site.sh bundle
 
       - name: Retain the verified production package
-        if: github.event_name == 'push' || inputs.promote
+        if: (github.event_name == 'push' || inputs.promote) && vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         id: upload_bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -263,6 +263,66 @@ jobs:
           retention-days: 7
           compression-level: 1
 
+      - name: Publish verified production bundle via release fallback when artifact storage is full
+        if: (github.event_name == 'push' || inputs.promote) && vars.LAPLACE_ARTIFACT_UPLOAD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_TAR: ${{ steps.bundle.outputs.path }}
+          TAG: promotion-bundle-${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha256sum "$BUNDLE_TAR" | awk '{print $1}' > "${BUNDLE_TAR}.sha256"
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.parse, urllib.request
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          tar_path = os.environ["BUNDLE_TAR"]
+          sha_path = tar_path + ".sha256"
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def api(url, method="GET", data=None, content_type=None):
+              h = dict(headers)
+              if content_type:
+                  h["Content-Type"] = content_type
+              req = urllib.request.Request(url, data=data, method=method, headers=h)
+              with urllib.request.urlopen(req, timeout=300) as resp:
+                  raw = resp.read()
+                  return json.loads(raw) if raw else {}
+          try:
+              existing = api(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
+              api(f"https://api.github.com/repos/{repo}/releases/{existing['id']}", method="DELETE")
+          except urllib.error.HTTPError as e:
+              if e.code != 404:
+                  raise
+          try:
+              api(f"https://api.github.com/repos/{repo}/git/refs/tags/{tag}", method="DELETE")
+          except urllib.error.HTTPError as e:
+              if e.code not in (404, 422):
+                  raise
+          rel = api(
+              f"https://api.github.com/repos/{repo}/releases",
+              method="POST",
+              data=json.dumps({
+                  "tag_name": tag,
+                  "target_commitish": os.environ["GITHUB_SHA"],
+                  "name": tag,
+                  "body": f"Transient promotion bundle for {os.environ['GITHUB_SHA']}",
+                  "prerelease": True,
+              }).encode("utf-8"),
+              content_type="application/json",
+          )
+          upload_base = rel["upload_url"].split("{", 1)[0]
+          for path, ctype in ((tar_path, "application/x-tar"), (sha_path, "text/plain")):
+              name = urllib.parse.quote(os.path.basename(path))
+              api(f"{upload_base}?name={name}", method="POST", data=open(path, "rb").read(), content_type=ctype)
+          print(f"Published transient release fallback {tag}")
+          PY
+
       - name: Clean staging delivery work after package upload
         if: always()
         uses: ./.github/actions/storage
@@ -270,7 +330,7 @@ jobs:
           checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain staging cleanup receipt
-        if: always()
+        if: always() && vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-staging-${{ github.run_id }}
@@ -390,7 +450,7 @@ jobs:
       - name: Install into /opt/laplace
         run: deploy/linux/site.sh install
 
-      - name: Database laplace-mono, extensions current (no upgrade path), migrations (the application database too, LAPLACE_APP_DB)
+      - name: Database laplace, extensions current (no upgrade path), migrations (the application database too, LAPLACE_APP_DB)
         run: |
           deploy/linux/site.sh database extensions migrate
 
@@ -404,7 +464,7 @@ jobs:
           checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain cloud cleanup receipt
-        if: always()
+        if: always() && vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-cloud-${{ github.run_id }}
@@ -472,11 +532,67 @@ jobs:
           echo "path=$b" >> "$GITHUB_OUTPUT"
 
       - name: Receive the verified bundle from hart-server
+        if: vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         id: download_bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: laplace-site-${{ github.sha }}
           path: ${{ steps.bundle.outputs.path }}
+
+      - name: Receive verified bundle from release fallback
+        if: vars.LAPLACE_ARTIFACT_UPLOAD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_DIR: ${{ steps.bundle.outputs.path }}
+          TAG: promotion-bundle-${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          bundle_dir = os.environ["BUNDLE_DIR"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/tags/{tag}", headers=headers)
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              rel = json.loads(resp.read())
+          for asset in rel["assets"]:
+              if asset["name"] not in ("laplace-site.tar", "laplace-site.tar.sha256"):
+                  continue
+              dl = urllib.request.Request(
+                  asset["url"],
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/octet-stream",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              out = os.path.join(bundle_dir, asset["name"])
+              with urllib.request.urlopen(dl, timeout=300) as r, open(out, "wb") as f:
+                  while True:
+                      chunk = r.read(1024 * 1024)
+                      if not chunk:
+                          break
+                      f.write(chunk)
+          expected = open(os.path.join(bundle_dir, "laplace-site.tar.sha256"), encoding="utf-8").read().strip()
+          h = hashlib.sha256()
+          with open(os.path.join(bundle_dir, "laplace-site.tar"), "rb") as f:
+              while True:
+                  chunk = f.read(1024 * 1024)
+                  if not chunk:
+                      break
+                  h.update(chunk)
+          actual = h.hexdigest()
+          if actual != expected:
+              raise SystemExit(f"SHA256 mismatch on promotion bundle: expected {expected}, got {actual}")
+          print(f"Downloaded and verified {tag} ({actual})")
+          PY
 
       - name: Receive, migrate application database, publish, restart
         run: deploy/linux/site.sh receive migrate_app publish restart
@@ -488,6 +604,39 @@ jobs:
         if: failure()
         run: deploy/linux/site.sh status
 
+      - name: Clean transient promotion bundle release
+        if: always() && vars.LAPLACE_ARTIFACT_UPLOAD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: promotion-bundle-${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def call(url, method="GET"):
+              req = urllib.request.Request(url, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  raw = resp.read()
+                  return json.loads(raw) if raw else {}
+          try:
+              rel = call(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
+              call(f"https://api.github.com/repos/{repo}/releases/{rel['id']}", method="DELETE")
+          except urllib.error.HTTPError:
+              pass
+          try:
+              call(f"https://api.github.com/repos/{repo}/git/refs/tags/{tag}", method="DELETE")
+          except urllib.error.HTTPError:
+              pass
+          PY
+
       - name: Clean received production package after readback
         if: always()
         uses: ./.github/actions/storage
@@ -495,7 +644,7 @@ jobs:
           checkout-token: ${{ secrets.LAPLACE_CHECKOUT }}
           receipt: ${{ runner.temp }}/storage.json
       - name: Retain production cleanup receipt
-        if: always()
+        if: always() && vars.LAPLACE_ARTIFACT_UPLOAD == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: storage-production-${{ github.run_id }}

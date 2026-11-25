@@ -18,7 +18,7 @@ if ([string]::IsNullOrWhiteSpace($Python) -and $env:LAPLACE_ENGINE_BUILD) {
     }
 }
 $pythonName = if ([string]::IsNullOrWhiteSpace($Python)) { 'python' } else { $Python }
-$python = (Get-Command $pythonName -CommandType Application -ErrorAction Stop).Source
+$python = @(Get-Command $pythonName -CommandType Application -ErrorAction Stop)[0].Source
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $probe = Join-Path $repo 'scripts\check-zstd-runtime.py'
 $release = Get-Content -Raw (Join-Path $repo 'deploy\zstd-release.json') | ConvertFrom-Json

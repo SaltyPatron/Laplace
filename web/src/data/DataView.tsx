@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, Select, TextArea, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
-import { admitContentRaw, readContent, readContentBytes } from './api';
+import { admitContentRaw, listContent, readContent, readContentBytes } from './api';
 import { useAppStore } from '../store';
 import { textBytes, type ContentMode } from './content';
 import { type UploadItem } from './uploadQueue';
@@ -39,6 +39,30 @@ function DataWorkspace({ tenant }: { tenant: string }) {
   const snapshot = useMemo(() => captureRows(rows, 'Explicit local artifact selection and HTTP admission receipts in this tab. This is not a seed manifest run or a complete source inventory.'), [rows]);
   const [history, setHistory] = useState<AdmissionRecord[]>(() => readAdmissionHistory(scope));
   useEffect(() => { setHistory((current) => recordAdmissions(scope, current, state.items)); }, [scope, state.items]);
+  const serverHistory = useReadResource({
+    key: JSON.stringify(['user-content-list', scope]),
+    read: (signal) => listContent(50, { tenant, signal }),
+  });
+  const combinedHistory = useMemo(() => {
+    const byId = new Set(history.map((row) => row.file_id.toLowerCase()));
+    const serverOnly = (serverHistory.data?.items ?? [])
+      .filter((item) => !byId.has(item.file_id.toLowerCase()))
+      .map((item) => ({
+        file_id: item.file_id,
+        content_id: '',
+        name: item.label || item.file_id.slice(0, 12),
+        path: '',
+        mode: 'text' as ContentMode,
+        bytes: item.bytes,
+        admitted_at: '',
+        tier: item.tier,
+        fromServer: true as const,
+      }));
+    return [
+      ...history.map((row) => ({ ...row, tier: undefined as number | undefined, fromServer: false as const })),
+      ...serverOnly,
+    ];
+  }, [history, serverHistory.data]);
   const queued = state.items.filter((item) => item.status === 'queued').length;
   const admitted = state.items.filter((item) => item.status === 'admitted').length;
   const columns: ResultColumn<VisibleItem>[] = [
@@ -55,7 +79,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
   ];
   return <div className={styles.page}>
     <header><h2>Data workspace</h2><p>Select files or author content, admit through the existing native text/code path, then open the returned records and bytes.</p>
-      <Link to="/explore/sources">Browse sources</Link>{' · '}<Link to="/operator?section=ingest">Ingestion runs</Link>{' · '}<Link to="/operator?section=recipes">Recipe Studio</Link>{' · '}<Link to="/operator?section=ops">Installed operations</Link></header>
+      <Link to="/explore/sources">Browse sources</Link>{' · '}<Link to="/operator?section=ingest">Ingestion runs</Link>{' · '}<Link to="/foundry">Foundry &amp; Recipe Studio</Link>{' · '}<Link to="/operator?section=ops">Installed operations</Link></header>
     <div className={styles.inputs}>
       <Panel title="Select local files"><div className={styles.stack}>
         <Field label="Admission mode" help="Text accepts valid UTF-8 documents. Code / structured uses the server's registered grammar for each relative path extension. Binary / media admits PNG, WAV, video, Parquet, and raw binary artifacts without UTF-8 rejection.">
@@ -97,15 +121,21 @@ function DataWorkspace({ tenant }: { tenant: string }) {
       <Muted>Only the selection present when you press Ingest is submitted. Navigation stops after the current request and retains this selection in memory; reload loses unsubmitted local selections. An unconfirmed request stops the batch without retrying it.</Muted>
       <ResultWorkspace scopeKey={scope} label="Artifact selection" snapshot={snapshot} columns={columns} rowLabel={(item) => item.name} rowKey={(item) => item.id} />
     </Panel>
-    <Panel title="Admission history">
-      <Muted>Admissions confirmed in this browser tab for tenant <strong>{tenant}</strong>, newest first. The server does not yet list a workspace's earlier admissions, so the full history is not shown here; open any earlier admission by its returned ID below.</Muted>
-      {history.length === 0 ? <p>Nothing admitted yet in this tab.</p> : <ul className={styles.history} aria-label="Admission history">
-        {history.map((row) => <li key={row.file_id}>
+    <Panel title="Admission history" actions={<Button variant="ghost" size="sm" onClick={() => void serverHistory.refresh()}>Refresh history</Button>}>
+      <Muted>Admitted artifacts recorded for tenant <strong>{tenant}</strong> from server witness closure and this browser tab.</Muted>
+      <ReadStatus label="Server admission history" resource={serverHistory} />
+      {combinedHistory.length === 0 ? <p>Nothing admitted yet for this tenant.</p> : <ul className={styles.history} aria-label="Admission history">
+        {combinedHistory.map((row) => <li key={row.file_id}>
           <div className={styles.historyHead}><strong>{row.name}</strong><span className={styles.historyStatus}>admitted</span></div>
-          <Muted><time dateTime={row.admitted_at}>{new Date(row.admitted_at).toLocaleString()}</time> · {row.bytes.toLocaleString()} bytes · {row.mode}{row.path && row.path !== row.name ? ` · ${row.path}` : ''}</Muted>
+          <Muted>
+            {row.admitted_at ? <><time dateTime={row.admitted_at}>{new Date(row.admitted_at).toLocaleString()}</time>{' · '}</> : row.tier != null ? `tier ${row.tier} · ` : null}
+            {row.bytes.toLocaleString()} bytes
+            {!row.fromServer ? ` · ${row.mode}${row.path && row.path !== row.name ? ` · ${row.path}` : ''}` : ''}
+          </Muted>
           <div className={styles.toolbar}>
             <Button variant="ghost" onClick={() => openReceipt(row.file_id)} aria-label={`Read ${row.name}`}>Read</Button>
             {/^[0-9a-f]{32}$/i.test(row.content_id) && <Link to={`/explore/entity/${row.content_id.toLowerCase()}`} aria-label={`Open entity for ${row.name}`}>Open entity</Link>}
+            {!row.content_id && /^[0-9a-f]{32}$/i.test(row.file_id) && <Link to={`/explore/entity/${row.file_id.toLowerCase()}`} aria-label={`Explore ${row.name}`}>Explore</Link>}
           </div>
         </li>)}
       </ul>}

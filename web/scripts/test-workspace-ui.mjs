@@ -159,6 +159,7 @@ try {
     if (path === '/v1/billing/plans') { billingPlansCalls++; return route.fulfill({ json: { data: [{ plan_id: 'fixture', name: 'Fixture plan', monthly_price_cents: 1255, description: 'UI-only fixture', monthly_credits: {} }] } }); }
     if (path === '/v1/billing/catalog') { billingCatalogCalls++; return route.fulfill({ status: 503, json: { error: { message: 'Fixture catalog unavailable' } } }); }
     if (path === '/v1/billing/entitlements') return route.fulfill({ json: { data: [] } });
+    if (path === '/v1/billing/patreon/status') return route.fulfill({ json: { oauth_configured: false, webhook_configured: false, campaign_id: null, linked: false, status: 'unlinked', patreon_user_id: null, patreon_email: null, tier: null, pledge_cents: 0, mapped_plan_id: null, granted_packages: [], last_synced_utc: null } });
     if (path === '/v1/billing/usage') { heldUsage = route; return; }
     // No unexpected fixture action may reach a real server.
     return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route: ${path}` } } });

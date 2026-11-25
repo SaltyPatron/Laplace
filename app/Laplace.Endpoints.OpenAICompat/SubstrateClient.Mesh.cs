@@ -44,6 +44,6 @@ internal sealed partial class SubstrateClient
 
         return new TaxonomyResponse("taxonomy", self.IdHex, self.Label,
             [.. rows.Where(r => r.Dir == "up").Select(Node)],
-            [.. rows.Where(r => r.Dir == "child").Select(Node)]);
+            [.. rows.Where(r => r.Dir is "down" or "child").Select(Node)]);
     }
 }

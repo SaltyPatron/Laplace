@@ -141,6 +141,10 @@ internal static class QueryEndpoints
                     topic2?.Label,
                     payload.Bands, rows));
             }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_request_error", ex.Message);
+            }
             catch (SubstrateQueryException ex) when (ex.Message.Contains("unknown shape", StringComparison.Ordinal))
             {
                 return EndpointJson.BadRequest("invalid_request_error",

@@ -44,6 +44,20 @@ internal static class UserContentEndpointMappings
         app.MapPost("/v1/content/media/raw", (HttpContext http, ITenantResolver tenants,
                 SubstrateClient substrate, CancellationToken ct) => AdmitRawAsync(http, tenants, substrate, ct, requireUtf8: false));
 
+        app.MapGet("/v1/content", async (HttpContext http, int? limit, ITenantResolver tenants,
+            SubstrateClient substrate, CancellationToken ct) =>
+        {
+            var (participant, error) = await ParticipantAsync(http, tenants, http.Request.Query["user"].ToString(), ct);
+            if (error is not null) return error;
+            var rows = await Laplace.Data.NpgsqlSubstrateReads.ListWitnessedContentAsync(
+                substrate.DataSource, Hash128.Text(participant!).ToBytes(), Math.Clamp(limit ?? 50, 1, 200), ct);
+            return Results.Ok(new UserContentListResponse(
+                participant!,
+                rows.Select(static r => new UserContentListItem(r.FileIdHex, r.Label, r.Tier, r.Bytes)).ToArray()));
+        })
+        .WithTags("content")
+        .Produces<UserContentListResponse>();
+
         app.MapGet("/v1/content/{idHex}/raw", async (HttpContext http, string idHex, ITenantResolver tenants,
             SubstrateClient substrate, CancellationToken ct) =>
         {

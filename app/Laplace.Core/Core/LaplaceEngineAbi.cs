@@ -65,6 +65,19 @@ public struct LpEngineWitnessShare
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public unsafe struct LpEngineTurnStep
+{
+    public int step;
+    public int continuity;
+    public lp_id entity_id;
+    public double grounds;
+    public double confidence;
+    public fixed byte kind[16];
+    public byte* text;
+    public nuint text_len;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public unsafe struct LpEngineTurnResponse
 {
     public int status_code;
@@ -90,7 +103,10 @@ public unsafe struct LpEngineTurnResponse
     public fixed byte error[512];
     public LpEngineWitnessShare* shares;
     public uint nshares;
-    public int reserved;
+    public int ordinal;
+    public int turns_before;
+    public uint nsteps;
+    public LpEngineTurnStep* steps;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -138,6 +154,10 @@ public unsafe struct LpEngineMoldRequest
     public uint n_layers;
     public uint n_heads;
     public int f16_weights;
+    public int format;
+    public uint n_kv_heads;
+    public uint ffn_dim;
+    public int tied_embeddings;
     public int reserved;
 }
 
@@ -339,6 +359,15 @@ public sealed record EngineWitnessShare(
     ulong Games,
     int ShareBasisPoints);
 
+public sealed record EngineTurnStep(
+    int Step,
+    string Kind,
+    Hash128 EntityId,
+    string Text,
+    double Grounds,
+    int Continuity,
+    double Confidence);
+
 public sealed record EngineTurnResponse(
     int StatusCode,
     bool OodaVerified,
@@ -359,7 +388,10 @@ public sealed record EngineTurnResponse(
     string? PatchedCode,
     string Disposition,
     string Error,
-    IReadOnlyList<EngineWitnessShare> Shares);
+    IReadOnlyList<EngineWitnessShare> Shares,
+    int Ordinal = 1,
+    int TurnsBefore = 0,
+    IReadOnlyList<EngineTurnStep>? Steps = null);
 
 public sealed record EngineChessRequest(
     string Fen,
@@ -396,7 +428,11 @@ public sealed record EngineMoldRequest(
     uint HiddenDim = 64,
     uint NLayers = 4,
     uint NHeads = 4,
-    bool F16Weights = false);
+    bool F16Weights = false,
+    int Format = 0,
+    uint NKvHeads = 0,
+    uint FfnDim = 0,
+    bool TiedEmbeddings = false);
 
 public sealed record EngineMoldResponse(
     int StatusCode,
@@ -719,6 +755,26 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
                         ? Encoding.UTF8.GetString(nativeOut.patched_code, checked((int)nativeOut.patched_len))
                         : null;
 
+                    var steps = new List<EngineTurnStep>(checked((int)nativeOut.nsteps));
+                    if (nativeOut.steps != null)
+                    {
+                        for (uint i = 0; i < nativeOut.nsteps; i++)
+                        {
+                            var st = &nativeOut.steps[i];
+                            string stepText = st->text != null && st->text_len > 0
+                                ? Encoding.UTF8.GetString(st->text, checked((int)st->text_len))
+                                : string.Empty;
+                            steps.Add(new EngineTurnStep(
+                                Step: st->step,
+                                Kind: LaplaceEngineAbi.ReadFixedUtf8(st->kind, 16),
+                                EntityId: Hash128.FromNative(st->entity_id),
+                                Text: stepText,
+                                Grounds: st->grounds,
+                                Continuity: st->continuity,
+                                Confidence: st->confidence));
+                        }
+                    }
+
                     return new EngineTurnResponse(
                         StatusCode: rc != 0 ? rc : nativeOut.status_code,
                         OodaVerified: nativeOut.ooda_verified != 0,
@@ -739,7 +795,10 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
                         PatchedCode: patched,
                         Disposition: LaplaceEngineAbi.ReadFixedUtf8(nativeOut.disposition, 160),
                         Error: LaplaceEngineAbi.ReadFixedUtf8(nativeOut.error, 512),
-                        Shares: shares);
+                        Shares: shares,
+                        Ordinal: nativeOut.ordinal > 0 ? nativeOut.ordinal : 1,
+                        TurnsBefore: nativeOut.turns_before,
+                        Steps: steps);
                 }
                 finally
                 {
@@ -900,6 +959,10 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
                     n_layers = request.NLayers,
                     n_heads = request.NHeads,
                     f16_weights = request.F16Weights ? 1 : 0,
+                    format = request.Format,
+                    n_kv_heads = request.NKvHeads,
+                    ffn_dim = request.FfnDim,
+                    tied_embeddings = request.TiedEmbeddings ? 1 : 0,
                 };
 
                 LpEngineMoldResponse nativeOut = default;

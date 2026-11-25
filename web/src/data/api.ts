@@ -6,6 +6,19 @@ export async function admitContent(mode: ContentMode, payload: ContentPayload, o
 export function readContent(id: string, options: ApiOptions) {
   return apiGet<ContentReadback>(`/v1/content/${encodeURIComponent(id)}?compact=true`, options);
 }
+export interface UserContentListItem {
+  file_id: string;
+  label: string;
+  tier: number;
+  bytes: number;
+}
+export interface UserContentListResponse {
+  source: string;
+  items: UserContentListItem[];
+}
+export function listContent(limit = 50, options: ApiOptions = {}) {
+  return apiGet<UserContentListResponse>(`/v1/content?limit=${limit}`, options);
+}
 export function readContentBytes(id: string, options: ApiOptions) {
   return apiGetArrayBuffer(`/v1/content/${encodeURIComponent(id)}/raw`, options);
 }

@@ -29,9 +29,9 @@
       <_NativeLocal Include="$(LAPLACE_BUILD)\Laplace-Native\icx-release\laplace.dll"
                     Condition="Exists('$(LAPLACE_BUILD)\Laplace-Native\icx-release\laplace.dll')" />
       <_NativeCandidate Include="@(_NativeExplicit)" />
+      <_NativeCandidate Include="@(_NativeLocal)" Condition="'@(_NativeCandidate)' == ''" />
       <_NativeCandidate Include="@(_NativePinned)" Condition="'@(_NativeCandidate)' == ''" />
       <_NativeCandidate Include="@(_NativeLatest)" Condition="'@(_NativeCandidate)' == ''" />
-      <_NativeCandidate Include="@(_NativeLocal)" Condition="'@(_NativeCandidate)' == ''" />
 
       <_EngineExplicit Include="$(LAPLACE_ENGINE_PACKAGE)\bin\laplace_engine_abi.dll"
                        Condition="'$(LAPLACE_ENGINE_PACKAGE)' != '' And Exists('$(LAPLACE_ENGINE_PACKAGE)\bin\laplace_engine_abi.dll')" />
@@ -41,9 +41,9 @@
       <_EngineLocal Include="$(LAPLACE_ENGINE_BUILD)\laplace_engine_abi.dll"
                     Condition="Exists('$(LAPLACE_ENGINE_BUILD)\laplace_engine_abi.dll')" />
       <_EngineCandidate Include="@(_EngineExplicit)" />
+      <_EngineCandidate Include="@(_EngineLocal)" Condition="'@(_EngineCandidate)' == ''" />
       <_EngineCandidate Include="@(_EnginePinned)" Condition="'@(_EngineCandidate)' == ''" />
       <_EngineCandidate Include="@(_EngineLatest)" Condition="'@(_EngineCandidate)' == ''" />
-      <_EngineCandidate Include="@(_EngineLocal)" Condition="'@(_EngineCandidate)' == ''" />
     </ItemGroup>
 
     <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
@@ -64,7 +64,7 @@
       <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineAbiDll)" Condition="'$(_ResolvedEngineAbiDll)' != '' And Exists('$(_ResolvedEngineAbiDll)')" />
       <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace_engine_abi.pdb" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace_engine_abi.pdb')" />
       <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace.exe" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace.exe')" />
-      <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace.pdb" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace.pdb')" />
+      <LaplaceWindowsRuntimeFile Include="$(_ResolvedEngineBinDir)\laplace.pdb" Condition="'$(_ResolvedEngineBinDir)' != '' And Exists('$(_ResolvedEngineBinDir)\laplace.pdb') And ('$(_ResolvedNativeBinDir)' == '' Or !Exists('$(_ResolvedNativeBinDir)\laplace.pdb'))" />
       <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libpq.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />
       <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libcrypto-*.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />
       <LaplaceWindowsRuntimeFile Include="$(LAPLACE_PG_DIR)\bin\libssl-*.dll" Condition="'$(LAPLACE_PG_DIR)' != '' And Exists('$(LAPLACE_PG_DIR)\bin\libpq.dll')" />

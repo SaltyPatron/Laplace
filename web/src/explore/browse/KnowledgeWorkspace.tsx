@@ -48,8 +48,8 @@ const METHOD_LABELS: Record<string, string> = {
 const label = (method: string) => METHOD_LABELS[method] ?? method.replaceAll('_', ' ');
 /** Shape similarity is not meaning: geometric neighbors belong to shape views, never to knowledge answers. */
 const NOT_KNOWLEDGE = new Set(['generate', 'neighbors']);
-/** Release-local packaging and format metadata that sources carry but that is not knowledge about the subject. */
-const PACKAGING = /type of pointer that lemma has|^upos:\s|\bHAS[ _]SENSE\b|variety of language:|^I hold "/i;
+/** Default bounded read shapes run automatically for plain search; specialty shapes run on demand or when their inputs are given. */
+const DEFAULT_SEARCH_METHODS = new Set(['define', 'describe', 'synonyms']);
 /** A read that resolved no stored content returned nothing; that is an empty result, not a failure. */
 const isNoMatch = (message: string) => /No content is witnessed|topic_not_witnessed/.test(message);
 const round = (value: number | string | null | undefined, digits = 2) => {
@@ -112,7 +112,14 @@ export function KnowledgeWorkspace() {
     const available = JSON.parse(catalogKey) as typeof searchMethods;
     const tasks: { method: string; read: () => Promise<Pick<Read, 'result'>> }[] = [];
     for (const shape of available) {
-      if (enabled !== null && !enabled.includes(shape.shape)) continue;
+      if (enabled !== null) {
+        if (!enabled.includes(shape.shape)) continue;
+      } else {
+        const contextual = (shape.shape === 'path' && !!topic2)
+          || (shape.shape === 'related' && !!relation)
+          || (shape.shape === 'translate' && !!lang);
+        if (!DEFAULT_SEARCH_METHODS.has(shape.shape) && !contextual) continue;
+      }
       if ((shape.needs_topic2 && !topic2) || (shape.needs_type && !relation)) continue;
       tasks.push({ method: shape.shape, read: async () => ({ result: await keyedAnswers(await runQuery({ ...dials, seed: dials.seed ? Number(dials.seed) : undefined, topic: query, shape: shape.shape,
         topic2: shape.needs_topic2 ? topic2 : undefined, relation_type: shape.needs_type ? relation : undefined,
@@ -143,8 +150,7 @@ export function KnowledgeWorkspace() {
 
   const browse = reads.find(read => read.browse)?.browse;
   const all = useMemo(() => {
-    if (query) return collectKnowledge(browse?.hits ?? [], reads.flatMap(read => read.result ? [read.result] : []))
-      .filter(row => !PACKAGING.test(row.text));
+    if (query) return collectKnowledge(browse?.hits ?? [], reads.flatMap(read => read.result ? [read.result] : []));
     const result = new Map<string, KnowledgeResult>();
     for (const band of leaders.data?.bands ?? []) {
       for (const claim of band.claims ?? []) {
@@ -200,11 +206,12 @@ export function KnowledgeWorkspace() {
           <Field label="Relation" htmlFor="search-relation" help="Adds incoming and outgoing relation searches."><Input id="search-relation" list="search-relations" value={relationDraft} onChange={event => setRelationDraft(event.target.value)} /><datalist id="search-relations">{relations.data?.relations.map(item => <option key={item.id_hex} value={item.name} />)}</datalist></Field>
           <Field label="Language" htmlFor="search-language"><Input id="search-language" value={languageDraft} onChange={event => setLanguageDraft(event.target.value)} placeholder="Any" /></Field>
         </div>
-        <fieldset className={styles.methodChoices}><legend>Search methods — all applicable methods run together</legend>
+        <fieldset className={styles.methodChoices}><legend>Search methods — default runs exact match, definitions and synonyms; select more as needed</legend>
           {[{ shape: 'entities', summary: 'Names, aliases, exact content and containment', needs_topic2: false, needs_type: false }, ...searchMethods].map(method => {
             const missing = method.needs_topic2 && !otherDraft.trim() ? 'requires a second subject' : method.needs_type && !relationDraft ? 'requires a relation' : '';
-            return <Checkbox key={method.shape} label={<span>{label(method.shape)} <small>— {method.summary}{missing ? ` (${missing})` : ''}</small></span>} checked={methodsDraft === null || methodsDraft.includes(method.shape)} onChange={event => {
-              const current = methodsDraft ?? ['entities', ...searchMethods.map(item => item.shape)];
+            const defaultChecked = method.shape === 'entities' || DEFAULT_SEARCH_METHODS.has(method.shape);
+            return <Checkbox key={method.shape} label={<span>{label(method.shape)} <small>— {method.summary}{missing ? ` (${missing})` : ''}</small></span>} checked={methodsDraft === null ? defaultChecked : methodsDraft.includes(method.shape)} onChange={event => {
+              const current = methodsDraft ?? ['entities', ...searchMethods.filter(item => DEFAULT_SEARCH_METHODS.has(item.shape)).map(item => item.shape)];
               setMethodsDraft(event.target.checked ? [...current, method.shape] : current.filter(item => item !== method.shape));
             }} />;
           })}
