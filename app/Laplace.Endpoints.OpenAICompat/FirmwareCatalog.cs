@@ -35,6 +35,8 @@ internal static class FirmwareCatalog
         new("inductive", "inductive", "Cross-witness empirical convergence & generalization"),
         new("abductive", "abductive", "Causal root-cause & best-explanation hypothesis"),
         new("constructive", "constructive", "Compositional synthesis across multi-tier entities"),
+        new("critical", "critical", "Skeptical evidence audit & high-trust verification"),
+        new("executive", "executive", "Decisive action-oriented synthesis & closure"),
         new("adversarial", "adversarial", "Counter-example probing & contradiction audit"),
         new("chess", "chess", "Variant laws, Chess960/Syzygy rules, and search policy"),
         new("without-layout", "without-layout", "Layout-free navigation refusing SpaceAfter and punctuation"),
