@@ -106,6 +106,8 @@ internal static class AppComposition
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
         services.AddSingleton<IConversationTurns, EngineConversationTurns>();
         services.AddSingleton<CodePlayerService>();
+        services.AddSingleton<IngestJournalService>();
+        services.AddServerHostedService<IngestJournalSyncService>();
         services.AddServerHostedService<CatalogPrewarmService>();
         if (browserAuth.Providers.Count > 0)
             services.AddServerHostedService<IdentityClientBootstrapService>();

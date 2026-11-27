@@ -704,3 +704,55 @@ CREATE TABLE IF NOT EXISTS app.tenant_knowledge_packages (
 );
 CREATE INDEX IF NOT EXISTS tenant_knowledge_packages_pkg
     ON app.tenant_knowledge_packages (package_id);
+
+-- =============================================================================
+-- 5. Operational Ingest Run Journal (synced from native JSONL progress streams)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS app.ingest_runs (
+    run_id                uuid PRIMARY KEY,
+    source_name           text NOT NULL,
+    source_id             text,
+    host                  text,
+    pid                   integer,
+    status                text NOT NULL DEFAULT 'running'
+                              CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+    phase                 text,
+    started_at            timestamptz NOT NULL DEFAULT now(),
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    ended_at              timestamptz,
+    files_done            bigint NOT NULL DEFAULT 0,
+    files_total           bigint NOT NULL DEFAULT 0,
+    bytes_done            bigint NOT NULL DEFAULT 0,
+    bytes_total           bigint NOT NULL DEFAULT 0,
+    entities              bigint NOT NULL DEFAULT 0,
+    physicalities         bigint NOT NULL DEFAULT 0,
+    attestations          bigint NOT NULL DEFAULT 0,
+    attestations_measured boolean NOT NULL DEFAULT false,
+    elapsed_ms            bigint NOT NULL DEFAULT 0,
+    error                 text,
+    journal_path          text
+);
+CREATE INDEX IF NOT EXISTS ingest_runs_started_idx
+    ON app.ingest_runs (started_at DESC);
+CREATE INDEX IF NOT EXISTS ingest_runs_status_idx
+    ON app.ingest_runs (status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS app.ingest_run_files (
+    run_id        uuid NOT NULL REFERENCES app.ingest_runs(run_id) ON DELETE CASCADE,
+    file_label    text NOT NULL,
+    source_name   text NOT NULL,
+    file_id       text,
+    status        text NOT NULL DEFAULT 'running',
+    started_at    timestamptz NOT NULL DEFAULT now(),
+    ended_at      timestamptz,
+    bytes         bigint NOT NULL DEFAULT 0,
+    records       bigint NOT NULL DEFAULT 0,
+    entities      bigint NOT NULL DEFAULT 0,
+    physicalities bigint NOT NULL DEFAULT 0,
+    attestations  bigint NOT NULL DEFAULT 0,
+    error         text,
+    PRIMARY KEY (run_id, file_label)
+);
+CREATE INDEX IF NOT EXISTS ingest_run_files_status_idx
+    ON app.ingest_run_files (run_id, status);

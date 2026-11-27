@@ -9,7 +9,15 @@ import { IngestRunFailure } from './IngestRunFailure';
 import { countText, ingestDuration, ingestStatusTone, OPEN_INGEST_STATES, progressText } from './ingestPresentation';
 import styles from './Admin.module.css';
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 3000;
+
+function formatBytes(bytes: number | null): string {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 function Status({ value }: { value: string | null }) {
   return value
@@ -20,15 +28,24 @@ function Status({ value }: { value: string | null }) {
 function RunProgress({ run }: { run: IngestRun }) {
   const done = run.input_units_done ?? 0;
   const total = run.input_units_total ?? 0;
-  const determinate = total > 0 && done <= total;
-  const pct = determinate ? Math.max(0, Math.min(100, (done / total) * 100)) : null;
+  const filesDone = run.files_done ?? 0;
+  const filesTotal = run.files_total ?? 0;
+  const bytesDeterminate = total > 0 && done <= total;
+  const filesDeterminate = filesTotal > 0 && filesDone <= filesTotal;
+  const pct = bytesDeterminate
+    ? Math.max(0, Math.min(100, (done / total) * 100))
+    : filesDeterminate
+      ? Math.max(0, Math.min(100, (filesDone / filesTotal) * 100))
+      : null;
   return (
     <div className={styles.runProgress}>
       <div className={styles.progressHeading}>
-        <strong>{progressText(run.input_units_done, run.input_units_total)}</strong>
+        <strong>{total > 0 || done > 0 ? `${formatBytes(run.input_units_done)} / ${formatBytes(run.input_units_total)}` : progressText(run.files_done, run.files_total)}</strong>
         {pct != null && <span>{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>}
       </div>
-      {determinate && <progress className={styles.progressBar} max={total} value={done} aria-label="Input progress" />}
+      {bytesDeterminate
+        ? <progress className={styles.progressBar} max={total} value={done} aria-label="Byte progress" />
+        : filesDeterminate && <progress className={styles.progressBar} max={filesTotal} value={filesDone} aria-label="File progress" />}
       <span className={styles.progressPct}>Files {progressText(run.files_done, run.files_total)}</span>
     </div>
   );
@@ -58,7 +75,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
       return captureRows(
         result.rows,
         `Up to ${limit} requested run receipts${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}. Older runs may exist.`,
-        { operation: 'ops.ingest_runs', requested_limit: limit },
+        { operation: 'app.ingest_runs', requested_limit: limit },
       );
     },
   });
@@ -157,7 +174,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
           >
             {expandedRun === run.run_id ? 'Hide files' : 'File receipts'}
           </Button>
-          {OPEN_INGEST_STATES.has(run.status.toLowerCase()) && !/^[0-9a-f]{32}$/i.test(run.run_id) && canManage
+          {OPEN_INGEST_STATES.has(run.status.toLowerCase()) && canManage
             ? (
               <Button
                 variant="ghost"
@@ -177,7 +194,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
 
   return (
     <>
-      <Panel title="Admitted witnesses & testimony" expandable>
+      <Panel title="Ingest runs & admitted witnesses" expandable>
         <div className={styles.toolbar}>
           <label className={styles.liveLabel}>
             <Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />
@@ -235,8 +252,8 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
         <p>This changes the shared journal receipt only. It does not stop a CLI process or database backend. Use Activity to inspect and stop active backend work before closing its receipt.</p>
         <Link to="/operator?section=activity">Open Activity</Link>
         <details>
-          <summary>Equivalent journal-only SQL</summary>
-          <pre className={styles.sig}>{confirming ? `SELECT * FROM ops.ingest_run_close('${confirming.run_id}'::uuid, 'cancelled');` : ''}</pre>
+          <summary>Journal endpoint</summary>
+          <pre className={styles.sig}>{confirming ? `POST /v1/admin/ingest/runs/${confirming.run_id}/close {"status":"cancelled"}` : ''}</pre>
         </details>
         {actionError && <ErrorText role="alert">{actionError}</ErrorText>}
       </Modal>
@@ -246,7 +263,7 @@ function RunWorkspace({ tenant, refreshSignal, canManage }: { tenant: string; re
 
 function RunFiles({ runId, tenant, live, countersMeasured, onClose }: { runId: string; tenant: string; live: boolean; countersMeasured: boolean; onClose: () => void }) {
   const [limit, setLimit] = useState(250);
-  const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId);
+  const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId) || /^[0-9a-f]{32}$/i.test(runId);
   const filesRead = useReadResource({
     key: JSON.stringify(['ingest-files', tenant, runId, limit]),
     enabled: valid,
@@ -256,7 +273,7 @@ function RunFiles({ runId, tenant, live, countersMeasured, onClose }: { runId: s
       return captureRows(
         result.rows,
         `Requested up to ${limit} file receipts for run ${runId}; active and failed files are returned first${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}.`,
-        { operation: 'ops.ingest_files', run_id: runId, requested_limit: limit },
+        { operation: 'app.ingest_run_files', run_id: runId, requested_limit: limit },
       );
     },
   });

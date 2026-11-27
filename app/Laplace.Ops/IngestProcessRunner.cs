@@ -134,6 +134,19 @@ public static class IngestProcessRunner
         IReadOnlyList<string>? arguments = null)
     {
         var runId = Guid.NewGuid();
+        if (!start.Environment.ContainsKey("LAPLACE_INGEST_RUN_ID"))
+            start.Environment["LAPLACE_INGEST_RUN_ID"] = runId.ToString("D");
+        if (!start.Environment.ContainsKey("LAPLACE_INGEST_PROGRESS_PATH"))
+        {
+            var work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+                ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT");
+            if (!string.IsNullOrWhiteSpace(work))
+            {
+                var runsDir = Path.Combine(work, "logs", "ingest", "runs");
+                try { Directory.CreateDirectory(runsDir); } catch { /* native CLI also ensures directory */ }
+                start.Environment["LAPLACE_INGEST_PROGRESS_PATH"] = Path.Combine(runsDir, $"{runId:D}.jsonl");
+            }
+        }
         // Clone request context now; completion and stop can run after the request ends.
         var log = Log.ForContext(LogContext.Clone()).ForContext("SourceContext", typeof(IngestProcessRunner).FullName)
             .ForContext("ProcessRunId", runId).ForContext("Source", source);

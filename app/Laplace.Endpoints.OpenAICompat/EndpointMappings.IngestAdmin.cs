@@ -24,6 +24,8 @@ internal static class IngestAdminEndpoints
 
     internal sealed record SourceActionRequest(string Source);
 
+    internal sealed record CloseRunRequest(string? Status = null);
+
     internal sealed record RecipeLintRequest(
         [property: JsonPropertyName("recipe_dsl")] string RecipeDsl,
         string? Filename = null);
@@ -248,6 +250,64 @@ internal static class IngestAdminEndpoints
                 app.Logger.LogError(ex, "Ingest child stop failed for process={ChildProcessId}", request.Pid);
                 return Results.Problem("The ingest process could not be stopped. See the correlated server log.", statusCode: 503);
             }
+        }).WithTags("admin");
+
+        // ---- Live Ingest Run Journal --------------------------------------
+
+        app.MapGet("/v1/admin/ingest/runs", async (
+            IngestJournalService journal,
+            ISubstrateClient substrate,
+            int? limit,
+            CancellationToken ct) =>
+        {
+            var rows = await journal.ListRunsAsync(limit ?? 25, substrate, ct);
+            return Results.Json(new JsonObject
+            {
+                ["object"] = "list",
+                ["name"] = "app.ingest_runs",
+                ["rows"] = rows,
+            });
+        }).WithTags("admin");
+
+        app.MapGet("/v1/admin/ingest/runs/{runId}/files", async (
+            string runId,
+            IngestJournalService journal,
+            ISubstrateClient substrate,
+            int? limit,
+            CancellationToken ct) =>
+        {
+            var rows = await journal.ListFilesAsync(runId, limit ?? 250, substrate, ct);
+            return Results.Json(new JsonObject
+            {
+                ["object"] = "list",
+                ["name"] = "app.ingest_run_files",
+                ["rows"] = rows,
+            });
+        }).WithTags("admin");
+
+        app.MapPost("/v1/admin/ingest/runs/{runId}/close", async (
+            string runId,
+            HttpContext http,
+            PlatformAuthorization authorization,
+            IngestJournalService journal,
+            CancellationToken ct) =>
+        {
+            if (!await authorization.AllowsAsync(http, PlatformPolicy.Ingest, ct))
+                return Forbidden("Closing an ingest journal run requires ingestion.manage permission.");
+            if (!Guid.TryParse(runId, out var guid))
+                return EndpointJson.BadRequest("invalid_run_id", "A UUID run_id is required to close an ingest run.");
+
+            CloseRunRequest? request = null;
+            if (http.Request.ContentLength is > 0)
+                request = await EndpointJson.ReadJsonAsync<CloseRunRequest>(http.Request, ct);
+
+            var result = await journal.CloseRunAsync(guid, request?.Status ?? "cancelled", ct);
+            return Results.Json(new JsonObject
+            {
+                ["object"] = "list",
+                ["name"] = "app.ingest_run_close",
+                ["rows"] = new JsonArray(result),
+            });
         }).WithTags("admin");
 
         // ---- Corpus Estate Manager ----------------------------------------

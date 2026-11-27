@@ -119,35 +119,24 @@ export function listOps(like?: string, opts: ApiOptions = {}) {
   return callOp<OpSignature>('ops.api', like ? { p_like: like } : undefined, 2000, undefined, opts);
 }
 
-/** Recent rows of the ingest run journal, via `ops.ingest_runs`. */
+/** Recent rows of the live ingest run journal (`app.ingest_runs` + native JSONL streams). */
 export function ingestRuns(limit = 25, opts: ApiOptions = {}) {
-  return callOp<IngestRun>('ops.ingest_runs', { p_limit: limit }, limit, undefined, opts);
+  return apiGet<OpResult<IngestRun>>(`/v1/admin/ingest/runs?limit=${encodeURIComponent(String(limit))}`, opts);
 }
 
 /** Per-file work for one run, with active and failed files sorted first. */
 export function ingestFiles(runId: string, limit = 200, opts: ApiOptions = {}) {
-  return callOp<IngestFile>(
-    'ops.ingest_files',
-    { p_run_id: runId, p_limit: limit },
-    limit,
-    undefined,
+  return apiGet<OpResult<IngestFile>>(
+    `/v1/admin/ingest/runs/${encodeURIComponent(runId)}/files?limit=${encodeURIComponent(String(limit))}`,
     opts,
   );
 }
 
-/**
- * Force a run closed, unblocking any pipeline gating on it.
- *
- * `ops.ingest_run_close` is on the endpoint's write allow-list
- * (InstalledOpInvoker.WritableOps), so unlike every other catalog mutation it
- * resolves onto a writable connection instead of failing read-only.
- */
+/** Force an orphaned or active run receipt closed in the application journal. */
 export function closeIngestRun(runId: string, status = 'cancelled', opts: ApiOptions = {}) {
-  return callOp<Record<string, unknown>>(
-    'ops.ingest_run_close',
-    { p_run_id: runId, p_status: status },
-    1,
-    undefined,
+  return apiPost<OpResult<Record<string, unknown>>>(
+    `/v1/admin/ingest/runs/${encodeURIComponent(runId)}/close`,
+    { status },
     opts,
   );
 }

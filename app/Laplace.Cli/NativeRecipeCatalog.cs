@@ -261,6 +261,10 @@ internal static class NativeRecipeCatalog
         psi.Environment["LAPLACE_TIER0"] = LaplaceInstall.ResolveT0Perfcache();
         psi.Environment["LAPLACE_HIGHWAY"] = LaplaceInstall.ResolveHighwayPerfcache();
         psi.Environment["HOME"] = HomeDirectory();
+        var workDir = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT");
+        if (!string.IsNullOrWhiteSpace(workDir) && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_WORK")))
+            psi.Environment["LAPLACE_WORK"] = workDir;
         psi.Environment["LAPLACE_WORKING_SET_BYTES"] = MemoryTopology.WorkingSetFlushEnvelopeBytes.ToString(CultureInfo.InvariantCulture);
         if (!expandPrerequisites) psi.Environment["LAPLACE_INGEST_ONE"] = "1";
         else psi.Environment.Remove("LAPLACE_INGEST_ONE");
