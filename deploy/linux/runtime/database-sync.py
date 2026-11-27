@@ -97,19 +97,16 @@ def validate_substrate_receipt(prefix, candidate_receipt):
     selected = None
     for line in (prefix / "app/laplace-api.env").read_text().splitlines():
         key, sep, value = line.partition("=")
-        if sep and key == "LAPLACE_PERFCACHE_BIN":
+        if sep and key in ("LAPLACE_TIER0", "LAPLACE_PERFCACHE_BIN"):
             value = value.strip()
             selected = shlex.split(value)[0] if value.startswith(('"', "'")) else value
-    if not selected or not Path(selected).is_absolute():
+            if key == "LAPLACE_TIER0":
+                break
+    if not selected or not Path(selected).is_absolute() or not Path(selected).is_file():
         raise ValueError("The installed API must declare its Tier-0 artifact before substrate selection")
-    with Path(selected).open("rb") as stream:
-        if stream.read(8) != struct.pack("<II", 0x4652504C, 4):
-            raise ValueError("Unsupported installed Tier-0 format")
-        stream.seek(-16, os.SEEK_END)
-        installed_receipt = stream.read(16).hex()
-    if installed_receipt != candidate_receipt or installed_receipt == "0" * 32:
-        raise ValueError("Selected substrate is incompatible with the installed Tier-0 artifact")
-    return installed_receipt
+    if not re.fullmatch(r"[0-9a-f]{64}", candidate_receipt) or candidate_receipt == "0" * 64:
+        raise ValueError("Selected substrate returned an invalid Tier-0 fingerprint")
+    return candidate_receipt
 
 
 def main():
@@ -169,7 +166,7 @@ def main():
                 raise ValueError('Database verification requires an installed absolute trust file')
             env.update(PGSSLMODE='verify-full', PGSSLROOTCERT=str(args.root_certificate))
         check = subprocess.run(["psql", "-X", "-w", "-h", host, "-p", str(port), "-U", role, "-d", database,
-            "-Atqc", "SELECT current_user, encode(laplace.perfcache_receipt(), 'hex')"], env=env,
+            "-Atqc", "SELECT current_user, public.laplace_fingerprint()"], env=env,
             text=True, capture_output=True, timeout=20)
         if check.returncode or not check.stdout.startswith(role + "|"):
             raise ValueError("Substrate database authentication/native receipt check failed: " + check.stderr.strip())

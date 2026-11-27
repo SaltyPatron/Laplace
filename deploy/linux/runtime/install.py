@@ -542,7 +542,7 @@ def install_identities(config, lock):
                              PGSSLMODE='verify-full', PGSSLROOTCERT=config['root_certificate'], PGCONNECT_TIMEOUT='10')
         substrate_env.pop('PGPASSWORD', None)
         actual = checked(substrate_args, env=substrate_env,
-            input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
+            input="SELECT current_user; SELECT public.laplace_fingerprint();", timeout=20)
         if actual.splitlines() != [config['substrate']['role'], fresh['native_receipt']]:
             raise ValueError('API substrate identity/native operation differs from the selected substrate')
         if not application_refused(substrate_args, config['database'], env=substrate_env):
@@ -551,7 +551,7 @@ def install_identities(config, lock):
                                      'application_data': 'denied'}
         peer_args = ['runuser', '-u', mcp['user'], '--', config['pgbin'] + '/psql', '-XwAt', '-v', 'ON_ERROR_STOP=1',
             '-h', config['pgsocket'], '-p', str(config['port']), '-U', mcp['role'], '-d', config['substrate']['database'], '-f', '-']
-        peer_result = checked(peer_args, input="SELECT current_user; SELECT encode(laplace.perfcache_receipt(),'hex');", timeout=20)
+        peer_result = checked(peer_args, input="SELECT current_user; SELECT public.laplace_fingerprint();", timeout=20)
         if peer_result.splitlines() != [mcp['role'], fresh['native_receipt']]:
             raise ValueError('MCP peer identity/native operation differs from the selected substrate')
         if not application_refused(peer_args, config['database']):

@@ -135,7 +135,7 @@ if (($svc -and $svc.Status -eq 'Running') -or $port5432) {
         Write-Host "laplace db substrate version: $ver"
 
         $fileReceipt = Get-T0ReceiptHex (Join-Path $deployShare 'laplace_t0_perfcache.bin')
-        $receiptOutput = & $psql -h localhost -U postgres -d laplace -tAc "SELECT encode(laplace.perfcache_receipt(),'hex');" 2>&1
+        $receiptOutput = & $psql -h localhost -U postgres -d laplace -tAc "SELECT public.laplace_fingerprint();" 2>&1
         $receiptRc = $LASTEXITCODE
         $dbReceipt = if ($receiptRc -eq 0) { ($receiptOutput | Where-Object { $_ } | Select-Object -Last 1).Trim() } else { $null }
         if (-not $fileReceipt) {

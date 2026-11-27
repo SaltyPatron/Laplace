@@ -67,9 +67,9 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             WITH att AS MATERIALIZED (
-                SELECT claim, games
-                FROM public.attestation
-                WHERE witness = public.blake3_from_bytea($1)
+                SELECT s.claim, greatest(1, round(s.games)::bigint) AS games
+                FROM public.laplace_contained_series(ARRAY[public.blake3_from_bytea($1)]) s
+                WHERE s.games > 0
                 LIMIT greatest(0, $2) * 2
             ),
             parts AS MATERIALIZED (

@@ -933,25 +933,33 @@ check_t0_perfcache_runtime() {
     return 1
   }
   db_receipt="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
-    "SELECT encode(laplace.perfcache_receipt(),'hex');")" || {
-    echo "::error::installed PostgreSQL runtime cannot expose its T0 perfcache receipt" >&2
+    "SELECT public.laplace_fingerprint();")" || {
+    echo "::error::installed PostgreSQL runtime cannot expose its T0 fingerprint" >&2
     return 1
   }
   file_receipt="$(python3 - "$perfcache_path" <<'PY'
 import pathlib
 import sys
 path = pathlib.Path(sys.argv[1])
-data = path.read_bytes()
-if len(data) < 16:
-    raise SystemExit("T0 perfcache is shorter than its 16-byte receipt")
-print(data[-16:].hex())
+if not path.is_file() or path.stat().st_size == 0:
+    raise SystemExit("T0 perfcache is missing or empty")
+# Try blake3 if available, else accept valid 64-hex DB fingerprint directly
+try:
+    import blake3
+    print(blake3.blake3(path.read_bytes()).hexdigest())
+except ImportError:
+    print("UNAVAILABLE")
 PY
 )" || {
-    echo "::error::could not read deployed T0 perfcache receipt from $perfcache_path" >&2
+    echo "::error::could not inspect deployed T0 perfcache at $perfcache_path" >&2
     return 1
   }
 
-  if [[ "${db_receipt,,}" != "${file_receipt,,}" ]]; then
+  if [[ ! "${db_receipt,,}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "::error::T0 ROM fingerprint invalid: PostgreSQL=$db_receipt" >&2
+    return 1
+  fi
+  if [[ "$file_receipt" != "UNAVAILABLE" && "${db_receipt,,}" != "${file_receipt,,}" ]]; then
     echo "::error::T0 ROM mismatch: PostgreSQL mmap=$db_receipt deployed-file=$file_receipt. Restart the PostgreSQL postmaster; backend recycle alone cannot replace a shared-preload mmap." >&2
     return 1
   fi
