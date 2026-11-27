@@ -371,7 +371,7 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             SELECT public.laplace_highway_fingerprint() IS NOT NULL,
-                   EXISTS (SELECT 1 FROM public.entity WHERE mask <> 0::bit(64)),
+                   EXISTS (SELECT 1 FROM public.entity WHERE mask <> 0),
                    now(),
                    0::bigint,
                    0::bigint

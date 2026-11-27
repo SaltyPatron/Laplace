@@ -98,8 +98,8 @@ Any agent touching these areas must treat the current behavior listed below as *
 - **Build chain (`icx-release` into `$LAPLACE_BUILD/<repo>/icx-release`, `D:\Libraries\build\Laplace` on desktop):**
   PostgreSQL 18 + PostGIS → `Laplace-Native` (`include/laplace/*.h`, `manifest/`, `Laplace.Native.Interop`) → `Laplace-postgres` (`sql/laplace.sql.in`, `laplace.reconcile.sql`) → `Laplace-Engine` (`laplace` CLI, `LaplaceEngine`, `recipes/`, `firmware/`) → `Laplace-MCP` (`lpm` + `Laplace::http`) & `Laplace` (`app/Laplace.slnx`, `db/schema/*.sql`, `web/`). Supporting: `Laplace-UCI`, `Laplace-Operations`, `Laplace-Prototype`, `Laplace-Wiki`. *(Never read/edit frozen `Laplace-Refactor`.)*
 - **Four persistent substrate tables (`Laplace-postgres/sql/laplace.sql.in`):**
-  - `entity(id blake3, tier smallint, coord geometry(PointZM), hilbert bigint, mask bit(64))`
-  - `physicality(entity blake3, tier smallint, hilbert bigint, path geometry, mask bit(64))`
+  - `entity(id blake3, tier smallint, coord geometry(PointZM), hilbert bigint, mask bigint)`
+  - `physicality(entity blake3, tier smallint, path geometry, mask bigint)`
   - `attestation(claim blake3, witness blake3, lineage blake3, games bigint, tokens bigint, score float8, "position" int4, trust float8)`
   - `consensus(claim blake3 PK, rating float8, deviation float8, volatility float8, matches bigint)`
 - **Hosts:**
