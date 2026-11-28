@@ -83,6 +83,10 @@ public static partial class NpgsqlSubstrateReads
             return [];
 
         string? trimmedFilter = string.IsNullOrWhiteSpace(pathFilter) ? null : pathFilter.Trim();
+        int safeOffset = Math.Max(0, offset);
+        int candidateCap = trimmedFilter is null
+            ? Math.Clamp(limit + safeOffset, 1, 2048)
+            : Math.Clamp(Math.Max((limit + safeOffset) * 16, 512), 1, 2048);
 
         const string sql = """
             WITH held AS MATERIALIZED (
@@ -90,6 +94,7 @@ public static partial class NpgsqlSubstrateReads
                        hf.keys,
                        hf.unit,
                        coalesce(hf.unit_tier, 0::smallint) AS unit_tier,
+                       bit_count(hf.keys::bit(64)) AS matched_key_count,
                        coalesce((SELECT sum(c) FROM unnest(hf.counts) AS c), 0::bigint) AS total_hits
                 FROM public.laplace_held_files(
                     ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest($1::bytea[]) AS x),
@@ -99,30 +104,56 @@ public static partial class NpgsqlSubstrateReads
                 ) hf
                 WHERE hf.file IS NOT NULL
             ),
-            labeled AS (
-                SELECT encode(public.blake3_send(h.file), 'hex') AS file_id_hex,
-                       coalesce(public.laplace_label_text(public.blake3_send(h.file), false), encode(public.blake3_send(h.file), 'hex')) AS file_path,
-                       coalesce(encode(public.blake3_send(h.unit), 'hex'), encode(public.blake3_send(h.file), 'hex')) AS unit_id_hex,
-                       h.unit_tier,
+            bounded AS MATERIALIZED (
+                SELECT h.file,
                        h.keys,
-                       h.total_hits,
-                       left(coalesce(
-                           public.laplace_label_text(public.blake3_send(h.unit), false),
-                           public.laplace_label_text(public.blake3_send(h.file), false),
-                           ''
-                       ), 2048) AS snippet
+                       h.unit,
+                       h.unit_tier,
+                       h.matched_key_count,
+                       h.total_hits
                 FROM held h
+                ORDER BY h.matched_key_count DESC, h.total_hits DESC, h.file ASC
+                LIMIT $5
+            ),
+            filtered AS MATERIALIZED (
+                SELECT b.file,
+                       encode(public.blake3_send(b.file), 'hex') AS file_id_hex,
+                       coalesce(public.laplace_label_text(public.blake3_send(b.file), false), encode(public.blake3_send(b.file), 'hex')) AS file_path,
+                       b.unit,
+                       coalesce(encode(public.blake3_send(b.unit), 'hex'), encode(public.blake3_send(b.file), 'hex')) AS unit_id_hex,
+                       b.unit_tier,
+                       b.keys,
+                       b.matched_key_count,
+                       b.total_hits
+                FROM bounded b
+            ),
+            page AS MATERIALIZED (
+                SELECT file,
+                       file_id_hex,
+                       file_path,
+                       unit,
+                       unit_id_hex,
+                       unit_tier,
+                       keys,
+                       matched_key_count,
+                       total_hits
+                FROM filtered
+                WHERE $2::text IS NULL OR position(lower($2::text) IN lower(file_path)) > 0
+                ORDER BY matched_key_count DESC, total_hits DESC, file_path ASC
+                LIMIT $3 OFFSET $4
             )
             SELECT file_id_hex,
                    file_path,
                    unit_id_hex,
                    unit_tier,
                    keys,
-                   snippet
-            FROM labeled
-            WHERE $2::text IS NULL OR position(lower($2::text) IN lower(file_path)) > 0
-            ORDER BY bit_count(keys::bit(64)) DESC, total_hits DESC, file_path ASC
-            LIMIT $3 OFFSET $4
+                   left(coalesce(
+                       CASE WHEN unit IS NOT NULL THEN public.laplace_label_text(public.blake3_send(unit), false) END,
+                       file_path,
+                       ''
+                   ), 2048) AS snippet
+            FROM page
+            ORDER BY matched_key_count DESC, total_hits DESC, file_path ASC
             """;
 
         return await NpgsqlRead.ReadRowsAsync(
@@ -140,7 +171,8 @@ public static partial class NpgsqlSubstrateReads
                 p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea, Value = termIds });
                 p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)trimmedFilter ?? DBNull.Value });
                 p.AddWithValue(limit);
-                p.AddWithValue(Math.Max(0, offset));
+                p.AddWithValue(safeOffset);
+                p.AddWithValue(candidateCap);
             },
             timeoutSeconds: 30,
             ct: ct,

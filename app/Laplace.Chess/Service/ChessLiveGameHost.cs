@@ -257,4 +257,12 @@ public sealed partial class ChessLiveGameHost : IChessLiveGameHost
     /// <summary>Has the Engine read a PGN file under a source of the estate, or as a file of no corpus.</summary>
     public Task IngestFileAsync(string? source, string path, CancellationToken ct = default)
         => _recorder.IngestFileAsync(source, path, ct);
+
+    /// <summary>Has the Engine read a file under an explicit runtime witness and trust class.</summary>
+    public Task IngestFileAsync(string? source, string path, string trustClass, CancellationToken ct = default)
+        => _recorder.IngestFileAsync(source, path, trustClass, ct);
+
+    /// <summary>Has the Engine ingest a file through a declared source recipe (<c>laplace ingest -s &lt;source&gt;</c>).</summary>
+    public Task IngestSourceFileAsync(string sourceName, string path, CancellationToken ct = default)
+        => _recorder.IngestSourceFileAsync(sourceName, path, ct);
 }

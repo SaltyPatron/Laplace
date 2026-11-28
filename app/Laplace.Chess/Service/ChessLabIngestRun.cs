@@ -72,12 +72,16 @@ internal sealed class ChessLabIngestRun
     internal bool IsFinished { get { lock (_gate) return _finished; } }
 
     internal static async Task<ChessLabIngestRun> StartAsync(
-        ChessLiveGameHost host, ILogger log, string jobId, string label, string? source, CancellationToken ct)
+        ChessLiveGameHost host, ILogger log, string jobId, string label, string? source, CancellationToken ct,
+        string? trustClass = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ct.ThrowIfCancellationRequested();
         var journal = new LoggingChessIngestJournal();
-        var run = new ChessLabIngestRun(journal, log, jobId, label, source, host.IngestFileAsync, () => journal.RunId);
+        Func<string?, string, CancellationToken, Task> ingest = string.IsNullOrWhiteSpace(trustClass)
+            ? host.IngestFileAsync
+            : (witness, path, token) => host.IngestFileAsync(witness, path, trustClass, token);
+        var run = new ChessLabIngestRun(journal, log, jobId, label, source, ingest, () => journal.RunId);
         await Task.Run(run.Start, CancellationToken.None).ConfigureAwait(false);
         return run;
     }

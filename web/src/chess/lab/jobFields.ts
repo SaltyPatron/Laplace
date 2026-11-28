@@ -44,14 +44,16 @@ export const JOB_FIELDS: Record<string, FieldDef[]> = {
   'lichess-fetch': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
     { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
+    { key: 'fideId', label: 'FIDE ID (optional)', type: 'text', help: 'Admin curated corpus operation: optional official FIDE ID to link to this account (attested at AcademicCurated by Laplace Curated Chess).', placeholder: '1503014' },
     { key: 'all', label: 'Ingest all games', type: 'bool', help: 'Omit the provider cap and stream the complete available archive.' },
     { key: 'max', label: 'Game limit', type: 'number', min: 1, step: 100, help: 'Used only when “Ingest all games” is off.', placeholder: '1000' },
-    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record the downloaded games immediately.' },
+    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Admin curated corpus operation (ingestion.manage): witness downloaded games at StructuredCorpus and optional FIDE links at AcademicCurated.' },
   ],
   'player-profile': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'MagnusCarlsen' },
     { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
-    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to fetch alongside. Leave blank for the provider profile only; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to fetch and link alongside. Leave blank for the provider profile only; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
+    { key: 'ingest', label: 'Associate player identities', type: 'bool', help: 'Admin curated corpus operation (ingestion.manage): persist and witness the (FIDE ID, provider, username) link at AcademicCurated when a FIDE ID is provided.' },
   ],
   'fide-search': [
     { key: 'query', label: 'Player name', type: 'text', help: 'Search the official FIDE ratings database by real name.', placeholder: 'Carlsen, Magnus' },

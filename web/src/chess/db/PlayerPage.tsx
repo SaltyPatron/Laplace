@@ -1,15 +1,31 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Button, ErrorText, LoadingText, Muted, Panel, Stack, Table, Td, Th } from '@ui';
+import { Alert, Button, ErrorText, Input, LoadingText, Muted, Panel, Select, Stack, Table, Td, Th } from '@ui';
+import { useAccess } from '../../auth/access';
 import { StatCard } from '../../explore/components/StatCard';
-import { chessGame, chessPlayer, playerPath } from './api';
+import { chessGame, chessPlayer, linkChessPlayerFide, playerPath } from './api';
 import { GameBoard } from './GameBoard';
 import { OutcomeChip, RecordCell, recordText, scoreText } from './RecordBar';
-import type { ChessGameResponse, ChessPlayerResponse, ChessRecord } from './types';
+import type {
+  ChessFideLinkReceipt,
+  ChessFideProfile,
+  ChessGameResponse,
+  ChessPlayerAlias,
+  ChessPlayerResponse,
+  ChessRecord,
+} from './types';
 import { DeepestOpeningCell, useDeepestOpenings } from '../openings/Openings';
 import styles from './ChessDb.module.css';
 
 const PAGE = 25;
+
+function aliasKindLabel(kind: ChessPlayerAlias['kind']): string {
+  switch (kind) {
+    case 'chesscom': return 'Chess.com';
+    case 'lichess': return 'Lichess';
+    case 'fide': return 'FIDE';
+  }
+}
 
 /**
  * One player, addressed by the name as a PGN White/Black tag writes it: the record and
@@ -20,10 +36,14 @@ const PAGE = 25;
 export function PlayerPage() {
   const { name } = useParams();
   const [params, setParams] = useSearchParams();
+  const access = useAccess();
+  const canManageIngest = !access.error
+    && (access.data?.platform.permissions.includes('ingestion.manage') ?? false);
   const [player, setPlayer] = useState<ChessPlayerResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [latest, setLatest] = useState<ChessGameResponse | null>(null);
   const [latestErr, setLatestErr] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
   const rawOffset = Number(params.get('offset') ?? 0);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0
     ? Math.floor(rawOffset / PAGE) * PAGE
@@ -40,7 +60,7 @@ export function PlayerPage() {
       .then((p) => { if (!stale) setPlayer(p); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
     return () => { stale = true; };
-  }, [name, offset]);
+  }, [name, offset, refreshTick]);
 
   const games = player && player.offset === offset ? player.games : null;
   const latestGame = offset === 0 && games && games.length > 0 ? games[0] : null;
@@ -72,13 +92,30 @@ export function PlayerPage() {
         <nav className={styles.crumbs}>
           <Link to="/chess">Players</Link> <span>/</span> <span>{player.name}</span>
         </nav>
-        <h2>{player.name}</h2>
+        <div className={styles.heroNameLine}>
+          {player.fide?.title ? <span className={styles.titleBadge}>{player.fide.title}</span> : null}
+          <h2>{player.name}</h2>
+          {player.fide ? <span className={styles.fideIdTag}>FIDE {player.fide.id}</span> : null}
+        </div>
         <Muted>
           {player.overall.games === 0
             ? 'No recorded games under this name.'
             : `${player.overall.games.toLocaleString()} recorded games under this name`}
         </Muted>
       </header>
+
+      {player.fide ? (
+        <FideProfilePanel fide={player.fide} aliases={player.aliases ?? []} currentName={player.name} />
+      ) : null}
+
+      {canManageIngest ? (
+        <AdminFideLinkPanel
+          key={`${player.name}:${player.fide?.id ?? ''}`}
+          playerName={player.name}
+          initialFideId={player.fide?.id ?? ''}
+          onLinked={() => setRefreshTick((value) => value + 1)}
+        />
+      ) : null}
 
       {player.overall.games === 0 ? (
         <Panel title="No recorded games">
@@ -265,5 +302,158 @@ function ColourRow({ side, record }: { side: string; record: ChessRecord }) {
       <Td><RecordCell record={record} /></Td>
       <Td>{scoreText(record)}</Td>
     </tr>
+  );
+}
+
+function FideProfilePanel({
+  fide,
+  aliases,
+  currentName,
+}: {
+  fide: ChessFideProfile;
+  aliases: ChessPlayerAlias[];
+  currentName: string;
+}) {
+  return (
+    <Panel title="FIDE Profile">
+      <div className={styles.fidePanelBody}>
+        <div className={styles.fideIdentityRow}>
+          {fide.title ? <span className={styles.titleBadge}>{fide.title}</span> : null}
+          <strong>{fide.name ?? `FIDE ${fide.id}`}</strong>
+          <span className={styles.fideIdTag}>ID {fide.id}</span>
+          {fide.federation ? <span className={styles.fideMetaChip}>{fide.federation}</span> : null}
+          {fide.birth_year != null ? <span className={styles.fideMetaChip}>Born {fide.birth_year}</span> : null}
+        </div>
+
+        <div className={styles.statGrid}>
+          <StatCard label="Standard" value={fide.standard != null ? String(fide.standard) : '—'} />
+          <StatCard label="Rapid" value={fide.rapid != null ? String(fide.rapid) : '—'} />
+          <StatCard label="Blitz" value={fide.blitz != null ? String(fide.blitz) : '—'} />
+        </div>
+
+        {aliases.length > 0 ? (
+          <div className={styles.fideAliases}>
+            <Muted>Linked identities</Muted>
+            <ul className={styles.aliasList}>
+              {aliases.map((alias) => (
+                <li key={`${alias.kind}:${alias.name}`}>
+                  <Link
+                    className={styles.aliasChip}
+                    data-current={alias.name === currentName ? 'true' : undefined}
+                    to={playerPath(alias.name)}
+                  >
+                    <span className={styles.aliasKind}>{aliasKindLabel(alias.kind)}</span>
+                    <span>{alias.name}</span>
+                    <span className={styles.aliasGames}>{alias.games.toLocaleString()}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function AdminFideLinkPanel({
+  playerName,
+  initialFideId,
+  onLinked,
+}: {
+  playerName: string;
+  initialFideId: string;
+  onLinked: () => void;
+}) {
+  const [fideId, setFideId] = useState(initialFideId);
+  const [provider, setProvider] = useState<'chesscom' | 'lichess' | 'fide'>('chesscom');
+  const [username, setUsername] = useState(playerName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<ChessFideLinkReceipt | null>(null);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setReceipt(null);
+    const trimmedFide = fideId.trim();
+    const trimmedUser = username.trim();
+    if (!/^\d{4,12}$/.test(trimmedFide)) {
+      setError('FIDE ID must be 4 to 12 digits.');
+      return;
+    }
+    if (!trimmedUser) {
+      setError('Username is required.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const saved = await linkChessPlayerFide({
+        fide_id: trimmedFide,
+        provider,
+        username: trimmedUser,
+      });
+      setReceipt(saved);
+      onLinked();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="Link to FIDE ID (Admin)">
+      <form className={styles.fideLinkForm} onSubmit={(e) => void handleSubmit(e)}>
+        <Muted className={styles.lede}>
+          Admin curated corpus operation (<code>AcademicCurated</code>, witness <code>Laplace Curated Chess</code>).
+        </Muted>
+        <div className={styles.fideLinkFields}>
+          <label className={styles.filterField}>
+            <span>FIDE ID</span>
+            <Input
+              value={fideId}
+              onChange={(e) => setFideId(e.target.value)}
+              placeholder="1503014"
+              inputMode="numeric"
+              maxLength={12}
+              disabled={busy}
+            />
+          </label>
+          <label className={styles.filterField}>
+            <span>Provider</span>
+            <Select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as 'chesscom' | 'lichess' | 'fide')}
+              disabled={busy}
+            >
+              <option value="chesscom">Chess.com</option>
+              <option value="lichess">Lichess</option>
+              <option value="fide">FIDE alias</option>
+            </Select>
+          </label>
+          <label className={styles.filterField}>
+            <span>Username / alias</span>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={playerName}
+              maxLength={256}
+              disabled={busy}
+            />
+          </label>
+          <Button type="submit" loading={busy} disabled={busy}>
+            Save &amp; witness link
+          </Button>
+        </div>
+        {error ? <ErrorText role="alert">{error}</ErrorText> : null}
+        {receipt ? (
+          <Alert variant="success">
+            Linked FIDE <strong>{receipt.fide_id}</strong> ↔ <strong>{receipt.provider}:{receipt.username}</strong>{' '}
+            (witnessed by {receipt.witness} at {receipt.trust_class}).
+          </Alert>
+        ) : null}
+      </form>
+    </Panel>
   );
 }

@@ -1,5 +1,6 @@
-import { apiGet, type ApiOptions } from '../../api/client';
+import { apiGet, apiPost, type ApiOptions } from '../../api/client';
 import type {
+  ChessFideLinkReceipt,
   ChessGameResponse,
   ChessGamesResponse,
   ChessPlayerResponse,
@@ -52,6 +53,14 @@ export function chessLaplaceGames(
 /** One game: its tags and its replayed plies. */
 export function chessGame(id: string, opts: ApiOptions = {}) {
   return apiGet<ChessGameResponse>(`/chess/db/game?id=${encodeURIComponent(id)}`, opts);
+}
+
+/** Admin-only: persist and witness a curated FIDE-to-provider player link. */
+export function linkChessPlayerFide(
+  payload: { fide_id: string; provider: 'chesscom' | 'lichess' | 'fide'; username: string },
+  opts: ApiOptions = {},
+) {
+  return apiPost<ChessFideLinkReceipt>('/v1/admin/chess/fide-link', payload, opts);
 }
 
 /** The value of one PGN tag, or null when the source did not write it. */

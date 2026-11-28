@@ -1,11 +1,17 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.Endpoints.OpenAICompat.Auth;
 
 namespace Laplace.Endpoints.OpenAICompat;
+
+internal interface IChessFideLinkWitnesser
+{
+    Task WitnessAsync(string rootDir, string filePath, CancellationToken ct);
+}
 
 internal static class ChessEndpoints
 {
@@ -253,14 +259,17 @@ internal static class ChessEndpoints
         }).WithTags("chess-lab");
 
         // Lab jobs are authorized by the /chess/* tenancy and API-key middleware.
+        // Curated external acquisition/linking jobs are strictly admin corpus operations (ingestion.manage).
         app.MapPost("/chess/lab/start", async (HttpContext ctx, LabStartRequest req, ChessLabService lab,
-            ITenantResolver resolver, CancellationToken ct) =>
+            ITenantResolver resolver, PlatformAuthorization authorization, CancellationToken ct) =>
         {
             if (!Enum.TryParse<ChessLabJobKind>(req.Kind?.Replace("-", ""), ignoreCase: true, out var kind)
                 && !TryParseKind(req.Kind, out kind))
                 return Results.BadRequest(new { error = $"unknown kind '{req.Kind}'" });
             if (kind == ChessLabJobKind.LichessBot)
                 return Results.Conflict(new { error = "managed_service", message = "Use the Lichess service controls; the API must not start a second bot." });
+            if (RequiresIngestAuthority(kind) && !await authorization.AllowsAsync(ctx, PlatformPolicy.Ingest, ct))
+                return Forbidden("Curated chess corpus ingestion requires ingestion.manage permission.");
             var config = req.Config?.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()) ?? new Dictionary<string, string>();
             try
             {
@@ -413,7 +422,76 @@ internal static class ChessEndpoints
             return result is null ? Results.NotFound(new { error = "retained job is no longer available" })
                 : Results.Json(result);
         }).WithTags("chess-lab");
+
+        app.MapPost("/v1/admin/chess/fide-link", async (
+            HttpContext ctx,
+            PlatformAuthorization authorization,
+            CancellationToken ct) =>
+        {
+            ctx.Response.Headers.CacheControl = "private, no-store";
+            if (!await authorization.AllowsAsync(ctx, PlatformPolicy.Ingest, ct))
+                return Forbidden("Linking chess players to FIDE identities requires ingestion.manage permission.");
+
+            var request = await EndpointJson.ReadJsonAsync<AdminChessFideLinkRequest>(ctx.Request, ct);
+            if (request is null)
+                return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON with 'fide_id', 'provider', and 'username'.");
+
+            ChessFideLinkWriteResult written;
+            try
+            {
+                written = await ChessFideLinkStore.UpsertAsync(
+                    request.FideId,
+                    request.Provider,
+                    request.Username,
+                    ct: ct).ConfigureAwait(false);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointJson.BadRequest("invalid_chess_fide_link", ex.Message);
+            }
+
+            try
+            {
+                var witnesser = ctx.RequestServices.GetService<IChessFideLinkWitnesser>();
+                if (witnesser is not null)
+                {
+                    await witnesser.WitnessAsync(written.RootDirectory, written.FilePath, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await NativeEngineCli.RunIngestSourceFileAsync(
+                        ChessGameRecorder.CuratedFideLinksSource,
+                        written.FilePath,
+                        ct).ConfigureAwait(false);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("fide_link_not_witnessed", ex.Message);
+            }
+
+            return Results.Json(new
+            {
+                ok = true,
+                fide_id = written.FideId,
+                provider = written.Provider,
+                username = written.Username,
+                path = written.FilePath,
+                witness = ChessGameRecorder.CuratedFideLinkWitness,
+                trust_class = ChessGameRecorder.CuratedFideLinkTrustClass,
+            });
+        }).WithTags("admin", "chess");
     }
+
+    internal static bool RequiresIngestAuthority(ChessLabJobKind kind) => kind is
+        ChessLabJobKind.LichessFetch
+        or ChessLabJobKind.PlayerProfile
+        or ChessLabJobKind.FideProfile
+        or ChessLabJobKind.FideRoster;
+
+    private static IResult Forbidden(string message) => Results.Json(
+        new ErrorResponse(new ErrorBody("authorization_error", "platform_permission_required", message)),
+        statusCode: StatusCodes.Status403Forbidden);
 
     internal static bool OwnsPlaySession(PlaySession? session, OperationPrincipal? requester) =>
         requester is not null && session?.Requester == requester;
@@ -608,4 +686,8 @@ internal static class ChessEndpoints
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);
+    private sealed record AdminChessFideLinkRequest(
+        [property: JsonPropertyName("fide_id")] string? FideId,
+        [property: JsonPropertyName("provider")] string? Provider,
+        [property: JsonPropertyName("username")] string? Username);
 }

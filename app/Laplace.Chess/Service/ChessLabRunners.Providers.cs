@@ -45,8 +45,13 @@ public static partial class ChessLabRunners
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
+        string provider = ChessFideLinkStore.ValidateProvider(site, allowAliases: true);
+        if (provider == "fide")
+            throw new ArgumentException("site must be 'chesscom' or 'lichess'.", nameof(site));
+        if (fideId.Length > 0)
+            fideId = ChessFideLinkStore.ValidateFideId(fideId);
 
-        var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);
+        var online = await ChessGameFetcher.FetchProfileAsync(user, provider, ct);
         var profiles = new List<ChessPlayerProfile> { online };
         if (fideId.Length > 0)
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
@@ -59,7 +64,7 @@ public static partial class ChessLabRunners
         ChessLabIngestRun? journal = null;
         try
         {
-            string fileName = $"{ChessGameFetcher.Sanitize(online.ProviderId)}_{ChessGameFetcher.Sanitize(site)}.pgn";
+            string fileName = $"{ChessGameFetcher.Sanitize(online.ProviderId)}_{ChessGameFetcher.Sanitize(provider)}.pgn";
             if (persistPgn)
             {
                 outPath = Path.Combine(LabDir, slot.Job.Id, fileName);
@@ -71,24 +76,42 @@ public static partial class ChessLabRunners
                 outPath = Path.Combine(spoolDir, fileName);
             }
 
-            int games = await ChessGameFetcher.FetchAsync(online.ProviderId, site, max, 0, outPath,
+            int games = await ChessGameFetcher.FetchAsync(online.ProviderId, provider, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct, null);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
             {
-                // A fetched archive is a PGN of no corpus: the generic pgn recipe reads it, its file its own
-                // witness. (A sample of a source's files publishes no source witness.)
-                const string? source = null;
+                string witness = provider == "chesscom" ? "Chess.com" : "Lichess";
                 var liveHost = await lab.GetLiveHostAsync(ct);
                 journal = await ChessLabIngestRun.StartAsync(liveHost, lab.Log, slot.Job.Id,
-                    $"{ChessGameFetcher.Sanitize(site.Trim().ToLowerInvariant())}/{ChessGameFetcher.Sanitize(online.ProviderId)}",
-                    source, ct);
-                lab.Publish(slot, new ChessLabLogEvent("info", $"ingest run {journal.RunId} ({journal.SourceName}) journaled"));
+                    $"{ChessGameFetcher.Sanitize(provider)}/{ChessGameFetcher.Sanitize(online.ProviderId)}",
+                    witness, ct, trustClass: ChessGameRecorder.CuratedCorpusTrustClass);
+                lab.Publish(slot, new ChessLabLogEvent("info",
+                    $"ingest run {journal.RunId} ({journal.SourceName} @ {ChessGameRecorder.CuratedCorpusTrustClass}) journaled"));
                 await journal.IngestUnitAsync(fileName, outPath, ct);
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", games));
+
+                bool linked = false;
+                if (fideId.Length > 0)
+                {
+                    var link = await ChessFideLinkStore.UpsertAsync(
+                        fideId, provider, online.ProviderId, ct: ct);
+                    await liveHost.IngestSourceFileAsync(
+                        ChessGameRecorder.CuratedFideLinksSource,
+                        link.FilePath,
+                        ct);
+                    linked = true;
+                    lab.Publish(slot, new ChessLabMetricEvent("identity_linked", 1));
+                    lab.Publish(slot, new ChessLabLogEvent("info",
+                        $"linked FIDE {link.FideId} <-> {link.Provider}:{link.Username} admitted via source {ChessGameRecorder.CuratedFideLinksSource} ({ChessGameRecorder.CuratedFideLinkWitness} @ {ChessGameRecorder.CuratedFideLinkTrustClass})"));
+                }
+
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
-                    games, games, $"{profiles.Count} profiles acquired · {games} provider games read by the Engine"));
+                    games, games,
+                    linked
+                        ? $"{profiles.Count} profiles acquired · {games} {witness} games witnessed · FIDE {fideId} linked"
+                        : $"{profiles.Count} profiles acquired · {games} {witness} games witnessed"));
             }
             else
             {
@@ -135,19 +158,42 @@ public static partial class ChessLabRunners
         string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
+        bool ingest = ParseBool(slot.Job.Config, "ingest", true);
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
+        string provider = ChessFideLinkStore.ValidateProvider(site, allowAliases: true);
+        if (provider == "fide")
+            throw new ArgumentException("site must be 'chesscom' or 'lichess'.", nameof(site));
+        if (fideId.Length > 0)
+            fideId = ChessFideLinkStore.ValidateFideId(fideId);
 
-        var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);
+        var online = await ChessGameFetcher.FetchProfileAsync(user, provider, ct);
         var profiles = new List<ChessPlayerProfile> { online };
         if (fideId.Length > 0)
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
 
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
-        // A player is a highway node named by a FIDE id (Sequence 27.3); no profile mints one, so profiles
-        // are kept as the job's artifacts and recorded nowhere.
-        lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
-            $"{profiles.Count} profiles acquired"));
+
+        if (ingest && fideId.Length > 0)
+        {
+            var link = await ChessFideLinkStore.UpsertAsync(
+                fideId, provider, online.ProviderId, ct: ct);
+            var liveHost = await lab.GetLiveHostAsync(ct);
+            await liveHost.IngestSourceFileAsync(
+                ChessGameRecorder.CuratedFideLinksSource,
+                link.FilePath,
+                ct);
+            lab.Publish(slot, new ChessLabMetricEvent("identity_linked", 1));
+            lab.Publish(slot, new ChessLabLogEvent("info",
+                $"linked FIDE {link.FideId} <-> {link.Provider}:{link.Username} admitted via source {ChessGameRecorder.CuratedFideLinksSource} ({ChessGameRecorder.CuratedFideLinkWitness} @ {ChessGameRecorder.CuratedFideLinkTrustClass})"));
+            lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
+                $"{profiles.Count} profiles acquired · FIDE {link.FideId} linked ({ChessGameRecorder.CuratedFideLinkTrustClass})"));
+        }
+        else
+        {
+            lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
+                $"{profiles.Count} profiles acquired"));
+        }
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -237,6 +283,13 @@ public static partial class ChessLabRunners
             case ChessLabJobKind.LichessFetch:
                 _ = ParseBool(config, "all", true);
                 _ = ParseBool(config, "ingest", true);
+                if (config.TryGetValue("fideId", out var fetchFide) && !string.IsNullOrWhiteSpace(fetchFide))
+                    _ = ChessFideLinkStore.ValidateFideId(fetchFide);
+                break;
+            case ChessLabJobKind.PlayerProfile:
+                _ = ParseBool(config, "ingest", true);
+                if (config.TryGetValue("fideId", out var profileFide) && !string.IsNullOrWhiteSpace(profileFide))
+                    _ = ChessFideLinkStore.ValidateFideId(profileFide);
                 break;
             case ChessLabJobKind.FideSearch:
             case ChessLabJobKind.FideRoster:

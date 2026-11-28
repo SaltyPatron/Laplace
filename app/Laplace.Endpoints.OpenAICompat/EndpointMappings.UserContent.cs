@@ -199,13 +199,34 @@ internal static class UserContentEndpointMappings
         await using var conn = await substrate.DataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
             """
+            WITH file_closure AS MATERIALIZED (
+                SELECT hc.entity
+                FROM public.laplace_held_closure(
+                    ARRAY[public.blake3_from_bytea($1)],
+                    2::smallint, -1::bigint, 4, 2048) hc
+                WHERE hc.entity IS NOT NULL
+            )
             SELECT public.laplace_label_text($1::bytea, true),
-                   (SELECT count(*) FROM public.laplace_held_closure($2::public.blake3[]) WHERE entity = $1::public.blake3)
+                   (
+                       SELECT count(*)
+                       FROM file_closure fc
+                       WHERE fc.entity = public.blake3_from_bytea($2)
+                          OR EXISTS (
+                              SELECT 1
+                              FROM public.laplace_constituents(ARRAY[fc.entity]) c
+                              WHERE c.child = public.blake3_from_bytea($2)
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM public.attestation a
+                              WHERE a.claim = fc.entity
+                                AND a.witness = public.blake3_from_bytea($2)
+                          )
+                   )
             """,
             conn);
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, fileBytes);
-        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea,
-            new[] { witnessId.ToBytes() });
+        cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, witnessId.ToBytes());
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))

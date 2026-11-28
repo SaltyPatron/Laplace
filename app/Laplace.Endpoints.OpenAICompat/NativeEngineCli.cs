@@ -108,4 +108,39 @@ internal static class NativeEngineCli
         }
         return result;
     }
+
+    public static async Task<CapturedProcess.Result> RunIngestSourceFileAsync(
+        string sourceName,
+        string filePath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        var exe = ResolveBinary()
+            ?? throw new InvalidOperationException(
+                "Native C engine executable ('laplace') not found; set LAPLACE_ENGINE_EXE or LAPLACE_BUILD.");
+
+        var psi = new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("ingest");
+        psi.ArgumentList.Add("-d");
+        psi.ArgumentList.Add(LaplaceEngineRuntime.ResolveLibpqConnInfo());
+        psi.ArgumentList.Add("-s");
+        psi.ArgumentList.Add(sourceName.Trim());
+        psi.ArgumentList.Add(Path.GetFullPath(filePath));
+
+        using var proc = CapturedProcess.Start(psi);
+        var result = await proc.Completion.WaitAsync(ct).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            var detail = string.IsNullOrWhiteSpace(result.Stderr) ? result.Stdout : result.Stderr;
+            throw new InvalidOperationException(
+                $"Native ingest command (-s {sourceName}) exited with code {result.ExitCode}: {detail.Trim()}");
+        }
+        return result;
+    }
 }

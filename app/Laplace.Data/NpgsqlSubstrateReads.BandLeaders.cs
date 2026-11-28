@@ -12,8 +12,19 @@ public static partial class NpgsqlSubstrateReads
 
     public static Task<IReadOnlyList<NamedClaimLeaderRow>> ClaimLeadersNamedAsync(
         NpgsqlDataSource dataSource, int[] bands, int perBand, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("leaders.native_named"),
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        if (bands is null || bands.Length == 0)
+            throw new ArgumentException("At least one band (0..5) must be requested.", nameof(bands));
+        foreach (var b in bands)
+        {
+            if (b is < 0 or > 5)
+                throw new ArgumentException($"Unknown relation band {b}. Valid bands are 0..5.", nameof(bands));
+        }
+        if (perBand <= 0)
+            throw new ArgumentOutOfRangeException(nameof(perBand), "perBand must be positive.");
+
+        return NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("leaders.native_named"),
             static r => new NamedClaimLeaderRow(
                 r.GetInt32(0), r.GetString(1),
                 r.IsDBNull(2) ? null : r.GetString(2),
@@ -26,4 +37,5 @@ public static partial class NpgsqlSubstrateReads
                 p.Add("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = bands;
                 p.Add("per", NpgsqlDbType.Integer).Value = perBand;
             }, ct: ct, onError: onError);
+    }
 }

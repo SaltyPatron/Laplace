@@ -17,12 +17,48 @@ export interface ChessRecord {
   score: number | null;
 }
 
+/** Official FIDE profile linked to a recorded chess player. */
+export interface ChessFideProfile {
+  id: string;
+  name: string | null;
+  title: string | null;
+  federation: string | null;
+  sex: string | null;
+  flag: string | null;
+  birth_year: number | null;
+  standard: number | null;
+  rapid: number | null;
+  blitz: number | null;
+}
+
+/** Another linked handle/alias for the same FIDE player identity. */
+export interface ChessPlayerAlias {
+  name: string;
+  kind: 'fide' | 'chesscom' | 'lichess';
+  games: number;
+}
+
+/** Admin receipt returned by POST /v1/admin/chess/fide-link. */
+export interface ChessFideLinkReceipt {
+  ok: boolean;
+  fide_id: string;
+  provider: 'chesscom' | 'lichess' | 'fide';
+  username: string;
+  path: string;
+  witness: string;
+  trust_class: string;
+}
+
 /** One name of the player search. `games_complete: false` means the count hit a cap. */
 export interface ChessPlayerRow {
   name: string;
   games: number;
   games_complete: boolean;
+  fide_id?: string | null;
+  title?: string | null;
 }
+
+export type ChessPlayerSummary = ChessPlayerRow;
 
 export interface ChessPlayersResponse {
   search: string;
@@ -65,6 +101,8 @@ export interface ChessPlayerGameRow extends ChessGameRow {
 
 export interface ChessPlayerResponse {
   name: string;
+  fide?: ChessFideProfile | null;
+  aliases?: ChessPlayerAlias[];
   overall: ChessRecord;
   as_white: ChessRecord;
   as_black: ChessRecord;

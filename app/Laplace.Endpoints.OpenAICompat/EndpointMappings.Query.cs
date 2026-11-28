@@ -76,13 +76,19 @@ internal static class QueryEndpoints
             // An anonymous read, so the per-band limit is bounded server-side.
             if (limit is < 1 or > 20)
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'limit' must be between 1 and 20.");
-            var bandIds = (bands ?? "1,2,4,5")
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(s => int.TryParse(s, out var b) ? b : -1)
-                .Where(b => b is >= 0 and <= 12)
-                .Distinct().ToArray();
-            if (bandIds.Length == 0)
-                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-12.");
+            var rawBands = (bands ?? "1,2,4,5")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var bandList = new List<int>(rawBands.Length);
+            foreach (var raw in rawBands)
+            {
+                if (!int.TryParse(raw, out var b) || b is < 0 or > 5)
+                    return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-5.");
+                if (!bandList.Contains(b))
+                    bandList.Add(b);
+            }
+            if (bandList.Count == 0)
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-5.");
+            var bandIds = bandList.ToArray();
             var per = limit ?? 5;
             var leaders = await substrate.LeadersAsync(bandIds, per, ct);
             return Results.Json(new LeadersResponse("list", leaders));

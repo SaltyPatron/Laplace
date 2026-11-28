@@ -5,7 +5,7 @@ using Laplace.Ops;
 
 namespace Laplace.Chess.Service;
 
-internal sealed record ChessNativeWitnessRequest(string? Witness, string TrustClass, string Path);
+internal sealed record ChessNativeWitnessRequest(string? Witness, string TrustClass, string Path, string? SourceName = null);
 
 /// <summary>
 /// Records a game Laplace played (a play session, a Lichess game, a lab match, a self-play game) the way
@@ -22,6 +22,18 @@ public sealed class ChessGameRecorder
 
     /// <summary>The class an application's own output states at (Laplace-Native <c>trust_classes.toml</c>).</summary>
     public const string TrustClass = "AppDerived";
+
+    /// <summary>The class curated external game collections (Chess.com, Lichess) state at.</summary>
+    public const string CuratedCorpusTrustClass = "StructuredCorpus";
+
+    /// <summary>The witness for admin-curated FIDE-to-provider player identity links.</summary>
+    public const string CuratedFideLinkWitness = "Laplace Curated Chess";
+
+    /// <summary>The class admin-curated FIDE-to-provider player identity links state at.</summary>
+    public const string CuratedFideLinkTrustClass = "AcademicCurated";
+
+    /// <summary>The declared recipe source name for curated FIDE-to-provider identity links (<c>recipes/fide-links</c>).</summary>
+    public const string CuratedFideLinksSource = "fide-links";
 
     private readonly string _connectionString;
     private readonly string _directory;
@@ -79,15 +91,41 @@ public sealed class ChessGameRecorder
     /// <see cref="TrustClass"/> (Laplace's own games), or, when it is null, as a file of no corpus by the
     /// generic pgn recipe, its trunk its own witness. A failed read throws with what the Engine said.
     /// </summary>
-    public async Task IngestFileAsync(string? witness, string path, CancellationToken ct = default)
+    public Task IngestFileAsync(string? witness, string path, CancellationToken ct = default)
+        => IngestFileAsync(witness, path, TrustClass, ct);
+
+    /// <summary>
+    /// Has the Engine read a file stated by the runtime witness <paramref name="witness"/> at an explicit
+    /// <paramref name="trustClass"/> (for example <see cref="CuratedCorpusTrustClass"/> for curated Chess.com/Lichess
+    /// archives or <see cref="CuratedFideLinkTrustClass"/> for curated FIDE identity links), or, when
+    /// <paramref name="witness"/> is null, via <c>laplace ingest</c>.
+    /// </summary>
+    public async Task IngestFileAsync(string? witness, string path, string trustClass, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var request = new ChessNativeWitnessRequest(witness, TrustClass, path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(trustClass);
+        var request = new ChessNativeWitnessRequest(witness, trustClass, path);
         using var output = new MemoryStream();
         using var error = new MemoryStream();
         int code = await _execute(request, output, error, ct).ConfigureAwait(false);
         if (code != 0)
             throw new InvalidOperationException($"The Engine did not record {path} ({code}): {Tail(error)}");
+    }
+
+    /// <summary>
+    /// Has the Engine ingest a single file under a declared source recipe (<c>laplace ingest -d &lt;conn&gt; -s &lt;source&gt; &lt;path&gt;</c>),
+    /// such as <c>fide-links</c> (<c>recipes/fide-links/links.recipe</c>).
+    /// </summary>
+    public async Task IngestSourceFileAsync(string sourceName, string path, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var request = new ChessNativeWitnessRequest(null, TrustClass, path, SourceName: sourceName.Trim());
+        using var output = new MemoryStream();
+        using var error = new MemoryStream();
+        int code = await _execute(request, output, error, ct).ConfigureAwait(false);
+        if (code != 0)
+            throw new InvalidOperationException($"The Engine did not ingest {path} under source '{sourceName}' ({code}): {Tail(error)}");
     }
 
     private async Task<int> ExecuteNativeCliAsync(
@@ -107,7 +145,16 @@ public sealed class ChessGameRecorder
 
         string fullPath = Path.GetFullPath(request.Path);
         string rootDir = Path.GetDirectoryName(fullPath) ?? _directory;
-        if (!string.IsNullOrWhiteSpace(request.Witness))
+        if (!string.IsNullOrWhiteSpace(request.SourceName))
+        {
+            psi.ArgumentList.Add("ingest");
+            psi.ArgumentList.Add("-d");
+            psi.ArgumentList.Add(connInfo);
+            psi.ArgumentList.Add("-s");
+            psi.ArgumentList.Add(request.SourceName);
+            psi.ArgumentList.Add(fullPath);
+        }
+        else if (!string.IsNullOrWhiteSpace(request.Witness))
         {
             psi.ArgumentList.Add("witness");
             psi.ArgumentList.Add("-d");

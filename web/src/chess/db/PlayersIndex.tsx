@@ -150,9 +150,15 @@ export function PlayersIndex() {
                 {data.players.map((player) => (
                   <tr key={player.name}>
                     <Td>
-                      <Link className={styles.playerLink} to={playerPath(player.name)}>
-                        {player.name}
-                      </Link>
+                      <span className={styles.playerNameCell}>
+                        {player.title ? <span className={styles.titleBadge}>{player.title}</span> : null}
+                        <Link className={styles.playerLink} to={playerPath(player.name)}>
+                          {player.name}
+                        </Link>
+                        {player.fide_id ? (
+                          <span className={styles.fideIdTag}>FIDE {player.fide_id}</span>
+                        ) : null}
+                      </span>
                     </Td>
                     <Td title={player.games_complete ? undefined : 'at least this many games'}>
                       {gamesText(player)}
