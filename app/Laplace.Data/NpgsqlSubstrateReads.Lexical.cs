@@ -392,7 +392,7 @@ public static partial class NpgsqlSubstrateReads
                 FROM sense_synsets ss,
                      public.laplace_claims_each(
                          ARRAY[ss.synset_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                         ARRAY[public.laplace_text_id('definition of the synset'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) cd,
+                         ARRAY[public.laplace_text_id('definition'), public.laplace_text_id('definition of the synset'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) cd,
                      LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
                 WHERE cardinality(pd.pts) >= 2
                 ORDER BY ss.synset_id,
@@ -407,7 +407,7 @@ public static partial class NpgsqlSubstrateReads
                        cd.matches
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 12::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                    ARRAY[public.laplace_text_id('definition of the synset')]) cd,
+                    ARRAY[public.laplace_text_id('definition'), public.laplace_text_id('definition of the synset'), public.laplace_text_id('skos:definition')]) cd,
                      LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
                 WHERE cardinality(pd.pts) >= 2
                   AND NOT EXISTS (SELECT 1 FROM lexical_defs)

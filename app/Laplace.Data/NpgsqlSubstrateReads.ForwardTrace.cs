@@ -112,6 +112,7 @@ public static partial class NpgsqlSubstrateReads
                     greatest(4096::bigint, $7::bigint),
                     ARRAY(SELECT public.laplace_text_id(r)
                           FROM unnest(ARRAY[
+                              'pronunciation',
                               'pronunciation of a form',
                               'variety of language',
                               'other form',

@@ -54,9 +54,11 @@ public static partial class NpgsqlSubstrateReads
     private static readonly RelationBandDefinition[] GovernedBands =
     [
         new(1, "definition", 1.0, [
+            "definition",
             "definition of the synset",
             "standard definition of the synset in the ILI",
             "English definition",
+            "example",
             "example usage",
         ]),
         new(2, "taxonomy", 0.95, [
@@ -80,6 +82,8 @@ public static partial class NpgsqlSubstrateReads
             "pertainym",
         ]),
         new(4, "part_whole", 0.85, [
+            "meronym",
+            "holonym",
             "mero_part",
             "holo_part",
             "mero_member",
@@ -94,6 +98,7 @@ public static partial class NpgsqlSubstrateReads
             "Part2b",
             "Part2t",
             "variety of language",
+            "pronunciation",
             "pronunciation of a form",
             "emoji name",
             "CLDR short name of sequence",
@@ -164,6 +169,7 @@ public static partial class NpgsqlSubstrateReads
             ),
             def_rels AS MATERIALIZED (
                 SELECT ARRAY[
+                    public.laplace_text_id('definition'),
                     public.laplace_text_id('definition of the synset'),
                     public.laplace_text_id('standard definition of the synset in the ILI'),
                     public.laplace_text_id('English definition'),
@@ -337,7 +343,7 @@ public static partial class NpgsqlSubstrateReads
                 FROM synsets sy
                 JOIN LATERAL public.laplace_claims_each(
                     ARRAY[sy.synset_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                    ARRAY[public.laplace_text_id('definition of the synset'), public.laplace_text_id('standard definition of the synset in the ILI'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) c ON true
+                    ARRAY[public.laplace_text_id('definition'), public.laplace_text_id('definition of the synset'), public.laplace_text_id('standard definition of the synset in the ILI'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) c ON true
                 CROSS JOIN LATERAL (SELECT public.laplace_parts(c.path) AS pts) p
                 LEFT JOIN ctx_coupled cx ON cx.entity = sy.synset_id
                 WHERE cardinality(p.pts) = 3
