@@ -549,7 +549,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os, urllib.request
+          import hashlib, json, os, time, urllib.request
           token = os.environ["GH_TOKEN"]
           repo = os.environ["REPO"]
           tag = os.environ["TAG"]
@@ -565,21 +565,33 @@ jobs:
           for asset in rel["assets"]:
               if asset["name"] not in ("laplace-site.tar", "laplace-site.tar.sha256"):
                   continue
-              dl = urllib.request.Request(
-                  asset["url"],
-                  headers={
-                      "Authorization": f"Bearer {token}",
-                      "Accept": "application/octet-stream",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
-              )
+              expected_size = asset.get("size")
               out = os.path.join(bundle_dir, asset["name"])
-              with urllib.request.urlopen(dl, timeout=300) as r, open(out, "wb") as f:
-                  while True:
-                      chunk = r.read(1024 * 1024)
-                      if not chunk:
-                          break
-                      f.write(chunk)
+              for attempt in range(1, 4):
+                  dl = urllib.request.Request(
+                      asset["url"],
+                      headers={
+                          "Authorization": f"Bearer {token}",
+                          "Accept": "application/octet-stream",
+                          "X-GitHub-Api-Version": "2022-11-28",
+                      },
+                  )
+                  try:
+                      with urllib.request.urlopen(dl, timeout=300) as r, open(out, "wb") as f:
+                          while True:
+                              chunk = r.read(1024 * 1024)
+                              if not chunk:
+                                  break
+                              f.write(chunk)
+                      actual_size = os.path.getsize(out)
+                      if expected_size is not None and actual_size != expected_size:
+                          raise IOError(f"truncated download for {asset['name']}: got {actual_size} of {expected_size} bytes")
+                      break
+                  except Exception as exc:
+                      if attempt == 3:
+                          raise
+                      print(f"Download attempt {attempt} failed for {asset['name']}: {exc}; retrying...", flush=True)
+                      time.sleep(5 * attempt)
           expected = open(os.path.join(bundle_dir, "laplace-site.tar.sha256"), encoding="utf-8").read().strip()
           h = hashlib.sha256()
           with open(os.path.join(bundle_dir, "laplace-site.tar"), "rb") as f:
