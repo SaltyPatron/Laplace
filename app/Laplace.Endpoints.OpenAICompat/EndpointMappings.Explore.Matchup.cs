@@ -143,12 +143,13 @@ internal static partial class ExploreEndpoints
         {
             if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
-            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async gateQuote =>
             {
                 var matchup = await substrate.MatchupAsync(x.Trim(), y.Trim(), ct);
-                return matchup is null
-                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
-                    : Results.Json(matchup);
+                if (matchup is null)
+                    return EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.");
+                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                return Results.Json(matchup);
             });
         })
         .WithTags("explore")
@@ -162,12 +163,13 @@ internal static partial class ExploreEndpoints
         {
             if (string.IsNullOrWhiteSpace(x))
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'x' is required.");
-            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async gateQuote =>
             {
                 var response = await substrate.LexiconAsync(x.Trim(), string.IsNullOrWhiteSpace(y) ? null : y.Trim(), ct);
-                return response is null
-                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
-                    : Results.Json(response);
+                if (response is null)
+                    return EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.");
+                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                return Results.Json(response);
             });
         }).WithTags("explore").Produces<ResponseFieldResponse>();
 
@@ -181,12 +183,13 @@ internal static partial class ExploreEndpoints
             int selectedFanout = fanout ?? 512, selectedNearest = nearest ?? 16;
             if (selectedFanout is < 1 or > 4096 || selectedNearest is < 0 or > 256)
                 return EndpointJson.BadRequest("invalid_request_error", "fanout must be 1–4096; nearest must be 0–256.");
-            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async gateQuote =>
             {
                 var response = await substrate.ResponseFieldAsync(x.Trim(), y.Trim(), selectedFanout, selectedNearest, ct);
-                return response is null
-                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
-                    : Results.Json(response);
+                if (response is null)
+                    return EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.");
+                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                return Results.Json(response);
             });
         }).WithTags("explore").Produces<ResponseFieldResponse>();
 
@@ -195,12 +198,13 @@ internal static partial class ExploreEndpoints
         {
             if (string.IsNullOrWhiteSpace(x) || string.IsNullOrWhiteSpace(y))
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameters 'x' and 'y' are required.");
-            return await RunGatedExploreAsync(request, billing, "inspect", ct, async _ =>
+            return await RunGatedExploreAsync(request, billing, "inspect", ct, async gateQuote =>
             {
                 var verdict = await substrate.MatchupVerdictAsync(x.Trim(), y.Trim(), ct);
-                return verdict is null
-                    ? EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.")
-                    : Results.Json(verdict);
+                if (verdict is null)
+                    return EndpointJson.NotFound("topic_not_witnessed", "One of the topics resolves to nothing witnessed.");
+                if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
+                return Results.Json(verdict);
             });
         })
         .WithTags("explore")

@@ -84,7 +84,7 @@ Any agent touching these areas must treat the current behavior listed below as *
 | BPE vocab IDs or stored raw weights | Open Merkle vocabulary (`laplace-blake3-v1`); transient weight reduction (`raw_weight_bytes_retained = 0`). |
 | Salted / domain-prefixed / case-folded hashes | Pure content `lp_id` (zero salt, zero domain byte, `"King" != "king"`). |
 | Explicit `precedes` / `contains` / `continues_to` rows | Query `physicality.path` trajectories via GIN `laplace_path_ops`. |
-| Chess KVP tag bags or raw FEN entities | Pure state trajectories (`[P0..Pn]`) + `[P_k, P_{k+1}]` transitions + altitude inheritance (`Conflicts.md` K2). |
+| Chess KVP tag bags or raw FEN entities | Pure state trajectories (`line = [P0..Pn]`, shared `P0` across ~99% of games) attested once at game altitude (`1.0`/`0.5`/`0.0`) + GIN `laplace_path_ops` intersections + altitude inheritance (`Conflicts.md` K2); never per-move `[P_k, P_{k+1}]` win/loss explosions or downgrading annotated `K_PLAYED` games to `K_STUDY`. |
 | Raw `physicality.path` carrier doubles in 4D metrics | Always unpack child IDs and resolve real `entity.coord` before `frechet4d`/`dtw4d`/`edr4d` or Glome plotting. |
 | Ephemeral pointer storage or dropping gold/negative data | Resolve internal pointers at ingest; keep shared highway IDs (`i46360`, `Q937`, `abandon.01`) and negative scores. |
 | Capping a trust class as 1 witness or muting on ties | Dependence capping applies to shared causal `lineage` / Sybils only; never mute (`budget = 0`) on polysemy. |
@@ -100,7 +100,7 @@ Any agent touching these areas must treat the current behavior listed below as *
 - **Four persistent substrate tables (`Laplace-postgres/sql/laplace.sql.in`):**
   - `entity(id blake3, tier smallint, coord geometry(PointZM), hilbert bigint, mask bigint)`
   - `physicality(entity blake3, tier smallint, path geometry, mask bigint)`
-  - `attestation(claim blake3, witness blake3, lineage blake3, games bigint, tokens bigint, score float8, "position" int4, trust float8)`
+  - `attestation(claim blake3, witness blake3, lineage blake3, games bigint, tokens bigint, score float8, "position" int4, trust float8)` — nullable `trust`, CHECK `attestation_row_shape`: canonical `(lineage, trust)` lives once per witness on `(claim = witness, games = 0, tokens = 0, score = 0, "position" IS NULL, trust NOT NULL)` covered by ~16 KB `attestation_witness_reg`; claim testimony rows (`claim <> witness, games > 0, tokens >= games`) store `lineage = NULL, trust = NULL` unless overridden by `LP_SAID_DEPENDENCE` (hydrated on read)
   - `consensus(claim blake3 PK, rating float8, deviation float8, volatility float8, matches bigint)`
 - **Hosts:**
   - `HART-DESKTOP` (`100.70.222.78`, Windows, IIS `https://dev.hartonomous.com`, **metered 5G: seed strictly from local `E:\Data\Ingest`, NEVER bulk-download**): src `E:\Repositories\Laplace`, build `D:\Libraries\build\Laplace`, data `E:\Data\Ingest`, work `E:\Data\Laplace\work`, pgdata `E:\Data\Laplace\pgdata`, WAL `D:\Data\Laplace\pg_wal`, DB `laplace`.

@@ -120,7 +120,9 @@ test('[CHAT-1] chat answers what the substrate knows', async ({ page }) => {
   await ask(page, 'What is photosynthesis?');
   const text = await mainText(page);
   expect(text).not.toMatch(/no reply/i);
-  expect(text).toMatch(/synthesis/i);
+  // Strip the echoed prompt before asserting so the prompt word "photosynthesis" cannot self-match.
+  const withoutPrompt = text.replace(/What is photosynthesis\??/gi, '');
+  expect(withoutPrompt).toMatch(/radiant energy|plants|compounds|chlorophyll|light/i);
 });
 
 test('[CHAT-2] no debug dump inside the reply', async ({ page }) => {
@@ -164,7 +166,8 @@ test('[NUM-1] highway layer counts do not contradict', async ({ page }) => {
   await open(page, '/explore/highway/iso', 6000);
   const text = await mainText(page);
   const claimed = Number(text.match(/(\d[\d,]*) consensus edges across/)?.[1]?.replace(/,/g, '') ?? 0);
-  expect(claimed > 0 && /No consensus edges witnessed/.test(text)).toBe(false);
+  expect(claimed).toBeGreaterThan(0);
+  expect(/No consensus edges witnessed/.test(text)).toBe(false);
 });
 
 test('[NUM-2] audit counts are labeled truthfully', async ({ page }) => {

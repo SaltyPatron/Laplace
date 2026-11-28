@@ -39,7 +39,7 @@ export const HIGHWAY_LAYERS: HighwayLayer[] = [
       'HAS_LANGUAGE', 'IS_LANGUAGE_CODE', 'HAS_LANGUAGE_TYPE', 'HAS_LANGUAGE_SCOPE',
       'HAS_EXTERNAL_ID', 'HAS_PART',
     ],
-    band: 11,
+    band: 1,
     read: '/v1/query { topic, shape: "languages" } — which languages witness a concept',
     contributes:
       'Fixes the language of every surface, so the same concept witnessed in two languages folds to one entity instead of two.',

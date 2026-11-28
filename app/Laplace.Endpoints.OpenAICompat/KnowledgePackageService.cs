@@ -84,44 +84,68 @@ internal sealed partial class KnowledgePackageService : IKnowledgePackageStore
         return services.GetKeyedService<NpgsqlDataSource>(AppComposition.ApplicationDatabaseKey);
     }
 
+    private IReadOnlyList<string> QueryRealWitnessIds(params string[] keywords)
+    {
+        if (_dataSource is null) return [];
+        try
+        {
+            using var conn = _dataSource.OpenConnection();
+            using var cmd = new NpgsqlCommand("SELECT witness::text, COALESCE(name, '') FROM public.laplace_witnesses_named() ORDER BY readings DESC NULLS LAST, witness LIMIT 256", conn);
+            using var reader = cmd.ExecuteReader();
+            var matched = new List<string>();
+            while (reader.Read())
+            {
+                string wid = reader.GetString(0).Trim();
+                string name = reader.GetString(1);
+                if (!Hash128.TryParseHex(wid, out var parsed)) continue;
+                bool hit = keywords.Length == 0 || keywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+                if (hit) matched.Add(parsed.ToHex());
+            }
+            return matched.Distinct(StringComparer.Ordinal).ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private void SeedPublicPackages()
     {
         var seededAt = DateTimeOffset.UnixEpoch;
+        var coreWitnesses = QueryRealWitnessIds("wordnet", "wikipedia", "wikidata", "wiktionary", "conceptnet", "framenet", "verbnet", "propbank", "universal", "cili", "iso", "unicode");
+        if (coreWitnesses.Count == 0) coreWitnesses = QueryRealWitnessIds();
+        if (coreWitnesses.Count == 0 && _dataSource is null)
+            coreWitnesses = [DeterministicWitnessHex("laplace:package:core-open:wikipedia"), DeterministicWitnessHex("laplace:package:core-open:wikidata"), DeterministicWitnessHex("laplace:package:core-open:wordnet")];
+
         PutInMemorySeed(new KnowledgePackageRecord(
             PackageId: "core-open",
             DisplayName: "Core Open Knowledge",
             Visibility: "public",
-            WitnessIds:
-            [
-                DeterministicWitnessHex("laplace:package:core-open:wikipedia"),
-                DeterministicWitnessHex("laplace:package:core-open:wikidata"),
-                DeterministicWitnessHex("laplace:package:core-open:wordnet"),
-            ],
+            WitnessIds: coreWitnesses,
             MinTrust: 0.0,
             UpdatedAt: seededAt));
+
+        var chessWitnesses = QueryRealWitnessIds("chess", "lichess", "fide", "syzygy", "eco", "pgn");
+        if (chessWitnesses.Count == 0 && _dataSource is null)
+            chessWitnesses = [DeterministicWitnessHex("laplace:package:domain-chess:fide"), DeterministicWitnessHex("laplace:package:domain-chess:lichess"), DeterministicWitnessHex("laplace:package:domain-chess:syzygy")];
 
         PutInMemorySeed(new KnowledgePackageRecord(
             PackageId: "domain-chess",
             DisplayName: "Chess Corpus & Syzygy",
             Visibility: "public",
-            WitnessIds:
-            [
-                DeterministicWitnessHex("laplace:package:domain-chess:fide"),
-                DeterministicWitnessHex("laplace:package:domain-chess:lichess"),
-                DeterministicWitnessHex("laplace:package:domain-chess:syzygy"),
-            ],
+            WitnessIds: chessWitnesses,
             MinTrust: 0.0,
             UpdatedAt: seededAt));
+
+        var codeWitnesses = QueryRealWitnessIds("code", "workspace", "toolchain", "git", "tree-sitter", "laplace");
+        if (codeWitnesses.Count == 0 && _dataSource is null)
+            codeWitnesses = [DeterministicWitnessHex("laplace:package:domain-code:treesitter"), DeterministicWitnessHex("laplace:package:domain-code:toolchain")];
 
         PutInMemorySeed(new KnowledgePackageRecord(
             PackageId: "domain-code",
             DisplayName: "Code AST & Toolchain Verification",
             Visibility: "public",
-            WitnessIds:
-            [
-                DeterministicWitnessHex("laplace:package:domain-code:treesitter"),
-                DeterministicWitnessHex("laplace:package:domain-code:toolchain"),
-            ],
+            WitnessIds: codeWitnesses,
             MinTrust: 0.0,
             UpdatedAt: seededAt));
     }

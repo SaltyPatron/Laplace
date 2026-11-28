@@ -167,17 +167,9 @@ public sealed class ForwardPassLiveTests
 
     private static bool CanReachSeededSubstrate()
     {
-        try
-        {
-            using var conn = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString());
-            conn.Open();
-            using var cmd = new NpgsqlCommand(
-                "SELECT 1 FROM laplace.entities WHERE type_id = laplace.entity_type_id('Codepoint') LIMIT 1", conn);
-            return cmd.ExecuteScalar() is not null;
-        }
-        catch
-        {
-            return false;
-        }
+        using var conn = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString());
+        conn.Open();
+        using var cmd = new NpgsqlCommand("SELECT 1 FROM public.consensus LIMIT 1", conn);
+        return cmd.ExecuteScalar() is not null;
     }
 }

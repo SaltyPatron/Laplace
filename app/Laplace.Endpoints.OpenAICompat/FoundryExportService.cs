@@ -115,15 +115,9 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
                 effFfnDim = (uint)compiled.IntermediateSize;
             tiedEmbeddings = compiled.TieEmbeddings;
         }
-        else if (!string.IsNullOrWhiteSpace(recipeIdPrefix))
+        else if (string.IsNullOrWhiteSpace(recipeIdPrefix))
         {
-            throw new ArgumentException(
-                "Lookup by 'recipe_id_prefix' is not supported on export; supply the compiled 'recipe' JSON directly.",
-                nameof(recipeIdPrefix));
-        }
-        else
-        {
-            throw new ArgumentException("Field 'recipe' is required.");
+            throw new ArgumentException("Field 'recipe' or 'recipe_id_prefix' is required.");
         }
 
         var engine = _runtime.Runtime
@@ -152,7 +146,9 @@ internal sealed class NativeFoundryExportService : IFoundryExportService
             Format: string.Equals(ext, "safetensors", StringComparison.Ordinal) ? 1 : 0,
             NKvHeads: effKvHeads,
             FfnDim: effFfnDim,
-            TiedEmbeddings: tiedEmbeddings);
+            TiedEmbeddings: tiedEmbeddings,
+            RecipeJson: string.IsNullOrWhiteSpace(recipeJson) ? null : recipeJson,
+            RecipeIdPrefix: string.IsNullOrWhiteSpace(recipeIdPrefix) ? null : recipeIdPrefix.Trim());
 
         ct.ThrowIfCancellationRequested();
         var res = await Task.Run(() => engine.MoldCheckpoint(moldReq), ct).ConfigureAwait(false);

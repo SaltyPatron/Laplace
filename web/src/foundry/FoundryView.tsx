@@ -32,33 +32,48 @@ import styles from './FoundryView.module.css';
 
 const STARTER_RECIPES: { id: string; label: string; json: string }[] = [
   {
-    id: 'llama-4l',
-    label: 'Llama-architecture 4-layer (laplace-blake3-v1)',
+    id: 'dense-4l',
+    label: 'Dense 4-layer GQA (laplace-blake3-v1)',
     json: JSON.stringify({
-      name: 'laplace-foundry-llama4',
-      structure: 'llama',
-      vocab_size: 32000,
+      kind: 'laplace.recipe',
+      name: 'laplace-foundry-dense4',
+      structure: 'dense',
       hidden_size: 256,
       num_layers: 4,
-      num_heads: 4,
-      num_kv_heads: 2,
       intermediate_size: 768,
-      tied_embeddings: false,
+      tie_embeddings: false,
+      embed: { op: 'coord' },
+      lm_head: { op: 'trajectory' },
+      compile: 'continuation',
+      layers: Array.from({ length: 4 }, () => ({
+        kv_heads: 2,
+        heads: [{ op: 'context' }, { op: 'context' }, { op: 'relation' }, { op: 'relation' }],
+        ffn: { op: 'unary' },
+      })),
     }, null, 2),
   },
   {
-    id: 'qwen-gqa',
-    label: 'Qwen-architecture GQA (laplace-blake3-v1)',
+    id: 'dense-6l-tied',
+    label: 'Dense 6-layer tied GQA (laplace-blake3-v1)',
     json: JSON.stringify({
-      name: 'laplace-foundry-qwen4',
-      structure: 'qwen2',
-      vocab_size: 32000,
+      kind: 'laplace.recipe',
+      name: 'laplace-foundry-dense6',
+      structure: 'dense',
       hidden_size: 384,
       num_layers: 6,
-      num_heads: 6,
-      num_kv_heads: 2,
       intermediate_size: 1024,
-      tied_embeddings: true,
+      tie_embeddings: true,
+      embed: { op: 'coord' },
+      lm_head: { op: 'trajectory' },
+      compile: 'continuation',
+      layers: Array.from({ length: 6 }, () => ({
+        kv_heads: 2,
+        heads: [
+          { op: 'context' }, { op: 'context' }, { op: 'relation' },
+          { op: 'relation' }, { op: 'highway' }, { op: 'consensus' },
+        ],
+        ffn: { op: 'unary' },
+      })),
     }, null, 2),
   },
 ];
@@ -152,9 +167,9 @@ export function FoundryView() {
     setExportErr(null);
     try {
       const res = await exportSynthesis({
-        recipe: recipeIdPrefix.trim() ? null : recipeText,
-        recipe_id_prefix: recipeIdPrefix.trim() || null,
-        tokenizer_dir: tokenizerDir.trim() || null,
+        recipe: recipeText,
+        recipe_id_prefix: null,
+        tokenizer_dir: null,
         format,
         filename: filename.trim() || null,
       }, { tenant, quoteId });

@@ -117,7 +117,13 @@ public static partial class NpgsqlSubstrateReads
                    c.distance,
                    CASE WHEN c.vertices IS NOT NULL AND cardinality(c.vertices) >= 1 THEN (c.vertices[1] = c.anchor_id) ELSE NULL END,
                    ARRAY[c.occ],
-                   ARRAY[]::int[],
+                   ARRAY(
+                       SELECT DISTINCT o.occ_idx
+                       FROM occs o
+                       WHERE o.occ_idx <> c.occ
+                         AND (o.id = c.entity OR (c.vertices IS NOT NULL AND o.id = ANY(c.vertices)))
+                       ORDER BY o.occ_idx
+                   ),
                    CASE WHEN c.via IS NULL THEN ARRAY[]::bytea[] ELSE ARRAY[public.blake3_send(c.via)] END,
                    ARRAY[c.occ],
                    true,

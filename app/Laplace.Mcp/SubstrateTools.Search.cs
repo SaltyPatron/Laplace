@@ -283,7 +283,7 @@ public sealed partial class SubstrateTools
         var qTraj = ExtractTrajectory(query, out var qOrderedIds, out _);
         int qCount = qOrderedIds.Count;
 
-        var scored = new List<(int Index, string Document, double Score, double FrechetDistance)>();
+        var scored = new List<(int Index, string Document, double Overlap, double FrechetDistance, double Score)>();
         for (int i = 0; i < docsArray.Count; i++)
         {
             var item = docsArray[i];
@@ -294,16 +294,15 @@ public sealed partial class SubstrateTools
                     : string.Empty;
             if (string.IsNullOrEmpty(doc))
             {
-                scored.Add((i, doc, 0.0, double.PositiveInfinity));
+                scored.Add((i, doc, 0.0, double.PositiveInfinity, 0.0));
                 continue;
             }
             if (string.Equals(query, doc, StringComparison.Ordinal))
             {
-                scored.Add((i, doc, 2.0, 0.0));
+                scored.Add((i, doc, 1.0, 0.0, 2.0));
                 continue;
             }
             var dTraj = ExtractTrajectory(doc, out _, out var dTokens);
-            int dVerts = dTraj.Length / 4;
             int matchedQueryTokens = 0;
             for (int qi = 0; qi < qCount; qi++)
             {
@@ -312,22 +311,23 @@ public sealed partial class SubstrateTools
             }
 
             double coverage = qCount > 0 ? (double)matchedQueryTokens / qCount : 0.0;
-            double rawFrechet = Math4d.SubTrajectoryFrechet(qTraj, dTraj);
-            double frechet = double.IsFinite(rawFrechet) ? rawFrechet + 0.55 * (1.0 - coverage) : double.PositiveInfinity;
-            double score = matchedQueryTokens > 0
-                ? 1.0 / (1.0 + Math.Max(0.0, frechet)) + coverage
-                : 0.20 / (1.0 + Math.Max(0.0, frechet));
-            scored.Add((i, doc, score, frechet));
+            double frechet = Math4d.SubTrajectoryFrechet(qTraj, dTraj);
+            double proximity = double.IsFinite(frechet) ? 1.0 / (1.0 + Math.Max(0.0, frechet)) : 0.0;
+            double score = matchedQueryTokens > 0 ? coverage + proximity : 0.20 * proximity;
+            scored.Add((i, doc, coverage, frechet, score));
         }
 
         return JsonRows(scored
-            .OrderByDescending(x => x.Score)
+            .OrderByDescending(x => x.Overlap)
+            .ThenBy(x => double.IsFinite(x.FrechetDistance) ? x.FrechetDistance : double.MaxValue)
+            .ThenByDescending(x => x.Score)
             .ThenBy(x => x.Index)
             .Take(topN)
             .Select(x => new JsonObject
             {
                 ["index"] = x.Index,
                 ["score"] = Math.Round(x.Score, 6),
+                ["word_overlap"] = Math.Round(x.Overlap, 6),
                 ["frechet_distance"] = double.IsFinite(x.FrechetDistance) ? Math.Round(x.FrechetDistance, 6) : null,
                 ["document"] = x.Document,
             }));
@@ -337,25 +337,111 @@ public sealed partial class SubstrateTools
     {
         string query = Req(args, "query");
         int limit = Math.Clamp(Int(args, "limit", 16), 1, 100);
+        string? pathFilter = Opt(args, "path");
         bool includePeers = args?["include_peers"]?.GetValue<bool>() == true;
 
-        var snapshot = EnsureIndex(forceReindex: false);
         var qTraj = ExtractTrajectory(query, out _, out var qTokens);
-
         var hits = new List<JsonObject>();
+
+        // Prefer the ingested PostgreSQL substrate containment/AST index over working-tree disk scanning.
+        try
+        {
+            var termBytes = qTokens
+                .Where(static id => id != Hash128.Zero)
+                .Take(64)
+                .Select(static id => id.ToBytes())
+                .ToArray();
+            var files = termBytes.Length > 0
+                ? NpgsqlSubstrateReads.SearchCodeFilesAsync(_dbReadOnly, termBytes, pathFilter, limit, 0, default)
+                    .GetAwaiter().GetResult()
+                : [];
+            if (files.Count > 0)
+            {
+                var rankedFiles = files
+                    .Select(sym =>
+                    {
+                        string fileName = Path.GetFileName(sym.FilePath);
+                        string docText = $"{fileName}\n{sym.Snippet}";
+                        var dTraj = ExtractTrajectory(docText, out _, out var dTokens);
+                        double overlap = TokenOverlap(qTokens, dTokens);
+                        bool exact = sym.FilePath.Contains(query, StringComparison.OrdinalIgnoreCase)
+                            || sym.Snippet.Contains(query, StringComparison.OrdinalIgnoreCase);
+                        double frechet = qTraj.Length > 0 && dTraj.Length > 0
+                            ? Math4d.SubTrajectoryFrechet(qTraj, dTraj)
+                            : double.PositiveInfinity;
+                        double score = (exact ? 1.0 : 0.0) + overlap;
+                        return (Row: sym, Name: fileName, Overlap: overlap, Frechet: frechet, Exact: exact, Score: score);
+                    })
+                    .OrderByDescending(x => x.Exact)
+                    .ThenByDescending(x => x.Overlap)
+                    .ThenBy(x => double.IsFinite(x.Frechet) ? x.Frechet : double.MaxValue)
+                    .Take(limit)
+                    .ToArray();
+
+                foreach (var hit in rankedFiles)
+                {
+                    hits.Add(new JsonObject
+                    {
+                        ["path"] = hit.Row.FilePath,
+                        ["kind"] = $"tier-{hit.Row.UnitTier}",
+                        ["name"] = hit.Name,
+                        ["snippet"] = hit.Row.Snippet,
+                        ["score"] = Math.Round(hit.Score, 6),
+                        ["word_overlap"] = Math.Round(hit.Overlap, 6),
+                        ["frechet_distance"] = double.IsFinite(hit.Frechet) ? Math.Round(hit.Frechet, 6) : null,
+                    });
+                }
+
+                if (includePeers && qTokens.Count > 0)
+                {
+                    var peers = ResolveSemanticPeersOptionalAsync(_dbReadOnly, qTokens.Take(8), default).GetAwaiter().GetResult();
+                    if (peers is not null)
+                    {
+                        foreach (var kv in peers.Take(limit))
+                        {
+                            hits.Add(new JsonObject
+                            {
+                                ["word_id"] = kv.Key.ToHex(),
+                                ["peers"] = new JsonArray(kv.Value.Select(p => (JsonNode)JsonValue.Create(p.ToHex())!).ToArray()),
+                                ["kind"] = "peer",
+                            });
+                        }
+                    }
+                }
+
+                return (new JsonObject
+                {
+                    ["source"] = "substrate",
+                    ["files_indexed"] = rankedFiles.Select(r => r.Row.FileIdHex).Distinct(StringComparer.Ordinal).Count(),
+                    ["rows"] = new JsonArray(hits.Take(limit).ToArray()),
+                }.ToJsonString(), false);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.ForContext<SubstrateTools>().Debug(ex, "Substrate code search unavailable; falling back to local workspace index.");
+        }
+
+        var snapshot = EnsureIndex(forceReindex: false);
+
         var ranked = snapshot.Files
+            .Where(f => string.IsNullOrWhiteSpace(pathFilter)
+                || f.RelativePath.Contains(pathFilter, StringComparison.OrdinalIgnoreCase))
             .Select(f =>
             {
                 double overlap = TokenOverlap(qTokens, f.Tokens);
                 bool substr = f.Content.Contains(query, StringComparison.OrdinalIgnoreCase);
                 double frechet = qTraj.Length > 0 && f.Trajectory.Length > 0
                     ? Math4d.SubTrajectoryFrechet(qTraj, f.Trajectory)
-                    : 2.0;
-                double score = (substr ? 2.0 : 0.0) + overlap + 0.5 / (1.0 + Math.Max(0.0, frechet));
-                return (File: f, Score: score, Substr: substr);
+                    : double.PositiveInfinity;
+                double proximity = double.IsFinite(frechet) ? 0.5 / (1.0 + Math.Max(0.0, frechet)) : 0.0;
+                double score = (substr ? 2.0 : 0.0) + overlap + proximity;
+                return (File: f, Overlap: overlap, Frechet: frechet, Score: score, Substr: substr);
             })
-            .Where(x => x.Substr || x.Score > 0.25)
-            .OrderByDescending(x => x.Score)
+            .Where(x => x.Substr || x.Overlap > 0.0 || x.Score > 0.25)
+            .OrderByDescending(x => x.Substr)
+            .ThenByDescending(x => x.Overlap)
+            .ThenBy(x => double.IsFinite(x.Frechet) ? x.Frechet : double.MaxValue)
             .Take(limit)
             .ToArray();
 
@@ -364,7 +450,9 @@ public sealed partial class SubstrateTools
             hits.Add(new JsonObject
             {
                 ["path"] = hit.File.RelativePath,
-                ["score"] = Math.Round(hit.Score, 4),
+                ["score"] = Math.Round(hit.Score, 6),
+                ["word_overlap"] = Math.Round(hit.Overlap, 6),
+                ["frechet_distance"] = double.IsFinite(hit.Frechet) ? Math.Round(hit.Frechet, 6) : null,
                 ["kind"] = "file",
             });
         }
@@ -388,6 +476,7 @@ public sealed partial class SubstrateTools
 
         return (new JsonObject
         {
+            ["source"] = "workspace-fallback",
             ["root"] = snapshot.RootPath,
             ["files_indexed"] = snapshot.FileCount,
             ["rows"] = new JsonArray(hits.Take(limit).ToArray()),

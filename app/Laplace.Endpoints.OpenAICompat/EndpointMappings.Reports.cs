@@ -29,12 +29,17 @@ internal static class ReportEndpoints
         app.MapPost("/v1/audit/report", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<AuditReportRequest>(request, ct) ?? new AuditReportRequest();
+            string scope = string.IsNullOrWhiteSpace(payload.Scope) ? "summary" : payload.Scope.Trim().ToLowerInvariant();
+            if (scope is not ("summary" or "full"))
+                return EndpointJson.BadRequest("unsupported_option", $"Audit report scope '{scope}' is not supported; expected 'summary' or 'full'.");
+            int baseLimit = scope == "full" ? 100 : 20;
+            int topRelationLimit = payload.Academic ? baseLimit * 2 : baseLimit;
             return await RunGatedReportAsync(request, billing, "audit.deep_report", ct, async gateQuote =>
             {
                 var report = await substrate.AuditReportAsync(
-                    includeConsensus: payload.IncludeConsensus,
-                    includeConvergence: payload.IncludeConvergence,
-                    topRelationLimit: payload.Academic ? 50 : 20,
+                    includeConsensus: payload.IncludeConsensus || payload.IncludeEvidence,
+                    includeConvergence: payload.IncludeConvergence || scope == "full",
+                    topRelationLimit: topRelationLimit,
                     ct);
                 if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
 
@@ -162,16 +167,19 @@ internal static class ReportEndpoints
                     "invalid_request_error",
                     "Forward controls require steps >= 1, max_stride >= 0, top_k >= 1, and finite spread >= 0.");
 
+            int effSteps = payload.Academic ? Math.Max(payload.Steps, 12) : payload.Steps;
+            int effTopK = payload.Academic ? Math.Max(payload.TopK, 32) : payload.TopK;
+
             return await RunGatedReportAsync(request, billing, "explain.trace", ct, async gateQuote =>
             {
                 // The native forward pass that generation runs, traced. depth and beam
                 // bind to hops and fanout.
                 var trace = await substrate.ForwardTraceAsync(
                     payload.Prompt.Trim(),
-                    steps: payload.Steps,
+                    steps: effSteps,
                     maxStride: payload.MaxStride,
                     spread: payload.Spread,
-                    topK: payload.TopK,
+                    topK: effTopK,
                     hops: payload.Depth,
                     fanout: payload.Beam,
                     ct);

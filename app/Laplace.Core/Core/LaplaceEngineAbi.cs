@@ -159,6 +159,8 @@ public unsafe struct LpEngineMoldRequest
     public uint ffn_dim;
     public int tied_embeddings;
     public int reserved;
+    public byte* recipe_json;
+    public byte* recipe_id_prefix;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -432,7 +434,9 @@ public sealed record EngineMoldRequest(
     int Format = 0,
     uint NKvHeads = 0,
     uint FfnDim = 0,
-    bool TiedEmbeddings = false);
+    bool TiedEmbeddings = false,
+    string? RecipeJson = null,
+    string? RecipeIdPrefix = null);
 
 public sealed record EngineMoldResponse(
     int StatusCode,
@@ -637,6 +641,20 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
         return FormatLibpqConnInfo(LaplaceInstall.PostgresConnectionString());
     }
 
+    private static byte* AllocHGlobalUtf8(string? s, List<nint> allocs, out nuint len)
+    {
+        if (s is null) { len = 0; return null; }
+        int byteCount = Encoding.UTF8.GetByteCount(s);
+        len = (nuint)byteCount;
+        nint p = Marshal.AllocHGlobal(checked(byteCount + 1));
+        allocs.Add(p);
+        var span = new Span<byte>((void*)p, byteCount + 1);
+        if (byteCount > 0)
+            Encoding.UTF8.GetBytes(s.AsSpan(), span[..byteCount]);
+        span[byteCount] = 0;
+        return (byte*)p;
+    }
+
     public EngineTurnResponse Turn(EngineTurnRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -647,14 +665,7 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
             var allocs = new List<nint>();
             try
             {
-                byte* AllocUtf8(string? s, out nuint len)
-                {
-                    if (s is null) { len = 0; return null; }
-                    len = (nuint)Encoding.UTF8.GetByteCount(s);
-                    var p = Marshal.StringToCoTaskMemUTF8(s);
-                    allocs.Add(p);
-                    return (byte*)p;
-                }
+                byte* AllocUtf8(string? s, out nuint len) => AllocHGlobalUtf8(s, allocs, out len);
 
                 byte* AllocZ(string? s) => AllocUtf8(s, out _);
 
@@ -841,13 +852,7 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
             var allocs = new List<nint>();
             try
             {
-                byte* AllocZ(string? s)
-                {
-                    if (s is null) return null;
-                    var p = Marshal.StringToCoTaskMemUTF8(s);
-                    allocs.Add(p);
-                    return (byte*)p;
-                }
+                byte* AllocZ(string? s) => AllocHGlobalUtf8(s, allocs, out _);
 
                 LpEngineAuthorityScope nativeAuth = default;
                 LpEngineAuthorityScope* authPtr = null;
@@ -925,13 +930,7 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
             var allocs = new List<nint>();
             try
             {
-                byte* AllocZ(string? s)
-                {
-                    if (s is null) return null;
-                    var p = Marshal.StringToCoTaskMemUTF8(s);
-                    allocs.Add(p);
-                    return (byte*)p;
-                }
+                byte* AllocZ(string? s) => AllocHGlobalUtf8(s, allocs, out _);
 
                 LpEngineAuthorityScope nativeAuth = default;
                 LpEngineAuthorityScope* authPtr = null;
@@ -969,6 +968,8 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
                     n_kv_heads = request.NKvHeads,
                     ffn_dim = request.FfnDim,
                     tied_embeddings = request.TiedEmbeddings ? 1 : 0,
+                    recipe_json = AllocZ(request.RecipeJson),
+                    recipe_id_prefix = AllocZ(request.RecipeIdPrefix),
                 };
 
                 LpEngineMoldResponse nativeOut = default;

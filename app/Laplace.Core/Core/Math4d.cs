@@ -108,6 +108,16 @@ public static unsafe class Math4d
         return Distance(p1, p2);
     }
 
+    public static double FrechetOutliers(ReadOnlySpan<double> p, ReadOnlySpan<double> q, uint maxOutliers)
+    {
+        nuint np = (nuint)(p.Length / 4);
+        nuint nq = (nuint)(q.Length / 4);
+        if (np == 0 || nq == 0) return double.PositiveInfinity;
+        fixed (double* pp = p)
+        fixed (double* pq = q)
+            return LaplaceNative.lp_frechet4_outliers(pp, np, pq, nq, maxOutliers);
+    }
+
     public static double SubTrajectoryFrechet(ReadOnlySpan<double> query, ReadOnlySpan<double> target)
     {
         int m = query.Length / 4;
@@ -119,19 +129,27 @@ public static unsafe class Math4d
             return fullDist;
 
         double best = fullDist;
-
         if (n >= m)
         {
-            double subDist = DiscreteFrechetManaged(query, m, target, n, freeTargetEndpoints: true);
-            if (subDist < best)
-                best = subDist;
+            int maxExtra = Math.Min(n - m, 2);
+            for (int start = 0; start <= n - m; start++)
+            {
+                for (int extra = 0; extra <= maxExtra && start + m + extra <= n; extra++)
+                {
+                    var win = target.Slice(start * 4, (m + extra) * 4);
+                    double d = extra == 0 ? Frechet(query, win) : FrechetOutliers(query, win, (uint)extra);
+                    if (d < best) best = d;
+                }
+            }
         }
         else
         {
-            double revSubDist = DiscreteFrechetManaged(target, n, query, m, freeTargetEndpoints: true)
-                + 0.55 * (1.0 - (double)n / m);
-            if (revSubDist < best)
-                best = revSubDist;
+            for (int start = 0; start <= m - n; start++)
+            {
+                var win = query.Slice(start * 4, n * 4);
+                double d = Frechet(target, win) + 0.55 * (1.0 - (double)n / m);
+                if (d < best) best = d;
+            }
         }
 
         if (m >= 2 && n >= 2)
@@ -145,7 +163,7 @@ public static unsafe class Math4d
                 var pSlice = query.Slice(i * 4, 4);
                 for (int j = 0; j < n; j++)
                 {
-                    if (Dist4d(pSlice, target.Slice(j * 4, 4)) <= MatchThreshold)
+                    if (Distance(pSlice, target.Slice(j * 4, 4)) <= MatchThreshold)
                     {
                         pSlice.CopyTo(pCore.Slice(mc * 4, 4));
                         mc++;
@@ -162,7 +180,7 @@ public static unsafe class Math4d
                     var qSlice = target.Slice(j * 4, 4);
                     for (int i = 0; i < m; i++)
                     {
-                        if (Dist4d(query.Slice(i * 4, 4), qSlice) <= MatchThreshold)
+                        if (Distance(query.Slice(i * 4, 4), qSlice) <= MatchThreshold)
                         {
                             qSlice.CopyTo(qCore.Slice(nc * 4, 4));
                             nc++;
@@ -175,11 +193,12 @@ public static unsafe class Math4d
                 {
                     var pCoreSpan = pCore[..(mc * 4)];
                     var qCoreSpan = qCore[..(nc * 4)];
-                    double coreFrechet = nc >= mc
-                        ? DiscreteFrechetManaged(pCoreSpan, mc, qCoreSpan, nc, freeTargetEndpoints: true)
-                        : DiscreteFrechetManaged(pCoreSpan, mc, qCoreSpan, nc, freeTargetEndpoints: false);
-                    double coreDirectedHausdorff = DirectedHausdorffManaged(pCoreSpan, mc, qCoreSpan, nc);
-                    double coreShape = Math.Min(coreFrechet, coreDirectedHausdorff + 0.12);
+                    uint coreSkip = (uint)Math.Min(Math.Abs(nc - mc), 8);
+                    double coreFrechet = coreSkip > 0
+                        ? FrechetOutliers(pCoreSpan, qCoreSpan, coreSkip)
+                        : Frechet(pCoreSpan, qCoreSpan);
+                    double coreHausdorff = Hausdorff(pCoreSpan, qCoreSpan);
+                    double coreShape = Math.Min(coreFrechet, coreHausdorff + 0.12);
                     double coveragePenalty = 0.55 * (1.0 - (double)mc / m);
                     double coreDist = coreShape + coveragePenalty;
                     if (coreDist < best)
@@ -190,99 +209,6 @@ public static unsafe class Math4d
 
         return best;
     }
-
-    private static double DirectedHausdorffManaged(
-        ReadOnlySpan<double> p, int m,
-        ReadOnlySpan<double> q, int n)
-    {
-        double maxMin = 0.0;
-        for (int i = 0; i < m; i++)
-        {
-            var pi = p.Slice(i * 4, 4);
-            double minD = double.PositiveInfinity;
-            for (int j = 0; j < n; j++)
-            {
-                double d = Dist4d(pi, q.Slice(j * 4, 4));
-                if (d < minD) minD = d;
-            }
-            if (minD > maxMin) maxMin = minD;
-        }
-        return maxMin;
-    }
-
-    private static double DiscreteFrechetManaged(
-        ReadOnlySpan<double> p, int m,
-        ReadOnlySpan<double> q, int n,
-        bool freeTargetEndpoints)
-    {
-        if (m == 1)
-        {
-            var p0 = p[..4];
-            if (freeTargetEndpoints)
-            {
-                double minD = double.PositiveInfinity;
-                for (int j = 0; j < n; j++)
-                {
-                    double d = Dist4d(p0, q.Slice(j * 4, 4));
-                    if (d < minD) minD = d;
-                }
-                return minD;
-            }
-            else
-            {
-                double maxD = 0.0;
-                for (int j = 0; j < n; j++)
-                {
-                    double d = Dist4d(p0, q.Slice(j * 4, 4));
-                    if (d > maxD) maxD = d;
-                }
-                return maxD;
-            }
-        }
-
-        Span<double> prev = n <= 256 ? stackalloc double[n] : new double[n];
-        Span<double> curr = n <= 256 ? stackalloc double[n] : new double[n];
-
-        var pFirst = p[..4];
-        prev[0] = Dist4d(pFirst, q[..4]);
-        for (int j = 1; j < n; j++)
-        {
-            double d = Dist4d(pFirst, q.Slice(j * 4, 4));
-            prev[j] = freeTargetEndpoints ? d : Math.Max(d, prev[j - 1]);
-        }
-
-        for (int i = 1; i < m; i++)
-        {
-            var pi = p.Slice(i * 4, 4);
-            double d0 = Dist4d(pi, q[..4]);
-            curr[0] = Math.Max(d0, prev[0]);
-
-            for (int j = 1; j < n; j++)
-            {
-                double d = Dist4d(pi, q.Slice(j * 4, 4));
-                double step = prev[j - 1];
-                if (prev[j] < step) step = prev[j];
-                if (curr[j - 1] < step) step = curr[j - 1];
-                curr[j] = d > step ? d : step;
-            }
-
-            curr.CopyTo(prev);
-        }
-
-        if (!freeTargetEndpoints)
-            return prev[n - 1];
-
-        double bestEnd = prev[0];
-        for (int j = 1; j < n; j++)
-        {
-            if (prev[j] < bestEnd)
-                bestEnd = prev[j];
-        }
-        return bestEnd;
-    }
-
-    private static double Dist4d(ReadOnlySpan<double> a, ReadOnlySpan<double> b) =>
-        Distance(a, b);
 
     public static int ComputeSparseEigenmap(
         ReadOnlySpan<int> rows,

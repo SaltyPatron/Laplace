@@ -135,7 +135,7 @@ public sealed class ManagedSearchBackend : IChessBackend
         return (ct, emit) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            if (useNative && !ct.IsCancellationRequested && !ChessEngineService.HasImmediateMate(_modality, state))
+            if (useNative && !ct.IsCancellationRequested)
             {
                 try
                 {
@@ -161,9 +161,20 @@ public sealed class ManagedSearchBackend : IChessBackend
                         emit(infoLine);
                         return new ChessBackendResult(bestNative, [line, infoLine]);
                     }
+                    if (resp.StatusCode != 0)
+                    {
+                        string errMsg = string.IsNullOrWhiteSpace(resp.Error) ? $"status={resp.StatusCode}" : resp.Error;
+                        Laplace.Ops.LaplaceLogging.LogWarning(typeof(ManagedSearchBackend),
+                            new InvalidOperationException($"Native chess search failed: {errMsg}"),
+                            "Native chess search failed ({Error}); falling back to explicit classical search.", errMsg);
+                        emit($"info string native_chess_error {errMsg}");
+                    }
                 }
                 catch (Exception ex) when (ex is DllNotFoundException or InvalidOperationException)
                 {
+                    Laplace.Ops.LaplaceLogging.LogWarning(typeof(ManagedSearchBackend), ex,
+                        "Native chess engine call failed; falling back to explicit classical search.");
+                    emit($"info string native_chess_error {ex.GetType().Name}: {ex.Message}");
                 }
             }
             var result = search.Think(state, limits, ct, iteration =>

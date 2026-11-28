@@ -369,6 +369,71 @@ public sealed partial class SubstrateTools : IMcpTools
     private (string, bool) PromptLanguage(JsonObject? args)
     {
         string prompt = Req(args, "prompt");
+        var wordIds = System.Text.RegularExpressions.Regex.Matches(prompt, @"\p{L}+")
+            .Select(static m => m.Value)
+            .Distinct(StringComparer.Ordinal)
+            .Take(32)
+            .Select(static w => Hash128.Text(w).ToBytes())
+            .ToArray();
+
+        if (wordIds.Length > 0)
+        {
+            const string sql = """
+                WITH q AS (
+                    SELECT public.blake3_from_bytea(x) AS wid
+                    FROM unnest($1::bytea[]) AS x
+                ),
+                holders AS (
+                    SELECT h.entity, h.path
+                    FROM public.laplace_holders(ARRAY(SELECT wid FROM q), '{}'::public.blake3[], false, -1::smallint, 64::bigint, 1::smallint) h
+                    WHERE NOT h.hub AND h.path IS NOT NULL
+                ),
+                parts AS (
+                    SELECT public.laplace_parts(h.path) AS p
+                    FROM holders h
+                ),
+                lang_hits AS (
+                    SELECT public.laplace_label_text(public.blake3_send(p[2]), true) AS lang_tag
+                    FROM parts
+                    WHERE cardinality(p) = 3
+                      AND public.laplace_label_text(public.blake3_send(p[2]), true) ~ '^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$'
+                )
+                SELECT lang_tag, count(*)::int AS score
+                FROM lang_hits
+                WHERE lang_tag IS NOT NULL
+                GROUP BY lang_tag
+                ORDER BY score DESC, lang_tag ASC
+                LIMIT 10
+                """;
+            try
+            {
+                using var conn = _dbReadOnly.OpenConnection();
+                using var cmd = new Npgsql.NpgsqlCommand(sql, conn);
+                cmd.Parameters.Add(new Npgsql.NpgsqlParameter
+                {
+                    NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea,
+                    Value = wordIds
+                });
+                var rows = new List<JsonObject>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    rows.Add(new JsonObject
+                    {
+                        ["language"] = r.GetString(0),
+                        ["score"] = r.GetInt32(1),
+                        ["source"] = "substrate"
+                    });
+                }
+                if (rows.Count > 0)
+                    return JsonRows(rows);
+            }
+            catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException)
+            {
+                // Fall through to honest Unicode script classification when substrate is unreachable.
+            }
+        }
+
         var tallies = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (Rune rune in prompt.EnumerateRunes())
         {
@@ -376,13 +441,13 @@ public sealed partial class SubstrateTools : IMcpTools
                 continue;
             string bucket = rune.Value switch
             {
-                <= 0x024F => "en",
-                >= 0x0400 and <= 0x04FF => "ru",
-                >= 0x0600 and <= 0x06FF => "ar",
-                >= 0x4E00 and <= 0x9FFF => "zh",
-                >= 0x3040 and <= 0x30FF => "ja",
-                >= 0xAC00 and <= 0xD7AF => "ko",
-                >= 0x0900 and <= 0x097F => "hi",
+                <= 0x024F => "und-Latn",
+                >= 0x0400 and <= 0x04FF => "und-Cyrl",
+                >= 0x0600 and <= 0x06FF => "und-Arab",
+                >= 0x4E00 and <= 0x9FFF => "und-Hani",
+                >= 0x3040 and <= 0x30FF => "und-Jpan",
+                >= 0xAC00 and <= 0xD7AF => "und-Hang",
+                >= 0x0900 and <= 0x097F => "und-Deva",
                 _ => "und",
             };
             tallies[bucket] = tallies.TryGetValue(bucket, out int n) ? n + 1 : 1;
@@ -391,6 +456,7 @@ public sealed partial class SubstrateTools : IMcpTools
         {
             ["language"] = kv.Key,
             ["score"] = kv.Value,
+            ["source"] = "script_fallback"
         }));
     }
 

@@ -1319,9 +1319,12 @@ public static partial class NpgsqlSubstrateReads
                 WHERE $5
                 LIMIT 1
             ),
-            end_coords AS MATERIALIZED (
+            chain_coords AS MATERIALIZED (
                 SELECT c.id, c.x, c.y, c.z, c.m
-                FROM public.laplace_entity_coords(ARRAY(SELECT DISTINCT id FROM checked)) c
+                FROM public.laplace_entity_coords(ARRAY(
+                    SELECT DISTINCT x
+                    FROM checked ch, unnest(coalesce(ch.chain, ARRAY[]::public.blake3[])) AS x
+                )) c
                 WHERE $5
             ),
             standings AS MATERIALIZED (
@@ -1336,13 +1339,18 @@ public static partial class NpgsqlSubstrateReads
                    coalesce(s.matches, 1)::bigint
             FROM checked ch
             LEFT JOIN standings s ON s.claim = ch.claim
-            LEFT JOIN end_coords ec ON ec.id = ch.id
             LEFT JOIN goal_coord gc ON true
+            LEFT JOIN LATERAL (
+                SELECT avg(sqrt(
+                    power(cc.x - gc.x, 2) + power(cc.y - gc.y, 2) +
+                    power(cc.z - gc.z, 2) + power(cc.m - gc.m, 2))) AS mean_dist
+                FROM unnest(coalesce(ch.chain, ARRAY[]::public.blake3[])) AS hop
+                JOIN chain_coords cc ON cc.id = hop
+                WHERE $5 AND gc.x IS NOT NULL AND hop <> public.blake3_from_bytea($2)
+            ) geom ON true
             ORDER BY CASE
-                WHEN $5 AND ec.id IS NOT NULL AND gc.x IS NOT NULL THEN
-                    ch.cost + 0.1 * sqrt(
-                        power(ec.x - gc.x, 2) + power(ec.y - gc.y, 2) +
-                        power(ec.z - gc.z, 2) + power(ec.m - gc.m, 2))
+                WHEN $5 AND geom.mean_dist IS NOT NULL THEN
+                    ch.cost + 0.1 * geom.mean_dist
                 ELSE ch.cost
             END ASC
             LIMIT 20

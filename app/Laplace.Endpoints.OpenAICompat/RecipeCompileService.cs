@@ -113,12 +113,25 @@ internal sealed class RecipeCompileService : IRecipeCompileService
             TieEmbeddings: tieEmbeddings);
     }
 
+    private static readonly HashSet<string> ValidOperators = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "coord", "context", "unary", "binary", "relation", "trajectory", "spectral",
+        "highway", "consensus", "copy", "induction", "composition", "routing",
+        "disambiguate", "salience", "frechet", "standing", "cooccur", "continuation",
+        "attention", "gqa", "mha", "mqa", "mla", "self_attention", "cross_attention",
+        "ffn", "swiglu", "geglu", "mlp", "moe", "expert",
+        "embed", "embedding", "token_embedding", "lm_head", "readout", "unembed",
+        "rmsnorm", "layernorm", "rope", "linear", "projection", "residual", "lookup", "pull", "couple"
+    };
+
     private static void ValidateOperator(JsonElement op)
     {
         string kind = op.ValueKind == JsonValueKind.Object && op.TryGetProperty("op", out var p)
             ? p.GetString() ?? "" : "";
         if (string.IsNullOrWhiteSpace(kind))
             throw new InvalidOperationException($"operator missing 'op': {op}");
+        if (!ValidOperators.Contains(kind.Trim()))
+            throw new InvalidOperationException($"unknown recipe operator '{kind}'");
 
         if (op.TryGetProperty("max_outside_probability", out var boundEl)
             && boundEl.ValueKind == JsonValueKind.Number)

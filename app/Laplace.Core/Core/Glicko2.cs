@@ -90,28 +90,38 @@ public static unsafe class Glicko2
         long tauFp1e9 = DefaultTauFp1e9)
     {
         if (games <= 0) throw new ArgumentOutOfRangeException(nameof(games));
-        var state = Init(priorRatingFp1e9, priorRdFp1e9, priorVolatilityFp1e9);
-        long q = sumScoreFp / games;
-        long rem = sumScoreFp - q * (games - 1);
-        Span<Glicko2Observation> obs = games <= 4096
-            ? stackalloc Glicko2Observation[(int)games]
-            : new Glicko2Observation[games];
-        for (long i = 0; i < games - 1; i++)
+        _ = tauFp1e9;
+        lp_rating prior = new()
         {
-            obs[(int)i] = new Glicko2Observation
-            {
-                OpponentRatingFp1e9 = opponentRatingFp1e9,
-                OpponentRdFp1e9 = opponentRdFp1e9,
-                ScoreFp1e9 = q,
-            };
-        }
-        obs[(int)(games - 1)] = new Glicko2Observation
-        {
-            OpponentRatingFp1e9 = opponentRatingFp1e9,
-            OpponentRdFp1e9 = opponentRdFp1e9,
-            ScoreFp1e9 = rem,
+            rating = priorRatingFp1e9 / (double)FpScale,
+            deviation = priorRdFp1e9 / (double)FpScale,
+            volatility = priorVolatilityFp1e9 / (double)FpScale,
         };
-        UpdatePeriod(ref state, obs, tauFp1e9, 0);
-        return state;
+        double wins = Math.Clamp(sumScoreFp / (double)FpScale, 0.0, (double)games);
+        lp_series_entry entry = new()
+        {
+            dependence_root = default,
+            games = (ulong)games,
+            wins = wins,
+            trust = 1.0,
+            witness_deviation = 0.0,
+            opponent = new lp_rating
+            {
+                rating = opponentRatingFp1e9 / (double)FpScale,
+                deviation = opponentRdFp1e9 / (double)FpScale,
+                volatility = 0.06,
+            },
+        };
+        lp_standing standing;
+        if (!LaplaceNative.lp_series_update(&prior, &entry, 1, &standing))
+            throw new InvalidOperationException("Native lp_series_update failed for AccumulateGames.");
+        return new Glicko2State
+        {
+            RatingFp1e9 = (long)Math.Round(standing.rating * FpScale),
+            RdFp1e9 = (long)Math.Round(standing.deviation * FpScale),
+            VolatilityFp1e9 = (long)Math.Round(standing.volatility * FpScale),
+            LastObservedAtUnixNs = 0,
+            ObservationCount = games,
+        };
     }
 }

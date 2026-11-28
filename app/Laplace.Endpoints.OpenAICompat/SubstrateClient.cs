@@ -67,6 +67,103 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
+    public async Task<IReadOnlyList<RoyaltyAttributionShare>> ResolveSourceAttributionAsync(
+        IReadOnlyList<string> claimIdsHex,
+        IReadOnlyList<string>? scopeWitnessIdsHex,
+        CancellationToken ct)
+    {
+        byte[][] ParseHexIds(IReadOnlyList<string>? list)
+        {
+            if (list is null || list.Count == 0) return Array.Empty<byte[]>();
+            var res = new List<byte[]>(list.Count);
+            foreach (var h in list)
+            {
+                if (string.IsNullOrWhiteSpace(h) || h.Length != 32) continue;
+                try { res.Add(Convert.FromHexString(h)); }
+                catch (FormatException) { }
+            }
+            return res.ToArray();
+        }
+
+        var claimBytes = ParseHexIds(claimIdsHex);
+        var scopeBytes = ParseHexIds(scopeWitnessIdsHex);
+        if (claimBytes.Length == 0 && scopeBytes.Length == 0)
+            return Array.Empty<RoyaltyAttributionShare>();
+
+        try
+        {
+            await using var conn = await _dataSourceReadOnly.OpenConnectionAsync(ct).ConfigureAwait(false);
+            if (claimBytes.Length > 0)
+            {
+                const string sql = """
+                    SELECT encode(public.blake3_send(a.source_id), 'hex'),
+                           a.share_bp,
+                           a.games,
+                           a.fisher_weight
+                    FROM public.laplace_source_attribution(
+                        ARRAY(SELECT public.blake3_from_bytea(x) FROM unnest($1::bytea[]) AS x),
+                        ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($2::bytea[]) AS y)) a
+                    WHERE a.share_bp > 0
+                    ORDER BY a.share_bp DESC, a.source_id ASC
+                    """;
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea, Value = claimBytes });
+                cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea, Value = scopeBytes });
+                var shares = new List<RoyaltyAttributionShare>();
+                await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await r.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    shares.Add(new RoyaltyAttributionShare(
+                        SourceIdHex: r.GetString(0),
+                        ShareBp: r.GetInt32(1),
+                        HitCount: r.GetInt64(2),
+                        TotalWeight: r.GetDouble(3)));
+                }
+                return shares;
+            }
+            else
+            {
+                // Scoped export without explicit claim IDs: attribute across the top claims attested by the scoped witnesses.
+                const string sql = """
+                    WITH scoped_claims AS (
+                        SELECT DISTINCT a.claim
+                        FROM public.attestation a
+                        WHERE a.witness = ANY(ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($1::bytea[]) AS y))
+                        LIMIT 4096
+                    )
+                    SELECT encode(public.blake3_send(s.source_id), 'hex'),
+                           s.share_bp,
+                           s.games,
+                           s.fisher_weight
+                    FROM public.laplace_source_attribution(
+                        ARRAY(SELECT claim FROM scoped_claims),
+                        ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($1::bytea[]) AS y)) s
+                    WHERE s.share_bp > 0
+                    ORDER BY s.share_bp DESC, s.source_id ASC
+                    """;
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bytea, Value = scopeBytes });
+                var shares = new List<RoyaltyAttributionShare>();
+                await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await r.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    shares.Add(new RoyaltyAttributionShare(
+                        SourceIdHex: r.GetString(0),
+                        ShareBp: r.GetInt32(1),
+                        HitCount: r.GetInt64(2),
+                        TotalWeight: r.GetDouble(3)));
+                }
+                return shares;
+            }
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
+        {
+            if (ct.IsCancellationRequested) throw;
+            Serilog.Log.ForContext<SubstrateClient>().Warning(ex, "Source attribution resolution failed.");
+            return Array.Empty<RoyaltyAttributionShare>();
+        }
+    }
+
     public async Task<IReadOnlyList<CodeSymbolHit>> SearchCodeSymbolsAsync(
         string query, string? path, int limit, int offset, CancellationToken ct)
     {

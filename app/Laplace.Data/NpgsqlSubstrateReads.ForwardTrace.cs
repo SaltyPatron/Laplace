@@ -56,20 +56,17 @@ public static partial class NpgsqlSubstrateReads
                 JOIN public.laplace_entities(ARRAY[ri.root_id]) e ON e.id = ri.root_id
             ),
             token_parts AS MATERIALIZED (
-                SELECT u.ord::int AS ord,
-                       public.laplace_text_id(tok) AS id,
-                       public.laplace_text_id(regexp_replace(tok, '^[^[:alnum:]]+|[^[:alnum:]]+$', '', 'g')) AS clean_id
-                FROM regexp_split_to_table(trim($1), '\s+') WITH ORDINALITY AS u(tok, ord)
-                WHERE length(u.tok) > 0
+                SELECT s.i::int AS ord,
+                       s.id
+                FROM public.laplace_segments($1) s
+                WHERE length(trim(s.segment)) > 0
+                  AND s.id IS NOT NULL
             ),
             witnessed_tokens AS MATERIALIZED (
-                SELECT tp.ord, coalesce(e1.id, e2.id) AS id
+                SELECT tp.ord, e.id
                 FROM token_parts tp
-                LEFT JOIN public.laplace_entities(ARRAY(SELECT id FROM token_parts)) e1
-                       ON e1.id = tp.id AND e1.tier IS NOT NULL
-                LEFT JOIN public.laplace_entities(ARRAY(SELECT clean_id FROM token_parts)) e2
-                       ON e2.id = tp.clean_id AND e2.tier IS NOT NULL
-                WHERE coalesce(e1.id, e2.id) IS NOT NULL
+                JOIN public.laplace_entities(ARRAY(SELECT id FROM token_parts)) e
+                  ON e.id = tp.id AND e.tier IS NOT NULL
                 ORDER BY tp.ord
             ),
             root_phys AS MATERIALIZED (
@@ -236,22 +233,32 @@ public static partial class NpgsqlSubstrateReads
                        ec.top_rel,
                        ec.top_rating,
                        ec.top_rd,
-                       coalesce(ec.best_conf, 0.0) + coalesce(es.cov_occ, 0)::double precision * 0.05 AS rank_score
+                       coalesce(ec.best_conf, 0.0) AS best_conf
                 FROM emit_coupled ec
                 FULL OUTER JOIN emit_suffix es ON es.entity = ec.entity
             ),
             emit_mx AS MATERIALIZED (
-                SELECT max(rank_score) AS top_score FROM emit_pool
+                SELECT max(best_conf) AS top_conf FROM emit_pool
             ),
             emit_filtered AS (
                 SELECT ep.*
                 FROM emit_pool ep, emit_mx mx
-                WHERE $4 <= 0.0 OR mx.top_score IS NULL OR ep.rank_score >= mx.top_score * (1.0 - least(1.0, $4))
-                ORDER BY ep.exact_channel_count DESC, ep.rank_score DESC
+                WHERE $4 <= 0.0 OR mx.top_conf IS NULL OR ep.best_conf >= mx.top_conf * (1.0 - least(1.0, $4))
+                ORDER BY ep.exact_channel_count DESC,
+                         ep.proposal_channel_count DESC,
+                         ep.best_conf DESC,
+                         ep.covered_occurrences DESC,
+                         ep.sequence_occurrences DESC
                 LIMIT greatest(1, least($2, $5))
             ),
             emit_rows AS (
-                SELECT row_number() OVER (ORDER BY ef.exact_channel_count DESC, ef.rank_score DESC)::int AS step,
+                SELECT row_number() OVER (
+                           ORDER BY ef.exact_channel_count DESC,
+                                    ef.proposal_channel_count DESC,
+                                    ef.best_conf DESC,
+                                    ef.covered_occurrences DESC,
+                                    ef.sequence_occurrences DESC
+                       )::int AS step,
                        encode(public.blake3_send(ef.entity), 'hex') AS entity_id_hex,
                        coalesce(public.laplace_label_text(public.blake3_send(ef.entity), false), encode(public.blake3_send(ef.entity), 'hex')) AS entity_label,
                        ef.stride_used,
