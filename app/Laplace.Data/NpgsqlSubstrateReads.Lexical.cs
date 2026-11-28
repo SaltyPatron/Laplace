@@ -53,17 +53,28 @@ public static partial class NpgsqlSubstrateReads
                     public.laplace_text_id('instance_hyponym')
                 ] AS rels
             ),
-            anchor_senses AS MATERIALIZED (
-                SELECT pr.pts[cardinality(pr.pts)] AS syn_id
+            anchor_sense_ids AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) cs,
-                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps,
+                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                WHERE cardinality(ps.pts) = 3
+            ),
+            anchor_senses AS MATERIALIZED (
+                SELECT sp.spts[cardinality(sp.spts)] AS syn_id
+                FROM anchor_sense_ids a
+                JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM anchor_sense_ids)) ph ON ph.entity = a.sense_id
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                WHERE cardinality(sp.spts) >= 3
+                UNION
+                SELECT pr.pts[cardinality(pr.pts)] AS syn_id
+                FROM anchor_sense_ids a,
                      public.laplace_claims_each(
-                         ARRAY[ps.pts[cardinality(ps.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[a.sense_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                          ARRAY[public.laplace_text_id('reference')]) cr,
                      LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
-                WHERE cardinality(ps.pts) = 3 AND cardinality(pr.pts) = 3
+                WHERE cardinality(pr.pts) = 3
                 LIMIT 8
             ),
             anchors AS MATERIALIZED (
@@ -348,29 +359,43 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH lexical_defs AS MATERIALIZED (
-                SELECT DISTINCT ON (pr.pts[cardinality(pr.pts)])
-                       ps.pts[cardinality(ps.pts)] AS sense_id,
-                       pr.pts[cardinality(pr.pts)] AS synset_id,
-                       pd.pts[cardinality(pd.pts)] AS def_id,
-                       public.laplace_confidence(cd.rating, cd.deviation, 2)::numeric AS eff_mu,
-                       cd.matches
+            WITH sense_rows AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) cs,
-                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps,
-                     public.laplace_claims_each(
-                         ARRAY[ps.pts[cardinality(ps.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                         ARRAY[public.laplace_text_id('reference')]) cr,
-                     LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr,
-                     public.laplace_claims_each(
-                         ARRAY[pr.pts[cardinality(pr.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                         ARRAY[public.laplace_text_id('definition of the synset')]) cd,
-                     LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
+                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
                 WHERE cardinality(ps.pts) >= 2
-                  AND cardinality(pr.pts) >= 2
-                  AND cardinality(pd.pts) >= 2
-                ORDER BY pr.pts[cardinality(pr.pts)],
+            ),
+            sense_synsets AS MATERIALIZED (
+                SELECT sr.sense_id, sp.spts[cardinality(sp.spts)] AS synset_id
+                FROM sense_rows sr
+                JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM sense_rows)) ph ON ph.entity = sr.sense_id
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                WHERE cardinality(sp.spts) >= 3
+                UNION
+                SELECT sr.sense_id, pr.pts[cardinality(pr.pts)] AS synset_id
+                FROM sense_rows sr,
+                     public.laplace_claims_each(
+                         ARRAY[sr.sense_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[public.laplace_text_id('reference')]) cr,
+                     LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
+                WHERE cardinality(pr.pts) >= 2
+            ),
+            lexical_defs AS MATERIALIZED (
+                SELECT DISTINCT ON (ss.synset_id)
+                       ss.sense_id,
+                       ss.synset_id,
+                       pd.pts[cardinality(pd.pts)] AS def_id,
+                       public.laplace_confidence(cd.rating, cd.deviation, 2)::numeric AS eff_mu,
+                       cd.matches
+                FROM sense_synsets ss,
+                     public.laplace_claims_each(
+                         ARRAY[ss.synset_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[public.laplace_text_id('definition of the synset'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) cd,
+                     LATERAL (SELECT public.laplace_parts(cd.path) AS pts) pd
+                WHERE cardinality(pd.pts) >= 2
+                ORDER BY ss.synset_id,
                          public.laplace_confidence(cd.rating, cd.deviation, 2) DESC,
                          cd.matches DESC
             ),

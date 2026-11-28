@@ -166,7 +166,9 @@ public static partial class NpgsqlSubstrateReads
                 SELECT ARRAY[
                     public.laplace_text_id('definition of the synset'),
                     public.laplace_text_id('standard definition of the synset in the ILI'),
-                    public.laplace_text_id('English definition')
+                    public.laplace_text_id('English definition'),
+                    public.laplace_text_id('synset gloss'),
+                    public.laplace_text_id('skos:definition')
                 ] AS rels
             ),
             ctx_coupled AS MATERIALIZED (
@@ -188,7 +190,9 @@ public static partial class NpgsqlSubstrateReads
                 WHERE cardinality(p.pts) = 3
             ),
             filtered_senses AS MATERIALIZED (
-                SELECT ts.sense_id, ts.conf, ts.matches
+                SELECT ts.sense_id,
+                       CASE WHEN sp.spts IS NOT NULL AND cardinality(sp.spts) >= 3 THEN sp.spts[cardinality(sp.spts)] END AS direct_synset_id,
+                       ts.conf, ts.matches
                 FROM topic_senses ts
                 LEFT JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM topic_senses)) ph
                   ON ph.entity = ts.sense_id
@@ -196,6 +200,12 @@ public static partial class NpgsqlSubstrateReads
                 WHERE $2 IS NULL OR (sp.spts IS NOT NULL AND cardinality(sp.spts) >= 2 AND sp.spts[2] = ANY(ARRAY(SELECT id FROM lang_codes)))
             ),
             synset_refs AS MATERIALIZED (
+                SELECT fs.direct_synset_id AS synset_id,
+                       fs.sense_id AS via_sense,
+                       fs.conf, fs.matches
+                FROM filtered_senses fs
+                WHERE fs.direct_synset_id IS NOT NULL
+                UNION ALL
                 SELECT p.pts[cardinality(p.pts)] AS synset_id,
                        fs.sense_id AS via_sense,
                        fs.conf, fs.matches
@@ -294,7 +304,8 @@ public static partial class NpgsqlSubstrateReads
                 GROUP BY c.entity
             ),
             senses AS MATERIALIZED (
-                SELECT p.pts[cardinality(p.pts)] AS sense_id
+                SELECT p.pts[cardinality(p.pts)] AS sense_id,
+                       CASE WHEN sp.spts IS NOT NULL AND cardinality(sp.spts) >= 3 THEN sp.spts[cardinality(sp.spts)] END AS direct_synset_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) c
@@ -305,6 +316,10 @@ public static partial class NpgsqlSubstrateReads
                   AND ($2 IS NULL OR (sp.spts IS NOT NULL AND cardinality(sp.spts) >= 2 AND sp.spts[2] = ANY(ARRAY(SELECT id FROM lang_codes))))
             ),
             synsets AS MATERIALIZED (
+                SELECT s.direct_synset_id AS synset_id
+                FROM senses s
+                WHERE s.direct_synset_id IS NOT NULL
+                UNION
                 SELECT p.pts[cardinality(p.pts)] AS synset_id
                 FROM senses s,
                      public.laplace_claims_each(
@@ -322,7 +337,7 @@ public static partial class NpgsqlSubstrateReads
                 FROM synsets sy
                 JOIN LATERAL public.laplace_claims_each(
                     ARRAY[sy.synset_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                    ARRAY[public.laplace_text_id('definition of the synset'), public.laplace_text_id('standard definition of the synset in the ILI')]) c ON true
+                    ARRAY[public.laplace_text_id('definition of the synset'), public.laplace_text_id('standard definition of the synset in the ILI'), public.laplace_text_id('synset gloss'), public.laplace_text_id('skos:definition')]) c ON true
                 CROSS JOIN LATERAL (SELECT public.laplace_parts(c.path) AS pts) p
                 LEFT JOIN ctx_coupled cx ON cx.entity = sy.synset_id
                 WHERE cardinality(p.pts) = 3
@@ -403,7 +418,8 @@ public static partial class NpgsqlSubstrateReads
                 ] AS rels
             ),
             senses AS MATERIALIZED (
-                SELECT p.pts[cardinality(p.pts)] AS sense_id
+                SELECT p.pts[cardinality(p.pts)] AS sense_id,
+                       CASE WHEN sp.spts IS NOT NULL AND cardinality(sp.spts) >= 3 THEN sp.spts[cardinality(sp.spts)] END AS direct_synset_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) c
@@ -415,6 +431,10 @@ public static partial class NpgsqlSubstrateReads
             ),
             synsets AS MATERIALIZED (
                 SELECT public.blake3_from_bytea($1) AS root_id
+                UNION
+                SELECT s.direct_synset_id
+                FROM senses s
+                WHERE s.direct_synset_id IS NOT NULL
                 UNION
                 SELECT p.pts[cardinality(p.pts)]
                 FROM senses s,
@@ -506,34 +526,56 @@ public static partial class NpgsqlSubstrateReads
                     public.laplace_text_id('IS_A')
                 ] AS rels
             ),
-            src_synsets AS MATERIALIZED (
-                SELECT public.blake3_from_bytea($1) AS id
-                UNION
-                SELECT pr.pts[cardinality(pr.pts)]
+            src_senses AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) cs,
-                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps,
+                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                WHERE cardinality(ps.pts) = 3
+            ),
+            src_synsets AS MATERIALIZED (
+                SELECT public.blake3_from_bytea($1) AS id
+                UNION
+                SELECT sp.spts[cardinality(sp.spts)]
+                FROM src_senses s
+                JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM src_senses)) ph ON ph.entity = s.sense_id
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                WHERE cardinality(sp.spts) >= 3
+                UNION
+                SELECT pr.pts[cardinality(pr.pts)]
+                FROM src_senses s,
                      public.laplace_claims_each(
-                         ARRAY[ps.pts[cardinality(ps.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[s.sense_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                          ARRAY[public.laplace_text_id('reference')]) cr,
                      LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
-                WHERE cardinality(ps.pts) = 3 AND cardinality(pr.pts) = 3
+                WHERE cardinality(pr.pts) = 3
                 LIMIT 10
+            ),
+            dst_senses AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
+                FROM public.laplace_claims_each(
+                    ARRAY[public.blake3_from_bytea($2)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                    ARRAY[public.laplace_text_id('lexical sense')]) cs,
+                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                WHERE cardinality(ps.pts) = 3
             ),
             dst_synsets AS MATERIALIZED (
                 SELECT public.blake3_from_bytea($2) AS id
                 UNION
+                SELECT sp.spts[cardinality(sp.spts)]
+                FROM dst_senses s
+                JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM dst_senses)) ph ON ph.entity = s.sense_id
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                WHERE cardinality(sp.spts) >= 3
+                UNION
                 SELECT pr.pts[cardinality(pr.pts)]
-                FROM public.laplace_claims_each(
-                    ARRAY[public.blake3_from_bytea($2)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                    ARRAY[public.laplace_text_id('lexical sense')]) cs,
-                     LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps,
+                FROM dst_senses s,
                      public.laplace_claims_each(
-                         ARRAY[ps.pts[cardinality(ps.pts)]], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                         ARRAY[s.sense_id], 4::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                          ARRAY[public.laplace_text_id('reference')]) cr,
                      LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
-                WHERE cardinality(ps.pts) = 3 AND cardinality(pr.pts) = 3
+                WHERE cardinality(pr.pts) = 3
                 LIMIT 16
             ),
             chains AS MATERIALIZED (
@@ -635,7 +677,8 @@ public static partial class NpgsqlSubstrateReads
                 GROUP BY c.entity
             ),
             senses AS MATERIALIZED (
-                SELECT p.pts[cardinality(p.pts)] AS sense_id
+                SELECT p.pts[cardinality(p.pts)] AS sense_id,
+                       CASE WHEN sp.spts IS NOT NULL AND cardinality(sp.spts) >= 3 THEN sp.spts[cardinality(sp.spts)] END AS direct_synset_id
                 FROM public.laplace_claims_each(
                     ARRAY[public.blake3_from_bytea($1)], 24::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                     ARRAY[public.laplace_text_id('lexical sense')]) c
@@ -649,6 +692,8 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.blake3_from_bytea($1) AS id
                 UNION
                 SELECT sense_id FROM senses
+                UNION
+                SELECT direct_synset_id FROM senses WHERE direct_synset_id IS NOT NULL
                 UNION
                 SELECT p.pts[cardinality(p.pts)]
                 FROM senses s,
@@ -709,37 +754,59 @@ public static partial class NpgsqlSubstrateReads
             WITH mid AS MATERIALIZED (
                 SELECT CASE WHEN $3 IS NULL OR $3 = '' THEN NULL ELSE ARRAY[public.laplace_text_id($3)] END AS rels
             ),
+            src_senses AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
+                FROM public.laplace_claims_each(
+                    ARRAY[public.blake3_from_bytea($1)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                    ARRAY[public.laplace_text_id('lexical sense')]) cs
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                WHERE cardinality(ps.pts) = 3
+            ),
             src_synsets AS MATERIALIZED (
                 SELECT public.blake3_from_bytea($1) AS id
                 UNION
                 (
+                    SELECT sp.spts[cardinality(sp.spts)]
+                    FROM src_senses s
+                    JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM src_senses)) ph ON ph.entity = s.sense_id
+                    CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                    WHERE cardinality(sp.spts) >= 3
+                    UNION
                     SELECT pr.pts[cardinality(pr.pts)]
-                    FROM public.laplace_claims_each(
-                        ARRAY[public.blake3_from_bytea($1)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                        ARRAY[public.laplace_text_id('lexical sense')]) cs
-                    CROSS JOIN LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                    FROM src_senses s
                     CROSS JOIN LATERAL public.laplace_claims_each(
-                        ARRAY[ps.pts[cardinality(ps.pts)]], 2::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                        ARRAY[s.sense_id], 2::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                         ARRAY[public.laplace_text_id('reference')]) cr
                     CROSS JOIN LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
-                    WHERE cardinality(ps.pts) = 3 AND cardinality(pr.pts) = 3
+                    WHERE cardinality(pr.pts) = 3
                     LIMIT 15
                 )
+            ),
+            dst_senses AS MATERIALIZED (
+                SELECT ps.pts[cardinality(ps.pts)] AS sense_id
+                FROM public.laplace_claims_each(
+                    ARRAY[public.blake3_from_bytea($2)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                    ARRAY[public.laplace_text_id('lexical sense')]) cs
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                WHERE cardinality(ps.pts) = 3
             ),
             dst_synsets AS MATERIALIZED (
                 SELECT public.blake3_from_bytea($2) AS id
                 UNION
                 (
+                    SELECT sp.spts[cardinality(sp.spts)]
+                    FROM dst_senses s
+                    JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM dst_senses)) ph ON ph.entity = s.sense_id
+                    CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                    WHERE cardinality(sp.spts) >= 3
+                    UNION
                     SELECT pr.pts[cardinality(pr.pts)]
-                    FROM public.laplace_claims_each(
-                        ARRAY[public.blake3_from_bytea($2)], 16::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
-                        ARRAY[public.laplace_text_id('lexical sense')]) cs
-                    CROSS JOIN LATERAL (SELECT public.laplace_parts(cs.path) AS pts) ps
+                    FROM dst_senses s
                     CROSS JOIN LATERAL public.laplace_claims_each(
-                        ARRAY[ps.pts[cardinality(ps.pts)]], 2::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
+                        ARRAY[s.sense_id], 2::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint,
                         ARRAY[public.laplace_text_id('reference')]) cr
                     CROSS JOIN LATERAL (SELECT public.laplace_parts(cr.path) AS pts) pr
-                    WHERE cardinality(ps.pts) = 3 AND cardinality(pr.pts) = 3
+                    WHERE cardinality(pr.pts) = 3
                     LIMIT 15
                 )
             ),
@@ -1174,6 +1241,12 @@ public static partial class NpgsqlSubstrateReads
             ),
             seeds AS MATERIALIZED (
                 SELECT public.blake3_from_bytea($1) AS id
+                UNION
+                SELECT sp.spts[cardinality(sp.spts)]
+                FROM senses s
+                JOIN public.laplace_physicalities(ARRAY(SELECT sense_id FROM senses)) ph ON ph.entity = s.sense_id
+                CROSS JOIN LATERAL (SELECT public.laplace_parts(ph.path) AS spts) sp
+                WHERE cardinality(sp.spts) >= 3
                 UNION
                 SELECT pr.pts[cardinality(pr.pts)]
                 FROM senses s,

@@ -430,6 +430,7 @@ internal static class RelationLaw
         new("subtype", 164, false, -1),
         new("synonym", 179, false, -1),
         new("synset containing lemma", 132, false, -1),
+        new("synset gloss", 67, false, -1),
         new("syntactic behaviour", 151, false, -1),
         new("translation", 180, false, -1),
         new("usage example", 80, false, -1),

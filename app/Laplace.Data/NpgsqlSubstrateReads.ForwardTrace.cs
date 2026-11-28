@@ -118,8 +118,7 @@ public static partial class NpgsqlSubstrateReads
                               'identifies',
                               'syntactic behaviour',
                               'type',
-                              'identifier',
-                              'vocabulary',
+                              'identifier vocabulary',
                               'CLDR short name of sequence'
                           ]) r),
                     0::smallint, 0.0,
