@@ -36,6 +36,8 @@ internal static class ChessEndpoints
         app.MapPost("/chess/explore", (ExploreRequest req, ChessEngineService svc, CancellationToken ct) =>
             WithChessValidation(async () => Results.Json(await svc.ExploreAsync(req.Fen, req.Limit ?? 12, ct)))).WithTags("chess");
 
+        MapChessDbEndpoints(app);
+
         app.MapPost("/chess/train/start", (double? temperature, double? weight, int? maxPlies, int? games, ChessEngineService svc) =>
         {
             if (temperature is { } t && (!double.IsFinite(t) || t < 0 || t > 10_000))
@@ -514,6 +516,85 @@ internal static class ChessEndpoints
         {
             return EndpointJson.BadRequest("invalid_fen", ex.Message);
         }
+    }
+
+    private static void MapChessDbEndpoints(WebApplication app)
+    {
+        static bool IsId(string? id) => id is { Length: 32 } && id.All(Uri.IsHexDigit);
+        static int ClampPage(int? value, int fallback, int max) => Math.Clamp(value ?? fallback, 0, max);
+        static IResult NativeAnswer(JsonElement answer) =>
+            answer.ValueKind == JsonValueKind.Object && answer.TryGetProperty("error", out _)
+                ? Results.BadRequest(answer)
+                : Results.Json(answer);
+
+        app.MapGet("/chess/db/position", async (string? fen, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(fen) || fen.Length > 128)
+                return Results.BadRequest(new { error = "fen: a FEN, up to 128 characters" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_position", new { fen = fen.Trim() }, ct));
+        }).WithTags("chess");
+
+        app.MapGet("/chess/db/tablebase", async (string? fen, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(fen) || fen.Length > 128)
+                return Results.BadRequest(new { error = "fen: a FEN, up to 128 characters" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_tablebase", new { fen = fen.Trim() }, ct));
+        }).WithTags("chess");
+
+        app.MapPost("/chess/db/game-openings", async (JsonElement body, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (body.ValueKind != JsonValueKind.Object)
+                return Results.BadRequest(new { error = "a JSON object: { pgn } or { line } or { pgns: [...] }" });
+            if (body.TryGetProperty("pgns", out var pgns))
+            {
+                if (pgns.ValueKind != JsonValueKind.Array || pgns.GetArrayLength() > 512
+                    || pgns.EnumerateArray().Any(p => p.ValueKind != JsonValueKind.String || p.GetString()!.Length > 65536))
+                    return Results.BadRequest(new { error = "pgns: up to 512 PGN strings" });
+                return NativeAnswer(await native.ReadAsync("/v1/chess_game_openings",
+                    new { pgns = pgns.EnumerateArray().Select(p => p.GetString()).ToArray() }, ct));
+            }
+            if (body.TryGetProperty("pgn", out var pgn))
+            {
+                if (pgn.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(pgn.GetString()) || pgn.GetString()!.Length > 65536)
+                    return Results.BadRequest(new { error = "pgn: a PGN string" });
+                return NativeAnswer(await native.ReadAsync("/v1/chess_game_openings", new { pgn = pgn.GetString() }, ct));
+            }
+            if (body.TryGetProperty("line", out var line) && line.ValueKind == JsonValueKind.String && IsId(line.GetString()))
+                return NativeAnswer(await native.ReadAsync("/v1/chess_game_openings", new { line = line.GetString()!.ToLowerInvariant() }, ct));
+            return Results.BadRequest(new { error = "{ pgn } or { line } or { pgns: [...] }" });
+        }).WithTags("chess");
+
+        app.MapGet("/chess/db/players", async (string? search, int? limit, int? offset, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            var q = (search ?? "").Trim();
+            if (q.Length > 200)
+                return Results.BadRequest(new { error = "search: up to 200 characters" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_players",
+                new { search = q, limit = Math.Max(1, ClampPage(limit, 25, 200)), offset = ClampPage(offset, 0, 1 << 30) }, ct));
+        }).WithTags("chess");
+
+        app.MapGet("/chess/db/player", async (string? name, int? limit, int? offset, int? opponents, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 400)
+                return Results.BadRequest(new { error = "name: as a White or Black tag writes it, up to 400 characters" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_player",
+                new { name, limit = Math.Max(1, ClampPage(limit, 25, 200)), offset = ClampPage(offset, 0, 1 << 30), opponents = ClampPage(opponents, 25, 200) }, ct));
+        }).WithTags("chess");
+
+        app.MapGet("/chess/db/games", async (string? witness, int? limit, int? offset, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(witness) || witness.Length > 200)
+                return Results.BadRequest(new { error = "witness: a source's witness, as its recipe names it" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_games",
+                new { witness = witness.Trim(), limit = Math.Max(1, ClampPage(limit, 25, 200)), offset = ClampPage(offset, 0, 1 << 30) }, ct));
+        }).WithTags("chess");
+
+        app.MapGet("/chess/db/game", async (string? id, NativeChessReaderService native, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(id) || !IsId(id))
+                return Results.BadRequest(new { error = "id: a record's 32-digit ID" });
+            return NativeAnswer(await native.ReadAsync("/v1/chess_game", new { id = id.ToLowerInvariant() }, ct));
+        }).WithTags("chess");
     }
 
     private sealed record FenRequest(string Fen);

@@ -116,6 +116,15 @@ internal sealed class IngestJournalService
                 }
             }
         }
+        var opsLogs = Environment.GetEnvironmentVariable("LAPLACE_OPS_LOG_DIR");
+        if (!string.IsNullOrWhiteSpace(opsLogs))
+        {
+            var opsTrimmed = opsLogs.Trim();
+            dirs.Add(Path.Combine(opsTrimmed, "ingest", "runs"));
+            if (Path.GetDirectoryName(Path.GetFullPath(opsTrimmed)) is { Length: > 0 } stateRoot)
+                dirs.Add(Path.Combine(stateRoot, "logs", "ingest", "runs"));
+        }
+
         return dirs.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 

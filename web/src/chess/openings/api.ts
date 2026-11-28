@@ -38,10 +38,10 @@ export interface GameOpeningsResponse {
 }
 
 export const positionOpenings = (fen: string, signal?: AbortSignal) =>
-  apiGet<PositionOpeningsResponse>(`/modular/api/chess/position?fen=${encodeURIComponent(fen)}`, { signal });
+  apiGet<PositionOpeningsResponse>(`/chess/db/position?fen=${encodeURIComponent(fen)}`, { signal });
 
 export const gameOpenings = (pgn: string, signal?: AbortSignal) =>
-  apiPost<GameOpeningsResponse>('/modular/api/chess/game-openings', { pgn }, { signal });
+  apiPost<GameOpeningsResponse>('/chess/db/game-openings', { pgn }, { signal });
 
 /** The most specific opening: the longest line that still contains the position. */
 export const mostSpecific = (openings: OpeningLine[]) => openings.at(-1) ?? null;
@@ -50,13 +50,13 @@ export const mostSpecific = (openings: OpeningLine[]) => openings.at(-1) ?? null
  * { deepest } (null for a game with an illegal move or no named position). */
 export interface GameDeepestOpening { deepest: OpeningLine | null }
 export const gameOpeningsBatch = (pgns: string[], signal?: AbortSignal) =>
-  apiPost<GameDeepestOpening[]>('/modular/api/chess/game-openings', { pgns }, { signal });
+  apiPost<GameDeepestOpening[]>('/chess/db/game-openings', { pgns }, { signal });
 
 /** Syzygy win/draw/loss as the endpoint names it (win, draw, loss, and the 50-move-rule cases). */
 export type Wdl = string;
 
 /**
- * GET /modular/api/chess/tablebase: Syzygy verdicts recorded as claims on the same position
+ * GET /chess/db/tablebase: Syzygy verdicts recorded as claims on the same position
  * ids. `wdl`/`dtz` are from the side to move's view; each move's are from the opponent's view
  * after it, best move first. Positions without a recorded table give null verdicts.
  */
@@ -68,7 +68,7 @@ export interface TablebaseResponse {
 }
 
 export const positionTablebase = (fen: string, signal?: AbortSignal) =>
-  apiGet<TablebaseResponse>(`/modular/api/chess/tablebase?fen=${encodeURIComponent(fen)}`, { signal });
+  apiGet<TablebaseResponse>(`/chess/db/tablebase?fen=${encodeURIComponent(fen)}`, { signal });
 
 /** Syzygy tables cover at most five pieces here; more is never asked. */
 export const TABLEBASE_PIECES = 5;

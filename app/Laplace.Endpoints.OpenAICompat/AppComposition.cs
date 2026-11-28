@@ -135,6 +135,7 @@ internal static class AppComposition
         });
         services.AddSingleton<LichessStatusMemory>();
         services.AddTransient<LichessStatusReader>();
+        services.AddSingleton<NativeChessReaderService>();
         services.AddHttpClient("lichess-control", client => client.Timeout = TimeSpan.FromSeconds(10));
         services.AddTransient<LichessControlClient>();
         if (OperatingSystem.IsWindows()) services.AddSingleton<IServiceControl, WindowsServiceControl>();

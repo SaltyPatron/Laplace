@@ -10,7 +10,7 @@ const PETROV = { line: 'c3'.repeat(16), name: 'Petrov Defence', eco: 'C42', plie
 
 test('the board shows the openings its position belongs to, most specific first', async ({ page }) => {
   const asked: string[] = [];
-  await page.route('**/modular/api/chess/position?**', (route) => {
+  await page.route('**/chess/db/position?**', (route) => {
     asked.push(new URL(route.request().url()).searchParams.get('fen') ?? '');
     return route.fulfill({ json: { position: 'd4'.repeat(16), games: 12873, openings: [OPEN_GAME, KINGS_KNIGHT] } });
   });
@@ -30,7 +30,7 @@ test('the board shows the openings its position belongs to, most specific first'
 });
 
 test('a position on no opening line says so', async ({ page }) => {
-  await page.route('**/modular/api/chess/position?**', (route) =>
+  await page.route('**/chess/db/position?**', (route) =>
     route.fulfill({ json: { position: 'e5'.repeat(16), games: 0, openings: [] } }));
   await page.route(/\/chess\/(legal|eval|new)$/, (route) => route.fulfill({ json: { moves: [], inCheck: false, status: 'ongoing', fen: START_FEN } }));
   await page.goto('/play');
@@ -49,11 +49,11 @@ test('a game shows its deepest opening, where it leaves book, and each ply\'s op
   ].map((row, i) => ({ ...row, clock: null, position: String(i + 1).repeat(32) }));
   const posted: unknown[] = [];
   // One read gives the game's tags and its replayed plies.
-  await page.route(`**/modular/api/chess/game?id=${GAME_ID}`, (route) => route.fulfill({ json: {
+  await page.route(`**/chess/db/game?id=${GAME_ID}`, (route) => route.fulfill({ json: {
     id: GAME_ID, line: 'f6'.repeat(16), tags: [{ name: 'White', value: 'White' }, { name: 'Black', value: 'Black' }, { name: 'Result', value: '1-0' }],
     white: 'White', black: 'Black', result: '1-0', date: null, event: null, eco: 'C42', start_fen: START_FEN,
     movetext: '1. e4 e5 2. Nf3 Nf6 3. h3 1-0', complete: true, plies } }));
-  await page.route('**/modular/api/chess/game-openings', (route) => {
+  await page.route('**/chess/db/game-openings', (route) => {
     posted.push(route.request().postDataJSON());
     return route.fulfill({ json: {
       line: 'f6'.repeat(16), deepest: PETROV, out_of_book_at: 5,
@@ -86,10 +86,10 @@ test('a game shows its deepest opening, where it leaves book, and each ply\'s op
 test('a game list reads every game\'s deepest opening in one batch', async ({ page }) => {
   const row = (id: string, movetext: string | null) => ({ id: id.repeat(32), line: null, white: 'Laplace', black: 'Browser player',
     result: '1-0', date: '2026.11.11', event: 'Laplace Play', eco: null, movetext });
-  await page.route('**/modular/api/chess/games?**', (route) => route.fulfill({ json: { witness: 'Laplace', total: 3, offset: 0,
+  await page.route('**/chess/db/games?**', (route) => route.fulfill({ json: { witness: 'Laplace', total: 3, offset: 0,
     games: [row('a', '1. e4 e5 2. Nf3 Nf6 1-0'), row('b', '1. h4 a5 1-0'), row('c', null)] } }));
   const batches: unknown[] = [];
-  await page.route('**/modular/api/chess/game-openings', (route) => {
+  await page.route('**/chess/db/game-openings', (route) => {
     batches.push(route.request().postDataJSON());
     return route.fulfill({ json: [
       { deepest: PETROV },
@@ -107,7 +107,7 @@ test('a game list reads every game\'s deepest opening in one batch', async ({ pa
 
 const KQK = '8/8/8/8/8/8/1Q6/K6k w - - 0 1';
 const playOn = async (page: import('@playwright/test').Page, fen: string) => {
-  await page.route('**/modular/api/chess/position?**', (route) => route.fulfill({ json: { position: 'f1'.repeat(16), games: 0, openings: [] } }));
+  await page.route('**/chess/db/position?**', (route) => route.fulfill({ json: { position: 'f1'.repeat(16), games: 0, openings: [] } }));
   await page.route(/\/chess\/(legal|eval|new)$/, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/legal')) return route.fulfill({ json: { moves: [], inCheck: false, status: 'ongoing' } });
@@ -118,7 +118,7 @@ const playOn = async (page: import('@playwright/test').Page, fen: string) => {
 
 test('a full board never asks the tablebase', async ({ page }) => {
   let asked = 0;
-  await page.route('**/modular/api/chess/tablebase?**', (route) => { asked += 1; return route.fulfill({ json: {} }); });
+  await page.route('**/chess/db/tablebase?**', (route) => { asked += 1; return route.fulfill({ json: {} }); });
   await playOn(page, START_FEN);
   await page.goto('/play');
   await expect(page.getByRole('region', { name: 'Openings of this position' })).toBeVisible();
@@ -127,7 +127,7 @@ test('a full board never asks the tablebase', async ({ page }) => {
 });
 
 test('a tablebase position shows its verdict and best moves from the mover\'s view', async ({ page }) => {
-  await page.route('**/modular/api/chess/tablebase?**', (route) => route.fulfill({ json: {
+  await page.route('**/chess/db/tablebase?**', (route) => route.fulfill({ json: {
     position: 'aa'.repeat(16), wdl: 'win', dtz: 11,
     moves: [
       { san: 'Kb1', position: 'b1'.repeat(16), wdl: 'loss', dtz: -10 },
@@ -148,7 +148,7 @@ test('a tablebase position shows its verdict and best moves from the mover\'s vi
 });
 
 test('a few-piece position without a recorded table says so', async ({ page }) => {
-  await page.route('**/modular/api/chess/tablebase?**', (route) => route.fulfill({ json: { position: 'bb'.repeat(16), wdl: null, dtz: null, moves: [] } }));
+  await page.route('**/chess/db/tablebase?**', (route) => route.fulfill({ json: { position: 'bb'.repeat(16), wdl: null, dtz: null, moves: [] } }));
   await playOn(page, '8/8/8/8/8/8/1QR5/K6k w - - 0 1');
   await page.goto('/play');
   await page.getByRole('button', { name: 'New game' }).click();

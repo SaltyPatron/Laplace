@@ -6,7 +6,7 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 test.describe('chess UI', () => {
   test('replay stepping never steals page scroll', async ({ page }) => {
     // One read gives the headers (as PGN tags) and the replayed plies with their clocks.
-    await page.route(`**/modular/api/chess/game?id=${GAME_ID}`, async (route) => {
+    await page.route(`**/chess/db/game?id=${GAME_ID}`, async (route) => {
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({

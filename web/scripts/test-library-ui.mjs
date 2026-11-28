@@ -35,7 +35,7 @@ try {
   const queryReads = [], comparisonReads = [];
   await page.route('**/health/**', route => route.fulfill({ json: { ready: true } }));
   // Recorded games are read from the modular host, not the monorepo API.
-  await page.route('**/modular/api/chess/game?**', route => new URL(route.request().url()).searchParams.get('id') === gameId
+  await page.route('**/chess/db/game?**', route => new URL(route.request().url()).searchParams.get('id') === gameId
     ? route.fulfill({ json: { id: gameId, line: null, tags: [{ name: 'Event', value: 'Fixture event' }], white: 'Fixture player', black: 'Fixture opponent', result: '1-0', date: '2026.01.01', event: 'Fixture event', eco: 'A00', start_fen: startFen, movetext: '1. e4', complete: true, plies: [{ ply: 1, san: 'e4', uci: 'e2e4', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', white_moved: true, position: positionId, clock: null }] } })
     : route.fulfill({ status: 400, json: { error: 'unknown game' } }));
   await page.route('**/v1/**', route => {

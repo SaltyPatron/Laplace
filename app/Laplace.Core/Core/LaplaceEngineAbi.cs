@@ -592,7 +592,7 @@ public sealed unsafe class LaplaceEngineRuntime : ILaplaceEngineRuntime
         return normalized;
     }
 
-    internal static string FormatLibpqConnInfo(string npgsql)
+    public static string FormatLibpqConnInfo(string npgsql)
     {
         var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsql };
         var parts = new List<string>();

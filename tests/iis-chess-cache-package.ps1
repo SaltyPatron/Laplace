@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot/../deploy/windows/iis-runtime.ps1"
 $work=Join-Path ([IO.Path]::GetTempPath()) ('iis-cache-closure-'+[Guid]::NewGuid().ToString('N'))
 $files=@()
-$names=@('tier0.bin','tier0.flags','tier0.flags.layout','highway.bin')
+$names=@('tier0.bin','tier0.flags','tier0.flags.layout','highway.bin','tier0.chess')
 foreach($component in @('','cli','uci')) {
     $share=Join-Path (Join-Path $work $component) 'share/laplace'
     $null=New-Item -ItemType Directory -Path $share -Force

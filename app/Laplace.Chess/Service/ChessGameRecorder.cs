@@ -103,6 +103,7 @@ public sealed class ChessGameRecorder
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        EnsureWritableWorkDir(psi);
 
         string fullPath = Path.GetFullPath(request.Path);
         string rootDir = Path.GetDirectoryName(fullPath) ?? _directory;
@@ -153,23 +154,39 @@ public sealed class ChessGameRecorder
         return res.ExitCode;
     }
 
+    private static void EnsureWritableWorkDir(ProcessStartInfo psi)
+    {
+        var work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
+            ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT");
+        if (string.IsNullOrWhiteSpace(work))
+        {
+            var opsLogs = Environment.GetEnvironmentVariable("LAPLACE_OPS_LOG_DIR");
+            work = !string.IsNullOrWhiteSpace(opsLogs)
+                ? Path.GetDirectoryName(Path.GetFullPath(opsLogs.Trim()))
+                : null;
+        }
+        if (string.IsNullOrWhiteSpace(work))
+            work = Path.Combine(Path.GetTempPath(), "laplace-work");
+        else
+            work = Path.GetFullPath(work.Trim());
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(work, "logs", "ingest", "runs"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            work = Path.Combine(Path.GetTempPath(), "laplace-work");
+            try { Directory.CreateDirectory(Path.Combine(work, "logs", "ingest", "runs")); }
+            catch { }
+        }
+        psi.Environment["LAPLACE_WORK"] = work;
+    }
+
     internal static string ToLibpqConnInfo(string npgsqlConn)
     {
-        var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsqlConn };
-        var parts = new List<string>();
-        void AddIf(string npgsqlKey, string libpqKey)
-        {
-            if (csb.TryGetValue(npgsqlKey, out var v) && v is not null && !string.IsNullOrWhiteSpace(v.ToString()))
-                parts.Add($"{libpqKey}={v}");
-        }
-        AddIf("Host", "host");
-        AddIf("Port", "port");
-        AddIf("Database", "dbname");
-        AddIf("Username", "user");
-        AddIf("Password", "password");
-        AddIf("SSL Mode", "sslmode");
-        AddIf("Root Certificate", "sslrootcert");
-        return parts.Count > 0 ? string.Join(' ', parts) : LaplaceEngineRuntime.ResolveLibpqConnInfo();
+        var formatted = LaplaceEngineRuntime.FormatLibpqConnInfo(npgsqlConn);
+        return !string.IsNullOrWhiteSpace(formatted) ? formatted : LaplaceEngineRuntime.ResolveLibpqConnInfo();
     }
 
     internal static string? ResolveNativeBinary()

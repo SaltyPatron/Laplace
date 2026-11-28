@@ -266,7 +266,8 @@ try {
         foreach($cacheSetting in @(
             @{Name='laplace.tier0';File=(Join-Path $deployShareDir 'tier0.bin')},
             @{Name='laplace.flags';File=(Join-Path $deployShareDir 'tier0.flags')},
-            @{Name='laplace.highway';File=(Join-Path $deployShareDir 'highway.bin')}
+            @{Name='laplace.highway';File=(Join-Path $deployShareDir 'highway.bin')},
+            @{Name='laplace.chess';File=(Join-Path $deployShareDir 'tier0.chess')}
         )){
             if(Test-Path -LiteralPath $cacheSetting.File -PathType Leaf){
                 $normalizedPath=$cacheSetting.File.Replace('\','/').Replace("'","''")

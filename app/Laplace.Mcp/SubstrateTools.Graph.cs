@@ -306,23 +306,7 @@ public sealed partial class SubstrateTools
     }
 
     private static string ToLibpqConnInfo(string npgsqlConn)
-    {
-        var csb = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = npgsqlConn };
-        var parts = new List<string>();
-        void AddIf(string npgsqlKey, string libpqKey)
-        {
-            if (csb.TryGetValue(npgsqlKey, out var v) && v is not null && !string.IsNullOrWhiteSpace(v.ToString()))
-                parts.Add($"{libpqKey}={v}");
-        }
-        AddIf("Host", "host");
-        AddIf("Port", "port");
-        AddIf("Database", "dbname");
-        AddIf("Username", "user");
-        AddIf("Password", "password");
-        AddIf("SSL Mode", "sslmode");
-        AddIf("Root Certificate", "sslrootcert");
-        return string.Join(' ', parts);
-    }
+        => LaplaceEngineRuntime.FormatLibpqConnInfo(npgsqlConn);
 
     private static string? ResolveNativeBinary()
     {

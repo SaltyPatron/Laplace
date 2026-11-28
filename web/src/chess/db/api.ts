@@ -22,7 +22,7 @@ export function chessPlayers(
   if (params.search) q.set('search', params.search);
   if (params.limit != null) q.set('limit', String(params.limit));
   if (params.offset != null) q.set('offset', String(params.offset));
-  return apiGet<ChessPlayersResponse>(`/modular/api/chess/players?${q}`, opts);
+  return apiGet<ChessPlayersResponse>(`/chess/db/players?${q}`, opts);
 }
 
 /** One player's record, source ratings, opponents and a page of games, newest first. */
@@ -35,7 +35,7 @@ export function chessPlayer(
   if (params.limit != null) q.set('limit', String(params.limit));
   if (params.offset != null) q.set('offset', String(params.offset));
   if (params.opponents != null) q.set('opponents', String(params.opponents));
-  return apiGet<ChessPlayerResponse>(`/modular/api/chess/player?${q}`, opts);
+  return apiGet<ChessPlayerResponse>(`/chess/db/player?${q}`, opts);
 }
 
 /** The games Laplace itself played, newest first. */
@@ -46,12 +46,12 @@ export function chessLaplaceGames(
   const q = new URLSearchParams({ witness: LAPLACE_WITNESS });
   q.set('limit', String(params.limit ?? 200));
   q.set('offset', String(params.offset ?? 0));
-  return apiGet<ChessGamesResponse>(`/modular/api/chess/games?${q}`, opts);
+  return apiGet<ChessGamesResponse>(`/chess/db/games?${q}`, opts);
 }
 
 /** One game: its tags and its replayed plies. */
 export function chessGame(id: string, opts: ApiOptions = {}) {
-  return apiGet<ChessGameResponse>(`/modular/api/chess/game?id=${encodeURIComponent(id)}`, opts);
+  return apiGet<ChessGameResponse>(`/chess/db/game?id=${encodeURIComponent(id)}`, opts);
 }
 
 /** The value of one PGN tag, or null when the source did not write it. */

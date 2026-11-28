@@ -147,6 +147,7 @@
       <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.flags" Condition="Exists('$(_PerfcacheCandidate)/tier0.flags')" />
       <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.flags.layout" Condition="Exists('$(_PerfcacheCandidate)/tier0.flags.layout')" />
       <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/highway.bin" Condition="Exists('$(_PerfcacheCandidate)/highway.bin')" />
+      <_LaplacePerfcacheFile Include="$(_PerfcacheCandidate)/tier0.chess" Condition="Exists('$(_PerfcacheCandidate)/tier0.chess')" />
     </ItemGroup>
 
     <ItemGroup Condition="'@(_LaplacePerfcacheFile)' != ''">

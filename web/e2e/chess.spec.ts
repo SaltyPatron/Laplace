@@ -83,7 +83,7 @@ test.describe('chess UI', () => {
 
   test('player search and paging are URL-addressable', async ({ page }) => {
     const requests: URL[] = [];
-    await page.route('**/modular/api/chess/players?**', async (route) => {
+    await page.route('**/chess/db/players?**', async (route) => {
       const url = new URL(route.request().url());
       requests.push(url);
       await route.fulfill({ json: {
@@ -127,7 +127,7 @@ test.describe('chess UI', () => {
 
   test('the player index loads the recorded roster most games first', async ({ page }) => {
     const requests: URL[] = [];
-    await page.route('**/modular/api/chess/players?**', (route) => {
+    await page.route('**/chess/db/players?**', (route) => {
       const url = new URL(route.request().url());
       requests.push(url);
       return route.fulfill({ json: {
@@ -153,7 +153,7 @@ test.describe('chess UI', () => {
     const requests: URL[] = [];
     const record = (games: number, wins: number, draws: number, losses: number) =>
       ({ games, wins, draws, losses, unscored: 0, score: (wins + draws / 2) / games });
-    await page.route('**/modular/api/chess/player?**', (route) => {
+    await page.route('**/chess/db/player?**', (route) => {
       const url = new URL(route.request().url());
       requests.push(url);
       const offset = Number(url.searchParams.get('offset') ?? 0);
@@ -169,7 +169,7 @@ test.describe('chess UI', () => {
           as_white: true, opponent: 'Kasparov, Garry', outcome: 2 }],
       } });
     });
-    await page.route('**/modular/api/chess/game?**', (route) => route.fulfill({ json: {
+    await page.route('**/chess/db/game?**', (route) => route.fulfill({ json: {
       id: 'a'.repeat(32), line: null, tags: [], white: 'Karpov, Anatoly', black: 'Kasparov, Garry', result: '1-0',
       date: '1990.10.08', event: 'World Championship', eco: 'C92', start_fen: null, movetext: null, complete: true, plies: [] } }));
 
@@ -194,7 +194,7 @@ test.describe('chess UI', () => {
 
   test('a name nobody played under says so instead of showing an empty record', async ({ page }) => {
     const empty = { games: 0, wins: 0, draws: 0, losses: 0, unscored: 0, score: null };
-    await page.route('**/modular/api/chess/player?**', (route) => route.fulfill({ json: {
+    await page.route('**/chess/db/player?**', (route) => route.fulfill({ json: {
       name: 'Profile, Only', overall: empty, as_white: empty, as_black: empty, peak_rating: null, ratings: [],
       opponents_total: 0, opponents: [], total: 0, offset: 0, games: [] } }));
     await page.goto('/chess/players/Profile%2C%20Only');
@@ -206,7 +206,7 @@ test.describe('chess UI', () => {
 
   test('Laplace games have a dedicated, filterable URL', async ({ page }) => {
     const requests: URL[] = [];
-    await page.route('**/modular/api/chess/games?**', async (route) => {
+    await page.route('**/chess/db/games?**', async (route) => {
       requests.push(new URL(route.request().url()));
       await route.fulfill({ json: {
         witness: 'Laplace',
