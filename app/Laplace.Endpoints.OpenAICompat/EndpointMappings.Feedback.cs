@@ -11,7 +11,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// <summary>
 /// Caller confirms or refutes one claim as a runtime witness at <c>UserPromptContent</c>
 /// using a canonical <c>.statement</c> record admitted via <c>laplace witness</c>, and
-/// reads prior/posterior standing directly from <c>public.laplace_consensus</c>.
+/// reads prior/posterior standing directly from <c>public.laplace_standings</c>.
 /// </summary>
 internal static class FeedbackEndpoints
 {
@@ -151,7 +151,8 @@ internal static class FeedbackEndpoints
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(
-            "SELECT rating, deviation, matches FROM public.laplace_consensus WHERE claim = $1::public.blake3 LIMIT 1",
+            "SELECT s.rating, s.deviation, s.matches, public.laplace_confidence(s.rating, s.deviation, 2::double precision) " +
+            "FROM public.laplace_standings(ARRAY[public.blake3_from_bytea($1)]) s LIMIT 1",
             conn);
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, claimId.ToBytes());
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -161,7 +162,7 @@ internal static class FeedbackEndpoints
         double rating = reader.GetDouble(0);
         double rd = reader.GetDouble(1);
         long matches = reader.GetInt64(2);
-        double confidence = Math.Clamp(1.0 / (1.0 + Math.Exp(-(rating - 1500.0) / 173.7178)), 0.0, 1.0);
+        double confidence = reader.GetDouble(3);
         return new FeedbackStanding(rating, rd, matches, confidence);
     }
 }

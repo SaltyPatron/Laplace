@@ -14,9 +14,9 @@ public static partial class NpgsqlSubstrateReads
 
     private const string EntityPhysicalitiesSql = """
         SELECT 0::smallint,
-               ST_X(e.coord), ST_Y(e.coord), ST_Z(e.coord), ST_M(e.coord),
-               sqrt(ST_X(e.coord)*ST_X(e.coord) + ST_Y(e.coord)*ST_Y(e.coord) + ST_Z(e.coord)*ST_Z(e.coord) + ST_M(e.coord)*ST_M(e.coord)),
-               coalesce(ST_NumPoints(p.path), 1)
+               public.ST_X(e.coord), public.ST_Y(e.coord), public.ST_Z(e.coord), public.ST_M(e.coord),
+               sqrt(public.ST_X(e.coord)*public.ST_X(e.coord) + public.ST_Y(e.coord)*public.ST_Y(e.coord) + public.ST_Z(e.coord)*public.ST_Z(e.coord) + public.ST_M(e.coord)*public.ST_M(e.coord)),
+               coalesce(public.ST_NumPoints(p.path), 1)
         FROM public.laplace_entities(ARRAY[public.blake3_from_bytea($1)]) e
         LEFT JOIN public.laplace_physicalities(ARRAY[public.blake3_from_bytea($1)]) p ON p.entity = e.id
         WHERE e.id IS NOT NULL
@@ -99,10 +99,10 @@ public static partial class NpgsqlSubstrateReads
                 LIMIT 1
             )
             SELECT c.ordinal,
-                   coalesce(ST_X(ST_PointN(p.path, c.ordinal)), 0),
-                   coalesce(ST_Y(ST_PointN(p.path, c.ordinal)), 0),
-                   coalesce(ST_Z(ST_PointN(p.path, c.ordinal)), 0),
-                   coalesce(ST_M(ST_PointN(p.path, c.ordinal)), 0),
+                   coalesce(public.ST_X(public.ST_PointN(p.path, c.ordinal)), 0),
+                   coalesce(public.ST_Y(public.ST_PointN(p.path, c.ordinal)), 0),
+                   coalesce(public.ST_Z(public.ST_PointN(p.path, c.ordinal)), 0),
+                   coalesce(public.ST_M(public.ST_PointN(p.path, c.ordinal)), 0),
                    encode(public.blake3_send(c.child), 'hex'),
                    c.run_length,
                    c.flags

@@ -412,6 +412,7 @@ CREATE OR REPLACE FUNCTION app.consume_credit(
         p_units int)
     RETURNS TABLE(plan_id text, remaining int, period_end timestamptz)
     LANGUAGE sql
+    SET search_path = pg_catalog, app
 AS $$
     WITH candidate AS (
         SELECT e.tenant, e.plan_id,

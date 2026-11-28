@@ -115,15 +115,15 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             WITH anchor AS (
-                SELECT ST_MakePoint($1, $2, $3, $4) AS pt,
-                       CASE WHEN $5 IS NULL THEN NULL ELSE ST_GeomFromText($5) END AS traj
+                SELECT public.ST_MakePoint($1, $2, $3, $4) AS pt,
+                       CASE WHEN $5 IS NULL THEN NULL ELSE public.ST_GeomFromText($5) END AS traj
             ),
             knn AS MATERIALIZED (
                 SELECT k.ordinal, k.id, k.tier, k.distance
                 FROM anchor a, public.laplace_knn4d(a.pt, greatest(1, $6), false, 0::smallint, NULL, NULL) k
             ),
             curves AS MATERIALIZED (
-                SELECT c.entity, ST_GeomFromEWKB(c.curve_ewkb) AS curve
+                SELECT c.entity, public.ST_GeomFromEWKB(c.curve_ewkb) AS curve
                 FROM public.laplace_curves(ARRAY(SELECT id FROM knn LIMIT greatest(1, $7))) c
                 WHERE c.curve_ewkb IS NOT NULL
             )
@@ -203,7 +203,7 @@ public static partial class NpgsqlSubstrateReads
             LIMIT 1
         ),
         src_curve AS (
-            SELECT ST_GeomFromEWKB(cv.curve_ewkb) AS curve
+            SELECT public.ST_GeomFromEWKB(cv.curve_ewkb) AS curve
             FROM target t, public.laplace_curves(ARRAY[t.tid]) cv
             WHERE cv.curve_ewkb IS NOT NULL
             LIMIT 1
@@ -214,7 +214,7 @@ public static partial class NpgsqlSubstrateReads
                  public.laplace_knn4d(s.coord, greatest(1, $2), false, 0::smallint, NULL, t.tid) k
         ),
         curves AS MATERIALIZED (
-            SELECT cv.entity, ST_GeomFromEWKB(cv.curve_ewkb) AS curve
+            SELECT cv.entity, public.ST_GeomFromEWKB(cv.curve_ewkb) AS curve
             FROM public.laplace_curves(ARRAY(SELECT id FROM knn)) cv
             WHERE cv.curve_ewkb IS NOT NULL
         )
@@ -224,8 +224,8 @@ public static partial class NpgsqlSubstrateReads
                CASE WHEN sc.curve IS NOT NULL AND c.curve IS NOT NULL
                     THEN public.laplace_frechet4d(sc.curve, c.curve)
                     ELSE NULL END,
-               ST_X(k.coord), ST_Y(k.coord), ST_Z(k.coord), ST_M(k.coord),
-               sqrt(ST_X(k.coord)*ST_X(k.coord) + ST_Y(k.coord)*ST_Y(k.coord) + ST_Z(k.coord)*ST_Z(k.coord) + ST_M(k.coord)*ST_M(k.coord))
+               public.ST_X(k.coord), public.ST_Y(k.coord), public.ST_Z(k.coord), public.ST_M(k.coord),
+               sqrt(public.ST_X(k.coord)*public.ST_X(k.coord) + public.ST_Y(k.coord)*public.ST_Y(k.coord) + public.ST_Z(k.coord)*public.ST_Z(k.coord) + public.ST_M(k.coord)*public.ST_M(k.coord))
         FROM knn k
         LEFT JOIN src_curve sc ON true
         LEFT JOIN curves c ON c.entity = k.id
@@ -405,7 +405,7 @@ public static partial class NpgsqlSubstrateReads
                 SELECT 2 AS side, public.blake3_from_bytea($2) AS bid
             ),
             curves AS MATERIALIZED (
-                SELECT p.side, p.bid, ST_GeomFromEWKB(c.curve_ewkb) AS geom
+                SELECT p.side, p.bid, public.ST_GeomFromEWKB(c.curve_ewkb) AS geom
                 FROM pair p
                 LEFT JOIN public.laplace_curves(ARRAY[public.blake3_from_bytea($1), public.blake3_from_bytea($2)]) c
                   ON c.entity = p.bid
@@ -422,16 +422,16 @@ public static partial class NpgsqlSubstrateReads
             )
             SELECT c.side,
                    (dp.path)[1]::int,
-                   ST_X(dp.geom)::float8,
-                   ST_Y(dp.geom)::float8,
-                   ST_Z(dp.geom)::float8,
-                   ST_M(dp.geom)::float8,
+                   public.ST_X(dp.geom)::float8,
+                   public.ST_Y(dp.geom)::float8,
+                   public.ST_Z(dp.geom)::float8,
+                   public.ST_M(dp.geom)::float8,
                    m.frechet,
                    m.dtw,
                    m.hausdorff
             FROM curves c
             CROSS JOIN metrics m
-            CROSS JOIN LATERAL ST_DumpPoints(c.geom) AS dp
+            CROSS JOIN LATERAL public.ST_DumpPoints(c.geom) AS dp
             WHERE c.geom IS NOT NULL
             ORDER BY c.side, (dp.path)[1]::int
             """;
@@ -465,7 +465,7 @@ public static partial class NpgsqlSubstrateReads
             anchor AS (
                 SELECT a.id_raw, e.id, e.x, e.y, e.z, e.m,
                        sqrt(e.x*e.x + e.y*e.y + e.z*e.z + e.m*e.m) AS radius,
-                       coalesce(ST_NumPoints(p.path), 1) AS path_len
+                       coalesce(public.ST_NumPoints(p.path), 1) AS path_len
                 FROM anchor_id a
                 JOIN public.laplace_entity_coords(ARRAY[public.blake3_from_bytea(a.id_raw)]) e ON true
                 LEFT JOIN public.laplace_physicalities(ARRAY[public.blake3_from_bytea(a.id_raw)]) p ON p.entity = e.id

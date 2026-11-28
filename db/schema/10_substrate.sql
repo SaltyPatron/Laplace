@@ -60,7 +60,9 @@ CREATE FOREIGN TABLE IF NOT EXISTS ops.pg_log (
 
 CREATE OR REPLACE FUNCTION ops.repoint_pg_log()
     RETURNS text
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog, ops, public
+AS $$
 DECLARE
     f text := pg_current_logfile('csvlog');
 BEGIN
@@ -97,7 +99,9 @@ BEGIN
 END $$;
 
 CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_role text, p_dir text)
-    RETURNS text LANGUAGE plpgsql AS $repoint_role$
+    RETURNS text LANGUAGE plpgsql
+    SET search_path = pg_catalog, ops, public
+AS $repoint_role$
 BEGIN
     IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
         RAISE EXCEPTION 'Unknown application log role: %', p_role;
@@ -111,7 +115,9 @@ BEGIN
 END $repoint_role$;
 
 CREATE OR REPLACE FUNCTION ops.repoint_app_log(p_dir text)
-    RETURNS text LANGUAGE plpgsql AS $repoint$
+    RETURNS text LANGUAGE plpgsql
+    SET search_path = pg_catalog, ops, public
+AS $repoint$
 DECLARE r text; n int := 0;
 BEGIN
     IF p_dir IS NULL OR btrim(p_dir) = '' THEN
@@ -128,7 +134,9 @@ CREATE OR REPLACE FUNCTION ops.app_log(p_role text, p_since timestamptz DEFAULT 
     p_contains text DEFAULT NULL, p_limit integer DEFAULT 200)
     RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
                   category text, message text, detail text)
-    LANGUAGE plpgsql STABLE AS $source_logs$
+    LANGUAGE plpgsql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $source_logs$
 BEGIN
     IF p_role IS NULL OR p_role NOT IN ('cli','mcp','uci','migrations','api','lichess') THEN
         RAISE EXCEPTION 'Unknown application log role: %', p_role USING ERRCODE='22023';
@@ -147,7 +155,9 @@ END $source_logs$;
 CREATE OR REPLACE FUNCTION ops.app_log()
     RETURNS TABLE(log_time timestamptz, application_name text, error_severity text,
                   category text, message text, detail text)
-    LANGUAGE plpgsql STABLE AS $logs$
+    LANGUAGE plpgsql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $logs$
 DECLARE r text; available integer := 0;
 BEGIN
     FOREACH r IN ARRAY ARRAY['cli','mcp','uci','migrations','api','lichess'] LOOP
@@ -185,7 +195,9 @@ END $$;
 
 CREATE OR REPLACE FUNCTION ops.repoint_chess_drops(p_dir text)
     RETURNS text
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog, ops, public
+AS $$
 BEGIN
     IF p_dir IS NULL OR btrim(p_dir) = '' THEN
         RAISE EXCEPTION 'ops.repoint_chess_drops: a log directory is required';
@@ -200,7 +212,9 @@ $$;
 CREATE OR REPLACE FUNCTION ops.chess_drops()
     RETURNS TABLE(log_time timestamptz, source_name text, reason text, dropped bigint,
                   kept bigint, seen bigint, drop_pct double precision)
-    LANGUAGE plpgsql STABLE AS $drops$
+    LANGUAGE plpgsql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $drops$
 BEGIN
     RETURN QUERY SELECT f.log_time, f.source_name, f.reason, f.dropped, f.kept, f.seen, f.drop_pct
         FROM ops.chess_drops_ft f;
@@ -209,7 +223,9 @@ EXCEPTION WHEN undefined_file OR undefined_table THEN
 END $drops$;
 
 CREATE OR REPLACE FUNCTION ops.attestation_count()
-RETURNS bigint LANGUAGE plpgsql STABLE AS $$
+RETURNS bigint LANGUAGE plpgsql STABLE
+SET search_path = pg_catalog, ops, public
+AS $$
 DECLARE measured bigint;
 BEGIN
     IF to_regclass('public.attestation') IS NULL THEN
@@ -221,7 +237,9 @@ END $$;
 
 CREATE OR REPLACE FUNCTION ops.substrate_counts()
     RETURNS TABLE(metric text, value bigint)
-    LANGUAGE sql STABLE AS $counts_fn$
+    LANGUAGE sql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $counts_fn$
     WITH targets(metric, relid, ordinal) AS (
         SELECT 'entities(ESTIMATE)'::text, to_regclass('public.entity'), 1
         UNION ALL
@@ -250,7 +268,9 @@ $counts_fn$;
 
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text, kind text)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $api_fn$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = pg_catalog, ops, public
+AS $api_fn$
     SELECT CASE WHEN n.nspname = 'public' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END AS name,
            pg_get_function_arguments(p.oid) AS args,
@@ -299,7 +319,9 @@ CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
         throughput_baseline_rows_per_s double precision,
         throughput_slowdown_ratio double precision
     )
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = pg_catalog, ops, public
+AS $$
     WITH w AS (
         SELECT coalesce(nullif(name, ''), encode(public.blake3_send(witness), 'hex')) AS src_name,
                encode(public.blake3_send(witness), 'hex') AS src_hex,
@@ -363,7 +385,9 @@ CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit integer DEFAULT 25)
         evidence_persisted boolean,
         error text
     )
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = pg_catalog, ops, public
+AS $$
     SELECT encode(public.blake3_send(w.witness), 'hex') AS run_id,
            coalesce(nullif(w.name, ''), encode(public.blake3_send(w.witness), 'hex')) AS source_name,
            encode(public.blake3_send(w.witness), 'hex') AS source_id,
@@ -417,7 +441,9 @@ CREATE OR REPLACE FUNCTION ops.ingest_files(p_run_id text, p_limit integer DEFAU
         attestations bigint,
         error text
     )
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = pg_catalog, ops, public
+AS $$
     SELECT encode(public.blake3_send(w.witness), 'hex') AS run_id,
            coalesce(nullif(w.name, ''), encode(public.blake3_send(w.witness), 'hex')) AS file_label,
            coalesce(nullif(w.name, ''), encode(public.blake3_send(w.witness), 'hex')) AS source_name,
@@ -441,7 +467,9 @@ $$;
 DROP FUNCTION IF EXISTS ops.ingest_run_close(text, text);
 CREATE OR REPLACE FUNCTION ops.ingest_run_close(p_run_id text, p_status text DEFAULT 'cancelled')
     RETURNS TABLE(run_id text, status text, closed boolean, detail text)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+    SET search_path = pg_catalog, ops, public
+AS $$
     SELECT p_run_id,
            coalesce(nullif(btrim(p_status), ''), 'cancelled'),
            false,
@@ -459,7 +487,9 @@ CREATE OR REPLACE FUNCTION ops.evict_source(p_source text)
         orphaned_claims bigint,
         swept_orphans bigint
     )
-    LANGUAGE plpgsql VOLATILE AS $evict$
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = pg_catalog, ops, public
+AS $evict$
 DECLARE
     v_witness public.blake3;
     v_removed bigint := 0;
@@ -512,7 +542,9 @@ CREATE OR REPLACE FUNCTION ops.activity(p_min_seconds double precision DEFAULT 0
         backend_seconds double precision,
         query text
     )
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $$
     SELECT a.pid,
            (a.pid = pg_backend_pid()) AS is_self,
            (a.state IS NULL AND a.pid <> pg_backend_pid()) AS restricted,
@@ -538,7 +570,9 @@ $$;
 DROP FUNCTION IF EXISTS ops.cancel_backend(integer);
 CREATE OR REPLACE FUNCTION ops.cancel_backend(p_pid integer)
     RETURNS TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)
-    LANGUAGE plpgsql VOLATILE AS $cancel_fn$
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = pg_catalog, ops, public
+AS $cancel_fn$
 DECLARE
     v_state text;
     v_query text;
@@ -560,7 +594,9 @@ END $cancel_fn$;
 DROP FUNCTION IF EXISTS ops.terminate_backend(integer);
 CREATE OR REPLACE FUNCTION ops.terminate_backend(p_pid integer)
     RETURNS TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)
-    LANGUAGE plpgsql VOLATILE AS $term_fn$
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = pg_catalog, ops, public
+AS $term_fn$
 DECLARE
     v_state text;
     v_query text;
@@ -589,7 +625,9 @@ CREATE OR REPLACE FUNCTION ops.index_health()
         is_partitioned_parent boolean,
         leaf_count bigint
     )
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+    SET search_path = pg_catalog, ops, public
+AS $$
     SELECT ic.relname::text AS index_name,
            tc.relname::text AS table_name,
            n.nspname::text AS schema_name,
@@ -612,7 +650,9 @@ $$;
 DROP FUNCTION IF EXISTS ops.reindex_invalid(boolean);
 CREATE OR REPLACE FUNCTION ops.reindex_invalid(p_dry_run boolean DEFAULT true)
     RETURNS TABLE(schema_name text, index_name text, valid boolean, action text)
-    LANGUAGE plpgsql VOLATILE AS $reidx$
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = pg_catalog, ops, public
+AS $reidx$
 DECLARE
     rec record;
 BEGIN
@@ -638,7 +678,9 @@ END $reidx$;
 
 DROP PROCEDURE IF EXISTS ops.analyze_substrate();
 CREATE OR REPLACE PROCEDURE ops.analyze_substrate()
-    LANGUAGE plpgsql AS $analyze_proc$
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog, ops, public
+AS $analyze_proc$
 BEGIN
     ANALYZE public.entity;
     ANALYZE public.physicality;

@@ -78,7 +78,7 @@ internal sealed partial class SubstrateClient
         var relations = await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
             rows.Where(row => row.Relation is not null).Select(row => row.Relation!)
                 .DistinctBy(id => Convert.ToHexStringLower(id)).ToArray(),
-            ["definition", "definitions", "example", "examples"],ct).ConfigureAwait(false);
+            ["definition", "definitions", "definition of the synset", "synset gloss", "skos:definition", "short definition", "gloss", "example", "examples", "example sentence"],ct).ConfigureAwait(false);
         HashSet<string>? unresolved=null;
         if (lexical && roots.Count == 1)
             (rows,unresolved) = await DescribeLexiconReferencesAsync(connection,rows,relations,ct).ConfigureAwait(false);
@@ -91,7 +91,7 @@ internal sealed partial class SubstrateClient
         var rows=await NpgsqlSubstrateReads.LexiconFieldAsync(connection,[id],ct).ConfigureAwait(false);
         var relations=await NpgsqlSubstrateReads.LexiconRelationsAsync(connection,
             rows.Where(row=>row.Relation is not null).Select(row=>row.Relation!).DistinctBy(value=>Convert.ToHexStringLower(value)).ToArray(),
-            ["definition","definitions","example","examples"],ct).ConfigureAwait(false);
+            ["definition","definitions","definition of the synset","synset gloss","skos:definition","short definition","gloss","example","examples","example sentence"],ct).ConfigureAwait(false);
         var (described,unresolved) = await DescribeLexiconReferencesAsync(connection,rows,relations,ct).ConfigureAwait(false);
         return ProjectLexiconField(described,relations,true,0,0,true,unresolved,[id]);
     }

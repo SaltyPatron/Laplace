@@ -123,21 +123,27 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             }
             else
             {
-                // Scoped export without explicit claim IDs: attribute across the top claims attested by the scoped witnesses.
+                // Scoped export without explicit claim IDs: walk each witness trunk's physicality
+                // containment index via laplace_contained_series instead of seq-scanning attestation.
                 const string sql = """
-                    WITH scoped_claims AS (
-                        SELECT DISTINCT a.claim
-                        FROM public.attestation a
-                        WHERE a.witness = ANY(ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($1::bytea[]) AS y))
+                    WITH scope_ids AS MATERIALIZED (
+                        SELECT ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($1::bytea[]) AS y) AS ids
+                    ),
+                    scoped_claims AS (
+                        SELECT DISTINCT cs.claim
+                        FROM scope_ids sc,
+                             public.laplace_contained_series(sc.ids) cs
+                        WHERE cs.claim IS NOT NULL AND cs.games > 0
                         LIMIT 4096
                     )
                     SELECT encode(public.blake3_send(s.source_id), 'hex'),
                            s.share_bp,
                            s.games,
                            s.fisher_weight
-                    FROM public.laplace_source_attribution(
-                        ARRAY(SELECT claim FROM scoped_claims),
-                        ARRAY(SELECT public.blake3_from_bytea(y) FROM unnest($1::bytea[]) AS y)) s
+                    FROM scope_ids sc,
+                         public.laplace_source_attribution(
+                             ARRAY(SELECT claim FROM scoped_claims),
+                             sc.ids) s
                     WHERE s.share_bp > 0
                     ORDER BY s.share_bp DESC, s.source_id ASC
                     """;

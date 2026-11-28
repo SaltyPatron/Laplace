@@ -6,13 +6,8 @@ const OUTCOME: Record<string, string> = {
   win: 'wins', 'cursed win': 'wins, but not within the 50-move rule', draw: 'draws',
   'blessed loss': 'loses, but saved by the 50-move rule', loss: 'loses',
 };
-/** The verdict for the side whose view it is, in words; an unknown verdict is shown as served. */
+/** The verdict for the side to move (or mover, for a move), in words; an unknown verdict is shown as served. */
 const words = (wdl: Wdl) => OUTCOME[wdl] ?? wdl;
-/** A move's verdict is from the opponent's view after it; the mover's result is its inverse. */
-const INVERSE: Record<string, string> = {
-  win: 'loss', 'cursed win': 'blessed loss', draw: 'draw', 'blessed loss': 'cursed win', loss: 'win',
-};
-const forMover = (wdl: Wdl) => INVERSE[wdl] ?? wdl;
 
 /**
  * Endgame verdicts recorded from Syzygy on this position: whether the side to move wins,
@@ -52,7 +47,7 @@ export function PositionTablebase({ fen }: { fen: string }) {
           <ul className={styles.broader} aria-label="Best moves by tablebase verdict">
             {verdict.moves.filter((move) => move.wdl != null).slice(0, 5).map((move) => (
               <li key={move.position}>
-                <strong>{move.san}</strong> <Muted>{words(forMover(move.wdl!))}{move.dtz != null && move.dtz !== 0 ? `, ${Math.abs(move.dtz)}` : ''}</Muted>
+                <strong>{move.san}</strong> <Muted>{words(move.wdl!)}{move.dtz != null && move.dtz !== 0 ? `, ${Math.abs(move.dtz)}` : ''}</Muted>
               </li>
             ))}
           </ul>

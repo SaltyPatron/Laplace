@@ -57,8 +57,8 @@ export type Wdl = string;
 
 /**
  * GET /chess/db/tablebase: Syzygy verdicts recorded as claims on the same position
- * ids. `wdl`/`dtz` are from the side to move's view; each move's are from the opponent's view
- * after it, best move first. Positions without a recorded table give null verdicts.
+ * ids. `wdl`/`dtz` are from the side to move's view (and for each move, the mover's
+ * result after playing it), best move first. Positions without a recorded table give null verdicts.
  */
 export interface TablebaseResponse {
   position: string;

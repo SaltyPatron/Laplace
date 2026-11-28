@@ -79,15 +79,17 @@ public static partial class NpgsqlSubstrateReads
 
         const string sql = """
             WITH occs AS MATERIALIZED (
-                SELECT (ord - 1)::int AS occ_idx, public.blake3_from_bytea(raw_id) AS id, raw_id
+                SELECT ord::int AS occ_idx, public.blake3_from_bytea(raw_id) AS id, raw_id
                 FROM unnest($1::bytea[]) WITH ORDINALITY AS u(raw_id, ord)
             ),
-            coupled AS MATERIALIZED (
+            r1 AS MATERIALIZED (
                 SELECT 1 AS rnd,
                        c.occ,
-                       (SELECT id FROM occs WHERE occ_idx = c.occ LIMIT 1) AS anchor_id,
+                       o.id AS anchor_id,
                        c.entity, c.route, c.rating, c.deviation, c.volatility,
-                       c.via, c.rel, c.tier, c.distance, c.vertices
+                       c.via, c.rel, c.tier, c.distance, c.vertices,
+                       ARRAY[c.occ] AS origins,
+                       CASE WHEN c.via IS NULL THEN ARRAY[]::public.blake3[] ELSE ARRAY[c.via] END AS binding_claims
                 FROM public.laplace_couple(
                     ARRAY(SELECT id FROM occs ORDER BY occ_idx),
                     greatest(8, $2)::bigint,
@@ -95,6 +97,45 @@ public static partial class NpgsqlSubstrateReads
                     CASE WHEN $3 > 0 THEN 2::smallint ELSE 0::smallint END,
                     0.0,
                     greatest(8, $2 + $3)) c
+                LEFT JOIN occs o ON o.occ_idx = c.occ
+            ),
+            r2_seeds AS MATERIALIZED (
+                SELECT row_number() OVER (ORDER BY min(occ), entity)::int AS seed_idx,
+                       entity AS seed_id,
+                       array_agg(DISTINCT occ ORDER BY occ) AS seed_origins,
+                       array_agg(DISTINCT via) FILTER (WHERE via IS NOT NULL) AS seed_bindings
+                FROM r1
+                WHERE route = 0
+                  AND entity <> ALL(ARRAY(SELECT id FROM occs))
+                GROUP BY entity
+            ),
+            r2 AS MATERIALIZED (
+                SELECT 2 AS rnd,
+                       s.seed_origins[1] AS occ,
+                       s.seed_id AS anchor_id,
+                       c.entity, c.route, c.rating, c.deviation, c.volatility,
+                       c.via, c.rel, c.tier, c.distance, c.vertices,
+                       s.seed_origins AS origins,
+                       coalesce(s.seed_bindings, ARRAY[]::public.blake3[]) || CASE WHEN c.via IS NULL THEN ARRAY[]::public.blake3[] ELSE ARRAY[c.via] END AS binding_claims
+                FROM r2_seeds s
+                JOIN public.laplace_couple(
+                    ARRAY(SELECT seed_id FROM r2_seeds ORDER BY seed_idx),
+                    greatest(12, $2)::bigint,
+                    '{}'::public.blake3[],
+                    0::smallint,
+                    0.0,
+                    greatest(128, $2 * 8)) c ON c.occ = s.seed_idx
+                WHERE c.route = 0
+            ),
+            coupled AS MATERIALIZED (
+                SELECT * FROM r1
+                UNION ALL
+                SELECT * FROM r2
+            ),
+            entity_origins AS MATERIALIZED (
+                SELECT entity, array_agg(DISTINCT orig ORDER BY orig) AS all_origins
+                FROM coupled, unnest(origins) AS orig
+                GROUP BY entity
             ),
             st AS MATERIALIZED (
                 SELECT s.claim, s.matches
@@ -116,18 +157,26 @@ public static partial class NpgsqlSubstrateReads
                    c.tier,
                    c.distance,
                    CASE WHEN c.vertices IS NOT NULL AND cardinality(c.vertices) >= 1 THEN (c.vertices[1] = c.anchor_id) ELSE NULL END,
-                   ARRAY[c.occ],
+                   c.origins,
                    ARRAY(
-                       SELECT DISTINCT o.occ_idx
-                       FROM occs o
-                       WHERE o.occ_idx <> c.occ
-                         AND (o.id = c.entity OR (c.vertices IS NOT NULL AND o.id = ANY(c.vertices)))
-                       ORDER BY o.occ_idx
+                       SELECT DISTINCT t_orig
+                       FROM (
+                           SELECT o.occ_idx AS t_orig
+                           FROM occs o
+                           WHERE NOT (o.occ_idx = ANY(c.origins))
+                             AND (o.id = c.entity OR (c.vertices IS NOT NULL AND o.id = ANY(c.vertices)))
+                           UNION
+                           SELECT eo_orig AS t_orig
+                           FROM entity_origins eo, unnest(eo.all_origins) AS eo_orig
+                           WHERE eo.entity = c.entity
+                             AND NOT (eo_orig = ANY(c.origins))
+                       ) tgt
+                       ORDER BY t_orig
                    ),
-                   CASE WHEN c.via IS NULL THEN ARRAY[]::bytea[] ELSE ARRAY[public.blake3_send(c.via)] END,
-                   ARRAY[c.occ],
+                   ARRAY(SELECT public.blake3_send(b) FROM unnest(c.binding_claims) AS b WHERE b IS NOT NULL),
+                   c.origins,
                    true,
-                   ARRAY[c.occ]
+                   c.origins
             FROM coupled c
             LEFT JOIN st ON st.claim = c.via
             """;

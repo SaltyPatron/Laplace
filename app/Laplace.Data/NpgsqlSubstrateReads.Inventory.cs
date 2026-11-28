@@ -138,14 +138,18 @@ public static partial class NpgsqlSubstrateReads
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null)
     {
         const string sql = """
-            WITH est AS (
-                SELECT (SELECT count(*)::bigint FROM public.attestation) AS ev,
+            WITH att AS (
+                SELECT (public.laplace_estate_summary(false)->>'attestations')::bigint AS ev
+            ),
+            est AS (
+                SELECT (SELECT ev FROM att) AS ev,
                        count(*)::bigint AS con,
                        avg(matches)::numeric AS avg_w,
                        max(matches)::bigint AS max_w
                 FROM public.consensus
+                WHERE matches > 0
             )
-            SELECT ev, con, CASE WHEN con > 0 THEN round(ev::numeric / con, 2) ELSE NULL END, avg_w, max_w
+            SELECT ev, con, CASE WHEN con > 0 AND ev IS NOT NULL THEN round(ev::numeric / con, 2) ELSE NULL END, avg_w, max_w
             FROM est
             """;
         var rows = await NpgsqlRead.ReadRowsAsync(conn, sql,
@@ -203,7 +207,7 @@ public static partial class NpgsqlSubstrateReads
         const string sql = """
             SELECT count(*)::bigint
             FROM public.consensus
-            WHERE matches >= 2
+            WHERE matches > 0 AND matches >= 2
             """;
         return NpgsqlRead.ExecuteScalarAsync<long?>(conn, sql,
             timeoutSeconds: timeoutSeconds, ct: ct, label: "multi_source_entity_count", onError: onError);
@@ -371,7 +375,14 @@ public static partial class NpgsqlSubstrateReads
     {
         const string sql = """
             SELECT public.laplace_highway_fingerprint() IS NOT NULL,
-                   EXISTS (SELECT 1 FROM public.entity WHERE mask <> 0),
+                   EXISTS (
+                       SELECT 1 FROM public.entity
+                       WHERE mask OPERATOR(public.?|) ARRAY[
+                           public.laplace_bank_bit('upos', 'NOUN'),
+                           public.laplace_bank_bit('kind', 'claim')
+                       ]
+                       LIMIT 1
+                   ),
                    now(),
                    0::bigint,
                    0::bigint
