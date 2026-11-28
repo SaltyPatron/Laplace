@@ -86,31 +86,57 @@ internal sealed class IngestJournalService
         _logger = logger;
     }
 
-    public static string? ResolveRunsDirectory()
+    public static IReadOnlyList<string> ResolveRunsDirectories()
     {
+        var dirs = new List<string>();
         var explicitDir = Environment.GetEnvironmentVariable("LAPLACE_INGEST_RUNS_DIR");
-        if (!string.IsNullOrWhiteSpace(explicitDir)) return explicitDir.Trim();
+        if (!string.IsNullOrWhiteSpace(explicitDir))
+            dirs.Add(explicitDir.Trim());
+
         var work = LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK")
             ?? LaplaceInstall.TryGetProcessOrMachineSetting("LAPLACE_WORK_ROOT");
-        if (string.IsNullOrWhiteSpace(work)) return null;
-        return Path.Combine(work.Trim(), "logs", "ingest", "runs");
+        if (!string.IsNullOrWhiteSpace(work))
+        {
+            var trimmed = work.Trim();
+            dirs.Add(Path.Combine(trimmed, "logs", "ingest", "runs"));
+
+            var clientsRoot = Path.Combine(trimmed, "clients");
+            if (Directory.Exists(clientsRoot))
+            {
+                try
+                {
+                    foreach (var userDir in Directory.GetDirectories(clientsRoot))
+                    {
+                        dirs.Add(Path.Combine(userDir, "laplace", "logs", "ingest", "runs"));
+                        dirs.Add(Path.Combine(userDir, "logs", "ingest", "runs"));
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        return dirs.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     public void ScanDiskJournals()
     {
-        var runsDir = ResolveRunsDirectory();
-        if (string.IsNullOrWhiteSpace(runsDir) || !Directory.Exists(runsDir)) return;
+        var runsDirs = ResolveRunsDirectories();
+        if (runsDirs.Count == 0) return;
 
         lock (_scanGate)
         {
-            string[] files;
-            try
+            var files = new List<string>();
+            foreach (var runsDir in runsDirs)
             {
-                files = Directory.GetFiles(runsDir, "*.jsonl", SearchOption.TopDirectoryOnly);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                return;
+                if (!Directory.Exists(runsDir)) continue;
+                try
+                {
+                    files.AddRange(Directory.GetFiles(runsDir, "*.jsonl", SearchOption.TopDirectoryOnly));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
             }
 
             var hostName = Environment.MachineName;
