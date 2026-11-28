@@ -192,18 +192,24 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.laplace_parts(c.path) AS parts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2 * 2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 1::smallint) c
+            ), labeled AS (
+                SELECT CASE
+                           WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
+                           ELSE 'member'
+                       END AS type_label,
+                       coalesce(public.laplace_label_text(public.blake3_send(parts[cardinality(parts)]), false), encode(public.blake3_send(parts[cardinality(parts)]), 'hex')) AS obj_label,
+                       encode(public.blake3_send(parts[cardinality(parts)]), 'hex') AS obj_hex,
+                       eff_mu,
+                       matches,
+                       cardinality(parts) AS nparts
+                FROM claims
+                WHERE cardinality(parts) >= 2
             )
-            SELECT CASE
-                       WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
-                       ELSE 'member'
-                   END,
-                   coalesce(public.laplace_label_text(public.blake3_send(parts[cardinality(parts)]), false), encode(public.blake3_send(parts[cardinality(parts)]), 'hex')),
-                   encode(public.blake3_send(parts[cardinality(parts)]), 'hex'),
-                   eff_mu,
-                   matches
-            FROM claims
-            WHERE cardinality(parts) >= 2
+            SELECT type_label, obj_label, obj_hex, eff_mu, matches
+            FROM labeled
+            WHERE (nparts < 3 OR type_label !~* '^\s*$|^upos$|^xpos$|^lexfile$|^deprel$|^part[ _]of[ _]speech( annotation)?$|^grammatical property category$|^variety of language$|^type of pointer that lemma|^HAS[ _]SENSE[ _]FREQUENCY$|^sense[ _]key$|^I hold$')
+              AND obj_label !~ '^I hold "'
             ORDER BY eff_mu DESC NULLS LAST, matches DESC
             LIMIT greatest(0, $2)
             """;
@@ -228,18 +234,24 @@ public static partial class NpgsqlSubstrateReads
                 SELECT public.laplace_parts(c.path) AS parts,
                        public.laplace_confidence(c.rating, c.deviation, 2)::numeric AS eff_mu,
                        c.matches
-                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 2::smallint) c
+                FROM public.laplace_claims_each(ARRAY[public.blake3_from_bytea($1)], greatest(1, $2 * 2)::bigint, ARRAY[public.laplace_bank_bit('kind','claim')], '{}'::public.blake3[], 2::smallint) c
+            ), labeled AS (
+                SELECT encode(public.blake3_send(parts[1]), 'hex') AS subj_hex,
+                       CASE
+                           WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
+                           ELSE 'member'
+                       END AS type_label,
+                       coalesce(public.laplace_label_text(public.blake3_send(parts[1]), false), encode(public.blake3_send(parts[1]), 'hex')) AS subj_label,
+                       eff_mu,
+                       matches,
+                       cardinality(parts) AS nparts
+                FROM claims
+                WHERE cardinality(parts) >= 2
             )
-            SELECT encode(public.blake3_send(parts[1]), 'hex'),
-                   CASE
-                       WHEN cardinality(parts) >= 3 THEN coalesce(public.laplace_label_text(public.blake3_send(parts[2]), false), encode(public.blake3_send(parts[2]), 'hex'))
-                       ELSE 'member'
-                   END,
-                   coalesce(public.laplace_label_text(public.blake3_send(parts[1]), false), encode(public.blake3_send(parts[1]), 'hex')),
-                   eff_mu,
-                   matches
-            FROM claims
-            WHERE cardinality(parts) >= 2
+            SELECT subj_hex, type_label, subj_label, eff_mu, matches
+            FROM labeled
+            WHERE (nparts < 3 OR type_label !~* '^\s*$|^upos$|^xpos$|^lexfile$|^deprel$|^part[ _]of[ _]speech( annotation)?$|^grammatical property category$|^variety of language$|^type of pointer that lemma|^HAS[ _]SENSE[ _]FREQUENCY$|^sense[ _]key$|^I hold$')
+              AND subj_label !~ '^I hold "'
             ORDER BY eff_mu DESC NULLS LAST, matches DESC
             LIMIT greatest(0, $2)
             """;

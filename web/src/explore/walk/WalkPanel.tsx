@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Muted, Panel, Stack } from '@ui';
-import { apiPost, type ApiOptions } from '../../api/client';
+import { apiPost, PaymentRequiredError, type ApiOptions } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
 import { GatePrompt } from '../components/GatePrompt';
@@ -51,7 +51,7 @@ export function WalkPanel() {
   const [fanout, setFanout] = useState(8);
   const [topK, setTopK] = useState(10);
   const [trace, setTrace] = useState<ForwardTraceStep[]>([]);
-  const [unlocked, setUnlocked] = useState(false);
+  const [needsQuote, setNeedsQuote] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ran, setRan] = useState(false);
@@ -72,6 +72,7 @@ export function WalkPanel() {
 
   async function run() {
     setErr(null);
+    setNeedsQuote(false);
     setBusy(true);
     const opts: ApiOptions = { tenant, quoteId: quote };
     try {
@@ -97,7 +98,8 @@ export function WalkPanel() {
         label: s.entity || `Unrealized selection ${i + 1}`,
       })));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (e instanceof PaymentRequiredError) setNeedsQuote(true);
+      else setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
       setRan(true);
@@ -107,14 +109,14 @@ export function WalkPanel() {
   const emitted = trace.filter((s) => s.event === 'emit');
   return (
     <Panel title="Reasoning trace">
-      {!unlocked ? (
-        <GatePrompt
-          serviceId="explain.trace"
-          label="Step-by-step receipts from the same forward pass the conversation uses."
-          onReady={() => setUnlocked(true)}
-        />
-      ) : (
-        <Stack gap={4}>
+      <Stack gap={4}>
+        {needsQuote && (
+          <GatePrompt
+            serviceId="explain.trace"
+            label="Step-by-step receipts from the same forward pass the conversation uses."
+            onReady={() => { setNeedsQuote(false); void run(); }}
+          />
+        )}
           <form className={styles.controls} onSubmit={(e) => { e.preventDefault(); void run(); }}>
             <Field label="Prompt" layout="row" htmlFor="walk-prompt">
               <Input id="walk-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
@@ -171,7 +173,6 @@ export function WalkPanel() {
             </>
           ) : null}
         </Stack>
-      )}
       {err ? <ErrorText>{err}</ErrorText> : null}
       {chatTurns.length > 0 ? (
         <Stack gap={3}>

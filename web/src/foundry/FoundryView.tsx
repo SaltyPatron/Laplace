@@ -166,10 +166,11 @@ export function FoundryView() {
     setExportBusy(true);
     setExportErr(null);
     try {
+      const prefix = recipeIdPrefix.trim();
       const res = await exportSynthesis({
-        recipe: recipeText,
-        recipe_id_prefix: null,
-        tokenizer_dir: null,
+        recipe: prefix ? null : recipeText,
+        recipe_id_prefix: prefix || null,
+        tokenizer_dir: tokenizerDir.trim() || null,
         format,
         filename: filename.trim() || null,
       }, { tenant, quoteId });

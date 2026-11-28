@@ -18,7 +18,6 @@ import {
   NODE_REL_SIZE,
   relationCounts,
   SHELL_RADIUS,
-  withoutPackaging,
   withoutRelations,
   type Dim,
   type WebEdge,
@@ -30,7 +29,7 @@ import { Graph3D, type Fg3dApi } from './Graph3D';
 import { Graph2D, type Fg2dApi } from './Graph2D';
 import { GraphLegend } from './GraphLegend';
 
-export { graphForDimension, withoutPackaging, withoutRelations } from './graphData';
+export { graphForDimension, withoutRelations } from './graphData';
 export type { WebEdge, WebGraph, WebNode } from './graphData';
 
 export function ConsensusGraph({
@@ -117,7 +116,7 @@ export function ConsensusGraph({
   }, []);
 
   const rawData = useMemo(
-    () => withoutPackaging(web ? fromWeb(web, walkPath) : fromStar(centerId, centerLabel, edges, walkPath), centerId),
+    () => (web ? fromWeb(web, walkPath) : fromStar(centerId, centerLabel, edges, walkPath)),
     [web, centerId, centerLabel, edges, walkPath],
   );
   const relations = useMemo(() => relationCounts(rawData.links), [rawData.links]);

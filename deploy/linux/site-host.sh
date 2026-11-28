@@ -28,7 +28,7 @@ fi
 host_args=("$@")
 as_is=false; routing_only=false; browser_setup=false; identity_enrollment=''
 chess_setup=false; chess_configuration=''; chess_enrollment=''; chess_routing=''
-runtime_only=false; runtime_manifest=''; check=false
+runtime_only=false; runtime_manifest=''; check=false; migrate_topology=false
 while (( $# )); do
   case "$1" in
     --as-is) as_is=true ;;
@@ -39,6 +39,7 @@ while (( $# )); do
       (( $# >= 2 )) || { echo '--chess-routing requires a declaration path' >&2; exit 2; }
       chess_setup=true; chess_routing=$2; shift ;;
     --runtime-only) runtime_only=true ;;
+    --migrate-topology) migrate_topology=true ;;
     --check) check=true ;;
     --runtime-manifest)
       (( $# >= 2 )) || { echo '--runtime-manifest requires a path' >&2; exit 2; }
@@ -144,6 +145,7 @@ application_runtime() {
     return 0
   fi
   if "$check"; then args=(--check); else args=(); fi
+  if "$migrate_topology"; then args+=(--migrate-topology); fi
   python3 "$HERE/runtime/install.py" --manifest "$selected" "${args[@]}"
 }
 runtime_storage() {

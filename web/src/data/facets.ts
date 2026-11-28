@@ -16,14 +16,6 @@ export class FacetUnavailable extends Error {
 }
 
 const NEUTRAL = 1500;
-/**
- * Relations that are source packaging or bank values, not meaning (recording law). Observed on staging for
- * "dog": an empty relation name, upos, WordNet pointer symbols, sense frequency; on dev for "water": Brown
- * part-of-speech tags ("part of speech annotation" -> nn, nn-nc). Banks filter; they are never meanings. Fixed
- * at ingest by the backend; filtered here so no lens ever presents them as knowledge.
- */
-const PACKAGING_RELATION = /^\s*$|^upos$|^xpos$|^lexfile$|^deprel$|^part[ _]of[ _]speech( annotation)?$|type of pointer that lemma|^HAS[ _]SENSE[ _]FREQUENCY$|^sense[ _]key$/i;
-export const isPackagingRelation = (relation: string) => PACKAGING_RELATION.test(relation);
 const ref = (id: string, label: string, tier = 0, kind?: string | null): EntityRef => ({ id: id.toLowerCase(), label: label || id.slice(0, 8), tier, kind: kind ?? undefined });
 
 /** Folded standing → state. Conservative standing above neutral confirms; no witnesses means nothing folded. */
@@ -88,11 +80,9 @@ export async function readIdentity(id: string, opts: ApiOptions = {}): Promise<I
 }
 
 export async function readFacet(id: string, facet: FacetName, q: FacetQuery = {}, opts: ApiOptions = {}): Promise<Facet> {
-  const result = await servesContract(opts)
+  return await servesContract(opts)
     ? await apiGet<Facet>(`/v1/entities/${id}/${facet}${query(q)}`, opts)
     : await adapt(id, facet, q, opts);
-  const items = result.items.filter((s) => !(s.kind.startsWith('attested:') && isPackagingRelation(s.kind.slice('attested:'.length))));
-  return items.length === result.items.length ? result : { ...result, items, total: result.total == null ? null : result.total - (result.items.length - items.length) };
 }
 
 function spidersFor(evidence: LabeledEvidenceItem[], typeLabel: string, objectId: string): Spider[] {

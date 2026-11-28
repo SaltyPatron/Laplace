@@ -115,7 +115,7 @@ function DataWorkspace({ tenant }: { tenant: string }) {
           const current = useAppStore.getState();
           if (JSON.stringify([current.tenant, current.authUser?.id]) !== scope) throw new Error('The account or tenant changed before submission');
           return admitContentRaw(kind, meta, body, { tenant });
-        })}>Ingest {queued} queued artifact{queued === 1 ? '' : 's'}</Button>
+        }).finally(() => void serverHistory.refresh())}>Ingest {queued} queued artifact{queued === 1 ? '' : 's'}</Button>
         <Button variant="ghost" disabled={!state.running || state.stopping} onClick={queue.stop}>{state.stopping ? 'Stopping after current request' : 'Stop after current request'}</Button>
         <span role="status">{admitted} admitted · {queued} queued{state.running ? ' · admission active' : ''}</span></div>
       <Muted>Only the selection present when you press Ingest is submitted. Navigation stops after the current request and retains this selection in memory; reload loses unsubmitted local selections. An unconfirmed request stops the batch without retrying it.</Muted>

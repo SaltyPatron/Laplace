@@ -942,6 +942,18 @@ phase_smoke() {
   # Routine verification reads the installed service without admitting synthetic
   # corpus content or creating ingestion runs. Write/round-trip qualification uses
   # --document-roundtrip explicitly against an isolated test installation.
+  if [[ -r /usr/local/libexec/laplace-mono/database-sync.py ]]; then
+    if grep -q 'perfcache_receipt' /usr/local/libexec/laplace-mono/database-sync.py; then
+      echo "::error::Installed /usr/local/libexec/laplace-mono/database-sync.py still references removed perfcache_receipt; run sudo bash deploy/linux/site-host.sh --runtime-only" >&2
+      echo '| Installed database-sync.py contract | FAILED (stale perfcache_receipt) |' >> "$SUMMARY"
+      rc=1
+    elif ! cmp -s "$ROOT/deploy/linux/runtime/database-sync.py" /usr/local/libexec/laplace-mono/database-sync.py; then
+      echo "::warning::Installed /usr/local/libexec/laplace-mono/database-sync.py differs from repository copy; run sudo bash deploy/linux/site-host.sh --runtime-only"
+      echo '| Installed database-sync.py contract | drift warning (re-run site-host.sh --runtime-only) |' >> "$SUMMARY"
+    else
+      echo '| Installed database-sync.py contract | current |' >> "$SUMMARY"
+    fi
+  fi
   if python3 "$ROOT/scripts/run-authenticated-verification.py" --base "$client_origin" -- \
       python3 "$ROOT/scripts/verify-installed-api-client.py" --cli "$LAPLACE_APP_DIR/cli/Laplace.Cli" \
       --base "$client_origin" --work "$SITE_WORK"; then

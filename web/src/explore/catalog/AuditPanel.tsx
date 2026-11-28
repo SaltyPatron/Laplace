@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { ErrorText, Muted, Panel, Table, Td, Th } from '@ui';
-import { apiPost } from '../../api/client';
+import { useEffect, useState } from 'react';
+import { Button, ErrorText, Muted, Panel, Table, Td, Th } from '@ui';
+import { apiPost, PaymentRequiredError } from '../../api/client';
 import { useAppStore } from '../../store';
 import { useExploreStore } from '../store';
 import { GatePrompt } from '../components/GatePrompt';
@@ -19,11 +19,14 @@ export function AuditPanel() {
   const { tenant, quoteId } = useAppStore();
   const exploreQuote = useExploreStore((s) => s.quoteId);
   const [report, setReport] = useState<{ counts?: Count[] } | null>(null);
-  const [unlocked, setUnlocked] = useState(false);
+  const [needsQuote, setNeedsQuote] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
     setErr(null);
+    setNeedsQuote(false);
+    setBusy(true);
     try {
       const res = await apiPost<{ report: { counts: Count[] } }>(
         '/v1/audit/report',
@@ -32,18 +35,23 @@ export function AuditPanel() {
       );
       setReport(res.report);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (e instanceof PaymentRequiredError) setNeedsQuote(true);
+      else setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
+  useEffect(() => { void load(); }, [tenant]);
+
   const counts = report?.counts ?? [];
   return (
-    <Panel title="Audit">
-      {!unlocked ? (
+    <Panel title="Audit" actions={<Button variant="ghost" size="sm" loading={busy} onClick={() => void load()}>Refresh</Button>}>
+      {needsQuote ? (
         <GatePrompt
           serviceId="audit.deep_report"
           label="Deep substrate audit report."
-          onReady={() => { setUnlocked(true); void load(); }}
+          onReady={() => { setNeedsQuote(false); void load(); }}
         />
       ) : report && counts.length === 0 ? (
         <Muted>The audit returned no counts.</Muted>

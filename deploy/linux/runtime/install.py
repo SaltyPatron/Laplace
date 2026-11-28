@@ -101,7 +101,7 @@ def validate(config):
             raise ValueError('Runtime installation requires the declared local cluster')
 
 
-def validate_declaration(config):
+def validate_declaration(config, allow_app_db_migration=False):
     validate(config)
     if socket.gethostname().split('.')[0].lower() != config['host']:
         raise ValueError('The runtime declaration belongs to another host')
@@ -113,11 +113,14 @@ def validate_declaration(config):
         if current.get(key) != expected:
             raise ValueError('Installed configuration differs from runtime declaration: ' + key)
     # A database consumer name does not declare another PostgreSQL cluster.
-    # Refuse contradictory topology before the base installer changes anything.
+    # Refuse contradictory topology before the base installer changes anything unless
+    # an operator explicitly converges a declared application-database migration.
     for key, expected in {'LAPLACE_APP_DBNAME': config['database'],
                           'LAPLACE_APP_PGPORT': str(config['port']),
                           'LAPLACE_APP_PGDATA': config['database_data'],
                           'LAPLACE_PGPORT': str(config['port'])}.items():
+        if key == 'LAPLACE_APP_DBNAME' and allow_app_db_migration:
+            continue
         if current.get(key) and current[key] != expected:
             raise ValueError('Application database differs from runtime declaration: ' + key)
     if current.get('LAPLACE_APP_PGHOST') not in (None, '', config['pgsocket'], config['database_host'], 'localhost'):
@@ -458,6 +461,14 @@ def application_refused(argv, database, env=None):
                                         or 'no pg_hba.conf entry' in result.stderr)
 
 
+def sql_ident(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def sql_literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def install_identities(config, lock):
     env = dict(os.environ, LAPLACE_HOST_LOCK_FD=str(lock.fileno()),
                LAPLACE_INSTALL_CAPTURE_DIAGNOSTICS='1',
@@ -474,13 +485,29 @@ def install_identities(config, lock):
             raise RuntimeError(f'{name}: {phase} failed; private diagnostics: {diagnostic}') from None
         return json.loads(output)
 
-    def sql(statement):
+    def sql_db(dbname, statement):
         return checked(['runuser', '-u', config['pg_os_user'], '--', config['pgbin'] + '/psql',
             '-XwAt', '-v', 'ON_ERROR_STOP=1', '-h', config['pgsocket'], '-p', str(config['port']),
-            '-d', config['database'], '-f', '-'], input=statement, timeout=30)
+            '-d', dbname, '-f', '-'], input=statement, timeout=60)
 
-    if Path(sql('SHOW data_directory')).resolve() != Path(config['database_data']).resolve():
+    if Path(sql_db('postgres', 'SHOW data_directory')).resolve() != Path(config['database_data']).resolve():
         raise ValueError('Connected cluster differs from runtime declaration')
+
+    # Ensure the declared application database exists with its declared schema and grants
+    # so fresh hosts and topology migrations converge in one command without manual psql steps.
+    app_db = config['database']
+    if not sql_db('postgres', f"SELECT 1 FROM pg_database WHERE datname = {sql_literal(app_db)}").strip():
+        print(f'Provisioning declared application database {app_db}...', flush=True)
+        sql_db('postgres', f'CREATE DATABASE {sql_ident(app_db)} OWNER {sql_ident(config["database_owner"])};')
+        sql_db(app_db, f'REVOKE CONNECT ON DATABASE {sql_ident(app_db)} FROM PUBLIC;')
+    schema_dir = ROOT / 'db/schema'
+    for schema_file in ('30_app.sql', '40_app_grants.sql'):
+        schema_path = schema_dir / schema_file
+        if schema_path.is_file():
+            checked(['runuser', '-u', config['pg_os_user'], '--', config['pgbin'] + '/psql',
+                '-XwAt', '-v', 'ON_ERROR_STOP=1', '-h', config['pgsocket'], '-p', str(config['port']),
+                '-d', app_db, '-f', str(schema_path)], timeout=120)
+
     print('Reconciling scoped runtime credentials and database roles...', flush=True)
     helper('application-runtime.py', ['--phase', 'prepare'], config)
     substrate_config = dict(config['substrate'], psql=config['pgbin'] + '/psql', admin_socket=config['pgsocket'],
@@ -623,6 +650,7 @@ def main():
     parser.add_argument('--check', action='store_true', help='Check installed prerequisites; root also verifies the private workload enrollment')
     parser.add_argument('--storage-check', action='store_true', help='Check the filesystems the declared installation will write before changing services')
     parser.add_argument('--data-access', action='store_true', help='Apply and verify only the declared shared-data ACLs for the API identity (root)')
+    parser.add_argument('--migrate-topology', action='store_true', help='Allow converging LAPLACE_APP_DBNAME to the declared runtime manifest database')
     args = parser.parse_args()
     manifest = selected_manifest(args.manifest)
     if manifest is None:
@@ -659,7 +687,7 @@ def main():
         return
     if os.geteuid() != 0:
         raise ValueError('Install identities with sudo bash deploy/linux/site-host.sh --runtime-only; --check does not require sudo')
-    validate_declaration(config)
+    validate_declaration(config, allow_app_db_migration=args.migrate_topology)
     with open(config['host_lock'], 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         work = Path(config['work'])

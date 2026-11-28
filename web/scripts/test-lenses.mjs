@@ -16,11 +16,6 @@ const entity = {
     { direction: 'out', type: 'IsA', entity_id_hex: id(10), entity_label: 'canine', eff_mu: 1612.4, witnesses: 3 },
     { direction: 'out', type: 'IsA', entity_id_hex: id(11), entity_label: 'domestic animal', eff_mu: 1087.071, witnesses: 1 },
     { direction: 'out', type: 'AtLocation', entity_id_hex: id(12), entity_label: 'backyard', eff_mu: 1087.071, witnesses: 1 },
-    // Packaging seen on staging: never shown as knowledge.
-    { direction: 'out', type: '', entity_id_hex: id(14), entity_label: 'packaging-empty-relation', eff_mu: 1406.04, witnesses: 1 },
-    { direction: 'out', type: 'upos', entity_id_hex: id(15), entity_label: 'packaging-upos', eff_mu: 1177.35, witnesses: 1 },
-    { direction: 'out', type: 'type of pointer that lemma has in all synsets containing it', entity_id_hex: id(16), entity_label: 'packaging-pointer', eff_mu: 1177.35, witnesses: 1 },
-    { direction: 'out', type: 'part of speech annotation', entity_id_hex: id(17), entity_label: 'packaging-pos-tag', eff_mu: 1484.08, witnesses: 1 },
     { direction: 'out', type: '2a30eca0f0e2bb66df1e900832701046', entity_id_hex: id(18), entity_label: 'unnamed-relation-target', eff_mu: 1440, witnesses: 1 },
   ],
   consensus_in: [{ direction: 'in', type: 'IsA', entity_id_hex: id(13), entity_label: 'puppy', eff_mu: 1210.5, witnesses: 2 }],

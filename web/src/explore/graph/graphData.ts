@@ -1,7 +1,6 @@
 /** Consensus-graph data model and pure transforms: types, layout seeds, web/star conversion and relation filtering. */
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
-import { isPackagingRelation } from '../../data/facets';
 
 export interface WebNode {
   id: string;
@@ -268,14 +267,10 @@ function walkIdsHas(walkPath: WalkPathNode[], id: string) {
 
 const endpoint = (end: unknown) => (typeof end === 'string' ? end : (end as WebNode).id);
 
-/** Packaging pointers and bank fields are filters, never strands: they must not appear as web nodes. */
-export function withoutPackaging(data: GraphData, centerId: string): GraphData {
-  return withoutRelations(data, null, centerId);
-}
-
-/** Drop strands of hidden (or packaging) relations, then subjects no remaining strand reaches. */
+/** Drop strands of hidden relations, then subjects no remaining strand reaches. */
 export function withoutRelations(data: GraphData, hidden: ReadonlySet<string> | null, centerId: string): GraphData {
-  const links = data.links.filter((l) => l.walk || (!isPackagingRelation(l.type) && !hidden?.has(l.type)));
+  if (!hidden || hidden.size === 0) return data;
+  const links = data.links.filter((l) => l.walk || !hidden.has(l.type));
   if (links.length === data.links.length) return data;
   const kept = new Set<string>([centerId]);
   for (const l of links) {
