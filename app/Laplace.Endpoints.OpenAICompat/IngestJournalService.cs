@@ -199,28 +199,44 @@ internal sealed class IngestJournalService
     {
         using var stream = new FileStream(fi.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         stream.Seek(state.Offset, SeekOrigin.Begin);
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 16384, leaveOpen: true);
 
-        long lastGoodPosition = state.Offset;
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
+        // Read raw bytes and split on '\n' so state.Offset tracks exact byte positions.
+        // StreamReader buffers ahead (16 KB), so stream.Position would jump past unread or
+        // trailing partial lines and could skip subsequent frames (including "complete").
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        var bytes = buffer.GetBuffer();
+        var total = (int)buffer.Length;
+        int lineStart = 0;
+        long lastGoodOffset = state.Offset;
+
+        for (int i = 0; i < total; i++)
         {
-            // Only advance offset through complete lines ending with '\n'.
-            // If we hit EOF mid-write, leave the trailing partial line for the next scan.
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            try
+            if (bytes[i] != (byte)'\n') continue;
+            int lineLen = i - lineStart;
+            if (lineLen > 0 && bytes[lineStart + lineLen - 1] == (byte)'\r')
+                lineLen--;
+            if (lineLen > 0)
             {
-                using var doc = JsonDocument.Parse(line);
-                ApplyFrame(state, doc.RootElement, fi.FullName, fi.CreationTimeUtc);
-                lastGoodPosition = stream.Position;
+                var line = Encoding.UTF8.GetString(bytes, lineStart, lineLen);
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(line);
+                        ApplyFrame(state, doc.RootElement, fi.FullName, fi.CreationTimeUtc);
+                    }
+                    catch (JsonException)
+                    {
+                        // Malformed or torn line; stop here and retry on the next poll.
+                        break;
+                    }
+                }
             }
-            catch (JsonException)
-            {
-                // Incomplete JSON line currently being flushed; retry on next poll.
-                break;
-            }
+            lineStart = i + 1;
+            lastGoodOffset = state.Offset + lineStart;
         }
-        state.Offset = lastGoodPosition;
+        state.Offset = lastGoodOffset;
     }
 
     private static void ApplyFrame(JournalFileState state, JsonElement root, string filePath, DateTime createdUtc)
@@ -870,6 +886,13 @@ internal sealed class IngestJournalService
         {
             using var p = Process.GetProcessById(pid);
             return !p.HasExited;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Process exists in the OS table (GetProcessById did not throw ArgumentException),
+            // but this service account (e.g. IIS AppPool\LaplacePool) lacks PROCESS_QUERY_INFORMATION
+            // on another user's laplace.exe. Treat as alive rather than falsely marking orphaned.
+            return true;
         }
         catch
         {
